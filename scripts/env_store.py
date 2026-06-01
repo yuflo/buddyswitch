@@ -22,7 +22,7 @@ MESSAGES_DIR: Path
 COMMENTS_DIR: Path
 CONTENT_ROOT: Path
 LOCAL_ROOT: Path
-BUDDYBOX_LOCAL_DIR: Path
+ACTOR_PRIVATE_DIR: Path
 
 
 def refresh_runtime_root_bindings() -> None:
@@ -38,7 +38,7 @@ def refresh_runtime_root_bindings() -> None:
     global COMMENTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
-    global BUDDYBOX_LOCAL_DIR
+    global ACTOR_PRIVATE_DIR
 
     ROOT = runtime_files.ROOT
     WORKSPACE_ROOT = runtime_files.WORKSPACE_ROOT
@@ -50,7 +50,7 @@ def refresh_runtime_root_bindings() -> None:
     COMMENTS_DIR = runtime_files.COMMENTS_DIR
     CONTENT_ROOT = runtime_files.CONTENT_ROOT
     LOCAL_ROOT = runtime_files.LOCAL_ROOT
-    BUDDYBOX_LOCAL_DIR = runtime_files.BUDDYBOX_LOCAL_DIR
+    ACTOR_PRIVATE_DIR = runtime_files.ACTOR_PRIVATE_DIR
 
 
 runtime_files.register_runtime_root_listener(refresh_runtime_root_bindings, call_immediately=True)
@@ -59,7 +59,7 @@ RUNTIME_WORKSPACE_AGENTS_HEADER = runtime_files.RUNTIME_WORKSPACE_AGENTS_HEADER
 
 now_iso = runtime_files.now_iso
 runtime_workspace_root = runtime_files.runtime_workspace_root
-buddybox_local_dir = runtime_files.buddybox_local_dir
+actor_private_dir = runtime_files.actor_private_dir
 refresh_runtime_roots_from_env = runtime_files.refresh_runtime_roots_from_env
 rel = runtime_files.rel
 runtime_workspace_agents_file = runtime_files.runtime_workspace_agents_file
@@ -115,7 +115,7 @@ _RETIRED_OBJECT_APIS = frozenset(
         "publish_track_proof",
         "append_track_update",
         "delete_artifact",
-        "delete_artifacts_by_buddy",
+        "delete_artifacts_by_role",
         "delete_all_artifacts",
         "list_messages",
         "get_message",
@@ -154,12 +154,12 @@ __all__ = [
     "COMMENTS_DIR",
     "CONTENT_ROOT",
     "LOCAL_ROOT",
-    "BUDDYBOX_LOCAL_DIR",
+    "ACTOR_PRIVATE_DIR",
     "RUNTIME_WORKSPACE_AGENTS_HEADER",
     "refresh_runtime_root_bindings",
     "now_iso",
     "runtime_workspace_root",
-    "buddybox_local_dir",
+    "actor_private_dir",
     "refresh_runtime_roots_from_env",
     "rel",
     "runtime_workspace_agents_file",

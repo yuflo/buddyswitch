@@ -35,14 +35,14 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ("search", "status", {}, "dev"),
     )
 
-    def _instance_json(self, *, instance_id: str = "inst-dev-example", buddy: str = "dev") -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+    def _instance_json(self, *, actor_id: str = "act-dev-example", role: str = "dev") -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         path = self._runtime_path("instance.json")
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -61,16 +61,16 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         *,
         payload: dict[str, object],
         instance_json: Path,
-        instance_id: str = "inst-dev-example",
-        buddy: str = "dev",
+        actor_id: str = "act-dev-example",
+        role: str = "dev",
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         manifest = env_manifest.load_manifest(MANIFEST)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return tool_registry.dispatch_env_tool_request(
             payload=payload,
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
             manifest=manifest,
@@ -106,7 +106,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         *,
         instance_json: Path,
         payload: dict[str, object],
-        buddy: str = "dev",
+        role: str = "dev",
     ) -> subprocess.CompletedProcess[str]:
         payload_json = json.dumps(payload, ensure_ascii=True)
         script = f"""
@@ -134,8 +134,8 @@ instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
     payload=json.loads({payload_json!r}),
-    active_buddy={buddy!r},
-    instance_id=instance_payload["instance_id"],
+    active_role={role!r},
+    actor_id=instance_payload["actor_id"],
     instance_json=instance_json,
     instance_payload=instance_payload,
     manifest=env_manifest.load_manifest(manifest_path),
@@ -157,7 +157,7 @@ print(json.dumps(response, sort_keys=True))
         instance_json: Path,
         payload: dict[str, object],
         blocked_module: str,
-        buddy: str = "dev",
+        role: str = "dev",
     ) -> subprocess.CompletedProcess[str]:
         payload_json = json.dumps(payload, ensure_ascii=True)
         script = f"""
@@ -185,8 +185,8 @@ instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
     payload=json.loads({payload_json!r}),
-    active_buddy={buddy!r},
-    instance_id=instance_payload["instance_id"],
+    active_role={role!r},
+    actor_id=instance_payload["actor_id"],
     instance_json=instance_json,
     instance_payload=instance_payload,
     manifest=env_manifest.load_manifest(manifest_path),
@@ -229,11 +229,11 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertEqual(response.get("action"), "context.list_sources")
 
     def test_unrelated_private_impl_import_failure_does_not_block_selected_tool(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-isolation", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-isolation", role="dev")
         completed = self._run_router_subprocess_with_blocked_message_impl(
             instance_json=instance_json,
             payload={"tool": "task", "action": "current", "args": {}},
-            buddy="dev",
+            role="dev",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         response = json.loads(completed.stdout)
@@ -243,11 +243,11 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertIs(response.get("state_changed"), False)
 
     def test_selected_private_impl_import_failure_returns_structured_feedback(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-selected-failure", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-selected-failure", role="dev")
         completed = self._run_router_subprocess_with_blocked_message_impl(
             instance_json=instance_json,
             payload={"tool": "message", "action": "list", "args": {}},
-            buddy="dev",
+            role="dev",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         response = json.loads(completed.stdout)
@@ -261,7 +261,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertIn("blocked message _impl import", str(response.get("why_blocked")))
 
     def test_role_auth_denies_before_selected_private_impl_import(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-role-deny-before-import", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-role-deny-before-import", role="dev")
         completed = self._run_router_subprocess_with_blocked_impl(
             instance_json=instance_json,
             payload={
@@ -275,7 +275,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
                 },
             },
             blocked_module="env.tools.track._impl",
-            buddy="dev",
+            role="dev",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         payload = json.loads(completed.stdout)
@@ -288,7 +288,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertNotIn("env.tools.track._impl", payload["loaded"])
 
     def test_allowed_role_reaches_selected_private_impl_import(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-role-allow-reaches-import", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-role-allow-reaches-import", role="pm")
         completed = self._run_router_subprocess_with_blocked_impl(
             instance_json=instance_json,
             payload={
@@ -302,7 +302,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
                 },
             },
             blocked_module="env.tools.track._impl",
-            buddy="pm",
+            role="pm",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         response = json.loads(completed.stdout)["response"]
@@ -312,11 +312,11 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertIn("blocked selected _impl import", str(response.get("why_blocked")))
 
     def test_role_auth_denial_precedes_args_shape_validation(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-role-deny-before-payload", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-role-deny-before-payload", role="dev")
         response = self._dispatch_env_tool(
             payload={"tool": "track", "action": "create", "args": "not-an-object"},
             instance_json=instance_json,
-            buddy="dev",
+            role="dev",
         )
         self._assert_role_auth_receipt(
             response,
@@ -326,8 +326,8 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertNotEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL_PAYLOAD")
 
     def test_selected_dispatch_imports_no_sibling_private_impl_modules(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-selected-impl-import", buddy="dev")
-        for tool, action, args, buddy in self._CHEAP_ACTION_CASES:
+        instance_json = self._instance_json(actor_id="act-dev-selected-impl-import", role="dev")
+        for tool, action, args, role in self._CHEAP_ACTION_CASES:
             payload_json = json.dumps({"tool": tool, "action": action, "args": args}, ensure_ascii=True)
             script = f"""
 import json
@@ -345,8 +345,8 @@ instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
     payload=json.loads({payload_json!r}),
-    active_buddy={buddy!r},
-    instance_id=instance_payload["instance_id"],
+    active_role={role!r},
+    actor_id=instance_payload["actor_id"],
     instance_json=instance_json,
     instance_payload=instance_payload,
     manifest=env_manifest.load_manifest(manifest_path),

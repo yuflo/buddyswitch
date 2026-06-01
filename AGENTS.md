@@ -76,8 +76,8 @@ Key paths:
 
 - Shared product-source mount point: `projects/app/`
 - Env manifest: `buddyswitch/manifest.toml`
-- Product runtime launcher: `./buddyswitch-codex instance start --buddy <buddy>`
-- Buddy host instructions: `tools/launcher/assets/buddies/<buddy>/AGENTS.md`
+- Product runtime launcher: `./buddyswitch-codex instance start --role <role>`
+- Role host instructions: `tools/launcher/assets/roles/<role>/AGENTS.md`
 
 Runtime state is projected under:
 
@@ -85,9 +85,9 @@ Runtime state is projected under:
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 
-Persistent private host files live under `$BUDDYSWITCH_BUDDYBOX_DIR`, which resolves to the active instance `workspace/buddybox`. Product objects still require explicit env tools; do not edit `buddyswitch/objects/**` or old buddybox runtime paths directly.
+Persistent private host files live under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`, which resolves to the active instance `workspace/private`. Product objects still require explicit env tools; do not edit `buddyswitch/objects/**` or old private workspace runtime paths directly.
 
-Use env tools for product-mode runtime state. Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
+Use env tools for product-mode runtime state. Do not edit `buddyswitch/objects/**` or `buddyswitch/local/private/**` directly.
 Runtime contracts are owned by code, JSON contracts, role contracts, and tests; do not create prose mirrors for runtime behavior.
 
 ## Done

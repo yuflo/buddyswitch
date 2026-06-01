@@ -25,8 +25,8 @@ _ACTION_DEFINITION_MAP = {
 
 
 class MessageServiceContext(TypedDict):
-    active_buddy: str
-    instance_id: str
+    active_role: str
+    actor_id: str
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
 
@@ -36,7 +36,7 @@ def _guess_correctable_fields(message: str) -> list[str] | None:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
         if suffix:
             return [row.strip() for row in suffix.split(",") if row.strip()]
-    for field in ("target_actor_address", "content", "reply_to", "buddy", "q", "limit"):
+    for field in ("target_actor_address", "content", "reply_to", "role", "q", "limit"):
         if field in message:
             return [field]
     return None
@@ -45,14 +45,16 @@ def _guess_correctable_fields(message: str) -> list[str] | None:
 def _reject_payload(
     *,
     action: str,
-    active_buddy: str,
+    active_actor: dict[str, Any],
+    active_role: str,
     message: str,
     correctable_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     return tool_results.rejection(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         code="E_MESSAGE_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
@@ -73,7 +75,8 @@ def _reject_payload(
 def _reject_scope(
     *,
     action: str,
-    active_buddy: str,
+    active_actor: dict[str, Any],
+    active_role: str,
     code: str,
     message: str,
     permission_boundary: str,
@@ -85,7 +88,8 @@ def _reject_scope(
     return tool_results.rejection(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         code=code,
         message=message,
         permission_boundary=permission_boundary,
@@ -106,7 +110,8 @@ def _reject_scope(
 def _reject_reachability(
     *,
     action: str,
-    active_buddy: str,
+    active_actor: dict[str, Any],
+    active_role: str,
     reachability_status: str,
     target_actor_address: dict[str, Any],
     message: str,
@@ -114,7 +119,8 @@ def _reject_reachability(
     return tool_results.rejection(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         code="E_MESSAGE_TARGET_NOT_ONLINE",
         message=message,
         permission_boundary="message.reachability",
@@ -140,7 +146,8 @@ def _reject_reachability(
 def _reject_delivery_cleaned(
     *,
     action: str,
-    active_buddy: str,
+    active_actor: dict[str, Any],
+    active_role: str,
     delivery_status: str,
     signal_error: str | None,
     target_actor_address: dict[str, Any],
@@ -148,7 +155,8 @@ def _reject_delivery_cleaned(
     return tool_results.rejection(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         code="E_MESSAGE_DELIVERY_FAILED",
         message="message.available signal delivery failed",
         permission_boundary="message.delivery",
@@ -175,7 +183,8 @@ def _reject_delivery_cleaned(
 def _reject_delivery_indeterminate(
     *,
     action: str,
-    active_buddy: str,
+    active_actor: dict[str, Any],
+    active_role: str,
     message_id: str,
     delivery_status: str,
     signal_error: str | None,
@@ -185,7 +194,8 @@ def _reject_delivery_indeterminate(
     return tool_results.rejection(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         code="E_MESSAGE_SEND_INDETERMINATE",
         message="signal delivery failed and message cleanup failed",
         permission_boundary="message.delivery_cleanup",
@@ -211,8 +221,8 @@ def _reject_delivery_indeterminate(
     )
 
 
-def _manifest_buddy_ids(context: MessageServiceContext) -> set[str]:
-    return context.rules.message.manifest_buddy_ids(context.get("manifest"))
+def _manifest_role_ids(context: MessageServiceContext) -> set[str]:
+    return context.rules.message.manifest_role_ids(context.get("manifest"))
 
 
 def _allowed_fields(action_name: str) -> set[str]:
@@ -224,30 +234,33 @@ def _allowed_fields(action_name: str) -> set[str]:
 
 def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
     action = "message.contacts"
-    active_buddy = context["active_buddy"]
-    manifest_buddies = _manifest_buddy_ids(context)
+    active_actor = context["active_actor"]
+    active_role = context["active_role"]
+    manifest_roles = _manifest_role_ids(context)
 
     try:
-        context.rules.message.ensure_active_buddy_is_manifest_declared(
-            active_buddy=active_buddy,
-            manifest_buddy_ids=manifest_buddies,
+        context.rules.message.ensure_active_role_is_manifest_declared(
+            active_role=active_role,
+            manifest_role_ids=manifest_roles,
         )
         request = context.rules.message.prepare_contacts_request(
             args=args,
-            manifest_buddy_ids=manifest_buddies,
+            manifest_role_ids=manifest_roles,
             allowed_fields=_allowed_fields("contacts"),
         )
     except context.rules.message.MessagePayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
         )
     except context.rules.message.MessageScopeError as exc:
         return _reject_scope(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code=exc.code,
             message=str(exc),
             permission_boundary=exc.permission_boundary,
@@ -258,12 +271,13 @@ def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) ->
         )
 
     try:
-        raw_contacts = context.daemon.list_contacts(buddy_id=request["buddy"])
+        raw_contacts = context.daemon.list_contacts(role_id=request["role"])
     except Exception as exc:
         return tool_results.rejection(
             tool="message",
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code="E_MESSAGE_CONTACTS_UNAVAILABLE",
             message=str(exc),
             permission_boundary="message.contacts",
@@ -283,7 +297,8 @@ def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) ->
     return tool_results.success(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         effect_summary=f"Returned {len(contacts)} online actor contact(s).",
         state_changed=False,
         durability="none",
@@ -295,40 +310,43 @@ def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) ->
             "contacts": contacts,
             "count": len(contacts),
             "sendable_count": sendable_count,
-            "filters": {"buddy": request["buddy"]},
+            "filters": {"role": request["role"]},
         },
     )
 
 
 def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
     action = "message.send"
-    active_buddy = context["active_buddy"]
-    manifest_buddies = _manifest_buddy_ids(context)
+    active_actor = context["active_actor"]
+    active_role = context["active_role"]
+    manifest_roles = _manifest_role_ids(context)
     source_actor_address = context.actor_address
 
     try:
-        context.rules.message.ensure_active_buddy_is_manifest_declared(
-            active_buddy=active_buddy,
-            manifest_buddy_ids=manifest_buddies,
+        context.rules.message.ensure_active_role_is_manifest_declared(
+            active_role=active_role,
+            manifest_role_ids=manifest_roles,
         )
         request = context.rules.message.prepare_send_request(
             args=args,
             source_actor_address=source_actor_address,
-            manifest_buddy_ids=manifest_buddies,
+            manifest_role_ids=manifest_roles,
             get_message=context.repos.message.get_message,
             allowed_fields=_allowed_fields("send"),
         )
     except context.rules.message.MessagePayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
         )
     except context.rules.message.MessageScopeError as exc:
         return _reject_scope(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code=exc.code,
             message=str(exc),
             permission_boundary=exc.permission_boundary,
@@ -345,7 +363,8 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
     except Exception as exc:
         return _reject_reachability(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             reachability_status="unavailable",
             target_actor_address=target_payload,
             message=f"target reachability check failed: {exc}",
@@ -355,7 +374,8 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         status = reachability_status if isinstance(reachability_status, str) and reachability_status else "unavailable"
         return _reject_reachability(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             reachability_status=status,
             target_actor_address=target_payload,
             message=f"target actor is not online: {status}",
@@ -369,7 +389,7 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
             reply_to=request["reply_to"],
         )
     except (ValueError, OSError) as exc:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
     try:
         delivery = context.daemon.deliver_message_available(
@@ -389,7 +409,8 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         except Exception as exc:
             return _reject_delivery_indeterminate(
                 action=action,
-                active_buddy=active_buddy,
+                active_actor=active_actor,
+                active_role=active_role,
                 message_id=message["id"],
                 delivery_status=delivery_status,
                 signal_error=signal_error,
@@ -398,7 +419,8 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
             )
         return _reject_delivery_cleaned(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             delivery_status=delivery_status,
             signal_error=signal_error,
             target_actor_address=target_payload,
@@ -408,10 +430,11 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
     return tool_results.success(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         effect_summary=(
             f"Sent one durable direct message from actor "
-            f"'{source_actor_address.instance_id}' to '{target_actor.instance_id}'."
+            f"'{source_actor_address.actor_id}' to '{target_actor.actor_id}'."
         ),
         state_changed=True,
         durability="durable",
@@ -431,30 +454,33 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
 
 def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
     action = "message.list"
-    active_buddy = context["active_buddy"]
-    manifest_buddies = _manifest_buddy_ids(context)
+    active_actor = context["active_actor"]
+    active_role = context["active_role"]
+    manifest_roles = _manifest_role_ids(context)
 
     try:
-        context.rules.message.ensure_active_buddy_is_manifest_declared(
-            active_buddy=active_buddy,
-            manifest_buddy_ids=manifest_buddies,
+        context.rules.message.ensure_active_role_is_manifest_declared(
+            active_role=active_role,
+            manifest_role_ids=manifest_roles,
         )
         request = context.rules.message.prepare_list_request(
             args=args,
-            manifest_buddy_ids=manifest_buddies,
+            manifest_role_ids=manifest_roles,
             allowed_fields=_allowed_fields("list"),
         )
     except context.rules.message.MessagePayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
         )
     except context.rules.message.MessageScopeError as exc:
         return _reject_scope(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code=exc.code,
             message=str(exc),
             permission_boundary=exc.permission_boundary,
@@ -468,7 +494,7 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
     inbox = context.rules.message.filter_inbox_messages(
         messages=all_messages,
         active_actor_address=context.actor_address,
-        sender_buddy=request["buddy"],
+        sender_role=request["role"],
         q=request["q"],
         limit=request["limit"],
     )
@@ -476,8 +502,9 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
     return tool_results.success(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
-        effect_summary=f"Returned {len(inbox)} inbox message(s) for active actor '{context.actor_address.instance_id}'.",
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Returned {len(inbox)} inbox message(s) for active actor '{context.actor_address.actor_id}'.",
         state_changed=False,
         durability="none",
         read_scope="active actor inbox messages",
@@ -491,7 +518,7 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
             "discovery_summary": {
                 "count": len(inbox),
                 "filters": {
-                    "buddy": request["buddy"],
+                    "role": request["role"],
                     "q": request["q"],
                     "limit": request["limit"],
                 },
@@ -502,31 +529,34 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
 
 def conversation_messages(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
     action = "message.conversation"
-    active_buddy = context["active_buddy"]
-    manifest_buddies = _manifest_buddy_ids(context)
+    active_actor = context["active_actor"]
+    active_role = context["active_role"]
+    manifest_roles = _manifest_role_ids(context)
 
     try:
-        context.rules.message.ensure_active_buddy_is_manifest_declared(
-            active_buddy=active_buddy,
-            manifest_buddy_ids=manifest_buddies,
+        context.rules.message.ensure_active_role_is_manifest_declared(
+            active_role=active_role,
+            manifest_role_ids=manifest_roles,
         )
         request = context.rules.message.prepare_conversation_request(
             args=args,
             source_actor_address=context.actor_address,
-            manifest_buddy_ids=manifest_buddies,
+            manifest_role_ids=manifest_roles,
             allowed_fields=_allowed_fields("conversation"),
         )
     except context.rules.message.MessagePayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
         )
     except context.rules.message.MessageScopeError as exc:
         return _reject_scope(
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code=exc.code,
             message=str(exc),
             permission_boundary=exc.permission_boundary,
@@ -537,12 +567,12 @@ def conversation_messages(*, args: dict[str, Any], context: MessageServiceContex
         )
 
     target_actor = request["target_actor_address"]
-    target_buddy = request["buddy"]
+    target_role = request["role"]
     messages = context.rules.message.filter_conversation_messages(
         messages=context.repos.message.list_messages(),
         active_actor_address=context.actor_address,
         target_actor_address=target_actor,
-        target_buddy=target_buddy,
+        target_role=target_role,
         q=request["q"],
         limit=request["limit"],
     )
@@ -550,13 +580,14 @@ def conversation_messages(*, args: dict[str, Any], context: MessageServiceContex
     if target_actor is not None:
         selector = {"target_actor_address": target_actor.to_payload()}
     else:
-        selector = {"buddy": target_buddy}
+        selector = {"role": target_role}
 
     return tool_results.success(
         tool="message",
         action=action,
-        active_buddy=active_buddy,
-        effect_summary=f"Returned {len(messages)} visible conversation message(s) for active actor '{context.actor_address.instance_id}'.",
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Returned {len(messages)} visible conversation message(s) for active actor '{context.actor_address.actor_id}'.",
         state_changed=False,
         durability="none",
         read_scope="active actor visible direct conversation messages",

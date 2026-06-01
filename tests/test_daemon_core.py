@@ -41,7 +41,7 @@ class DaemonCoreTestCase(unittest.TestCase):
 
 class DaemonCoreStateTests(DaemonCoreTestCase):
     def _instance_root(self, temp_root: str) -> Path:
-        root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
+        root = Path(temp_root) / "instances" / "act-dev-daed00000001"
         root.mkdir(parents=True, exist_ok=True)
         return root
 
@@ -54,8 +54,8 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_json.write_text(
                 json.dumps(
                     {
-                        "instance_id": "inst-dev-daed00000001",
-                        "buddy": "dev",
+                        "actor_id": "act-dev-daed00000001",
+                        "role": "dev",
                         "status": "active",
                         "instance_root": str(instance_root),
                         "workspace_dir": str(workspace_dir),
@@ -82,7 +82,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
 
             self.assertEqual(
                 row["actor_address"],
-                {"buddy_id": "dev", "instance_id": "inst-dev-daed00000001"},
+                {"role_id": "dev", "actor_id": "act-dev-daed00000001"},
             )
             self.assertEqual(row["endpoint"]["kind"], "daemon_mailbox_socket")
             self.assertEqual(row["endpoint"]["socket_path"], str(self.core.daemon_mailbox.mailbox_socket_path(context.instance_root)))
@@ -98,8 +98,8 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_json.write_text(
                 json.dumps(
                     {
-                        "instance_id": "inst-dev-daed00000001",
-                        "buddy": "dev",
+                        "actor_id": "act-dev-daed00000001",
+                        "role": "dev",
                         "status": "active",
                         "instance_root": str(instance_root),
                         "workspace_dir": str(workspace_dir),
@@ -113,8 +113,8 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             context = self.core.load_daemon_context(instance_json)
             actor_address = self.core.actor_address_for_context(context)
 
-            self.assertEqual(actor_address.to_payload(), {"buddy_id": "dev", "instance_id": "inst-dev-daed00000001"})
-            self.assertNotIn("to_buddy", self.core.register_daemon_actor.__code__.co_varnames)
+            self.assertEqual(actor_address.to_payload(), {"role_id": "dev", "actor_id": "act-dev-daed00000001"})
+            self.assertNotIn("to_role", self.core.register_daemon_actor.__code__.co_varnames)
 
     def test_missing_state_initializes_empty_valid_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -122,11 +122,11 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
 
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
-            self.assertEqual(state.payload["instance_id"], "inst-dev-daed00000001")
+            self.assertEqual(state.payload["actor_id"], "act-dev-daed00000001")
             self.assertEqual(state.payload["main_thread_id"], "thr-main")
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
             self.assertEqual(state.payload["handlers"], {})
@@ -138,7 +138,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -156,7 +156,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -173,7 +173,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -189,7 +189,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -222,7 +222,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -242,7 +242,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -258,7 +258,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -274,7 +274,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_ready(pid=4321, main_thread_id="thr-main")
@@ -299,13 +299,13 @@ class FakeBindingClient:
 
 class DaemonCoreBindingTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
+        instance_root = Path(temp_root) / "instances" / "act-dev-daed00000001"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daed00000001",
-            "buddy": "dev",
+            "actor_id": "act-dev-daed00000001",
+            "role": "dev",
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),
@@ -355,12 +355,12 @@ class DaemonCoreBindingTests(DaemonCoreTestCase):
 
 class DaemonCoreLifecycleTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
+        instance_root = Path(temp_root) / "instances" / "act-dev-daed00000001"
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload = {
-            "instance_id": "inst-dev-daed00000001",
-            "buddy": "dev",
+            "actor_id": "act-dev-daed00000001",
+            "role": "dev",
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(instance_root / "workspace"),
@@ -403,7 +403,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             if not recorded["done"]:
                 state = self.core.DaemonState.load(
                     instance_root=instance_root,
-                    instance_id="inst-dev-daed00000001",
+                    actor_id="act-dev-daed00000001",
                     main_thread_id=main_thread_id,
                 )
                 state.record_ready(pid=pid, main_thread_id=main_thread_id)
@@ -564,7 +564,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
 
             self.assertTrue(payload["terminated"])
             self.assertEqual(terminated, [4321])
-            self.assertEqual(unregistered[0]["actor_address"], {"buddy_id": "dev", "instance_id": "inst-dev-daed00000001"})
+            self.assertEqual(unregistered[0]["actor_address"], {"role_id": "dev", "actor_id": "act-dev-daed00000001"})
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
 
     def test_stop_daemon_does_not_fail_when_central_unregister_is_unavailable(self) -> None:
@@ -600,7 +600,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance["instance_root"],
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_ready(pid=4321, main_thread_id="thr-main")
@@ -659,7 +659,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance["instance_root"],
-                instance_id="inst-dev-daed00000001",
+                actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_handler_error("message", origin_turn_id="turn-user-1", message="message failed")
@@ -769,13 +769,13 @@ class ExplodingOnceHandler:
 
 class DaemonCoreRunLoopTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
+        instance_root = Path(temp_root) / "instances" / "act-dev-daed00000001"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daed00000001",
-            "buddy": "dev",
+            "actor_id": "act-dev-daed00000001",
+            "role": "dev",
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),

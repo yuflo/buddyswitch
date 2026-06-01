@@ -8,6 +8,7 @@ from typing import Any
 
 from env.repos import requests as request_repo
 from env.repos import runtime_files
+from env.tool_runtime.actor_profile import ActorAddress
 
 
 class RequestPayloadError(ValueError):
@@ -56,34 +57,57 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def manifest_buddy_ids(manifest: dict[str, Any] | None) -> set[str]:
+def _actor_payload(value: ActorAddress | dict[str, Any], field: str) -> dict[str, str]:
+    try:
+        if isinstance(value, ActorAddress):
+            return value.to_payload()
+        return ActorAddress.from_payload(value).to_payload()
+    except ValueError as exc:
+        raise RequestPayloadError(f"{field} must be a valid ActorAddress: {exc}", correctable_fields=[field]) from exc
+
+
+def _request_actor(value: Any, field: str) -> ActorAddress:
+    try:
+        return ActorAddress.from_payload(value)
+    except ValueError as exc:
+        raise RequestScopeError(
+            message=f"{field} must be a valid ActorAddress: {exc}",
+            permission_boundary="request.actor_identity",
+            human_summary="Request actor identity is malformed.",
+            why_blocked="Request lifecycle decisions require concrete actor identity.",
+            retryable=False,
+            correctable_fields=["request_id"],
+        ) from exc
+
+
+def manifest_role_ids(manifest: dict[str, Any] | None) -> set[str]:
     if not isinstance(manifest, dict):
         return set()
-    buddies = manifest.get("buddies")
-    if not isinstance(buddies, list):
+    roles = manifest.get("roles")
+    if not isinstance(roles, list):
         return set()
     rows: set[str] = set()
-    for row in buddies:
+    for row in roles:
         if not isinstance(row, dict):
             continue
-        buddy_id = row.get("id")
-        if isinstance(buddy_id, str) and buddy_id.strip():
-            rows.add(buddy_id.strip())
+        role_id = row.get("id")
+        if isinstance(role_id, str) and role_id.strip():
+            rows.add(role_id.strip())
     return rows
 
 
-def ensure_manifest_buddy(buddy_id: str, manifest_buddy_ids: set[str], field: str) -> None:
-    if buddy_id in manifest_buddy_ids:
+def ensure_manifest_role(role_id: str, manifest_role_ids: set[str], field: str) -> None:
+    if role_id in manifest_role_ids:
         return
     raise RequestPayloadError(
-        f"{field} must be one of manifest buddies",
+        f"{field} must be one of manifest roles",
         correctable_fields=[field],
         field_errors=[
             {
                 "path": field,
-                "message": f"unknown buddy id: {buddy_id}",
-                "allowed_values": sorted(manifest_buddy_ids),
-                "example": sorted(manifest_buddy_ids)[:1],
+                "message": f"unknown role id: {role_id}",
+                "allowed_values": sorted(manifest_role_ids),
+                "example": sorted(manifest_role_ids)[:1],
             }
         ],
     )
@@ -121,7 +145,8 @@ def normalize_ref_items(value: Any, field: str) -> list[dict[str, str]]:
 def normalize_create_args(
     *,
     args: Mapping[str, Any],
-    active_buddy: str,
+    active_role: str,
+    active_actor_address: ActorAddress | dict[str, Any],
     manifest: dict[str, Any],
     track: dict[str, Any],
     readable_ref_checker: Callable[[dict[str, str], str], None],
@@ -134,8 +159,8 @@ def normalize_create_args(
             correctable_fields=unknown,
         )
 
-    manifest_ids = manifest_buddy_ids(manifest)
-    ensure_manifest_buddy(active_buddy, manifest_ids, "active_buddy")
+    manifest_ids = manifest_role_ids(manifest)
+    ensure_manifest_role(active_role, manifest_ids, "active_role")
 
     track_id = runtime_files.require_id(
         _require_non_empty_text(args.get("track_id"), "track_id"),
@@ -145,16 +170,16 @@ def normalize_create_args(
     if track_id != current_track_id:
         raise RequestPayloadError("track_id does not match loaded track context", correctable_fields=["track_id"])
 
-    to_buddy = _require_non_empty_text(args.get("to_buddy"), "to_buddy")
-    ensure_manifest_buddy(to_buddy, manifest_ids, "to_buddy")
-    if to_buddy == active_buddy:
+    to_role = _require_non_empty_text(args.get("to_role"), "to_role")
+    ensure_manifest_role(to_role, manifest_ids, "to_role")
+    if to_role == active_role:
         raise RequestScopeError(
             message="request sender and recipient must differ",
             permission_boundary="request.self_request",
             human_summary="Self-directed requests are not allowed.",
-            why_blocked="request.create requires from_buddy and to_buddy to be different manifest buddies.",
+            why_blocked="request.create requires from_actor and to_role to be different manifest roles.",
             retryable=True,
-            correctable_fields=["to_buddy"],
+            correctable_fields=["to_role"],
         )
 
     title = _require_non_empty_text(args.get("title"), "title")
@@ -170,8 +195,8 @@ def normalize_create_args(
 
     return {
         "track_id": track_id,
-        "from_buddy": active_buddy,
-        "to_buddy": to_buddy,
+        "from_actor": _actor_payload(active_actor_address, "active_actor"),
+        "to_role": to_role,
         "title": title,
         "summary": summary,
         "target_refs": target_refs,
@@ -211,17 +236,17 @@ def normalize_list_args(
     if track_raw is not None:
         track_id = runtime_files.require_id(_require_non_empty_text(track_raw, "track_id"), "track_id")
 
-    buddy_raw = args.get("buddy")
-    buddy: str | None = None
-    if buddy_raw is not None:
-        buddy = _require_non_empty_text(buddy_raw, "buddy")
-        ensure_manifest_buddy(buddy, manifest_buddy_ids(manifest), "buddy")
+    role_raw = args.get("role")
+    role: str | None = None
+    if role_raw is not None:
+        role = _require_non_empty_text(role_raw, "role")
+        ensure_manifest_role(role, manifest_role_ids(manifest), "role")
 
     return {
         "box": box,
         "status": status,
         "track_id": track_id,
-        "buddy": buddy,
+        "role": role,
     }
 
 
@@ -230,28 +255,34 @@ def require_request_id(args: Mapping[str, Any]) -> str:
     return runtime_files.require_id(request_id, "request_id")
 
 
-def ensure_visible(request: Mapping[str, Any], active_buddy: str) -> None:
+def ensure_visible(
+    request: Mapping[str, Any],
+    active_role: str,
+    active_actor_address: ActorAddress | dict[str, Any],
+) -> None:
+    active_actor = ActorAddress.from_payload(_actor_payload(active_actor_address, "active_actor"))
+    requester = _request_actor(request.get("from_actor"), "request.from_actor")
     if (
-        request.get("from_buddy") == active_buddy
-        or request.get("to_buddy") == active_buddy
-        or active_buddy == "pm"
+        requester.actor_id == active_actor.actor_id
+        or request.get("to_role") == active_role
+        or active_role == "pm"
     ):
         return
     raise RequestScopeError(
-        message=f"request '{request.get('id')}' is not visible to active buddy '{active_buddy}'",
+        message=f"request '{request.get('id')}' is not visible to active role '{active_role}'",
         permission_boundary="request.visibility",
-        human_summary="Request is outside active-buddy visibility scope.",
+        human_summary="Request is outside active-role visibility scope.",
         why_blocked="Only requester, recipient, or PM can read this request.",
         retryable=False,
         correctable_fields=["request_id"],
     )
 
 
-def ensure_recipient(request: Mapping[str, Any], active_buddy: str) -> None:
-    if request.get("to_buddy") == active_buddy:
+def ensure_recipient(request: Mapping[str, Any], active_role: str) -> None:
+    if request.get("to_role") == active_role:
         return
     raise RequestScopeError(
-        message=f"request '{request.get('id')}' can only be changed by recipient '{request.get('to_buddy')}'",
+        message=f"request '{request.get('id')}' can only be changed by recipient '{request.get('to_role')}'",
         permission_boundary="request.recipient_scope",
         human_summary="Only the request recipient can run this action.",
         why_blocked="request.accept/block/complete are recipient-only mutations.",
@@ -260,11 +291,16 @@ def ensure_recipient(request: Mapping[str, Any], active_buddy: str) -> None:
     )
 
 
-def ensure_requester(request: Mapping[str, Any], active_buddy: str) -> None:
-    if request.get("from_buddy") == active_buddy:
+def ensure_requester(
+    request: Mapping[str, Any],
+    active_actor_address: ActorAddress | dict[str, Any],
+) -> None:
+    active_actor = ActorAddress.from_payload(_actor_payload(active_actor_address, "active_actor"))
+    requester = _request_actor(request.get("from_actor"), "request.from_actor")
+    if requester.actor_id == active_actor.actor_id:
         return
     raise RequestScopeError(
-        message=f"request '{request.get('id')}' can only be canceled by requester '{request.get('from_buddy')}'",
+        message=f"request '{request.get('id')}' can only be canceled by requester '{requester.actor_id}'",
         permission_boundary="request.requester_scope",
         human_summary="Only the request sender can cancel this request.",
         why_blocked="request.cancel is requester-only in this runtime scope.",
@@ -273,8 +309,13 @@ def ensure_requester(request: Mapping[str, Any], active_buddy: str) -> None:
     )
 
 
-def accept_patch(request: Mapping[str, Any], active_buddy: str, now: str) -> dict[str, Any]:
-    ensure_recipient(request, active_buddy)
+def accept_patch(
+    request: Mapping[str, Any],
+    active_role: str,
+    active_actor_address: ActorAddress | dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    ensure_recipient(request, active_role)
     status = request.get("status")
     if status not in {"open", "blocked"}:
         raise RequestStateError(
@@ -288,12 +329,22 @@ def accept_patch(request: Mapping[str, Any], active_buddy: str, now: str) -> dic
         "blocked_at": None,
         "completed_at": None,
         "canceled_at": None,
+        "accepted_by_actor": _actor_payload(active_actor_address, "active_actor"),
+        "blocked_by_actor": None,
+        "completed_by_actor": None,
+        "canceled_by_actor": None,
         "blocker": None,
     }
 
 
-def block_patch(request: Mapping[str, Any], active_buddy: str, blocker: str, now: str) -> dict[str, Any]:
-    ensure_recipient(request, active_buddy)
+def block_patch(
+    request: Mapping[str, Any],
+    active_role: str,
+    active_actor_address: ActorAddress | dict[str, Any],
+    blocker: str,
+    now: str,
+) -> dict[str, Any]:
+    ensure_recipient(request, active_role)
     status = request.get("status")
     if status != "accepted":
         raise RequestStateError(
@@ -308,16 +359,20 @@ def block_patch(request: Mapping[str, Any], active_buddy: str, blocker: str, now
         "blocked_at": now,
         "completed_at": None,
         "canceled_at": None,
+        "blocked_by_actor": _actor_payload(active_actor_address, "active_actor"),
+        "completed_by_actor": None,
+        "canceled_by_actor": None,
     }
 
 
 def complete_patch(
     request: Mapping[str, Any],
-    active_buddy: str,
+    active_role: str,
+    active_actor_address: ActorAddress | dict[str, Any],
     result_refs: list[dict[str, str]],
     now: str,
 ) -> dict[str, Any]:
-    ensure_recipient(request, active_buddy)
+    ensure_recipient(request, active_role)
     status = request.get("status")
     if status not in {"accepted", "blocked"}:
         raise RequestStateError(
@@ -333,11 +388,13 @@ def complete_patch(
         "blocker": None,
         "completed_at": now,
         "canceled_at": None,
+        "completed_by_actor": _actor_payload(active_actor_address, "active_actor"),
+        "canceled_by_actor": None,
     }
 
 
-def cancel_patch(request: Mapping[str, Any], active_buddy: str, now: str) -> dict[str, Any]:
-    ensure_requester(request, active_buddy)
+def cancel_patch(request: Mapping[str, Any], active_actor_address: ActorAddress | dict[str, Any], now: str) -> dict[str, Any]:
+    ensure_requester(request, active_actor_address)
     status = request.get("status")
     if status not in {"open", "accepted", "blocked"}:
         raise RequestStateError(
@@ -349,4 +406,5 @@ def cancel_patch(request: Mapping[str, Any], active_buddy: str, now: str) -> dic
         "updated_at": now,
         "canceled_at": now,
         "completed_at": None,
+        "canceled_by_actor": _actor_payload(active_actor_address, "active_actor"),
     }

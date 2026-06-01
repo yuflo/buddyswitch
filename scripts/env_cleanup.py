@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from env.repos import buddybox_files as buddybox_repo
+from env.repos import actor_private_files as actor_private_repo
 from env.repos import runtime_files
 
 try:
@@ -28,7 +28,7 @@ CATEGORY_ORDER = (
     "track_objects",
     "message_objects",
     "comment_objects",
-    "buddybox_private_files",
+    "actor_private_files",
 )
 
 
@@ -40,7 +40,7 @@ TRACK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACKS_DIR)
 ARTIFACT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.ARTIFACT_OBJECTS_DIR)
 MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
 COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.COMMENTS_DIR)
-BUDDYBOX_RELATIVE_DIR = "buddybox"
+ACTOR_PRIVATE_RELATIVE_DIR = "private"
 
 
 def _strip_toml_comment(line: str) -> str:
@@ -78,11 +78,11 @@ def _strip_toml_quotes(value: str) -> str:
     return value
 
 
-def _load_valid_buddies_minimal(manifest_path: Path) -> set[str]:
+def _load_valid_roles_minimal(manifest_path: Path) -> set[str]:
     if not manifest_path.exists():
         raise ManifestError(f"Manifest not found: {manifest_path}")
 
-    buddy_ids: set[str] = set()
+    role_ids: set[str] = set()
     current_section: str | None = None
     for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
         line = _strip_toml_comment(raw_line).strip()
@@ -94,17 +94,17 @@ def _load_valid_buddies_minimal(manifest_path: Path) -> set[str]:
         if line.startswith("[") and line.endswith("]"):
             current_section = None
             continue
-        if current_section != "buddies" or "=" not in line:
+        if current_section != "roles" or "=" not in line:
             continue
         key, raw_value = line.split("=", 1)
         if key.strip() != "id":
             continue
-        buddy_id = _strip_toml_quotes(raw_value.strip())
-        if buddy_id:
-            buddy_ids.add(buddy_id)
-    if not buddy_ids:
-        raise ManifestError("manifest must define at least one [[buddies]] id")
-    return buddy_ids
+        role_id = _strip_toml_quotes(raw_value.strip())
+        if role_id:
+            role_ids.add(role_id)
+    if not role_ids:
+        raise ManifestError("manifest must define at least one [[roles]] id")
+    return role_ids
 
 
 def rel(root: Path, path: Path) -> str:
@@ -233,27 +233,27 @@ def append_warning(warnings: list[str] | None, message: str) -> None:
         warnings.append(message)
 
 
-def load_valid_buddies(manifest_path: Path) -> set[str]:
+def load_valid_roles(manifest_path: Path) -> set[str]:
     if _load_manifest_full is not None:
         try:
             data = _load_manifest_full(manifest_path)
             ids = {
-                buddy["id"]
-                for buddy in data.get("buddies", [])
-                if isinstance(buddy, dict) and isinstance(buddy.get("id"), str) and buddy["id"].strip()
+                role["id"]
+                for role in data.get("roles", [])
+                if isinstance(role, dict) and isinstance(role.get("id"), str) and role["id"].strip()
             }
             if ids:
                 return ids
         except (ManifestError, OSError, ValueError, json.JSONDecodeError):
             pass
-    return _load_valid_buddies_minimal(manifest_path)
+    return _load_valid_roles_minimal(manifest_path)
 
 
-def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
+def new_plan(scope: str, *, role: str | None = None) -> dict[str, Any]:
     counts = {key: 0 for key in CATEGORY_ORDER}
     return {
         "scope": scope,
-        "buddy": buddy,
+        "role": role,
         "delete_paths": [],
         "artifact_object_ids": [],
         "message_object_ids": [],
@@ -303,17 +303,18 @@ def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[di
             continue
 
         artifact_id = payload.get("id")
-        producer_buddy = payload.get("created_by")
+        created_by_actor = payload.get("created_by_actor")
+        producer_role = created_by_actor.get("role_id") if isinstance(created_by_actor, dict) else None
         if not isinstance(artifact_id, str) or not artifact_id:
             invalid.append({"path": relative, "reason": "artifact object is missing id"})
             continue
-        if not isinstance(producer_buddy, str) or not producer_buddy:
-            invalid.append({"path": relative, "reason": f"artifact '{artifact_id}' is missing created_by"})
+        if not isinstance(producer_role, str) or not producer_role:
+            invalid.append({"path": relative, "reason": f"artifact '{artifact_id}' is missing created_by_actor.role_id"})
             continue
 
         record = {
             "id": artifact_id,
-            "producer_buddy": producer_buddy,
+            "producer_role": producer_role,
             "object_path": relative,
         }
         valid.append(record)
@@ -332,19 +333,21 @@ def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dic
             continue
 
         msg_id = payload.get("id")
-        from_buddy = payload.get("from_buddy")
-        to_buddy = payload.get("to_buddy")
+        from_actor = payload.get("from_actor_address")
+        to_actor = payload.get("to_actor_address")
+        from_role = from_actor.get("role_id") if isinstance(from_actor, dict) else None
+        to_role = to_actor.get("role_id") if isinstance(to_actor, dict) else None
         if not isinstance(msg_id, str) or not msg_id:
             invalid.append({"path": relative, "reason": "message object is missing id"})
             continue
-        if not isinstance(from_buddy, str) or not from_buddy:
-            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing from_buddy"})
+        if not isinstance(from_role, str) or not from_role:
+            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing from_actor_address.role_id"})
             continue
 
         valid.append({
             "id": msg_id,
-            "from_buddy": from_buddy,
-            "to_buddy": to_buddy,
+            "from_role": from_role,
+            "to_role": to_role,
             "object_path": relative,
         })
     return valid, invalid
@@ -362,19 +365,20 @@ def discover_comment_objects(root: Path) -> tuple[list[dict[str, Any]], list[dic
             continue
 
         cmt_id = payload.get("id")
-        author_buddy = payload.get("author_buddy")
+        by_actor = payload.get("by_actor")
+        author_role = by_actor.get("role_id") if isinstance(by_actor, dict) else None
         target_type = payload.get("target_type")
         target_id = payload.get("target_id")
         if not isinstance(cmt_id, str) or not cmt_id:
             invalid.append({"path": relative, "reason": "comment object is missing id"})
             continue
-        if not isinstance(author_buddy, str) or not author_buddy:
-            invalid.append({"path": relative, "reason": f"comment '{cmt_id}' is missing author_buddy"})
+        if not isinstance(author_role, str) or not author_role:
+            invalid.append({"path": relative, "reason": f"comment '{cmt_id}' is missing by_actor.role_id"})
             continue
 
         valid.append({
             "id": cmt_id,
-            "author_buddy": author_buddy,
+            "author_role": author_role,
             "target_type": target_type,
             "target_id": target_id,
             "object_path": relative,
@@ -403,7 +407,7 @@ def discover_instance_workspaces(
     plan: dict[str, Any],
     *,
     shared_root: Path,
-    buddy_filter: str | None,
+    role_filter: str | None,
 ) -> list[Path]:
     instances_root = shared_root / "instances"
     if shared_root.is_symlink():
@@ -459,30 +463,30 @@ def discover_instance_workspaces(
             )
             continue
 
-        instance_buddy: str | None = None
+        instance_role: str | None = None
         instance_json = instance_root / "instance.json"
         if instance_json.exists():
             try:
                 payload = read_json(instance_json)
             except (OSError, ValueError, json.JSONDecodeError):
                 payload = {}
-                if buddy_filter is not None:
+                if role_filter is not None:
                     add_warning(
                         plan,
-                        f"Skipping buddy-filtered cleanup for '{instance_root.name}': invalid instance.json.",
+                        f"Skipping role-filtered cleanup for '{instance_root.name}': invalid instance.json.",
                     )
-            buddy_value = payload.get("buddy")
-            if isinstance(buddy_value, str) and buddy_value:
-                instance_buddy = buddy_value
+            role_value = payload.get("role")
+            if isinstance(role_value, str) and role_value:
+                instance_role = role_value
 
-        if buddy_filter is not None:
-            if instance_buddy is None:
+        if role_filter is not None:
+            if instance_role is None:
                 add_warning(
                     plan,
-                    f"Skipping buddy-filtered cleanup for '{instance_root.name}': missing buddy in instance.json.",
+                    f"Skipping role-filtered cleanup for '{instance_root.name}': missing role in instance.json.",
                 )
                 continue
-            if instance_buddy != buddy_filter:
+            if instance_role != role_filter:
                 continue
 
         workspaces.append(workspace_dir)
@@ -557,9 +561,9 @@ def owner_object_json_path(root: Path, *, category: str, object_id: str) -> tupl
     )
 
 
-def _parse_buddybox_owner_path(path: Path) -> tuple[Path, str] | None:
+def _parse_actor_private_owner_path(path: Path) -> tuple[Path, str] | None:
     parts = path.resolve(strict=False).parts
-    marker = tuple(Path(BUDDYBOX_RELATIVE_DIR).parts)
+    marker = tuple(Path(ACTOR_PRIVATE_RELATIVE_DIR).parts)
     if not marker:
         return None
     window = len(marker)
@@ -572,20 +576,20 @@ def _parse_buddybox_owner_path(path: Path) -> tuple[Path, str] | None:
         logical_parts = parts[marker_end:]
         if not logical_parts:
             return None
-        buddy_root = Path(*parts[:marker_end])
+        private_root = Path(*parts[:marker_end])
         logical_name = "/".join(logical_parts)
-        return buddy_root, logical_name
+        return private_root, logical_name
     return None
 
 
-def delete_buddybox_path(path: Path) -> bool:
-    owner = _parse_buddybox_owner_path(path)
+def delete_actor_private_path(path: Path) -> bool:
+    owner = _parse_actor_private_owner_path(path)
     if owner is None:
         return False
-    buddy_root, logical_name = owner
+    private_root, logical_name = owner
     try:
-        buddybox_repo.delete_private_file(root=buddy_root, logical_name=logical_name)
-    except (buddybox_repo.BuddyboxBoundaryError, IsADirectoryError, OSError):
+        actor_private_repo.delete_private_file(root=private_root, logical_name=logical_name)
+    except (actor_private_repo.ActorPrivateBoundaryError, IsADirectoryError, OSError):
         return False
     return True
 
@@ -690,17 +694,17 @@ def default_manifest_path(repo_root: Path) -> Path:
 def build_cleanup_plan(
     *,
     scope: str,
-    buddy: str | None,
+    role: str | None,
     repo_root: Path = ROOT,
     manifest_path: Path | None = None,
     shared_root: Path | None = None,
 ) -> dict[str, Any]:
     manifest_path = manifest_path or default_manifest_path(repo_root)
-    valid_buddies = load_valid_buddies(manifest_path)
-    if scope == "buddy" and (buddy is None or buddy not in valid_buddies):
-        raise ValueError(f"Invalid buddy '{buddy}'. Check buddyswitch/manifest.toml")
+    valid_roles = load_valid_roles(manifest_path)
+    if scope == "role" and (role is None or role not in valid_roles):
+        raise ValueError(f"Invalid role '{role}'. Check buddyswitch/manifest.toml")
 
-    plan = new_plan(scope, buddy=buddy)
+    plan = new_plan(scope, role=role)
     plan["repo_root"] = str(repo_root)
     plan["shared_root"] = str(shared_root) if shared_root is not None else None
     plan["_path_categories"] = {}
@@ -708,47 +712,47 @@ def build_cleanup_plan(
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
     message_objects, invalid_message_objects = discover_message_objects(repo_root)
     comment_objects, invalid_comment_objects = discover_comment_objects(repo_root)
-    if scope == "buddy":
+    if scope == "role":
         for record in artifact_objects:
-            if record["producer_buddy"] == buddy:
+            if record["producer_role"] == role:
                 add_indexed_artifact(plan, record)
         for record in message_objects:
-            if record.get("from_buddy") == buddy or record.get("to_buddy") == buddy:
+            if record.get("from_role") == role or record.get("to_role") == role:
                 add_indexed_message(plan, record)
         for record in comment_objects:
-            if record.get("author_buddy") == buddy:
+            if record.get("author_role") == role:
                 add_indexed_comment(plan, record)
-        buddybox_relative_dir = BUDDYBOX_RELATIVE_DIR
+        actor_private_relative_dir = ACTOR_PRIVATE_RELATIVE_DIR
         if shared_root is not None:
             resolved_shared_root = shared_root.resolve(strict=False)
             for workspace_dir in discover_instance_workspaces(
                 plan,
                 shared_root=resolved_shared_root,
-                buddy_filter=buddy,
+                role_filter=role,
             ):
                 add_instance_workspace_dir_files(
                     plan,
                     shared_root=resolved_shared_root,
                     workspace_dir=workspace_dir,
-                    relative_dir=buddybox_relative_dir,
-                    category="buddybox_private_files",
+                    relative_dir=actor_private_relative_dir,
+                    category="actor_private_files",
                 )
         else:
-            add_dir_files(plan, buddybox_relative_dir, "buddybox_private_files")
+            add_dir_files(plan, actor_private_relative_dir, "actor_private_files")
         for item in invalid_artifact_objects:
             add_warning(
                 plan,
-                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+                f"{item['path']} cannot be safely attributed to role '{role}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
         for item in invalid_message_objects:
             add_warning(
                 plan,
-                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+                f"{item['path']} cannot be safely attributed to role '{role}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
         for item in invalid_comment_objects:
             add_warning(
                 plan,
-                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+                f"{item['path']} cannot be safely attributed to role '{role}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
 
     elif scope == "all-data":
@@ -761,17 +765,17 @@ def build_cleanup_plan(
             for workspace_dir in discover_instance_workspaces(
                 plan,
                 shared_root=resolved_shared_root,
-                buddy_filter=None,
+                role_filter=None,
             ):
                 add_instance_workspace_dir_files(
                     plan,
                     shared_root=resolved_shared_root,
                     workspace_dir=workspace_dir,
-                    relative_dir=BUDDYBOX_RELATIVE_DIR,
-                    category="buddybox_private_files",
+                    relative_dir=ACTOR_PRIVATE_RELATIVE_DIR,
+                    category="actor_private_files",
                 )
         else:
-            add_dir_files(plan, BUDDYBOX_RELATIVE_DIR, "buddybox_private_files")
+            add_dir_files(plan, ACTOR_PRIVATE_RELATIVE_DIR, "actor_private_files")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
@@ -853,13 +857,13 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
         external_path = plan.get("external_delete_paths", {}).get(relative_path)
         if external_path is not None:
             target_path = Path(external_path)
-            if category == "buddybox_private_files" and delete_buddybox_path(target_path):
+            if category == "actor_private_files" and delete_actor_private_path(target_path):
                 pass
             else:
                 delete_absolute_path(target_path)
         else:
             target_path = root / relative_path
-            if category == "buddybox_private_files" and delete_buddybox_path(target_path):
+            if category == "actor_private_files" and delete_actor_private_path(target_path):
                 pass
             else:
                 delete_relative_path(root, relative_path)
@@ -872,7 +876,7 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "scope": plan["scope"],
-        "buddy": plan["buddy"],
+        "role": plan["role"],
         "deleted_paths": deleted_paths,
         "deleted_count": len(deleted_paths),
         "artifact_object_ids": plan["artifact_object_ids"],
@@ -883,8 +887,8 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def print_text_plan(plan: dict[str, Any]) -> None:
-    if plan["scope"] == "buddy":
-        target = f"--buddy {plan['buddy']}"
+    if plan["scope"] == "role":
+        target = f"--role {plan['role']}"
     elif plan["scope"] == "all-data":
         target = "--all-data"
     else:
@@ -924,7 +928,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--manifest", type=Path, help="Manifest path. Defaults to <repo-root>/buddyswitch/manifest.toml.")
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--buddy")
+    target.add_argument("--role")
     target.add_argument("--all-data", action="store_true")
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print cleanup plan/result as JSON.")
@@ -932,8 +936,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def resolve_scope(args: argparse.Namespace) -> tuple[str, str | None]:
-    if args.buddy:
-        return "buddy", args.buddy
+    if args.role:
+        return "role", args.role
     if args.all_data:
         return "all-data", None
     raise ValueError("No cleanup target provided")
@@ -973,10 +977,10 @@ def main() -> int:
             raise ValueError(f"Refusing cleanup: shared root argument is a symlink ({shared_root}).")
         repo_root = resolve_repo_root_arg(repo_root_arg=args.repo_root, shared_root=shared_root)
         manifest_path = args.manifest.resolve() if args.manifest else default_manifest_path(repo_root)
-        scope, buddy = resolve_scope(args)
+        scope, role = resolve_scope(args)
         plan = build_cleanup_plan(
             scope=scope,
-            buddy=buddy,
+            role=role,
             repo_root=repo_root,
             manifest_path=manifest_path,
             shared_root=shared_root,

@@ -21,7 +21,7 @@ Send direct messages to online runtime actor addresses and read message context 
 - Use `message__contacts` first when you need a current online target actor.
 - Copy `contact.actor_address` from a contact row into `target_actor_address` for `message__send`.
 - Use `message__list` to read active actor inbox rows.
-- Use `message__conversation` to read active actor visible bidirectional context with a selected target buddy or actor.
+- Use `message__conversation` to read active actor visible bidirectional context with a selected target role or actor.
 - Use `request__list` when you need inbox/outbox request filtering; message state is not request lifecycle state.
 - Runtime response fields are authoritative for effects, rejection reasons, and recovery.
 
@@ -30,9 +30,9 @@ Send direct messages to online runtime actor addresses and read message context 
 - `message__contacts` returns online contact rows with `contact.actor_address`.
 - `message__send` requires `target_actor_address` copied from current contact data.
 - `message__list` reads only the active actor inbox; it does not accept `box`.
-- `message__conversation` reads active actor visible bidirectional messages with a selected target buddy or actor.
+- `message__conversation` reads active actor visible bidirectional messages with a selected target role or actor.
 - Message objects are immutable after creation. No edit or removal workflow exists for normal users.
-- Active buddy cannot send to another actor with the same buddy id.
+- Active role cannot send to another actor with the same role id.
 - Reply envelopes must stay within the same two-actor conversation pair.
 
 ## Do Not

@@ -13,7 +13,7 @@ from env.tool_runtime.definition import ActionDefinition, ToolDefinition, valida
 def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
-        title='Buddy Messages',
+        title='Role Messages',
         description='Discover online actor contacts, send direct actor-address messages, and list inbox messages.',
         scope='direct runtime actor inbox messaging',
         capability_boundary='Messages are direct runtime actor-address scope only.',
@@ -36,9 +36,9 @@ def _build_definition() -> ToolDefinition:
                     'additionalProperties': False,
                     'required': [],
                     'properties': {
-                        'buddy': {
+                        'role': {
                             'type': 'string',
-                            'description': 'Optional manifest buddy id filter for online actor contacts.',
+                            'description': 'Optional manifest role id filter for online actor contacts.',
                         },
                     },
                 },
@@ -65,7 +65,7 @@ def _build_definition() -> ToolDefinition:
                     'artifacts',
                     'comments',
                     'requests',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'env.tool role-action policy allows this action for the active role',
@@ -101,18 +101,18 @@ def _build_definition() -> ToolDefinition:
                         'target_actor_address': {
                             'type': 'object',
                             'additionalProperties': False,
-                            'required': ['buddy_id', 'instance_id'],
+                            'required': ['role_id', 'actor_id'],
                             'properties': {
-                                'buddy_id': {
+                                'role_id': {
                                     'type': 'string',
-                                    'description': 'Target runtime actor buddy id.',
+                                    'description': 'Target runtime actor role id.',
                                 },
-                                'instance_id': {
+                                'actor_id': {
                                     'type': 'string',
-                                    'description': 'Target runtime actor instance id.',
+                                    'description': 'Target runtime actor actor id.',
                                 },
                             },
-                            'description': 'Exact RuntimeActorAddress returned by message.contacts.',
+                            'description': 'Exact ActorAddress returned by message.contacts.',
                         },
                         'content': {
                             'type': 'string',
@@ -130,14 +130,14 @@ def _build_definition() -> ToolDefinition:
                 kind='write',
                 mutates='runtime_objects',
                 required_permission='message.send',
-                authority='message.direct_buddy_channel',
+                authority='message.direct_role_channel',
                 visibility='sender and recipient direct message visibility',
                 durability='durable',
                 result_content_level='message id and delivery status',
                 success_effect='Creates one durable inbox message and delivers a message.available signal to the target daemon.',
                 failure_state_guarantee='Rejected non-writes do not mutate runtime objects; delivery failures clean up the message or report an indeterminate write.',
                 reads=(
-                    'manifest buddy ids',
+                    'manifest role ids',
                     'central daemon actor reachability',
                 ),
                 writes=(
@@ -149,12 +149,12 @@ def _build_definition() -> ToolDefinition:
                     'artifacts',
                     'comments',
                     'requests',
-                    'buddybox files',
+                    'actor_private files',
                     'browser session',
                 ),
                 preconditions=(
-                    'target_actor_address is a declared manifest buddy actor address',
-                    'target_actor_address is online and not the active buddy',
+                    'target_actor_address is a declared manifest role actor address',
+                    'target_actor_address is online and not the active role',
                 ),
                 returns=(
                     'message_id',
@@ -164,7 +164,7 @@ def _build_definition() -> ToolDefinition:
                     'You need to deliver a direct inbox message to a specific online actor address.',
                 ),
                 do_not_use_when=(
-                    'You only have a buddy id but no actor address (use message.contacts) or need target-scoped track/artifact discussion (use comment.add).',
+                    'You only have a role id but no actor address (use message.contacts) or need target-scoped track/artifact discussion (use comment.add).',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -178,19 +178,19 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='list',
                 title='message.list',
-                description='List active-buddy inbox messages.',
+                description='List active-role inbox messages.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
                     'required': [],
                     'properties': {
-                        'buddy': {
+                        'role': {
                             'type': 'string',
-                            'description': 'Optional inbox buddy filter.',
+                            'description': 'Optional inbox role filter.',
                         },
                         'q': {
                             'type': 'string',
-                            'description': 'Optional case-insensitive keyword filter over active-buddy inbox message content.',
+                            'description': 'Optional case-insensitive keyword filter over active-role inbox message content.',
                         },
                         'limit': {
                             'type': 'integer',
@@ -205,14 +205,14 @@ def _build_definition() -> ToolDefinition:
                 kind='read',
                 mutates='none',
                 required_permission='message.list',
-                authority='message.active_buddy_inbox',
-                visibility='active-buddy inbox',
+                authority='message.active_role_inbox',
+                visibility='active-role inbox',
                 durability='none',
                 result_content_level='message rows',
-                success_effect='Lists active-buddy inbox messages with optional filters.',
+                success_effect='Lists active-role inbox messages with optional filters.',
                 failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
                 reads=(
-                    'active-buddy inbox messages',
+                    'active-role inbox messages',
                 ),
                 writes=(),
                 does_not_write=(
@@ -222,7 +222,7 @@ def _build_definition() -> ToolDefinition:
                     'artifacts',
                     'comments',
                     'requests',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'env.tool role-action policy allows this action for the active role',
@@ -231,7 +231,7 @@ def _build_definition() -> ToolDefinition:
                     'messages',
                 ),
                 use_when=(
-                    'You need to read active-buddy inbox messages, optionally filtered by sender buddy, keyword, or bounded count.',
+                    'You need to read active-role inbox messages, optionally filtered by sender role, keyword, or bounded count.',
                 ),
                 do_not_use_when=(
                     'You need to create a new direct message (use message.send) or discuss a track/artifact target thread (use comment.add).',
@@ -248,7 +248,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='conversation',
                 title='message.conversation',
-                description='Read active actor visible bidirectional direct messages with one target actor or buddy.',
+                description='Read active actor visible bidirectional direct messages with one target actor or role.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -257,22 +257,22 @@ def _build_definition() -> ToolDefinition:
                         'target_actor_address': {
                             'type': 'object',
                             'additionalProperties': False,
-                            'required': ['buddy_id', 'instance_id'],
+                            'required': ['role_id', 'actor_id'],
                             'properties': {
-                                'buddy_id': {
+                                'role_id': {
                                     'type': 'string',
-                                    'description': 'Target runtime actor buddy id.',
+                                    'description': 'Target runtime actor role id.',
                                 },
-                                'instance_id': {
+                                'actor_id': {
                                     'type': 'string',
-                                    'description': 'Target runtime actor instance id.',
+                                    'description': 'Target runtime actor actor id.',
                                 },
                             },
-                            'description': 'Exact RuntimeActorAddress for the other conversation participant.',
+                            'description': 'Exact ActorAddress for the other conversation participant.',
                         },
-                        'buddy': {
+                        'role': {
                             'type': 'string',
-                            'description': 'Target manifest buddy id for all visible actor-address conversations with that buddy.',
+                            'description': 'Target manifest role id for all visible actor-address conversations with that role.',
                         },
                         'q': {
                             'type': 'string',
@@ -295,7 +295,7 @@ def _build_definition() -> ToolDefinition:
                 visibility='active actor visible direct conversation messages',
                 durability='none',
                 result_content_level='message rows',
-                success_effect='Lists active actor visible bidirectional direct messages for the selected target actor or buddy.',
+                success_effect='Lists active actor visible bidirectional direct messages for the selected target actor or role.',
                 failure_state_guarantee='Rejected reads do not mutate runtime state and do not create messages.',
                 reads=(
                     'active actor visible direct messages',
@@ -308,11 +308,11 @@ def _build_definition() -> ToolDefinition:
                     'artifacts',
                     'comments',
                     'requests',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    'exactly one of target_actor_address or buddy is provided',
-                    'target selector is a declared manifest buddy outside the active buddy',
+                    'exactly one of target_actor_address or role is provided',
+                    'target selector is a declared manifest role outside the active role',
                 ),
                 returns=(
                     'messages',
@@ -320,7 +320,7 @@ def _build_definition() -> ToolDefinition:
                     'selector',
                 ),
                 use_when=(
-                    'You need bidirectional context between the active actor and one target actor or buddy.',
+                    'You need bidirectional context between the active actor and one target actor or role.',
                 ),
                 do_not_use_when=(
                     'You only need active actor inbox messages (use message.list) or need to send a new message (use message.send).',

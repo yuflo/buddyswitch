@@ -189,7 +189,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
                 variant_by_type[type_enum[0]] = variant
         for required_type in ("artifact", "track", "task", "external", "note"):
             self.assertIn(required_type, variant_by_type, msg=f"source_refs missing {required_type}")
-        self.assertNotIn("buddybox", variant_by_type)
+        self.assertNotIn("actor_private", variant_by_type)
         self.assertEqual(set(variant_by_type["artifact"]["required"]), {"type", "id"})
         self.assertEqual(set(variant_by_type["track"]["required"]), {"type", "id"})
         self.assertEqual(set(variant_by_type["task"]["required"]), {"type", "id"})
@@ -197,9 +197,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(set(variant_by_type["note"]["required"]), {"type", "label"})
         self.assertEqual(artifact_create["properties"]["read_claim"].get("type"), "string")
 
-        mentions = comment_add["properties"]["mentions"]
+        mentions = comment_add["properties"]["mentioned_actors"]
         self.assertEqual(mentions.get("type"), "array")
-        self.assertEqual(mentions.get("items", {}).get("type"), "string")
+        self.assertEqual(mentions.get("items", {}).get("type"), "object")
+        self.assertEqual(set(mentions.get("items", {}).get("required", [])), {"actor_id", "role_id"})
         self.assertEqual(comment_add["properties"]["target_type"].get("enum"), ["track", "artifact", "artifact_section"])
         comment_list = catalog.get_action_definition("comment", "list").input_schema
         self.assertEqual(comment_list["properties"]["status"].get("enum"), ["open", "resolved", "all"])
@@ -226,16 +227,16 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(search_open["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
 
         self.assertEqual(set(message_send.get("required", [])), {"target_actor_address", "content"})
-        self.assertNotIn("to_buddy", message_send.get("properties", {}))
+        self.assertNotIn("to_role", message_send.get("properties", {}))
         target_actor_address = message_send["properties"]["target_actor_address"]
         self.assertEqual(target_actor_address.get("type"), "object")
         self.assertIs(target_actor_address.get("additionalProperties"), False)
-        self.assertEqual(set(target_actor_address.get("required", [])), {"buddy_id", "instance_id"})
-        self.assertEqual(target_actor_address.get("properties", {}).get("buddy_id", {}).get("type"), "string")
-        self.assertEqual(target_actor_address.get("properties", {}).get("instance_id", {}).get("type"), "string")
+        self.assertEqual(set(target_actor_address.get("required", [])), {"role_id", "actor_id"})
+        self.assertEqual(target_actor_address.get("properties", {}).get("role_id", {}).get("type"), "string")
+        self.assertEqual(target_actor_address.get("properties", {}).get("actor_id", {}).get("type"), "string")
         message_contacts = catalog.get_action_definition("message", "contacts").input_schema
         self.assertEqual(message_contacts.get("required"), [])
-        self.assertEqual(set(message_contacts.get("properties", {})), {"buddy"})
+        self.assertEqual(set(message_contacts.get("properties", {})), {"role"})
 
         self.assertEqual(message_conversation_action.kind, "read")
         self.assertEqual(message_conversation_action.mutates, "none")
@@ -243,19 +244,19 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(message_conversation_action.durability, "none")
         self.assertEqual(message_conversation.get("required"), [])
         conversation_properties = message_conversation.get("properties", {})
-        self.assertEqual(set(conversation_properties), {"target_actor_address", "buddy", "q", "limit"})
+        self.assertEqual(set(conversation_properties), {"target_actor_address", "role", "q", "limit"})
         self.assertNotIn("box", conversation_properties)
-        self.assertNotIn("to_buddy", conversation_properties)
-        self.assertNotIn("from_buddy", conversation_properties)
+        self.assertNotIn("to_role", conversation_properties)
+        self.assertNotIn("from_role", conversation_properties)
         conversation_target = conversation_properties["target_actor_address"]
         self.assertEqual(conversation_target.get("type"), "object")
         self.assertIs(conversation_target.get("additionalProperties"), False)
-        self.assertEqual(set(conversation_target.get("required", [])), {"buddy_id", "instance_id"})
-        self.assertEqual(conversation_target.get("properties", {}).get("buddy_id", {}).get("type"), "string")
-        self.assertEqual(conversation_target.get("properties", {}).get("instance_id", {}).get("type"), "string")
+        self.assertEqual(set(conversation_target.get("required", [])), {"role_id", "actor_id"})
+        self.assertEqual(conversation_target.get("properties", {}).get("role_id", {}).get("type"), "string")
+        self.assertEqual(conversation_target.get("properties", {}).get("actor_id", {}).get("type"), "string")
 
         self.assertIn("track_id", request_create.get("required", []))
-        self.assertIn("to_buddy", request_create.get("required", []))
+        self.assertIn("to_role", request_create.get("required", []))
         self.assertIn("title", request_create.get("required", []))
         self.assertIn("summary", request_create.get("required", []))
         target_ref = request_create["properties"]["target_refs"]["items"]
@@ -281,7 +282,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         assert isinstance(properties, dict)
         self.assertEqual(
             set(properties),
-            {"track_id", "created_by", "template", "status", "q", "limit"},
+            {"track_id", "created_by_role", "template", "status", "q", "limit"},
         )
         self.assertEqual(
             properties["template"].get("enum"),

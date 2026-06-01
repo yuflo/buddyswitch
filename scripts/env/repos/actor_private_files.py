@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository helpers for active-buddy private buddybox files."""
+"""Repository helpers for actor private files."""
 
 from __future__ import annotations
 
@@ -13,57 +13,57 @@ from typing import Any
 from . import runtime_files
 
 
-class BuddyboxLogicalNameError(ValueError):
-    """Raised when logical_name is invalid for active buddy scope."""
+class ActorPrivateLogicalNameError(ValueError):
+    """Raised when logical_name is invalid for actor private scope."""
 
 
-class BuddyboxBoundaryError(ValueError):
-    """Raised when a request would escape active buddy private file boundary."""
+class ActorPrivateBoundaryError(ValueError):
+    """Raised when a request would escape actor private file boundary."""
 
 
-def normalize_logical_name(value: Any, *, active_buddy: str, buddy_ids: set[str]) -> str:
+def normalize_logical_name(value: Any, *, active_role: str, role_ids: set[str]) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise BuddyboxLogicalNameError("logical_name must be a non-empty string")
+        raise ActorPrivateLogicalNameError("logical_name must be a non-empty string")
     normalized = value.replace("\\", "/").strip()
     if normalized.startswith("/"):
-        raise BuddyboxLogicalNameError("logical_name must be relative")
+        raise ActorPrivateLogicalNameError("logical_name must be relative")
     parts = [part for part in normalized.split("/") if part not in {"", "."}]
     if not parts:
-        raise BuddyboxLogicalNameError("logical_name must be non-empty")
+        raise ActorPrivateLogicalNameError("logical_name must be non-empty")
     if any(part == ".." for part in parts):
-        raise BuddyboxLogicalNameError("logical_name must not include '..' traversal")
-    if parts[0] in (set(buddy_ids) | {active_buddy}):
-        raise BuddyboxLogicalNameError(
-            "logical_name must be relative to the active buddy private file capability and must not include a buddy prefix"
+        raise ActorPrivateLogicalNameError("logical_name must not include '..' traversal")
+    if parts[0] in (set(role_ids) | {active_role}):
+        raise ActorPrivateLogicalNameError(
+            "logical_name must be relative to the actor private file capability and must not include a role prefix"
         )
     return "/".join(parts)
 
 
-def normalize_logical_prefix(value: Any, *, active_buddy: str, buddy_ids: set[str]) -> str | None:
+def normalize_logical_prefix(value: Any, *, active_role: str, role_ids: set[str]) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise BuddyboxLogicalNameError("logical_name must be a string when provided")
+        raise ActorPrivateLogicalNameError("logical_name must be a string when provided")
     if not value.strip():
         return None
-    return normalize_logical_name(value, active_buddy=active_buddy, buddy_ids=buddy_ids)
+    return normalize_logical_name(value, active_role=active_role, role_ids=role_ids)
 
 
-def active_buddy_root(*, active_buddy: str, instance_payload: dict[str, Any] | None = None) -> Path:
-    runtime_files.require_id(active_buddy, "buddy")
-    return runtime_files.buddybox_local_dir(instance_payload)
+def active_actor_private_root(*, active_role: str, instance_payload: dict[str, Any] | None = None) -> Path:
+    runtime_files.require_id(active_role, "role")
+    return runtime_files.actor_private_dir(instance_payload)
 
 
-def ensure_active_buddy_root(*, active_buddy: str, instance_payload: dict[str, Any] | None = None) -> Path:
-    root = active_buddy_root(active_buddy=active_buddy, instance_payload=instance_payload)
+def ensure_active_actor_private_root(*, active_role: str, instance_payload: dict[str, Any] | None = None) -> Path:
+    root = active_actor_private_root(active_role=active_role, instance_payload=instance_payload)
     if root.exists() and root.is_symlink():
-        raise BuddyboxBoundaryError("active buddy private file root cannot be a symlink")
+        raise ActorPrivateBoundaryError("active actor private file root cannot be a symlink")
     try:
         root.mkdir(parents=True, exist_ok=True)
     except FileExistsError as exc:
-        raise BuddyboxBoundaryError("active buddy private file root must be a directory") from exc
+        raise ActorPrivateBoundaryError("active actor private file root must be a directory") from exc
     if root.is_symlink() or not root.is_dir():
-        raise BuddyboxBoundaryError("active buddy private file root must be a directory")
+        raise ActorPrivateBoundaryError("active actor private file root must be a directory")
     return root
 
 
@@ -97,7 +97,7 @@ def _updated_at_from_stat(path: Path) -> str:
     return datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
 
 
-def file_summary(path: Path, *, logical_name: str, active_buddy: str) -> dict[str, Any]:
+def file_summary(path: Path, *, logical_name: str, active_role: str) -> dict[str, Any]:
     stat = path.stat()
     content_type, _ = mimetypes.guess_type(path.name)
     return {
@@ -105,8 +105,8 @@ def file_summary(path: Path, *, logical_name: str, active_buddy: str) -> dict[st
         "size_bytes": stat.st_size,
         "updated_at": _updated_at_from_stat(path),
         "content_type": content_type or "application/octet-stream",
-        "visibility": "active_buddy_private",
-        "private_to_buddy": active_buddy,
+        "visibility": "active_actor_private",
+        "private_to_role": active_role,
     }
 
 
@@ -139,7 +139,7 @@ def state_summary(*, root: Path) -> dict[str, Any]:
 def list_private_file_summaries(
     *,
     root: Path,
-    active_buddy: str,
+    active_role: str,
     recursive: bool,
     limit: int,
     logical_prefix: str | None = None,
@@ -154,7 +154,7 @@ def list_private_file_summaries(
         logical_name = path.relative_to(root).as_posix()
         if isinstance(logical_prefix, str) and not logical_name.startswith(logical_prefix):
             continue
-        rows.append(file_summary(path, logical_name=logical_name, active_buddy=active_buddy))
+        rows.append(file_summary(path, logical_name=logical_name, active_role=active_role))
     rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("logical_name") or "")), reverse=True)
     return rows[:limit]
 
@@ -164,7 +164,7 @@ def read_private_file(*, root: Path, logical_name: str) -> tuple[bytes, str]:
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(logical_name)
     if not _resolved_existing_path_stays_in_root(path, root=root):
-        raise BuddyboxBoundaryError("logical_name resolves outside the active buddy private file root")
+        raise ActorPrivateBoundaryError("logical_name resolves outside the actor private file root")
     raw = path.read_bytes()
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return raw, content_type
@@ -173,12 +173,12 @@ def read_private_file(*, root: Path, logical_name: str) -> tuple[bytes, str]:
 def write_private_file(*, root: Path, logical_name: str, content: bytes) -> tuple[bool, str]:
     path = root / logical_name
     if not _resolved_write_parent_stays_in_root(path, root=root):
-        raise BuddyboxBoundaryError("logical_name parent resolves outside the active buddy private file root")
+        raise ActorPrivateBoundaryError("logical_name parent resolves outside the actor private file root")
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.is_dir():
         raise IsADirectoryError(logical_name)
     if path.exists() and not _resolved_existing_path_stays_in_root(path, root=root):
-        raise BuddyboxBoundaryError("logical_name resolves outside the active buddy private file root")
+        raise ActorPrivateBoundaryError("logical_name resolves outside the actor private file root")
 
     existed = path.exists() and path.is_file()
     with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent) as handle:
@@ -222,7 +222,7 @@ def delete_private_file(*, root: Path, logical_name: str) -> bool:
     if path.exists() and path.is_dir():
         raise IsADirectoryError(logical_name)
     if path.exists() and not _resolved_existing_path_stays_in_root(path, root=root):
-        raise BuddyboxBoundaryError("logical_name resolves outside the active buddy private file root")
+        raise ActorPrivateBoundaryError("logical_name resolves outside the actor private file root")
     if path.exists() and path.is_file():
         path.unlink()
         return True

@@ -26,17 +26,17 @@ ALL_BUDDIES = ("pm", "design", "dev", "market", "test")
 
 
 class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        instance_root = self._instance_root(instance_id)
+    def _instance_json(self, *, actor_id: str, role: str, status: str = "active") -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_root = self._instance_root(actor_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         path = instance_root / "instance.json"
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": status,
                     "instance_root": str(instance_root),
                     "workspace_dir": str(workspace_dir),
@@ -55,20 +55,20 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         tool: str,
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-track-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "actor_id": actor_id,
+                "active_role": role,
                 "tool": tool,
                 "action": action,
                 "args": args,
@@ -103,13 +103,13 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _pm_instance(self) -> Path:
-        return self._instance_json(instance_id="inst-pm-track", buddy="pm")
+        return self._instance_json(actor_id="act-pm-track", role="pm")
 
     def _create_track(self, *, instance_json: Path, track_id: str) -> dict[str, object]:
         return self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -125,8 +125,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         artifact_id: str,
         template: str,
         body: str,
@@ -144,8 +144,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args["supersedes_artifact_id"] = supersedes_artifact_id
         return self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy=buddy,
+            actor_id=actor_id,
+            role=role,
             tool="artifact",
             action="create_revision",
             args=args,
@@ -158,7 +158,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = created.get("track")
         self.assertIsInstance(track, dict, msg=created)
         assert isinstance(track, dict)
-        self.assertEqual(track.get("owner_buddy"), "pm")
+        self.assertEqual(track.get("owner_role"), "pm")
+        self.assertEqual(
+            track.get("created_by_actor"),
+            {"actor_id": self._runtime_actor_id(role="pm", label="act-pm-track"), "role_id": "pm"},
+        )
         self.assertEqual(track.get("state"), "active")
         self.assertEqual(track.get("health"), "ok")
         self.assertEqual(track.get("shared_materials"), [])
@@ -166,11 +170,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(track.get("close_proof"), [])
 
     def test_non_pm_cannot_create_track(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-design-track", buddy="design")
+        instance_json = self._instance_json(actor_id="act-design-track", role="design")
         denied = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-design-track",
-            buddy="design",
+            actor_id="act-design-track",
+            role="design",
             tool="track",
             action="create",
             args={
@@ -190,55 +194,55 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIs(denied.get("state_changed"), False)
         self.assertFalse(env_store.track_file("track-denied").exists())
 
-    def test_update_now_rejects_owner_buddy_without_state_mutation(self) -> None:
+    def test_update_now_rejects_owner_role_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-buddy-now").get("ok"))
-        before = env_store.track_file("track-owner-buddy-now").read_text(encoding="utf-8")
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-role-now").get("ok"))
+        before = env_store.track_file("track-owner-role-now").read_text(encoding="utf-8")
 
-        design_instance = self._instance_json(instance_id="inst-design-owner-now", buddy="design")
+        design_instance = self._instance_json(actor_id="act-design-owner-now", role="design")
         rejected = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-owner-now",
-            buddy="design",
+            actor_id="act-design-owner-now",
+            role="design",
             tool="track",
             action="update_now",
             args={
-                "track_id": "track-owner-buddy-now",
+                "track_id": "track-owner-role-now",
                 "now": {"next": "x", "blocker": None},
-                "owner_buddy": "design",
+                "owner_role": "design",
             },
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
         self.assertEqual(rejected.get("permission_boundary"), "request-payload")
         self.assertIs(rejected.get("state_changed"), False)
-        self.assertIn("unsupported payload fields: owner_buddy", str(rejected.get("why_blocked")))
-        self.assertEqual(env_store.track_file("track-owner-buddy-now").read_text(encoding="utf-8"), before)
+        self.assertIn("unsupported payload fields: owner_role", str(rejected.get("why_blocked")))
+        self.assertEqual(env_store.track_file("track-owner-role-now").read_text(encoding="utf-8"), before)
 
-    def test_add_update_rejects_owner_buddy_without_state_mutation(self) -> None:
+    def test_add_update_rejects_owner_role_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-buddy-update").get("ok"))
-        before = env_store.track_file("track-owner-buddy-update").read_text(encoding="utf-8")
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-role-update").get("ok"))
+        before = env_store.track_file("track-owner-role-update").read_text(encoding="utf-8")
 
-        design_instance = self._instance_json(instance_id="inst-design-owner-update", buddy="design")
+        design_instance = self._instance_json(actor_id="act-design-owner-update", role="design")
         rejected = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-owner-update",
-            buddy="design",
+            actor_id="act-design-owner-update",
+            role="design",
             tool="track",
             action="add_update",
             args={
-                "track_id": "track-owner-buddy-update",
+                "track_id": "track-owner-role-update",
                 "summary": "x",
-                "owner_buddy": "design",
+                "owner_role": "design",
             },
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
         self.assertEqual(rejected.get("permission_boundary"), "request-payload")
         self.assertIs(rejected.get("state_changed"), False)
-        self.assertIn("unsupported payload fields: owner_buddy", str(rejected.get("why_blocked")))
-        self.assertEqual(env_store.track_file("track-owner-buddy-update").read_text(encoding="utf-8"), before)
+        self.assertIn("unsupported payload fields: owner_role", str(rejected.get("why_blocked")))
+        self.assertEqual(env_store.track_file("track-owner-role-update").read_text(encoding="utf-8"), before)
 
     def test_add_update_defaults_kind_to_progress_when_omitted(self) -> None:
         pm_instance = self._pm_instance()
@@ -247,8 +251,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         updated = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_update",
             args={
@@ -269,26 +273,26 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_all_buddies_can_list_and_open_non_archived_tracks(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-shared-open").get("ok"))
-        for buddy in ALL_BUDDIES:
-            instance_id = f"inst-{buddy}-track"
-            instance_json = self._instance_json(instance_id=instance_id, buddy=buddy)
+        for role in ALL_BUDDIES:
+            actor_id = f"act-{role}-track"
+            instance_json = self._instance_json(actor_id=actor_id, role=role)
             listed = self._dispatch(
                 instance_json=instance_json,
-                instance_id=instance_id,
-                buddy=buddy,
+                actor_id=actor_id,
+                role=role,
                 tool="track",
                 action="list",
                 args={},
             )
             opened = self._dispatch(
                 instance_json=instance_json,
-                instance_id=instance_id,
-                buddy=buddy,
+                actor_id=actor_id,
+                role=role,
                 tool="track",
                 action="open",
                 args={"track_id": "track-shared-open"},
             )
-            with self.subTest(buddy=buddy):
+            with self.subTest(role=role):
                 self.assertTrue(listed.get("ok"), msg=listed)
                 self.assertTrue(opened.get("ok"), msg=opened)
 
@@ -298,8 +302,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         before = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="open",
             args={"track_id": "track-legacy-inline"},
@@ -336,8 +340,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ):
             rejected = self._dispatch(
                 instance_json=instance_json,
-                instance_id="inst-pm-track",
-                buddy="pm",
+                actor_id="act-pm-track",
+                role="pm",
                 tool="track",
                 action=action,
                 args=payload,
@@ -350,8 +354,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
                 after = self._dispatch(
                     instance_json=instance_json,
-                    instance_id="inst-pm-track",
-                    buddy="pm",
+                    actor_id="act-pm-track",
+                    role="pm",
                     tool="track",
                     action="open",
                     args={"track_id": "track-legacy-inline"},
@@ -364,8 +368,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-publish").get("ok"))
         draft = self._create_draft(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             artifact_id="art-material-r1",
             template="brief",
             body="material body",
@@ -374,8 +378,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -412,7 +416,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(refs[0].get("artifact_id"), "art-material-r1")
         self.assertEqual(refs[0].get("kind"), "brief")
         self.assertEqual(refs[0].get("label"), "Brief")
-        self.assertEqual(refs[0].get("from_buddy"), "pm")
+        self.assertEqual(
+            refs[0].get("from_actor"),
+            {"actor_id": self._runtime_actor_id(role="pm", label="act-pm-track"), "role_id": "pm"},
+        )
+        self.assertNotIn("from_role", refs[0])
         self.assertEqual(refs[0].get("summary"), "Published PM brief")
         self.assertTrue(bool(refs[0].get("current")), msg=refs[0])
         self.assertEqual(track_store.get("close_proof"), [])
@@ -425,8 +433,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         r1 = self._create_draft(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             artifact_id="art-replace-r1",
             template="brief",
             body="r1",
@@ -434,8 +442,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(r1.get("ok"), msg=r1)
         pub_r1 = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-main", "artifact_id": "art-replace-r1", "label": "Brief", "summary": "r1"},
@@ -444,8 +452,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         r2 = self._create_draft(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             artifact_id="art-replace-r2",
             template="brief",
             body="r2",
@@ -455,8 +463,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         archived = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="archive",
             args={"track_id": "track-material-archived"},
@@ -478,8 +486,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         cross_track = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-other", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
@@ -493,8 +501,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         archived_reject = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-archived", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
@@ -508,8 +516,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         pub_r2 = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-main", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
@@ -539,9 +547,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-open-attachments").get("ok"))
 
         pm_source = (
-            self._instance_root(self._runtime_instance_id(buddy="pm", label="inst-pm-track"))
+            self._instance_root(self._runtime_actor_id(role="pm", label="act-pm-track"))
             / "workspace"
-            / "buddybox"
+            / "private"
             / "evidence"
             / "brief-attachment.txt"
         )
@@ -550,8 +558,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         pm_draft = self._create_draft(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             artifact_id="art-track-open-brief-r1",
             template="brief",
             body="# Brief",
@@ -559,8 +567,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(pm_draft.get("ok"), msg=pm_draft)
         attached_pm = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="artifact",
             action="attach_file",
             args={
@@ -575,8 +583,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published_material = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -588,11 +596,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published_material.get("ok"), msg=published_material)
 
-        test_instance = self._instance_json(instance_id="inst-test-track-open", buddy="test")
+        test_instance = self._instance_json(actor_id="act-test-track-open", role="test")
         test_source = (
-            self._instance_root(self._runtime_instance_id(buddy="test", label="inst-test-track-open"))
+            self._instance_root(self._runtime_actor_id(role="test", label="act-test-track-open"))
             / "workspace"
-            / "buddybox"
+            / "private"
             / "evidence"
             / "proof-attachment.txt"
         )
@@ -601,8 +609,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         test_draft = self._create_draft(
             instance_json=test_instance,
-            instance_id="inst-test-track-open",
-            buddy="test",
+            actor_id="act-test-track-open",
+            role="test",
             artifact_id="art-track-open-proof-r1",
             template="proof",
             body="# Proof",
@@ -610,8 +618,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(test_draft.get("ok"), msg=test_draft)
         attached_test = self._dispatch(
             instance_json=test_instance,
-            instance_id="inst-test-track-open",
-            buddy="test",
+            actor_id="act-test-track-open",
+            role="test",
             tool="artifact",
             action="attach_file",
             args={
@@ -626,8 +634,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published_proof = self._dispatch(
             instance_json=test_instance,
-            instance_id="inst-test-track-open",
-            buddy="test",
+            actor_id="act-test-track-open",
+            role="test",
             tool="track",
             action="add_proof",
             args={
@@ -639,11 +647,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published_proof.get("ok"), msg=published_proof)
 
-        dev_instance = self._instance_json(instance_id="inst-dev-track-open", buddy="dev")
+        dev_instance = self._instance_json(actor_id="act-dev-track-open", role="dev")
         opened = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-track-open",
-            buddy="dev",
+            actor_id="act-dev-track-open",
+            role="dev",
             tool="track",
             action="open",
             args={"track_id": "track-open-attachments"},
@@ -686,8 +694,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         draft = self._create_draft(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             artifact_id="art-cross-track-material-r1",
             template="brief",
             body="draft",
@@ -695,8 +703,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(draft.get("ok"), msg=draft)
         first_publish = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-a", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "published-a"},
@@ -709,8 +717,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         duplicate = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-a", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "dup"},
@@ -721,8 +729,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         cross_track = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-b", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "published-b"},
@@ -731,11 +739,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(bool(cross_track.get("state_changed")), msg=cross_track)
         self.assertEqual(cross_track.get("durability"), "none")
 
-        design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
+        design_instance = self._instance_json(actor_id="act-design-track", role="design")
         wrong_owner = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-track",
-            buddy="design",
+            actor_id="act-design-track",
+            role="design",
             tool="track",
             action="add_material",
             args={"track_id": "track-material-a", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "wrong-owner"},
@@ -755,8 +763,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id=track_id).get("ok"))
         draft = self._create_draft(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             artifact_id=artifact_id,
             template="brief",
             body="atomic body",
@@ -783,8 +791,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         with mock.patch("env_legacy_store.save_track", side_effect=_fail_first_track_save):
             rejected = self._dispatch(
                 instance_json=pm_instance,
-                instance_id="inst-pm-track",
-                buddy="pm",
+                actor_id="act-pm-track",
+                role="pm",
                 tool="track",
                 action="add_material",
                 args={"track_id": track_id, "artifact_id": artifact_id, "label": "Brief", "summary": "publish"},
@@ -800,11 +808,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-publish").get("ok"))
 
-        test_instance = self._instance_json(instance_id="inst-test-track", buddy="test")
+        test_instance = self._instance_json(actor_id="act-test-track", role="test")
         draft = self._create_draft(
             instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
+            actor_id="act-test-track",
+            role="test",
             artifact_id="art-proof-r1",
             template="proof",
             body="pass",
@@ -813,8 +821,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         proof = self._dispatch(
             instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
+            actor_id="act-test-track",
+            role="test",
             tool="track",
             action="add_proof",
             args={"track_id": "track-proof-publish", "artifact_id": "art-proof-r1", "label": "Smoke", "summary": "Pass"},
@@ -856,19 +864,19 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-archived").get("ok"))
         archived = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="archive",
             args={"track_id": "track-proof-archived"},
         )
         self.assertTrue(archived.get("ok"), msg=archived)
 
-        test_instance = self._instance_json(instance_id="inst-test-track", buddy="test")
+        test_instance = self._instance_json(actor_id="act-test-track", role="test")
         r1 = self._create_draft(
             instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
+            actor_id="act-test-track",
+            role="test",
             artifact_id="art-proof-replace-r1",
             template="proof",
             body="r1",
@@ -876,8 +884,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(r1.get("ok"), msg=r1)
         pub_r1 = self._dispatch(
             instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
+            actor_id="act-test-track",
+            role="test",
             tool="track",
             action="add_proof",
             args={"track_id": "track-proof-main", "artifact_id": "art-proof-replace-r1", "label": "Smoke", "summary": "r1"},
@@ -886,8 +894,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         r2 = self._create_draft(
             instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
+            actor_id="act-test-track",
+            role="test",
             artifact_id="art-proof-replace-r2",
             template="proof",
             body="r2",
@@ -901,8 +909,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected = self._dispatch(
             instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
+            actor_id="act-test-track",
+            role="test",
             tool="track",
             action="add_proof",
             args={"track_id": "track-proof-archived", "artifact_id": "art-proof-replace-r2", "label": "Smoke", "summary": "r2"},
@@ -916,8 +924,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published = self._dispatch(
             instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
+            actor_id="act-test-track",
+            role="test",
             tool="track",
             action="add_proof",
             args={"track_id": "track-proof-main", "artifact_id": "art-proof-replace-r2", "label": "Smoke", "summary": "r2"},
@@ -949,11 +957,11 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(before_archive, dict)
         self.assertIsNone(before_archive.get("archived_at"))
 
-        design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
+        design_instance = self._instance_json(actor_id="act-design-track", role="design")
         denied = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-track",
-            buddy="design",
+            actor_id="act-design-track",
+            role="design",
             tool="track",
             action="archive",
             args={"track_id": "track-archive"},
@@ -972,8 +980,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         archived = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
             action="archive",
             args={"track_id": "track-archive"},
@@ -982,8 +990,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         draft = self._create_draft(
             instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
+            actor_id="act-pm-track",
+            role="pm",
             artifact_id="art-archive-r1",
             template="brief",
             body="x",
@@ -999,8 +1007,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ):
             rejected = self._dispatch(
                 instance_json=design_instance,
-                instance_id="inst-design-track",
-                buddy="design",
+                actor_id="act-design-track",
+                role="design",
                 tool="track",
                 action=action,
                 args=args,

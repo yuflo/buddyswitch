@@ -93,8 +93,8 @@ class EnvClientPayloadCliTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-dev-test",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "dev",
+                "BUDDYSWITCH_ACTOR_ID": "act-dev-test",
+                "BUDDYSWITCH_ROLE_ID": "dev",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime.sock",
             },
             clear=False,
@@ -118,8 +118,8 @@ class EnvClientPayloadCliTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-dev-test",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "dev",
+                "BUDDYSWITCH_ACTOR_ID": "act-dev-test",
+                "BUDDYSWITCH_ROLE_ID": "dev",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime.sock",
                 "BUDDYSWITCH_ALLOW_ENV_ADMIN_CLI": "1",
             },
@@ -141,9 +141,9 @@ class EnvClientPayloadCliTests(unittest.TestCase):
             {"tool": "context", "action": "list_sources", "args": {}},
         )
 
-    def test_buddybox_cli_resource_is_not_registered(self) -> None:
+    def test_actor_private_cli_resource_is_not_registered(self) -> None:
         completed = subprocess.run(
-            ["python3", str(ROOT / "scripts" / "env" / "client.py"), "buddybox", "write", "--payload", "{}"],
+            ["python3", str(ROOT / "scripts" / "env" / "client.py"), "actor_private", "write", "--payload", "{}"],
             cwd=ROOT,
             text=True,
             capture_output=True,

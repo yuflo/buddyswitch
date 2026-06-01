@@ -260,6 +260,12 @@ buddyswitch_workspace_execution_worktree_has_dirty_unmanaged_changes() {
     status_args+=(":(exclude)${managed_path}")
     status_args+=(":(exclude)${managed_path}/**")
   done < <(buddyswitch_workspace_runtime_managed_paths)
+  while IFS= read -r managed_path; do
+    [[ -n "${managed_path}" ]] || continue
+    managed_path="${managed_path%/}"
+    status_args+=(":(exclude)${managed_path}")
+    status_args+=(":(exclude)${managed_path}/**")
+  done < <(buddyswitch_workspace_execution_sparse_paths)
 
   status_output="$(git -C "${workspace_dir}" "${status_args[@]}")"
   [[ -n "${status_output}" ]]
@@ -279,6 +285,12 @@ buddyswitch_workspace_report_dirty_unmanaged_execution_changes() {
     status_args+=(":(exclude)${managed_path}")
     status_args+=(":(exclude)${managed_path}/**")
   done < <(buddyswitch_workspace_runtime_managed_paths)
+  while IFS= read -r managed_path; do
+    [[ -n "${managed_path}" ]] || continue
+    managed_path="${managed_path%/}"
+    status_args+=(":(exclude)${managed_path}")
+    status_args+=(":(exclude)${managed_path}/**")
+  done < <(buddyswitch_workspace_execution_sparse_paths)
 
   git -C "${workspace_dir}" "${status_args[@]}" >&2 || true
 }
@@ -502,12 +514,12 @@ buddyswitch_workspace_runtime_output_paths() {
 
 buddyswitch_workspace_local_runtime_paths() {
   cat <<'EOF'
-buddybox
+private
 EOF
 }
 
 buddyswitch_workspace_is_instance_mode() {
-  [[ -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]
+  [[ -n "${BUDDYSWITCH_ACTOR_ID:-}" ]]
 }
 
 buddyswitch_workspace_neutralize_project_codex_config() {
@@ -705,11 +717,11 @@ buddyswitch_workspace_ensure_execution_worktree() {
 }
 
 buddyswitch_workspace_install_runtime_agents() {
-  local workspace_dir template_path buddy_id
+  local workspace_dir template_path role_id
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   template_path="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE:-}"
-  buddy_id="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  role_id="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
   if [[ -z "${template_path}" ]]; then
     echo "BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE is required for runtime AGENTS installation." >&2
     return 1
@@ -718,8 +730,8 @@ buddyswitch_workspace_install_runtime_agents() {
     echo "Runtime AGENTS template not found: ${template_path}" >&2
     return 1
   fi
-  if [[ -z "${buddy_id}" ]]; then
-    echo "Active buddy id is required for runtime AGENTS installation." >&2
+  if [[ -z "${role_id}" ]]; then
+    echo "Active role id is required for runtime AGENTS installation." >&2
     return 1
   fi
 
@@ -727,16 +739,16 @@ buddyswitch_workspace_install_runtime_agents() {
 }
 
 buddyswitch_workspace_install_runtime_skills() {
-  local buddy_id repo_root
+  local role_id repo_root
 
-  buddy_id="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
-  if [[ -z "${buddy_id}" ]]; then
+  role_id="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
+  if [[ -z "${role_id}" ]]; then
     return 0
   fi
 
   repo_root="$(buddyswitch_workspace_repo_root)"
   python3 "${repo_root}/scripts/runtime_skills.py" install \
-    --buddy "${buddy_id}" \
+    --role "${role_id}" \
     --workspace "${BUDDYSWITCH_WORKSPACE_DIR}"
 }
 
@@ -765,9 +777,31 @@ buddyswitch_workspace_sync_runtime_surface() {
     buddyswitch_workspace_configure_execution_sparse_checkout "${workspace_dir}" existing || return $?
   fi
 
+  buddyswitch_workspace_overlay_runtime_source_surface
+
   buddyswitch_workspace_cleanup_stale_state_projections
   buddyswitch_workspace_sync_runtime_contracts
   buddyswitch_workspace_neutralize_project_codex_config
+}
+
+buddyswitch_workspace_overlay_runtime_source_surface() {
+  local repo_root workspace_dir sparse_path relative_path source_path target_path
+
+  repo_root="$(buddyswitch_workspace_repo_root)"
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  while IFS= read -r sparse_path; do
+    [[ -n "${sparse_path}" ]] || continue
+    relative_path="${sparse_path%/}"
+    source_path="${repo_root}/${relative_path}"
+    target_path="${workspace_dir}/${relative_path}"
+    if [[ ! -e "${source_path}" && ! -L "${source_path}" ]]; then
+      buddyswitch_workspace_force_remove_path "${target_path}"
+      continue
+    fi
+    buddyswitch_workspace_force_remove_path "${target_path}"
+    mkdir -p "$(dirname "${target_path}")"
+    cp -R "${source_path}" "${target_path}"
+  done < <(buddyswitch_workspace_execution_sparse_paths)
 }
 
 buddyswitch_workspace_sync_runtime_contracts() {
@@ -832,7 +866,7 @@ buddyswitch/objects/tracks
 buddyswitch/objects/artifacts
 buddyswitch/objects/messages
 buddyswitch/objects/comments
-buddyswitch/local/buddybox
+buddyswitch/local/actor-private
 EOF
 }
 
@@ -888,31 +922,35 @@ buddyswitch_workspace_cleanup_projection_dir() {
 
 buddyswitch_workspace_cleanup_stale_state_projections() {
   local workspace_dir state_root workspace_objects_root state_objects_root
-  local legacy_runtime_local_root workspace_buddybox_root
+  local legacy_runtime_local_root workspace_private_root
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   state_root="${BUDDYSWITCH_SHARED_ROOT}/state"
   workspace_objects_root="${workspace_dir}/buddyswitch/objects"
   state_objects_root="${state_root}/buddyswitch/objects"
   legacy_runtime_local_root="${workspace_dir}/buddyswitch/local"
-  workspace_buddybox_root="${legacy_runtime_local_root}/buddybox"
 
   buddyswitch_workspace_cleanup_projection_dir "${workspace_objects_root}" "${state_objects_root}" "*.json" || return $?
 
-  if [[ -L "${workspace_buddybox_root}" ]]; then
-    rm -f "${workspace_buddybox_root}"
-    return 0
-  fi
-  if [[ ! -d "${workspace_buddybox_root}" ]]; then
-    return 0
-  fi
-  buddyswitch_workspace_force_remove_path "${workspace_buddybox_root}" || return $?
+  for workspace_private_root in \
+    "${legacy_runtime_local_root}/private" \
+    "${legacy_runtime_local_root}/actor-private"
+  do
+    if [[ -L "${workspace_private_root}" ]]; then
+      rm -f "${workspace_private_root}"
+      continue
+    fi
+    if [[ ! -d "${workspace_private_root}" ]]; then
+      continue
+    fi
+    buddyswitch_workspace_force_remove_path "${workspace_private_root}" || return $?
+  done
 }
 
-buddyswitch_workspace_active_buddy() {
-  local buddy_id
-  buddy_id="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
-  printf '%s\n' "${buddy_id}"
+buddyswitch_workspace_active_role() {
+  local role_id
+  role_id="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
+  printf '%s\n' "${role_id}"
 }
 
 buddyswitch_workspace_install_guardrail_hooks() {

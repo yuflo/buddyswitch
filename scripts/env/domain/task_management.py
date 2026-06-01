@@ -24,7 +24,7 @@ _PUBLICATION_STYLE_FIELDS = {
     "shared_materials",
     "source_refs",
     "supersedes_artifact_id",
-    "target_buddy",
+    "target_role",
     "template",
     "updates",
     "visibility",
@@ -76,7 +76,8 @@ def _pending_switch_from_event(event: Mapping[str, Any]) -> dict[str, Any] | Non
 
 def current_snapshot(
     *,
-    active_buddy: str,
+    active_role: str,
+    active_actor: Mapping[str, Any],
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     history_limit: int = 8,
@@ -84,7 +85,7 @@ def current_snapshot(
     """Read the canonical current task snapshot without mutating taskbox state."""
 
     all_events = task_repo.read_history_events(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
         limit=0,
@@ -113,7 +114,7 @@ def current_snapshot(
     if current_task_id is not None:
         loaded = task_repo.get_task(
             current_task_id,
-            active_buddy=active_buddy,
+            active_role=active_role,
             instance_json=instance_json,
             instance_payload=instance_payload,
         )
@@ -131,7 +132,7 @@ def current_snapshot(
         progress_summary = str(summary) if isinstance(summary, str) and summary else str(current_task.get("body_excerpt") or "")
 
     return {
-        "owner_buddy": active_buddy,
+        "owner_actor": dict(active_actor),
         "task_state": task_state,
         "current_task": current_task,
         "pending_confirmation": pending_confirmation,
@@ -143,12 +144,12 @@ def current_snapshot(
 
 def _repo_kwargs(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> dict[str, Any]:
     return {
-        "active_buddy": active_buddy,
+        "active_role": active_role,
         "instance_json": instance_json,
         "instance_payload": instance_payload,
     }
@@ -268,11 +269,11 @@ def _normalize_task_payload(value: Any) -> dict[str, Any]:
     }
 
 
-def _new_task_doc(*, task_id: str, active_buddy: str, task: Mapping[str, Any]) -> dict[str, Any]:
+def _new_task_doc(*, task_id: str, active_actor: Mapping[str, Any], task: Mapping[str, Any]) -> dict[str, Any]:
     now = runtime_files.now_iso()
     return {
         "id": task_id,
-        "owner_buddy": active_buddy,
+        "owner_actor": dict(active_actor),
         "title": task["title"],
         "summary": task.get("summary", ""),
         "body": task["body"],
@@ -289,7 +290,7 @@ def _new_task_doc(*, task_id: str, active_buddy: str, task: Mapping[str, Any]) -
 def _current_full_task(
     snapshot: Mapping[str, Any],
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> dict[str, Any] | None:
@@ -301,7 +302,7 @@ def _current_full_task(
         return None
     return task_repo.get_task(
         task_id,
-        **_repo_kwargs(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload),
+        **_repo_kwargs(active_role=active_role, instance_json=instance_json, instance_payload=instance_payload),
     )
 
 
@@ -323,7 +324,7 @@ def _validate_propose_args(args: Mapping[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _normalize_target(value: Any, *, active_buddy: str, instance_json: Path | str | None, instance_payload: Mapping[str, object] | None) -> dict[str, Any]:
+def _normalize_target(value: Any, *, active_role: str, instance_json: Path | str | None, instance_payload: Mapping[str, object] | None) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("target must be an object")
     unknown = sorted(key for key in value if isinstance(key, str) and key not in _TARGET_FIELDS)
@@ -335,7 +336,7 @@ def _normalize_target(value: Any, *, active_buddy: str, instance_json: Path | st
         task_id = runtime_files.require_id(task_id, "target.task_id")
         if task_repo.get_task(
             task_id,
-            **_repo_kwargs(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload),
+            **_repo_kwargs(active_role=active_role, instance_json=instance_json, instance_payload=instance_payload),
         ) is None:
             raise ValueError(f"target task not found: {task_id}")
         return {"mode": "existing", "task_id": task_id, "task": None}
@@ -347,7 +348,8 @@ def _normalize_target(value: Any, *, active_buddy: str, instance_json: Path | st
 
 def propose_task(
     *,
-    active_buddy: str,
+    active_role: str,
+    active_actor: Mapping[str, Any],
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     args: Mapping[str, Any],
@@ -357,14 +359,15 @@ def propose_task(
         return validation_error
 
     snapshot = current_snapshot(
-        active_buddy=active_buddy,
+        active_role=active_role,
+        active_actor=active_actor,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
     proposal_type = str(args["type"])
     reason = str(args["reason"]).strip()
     evidence = str(args["evidence"]).strip()
-    repo_kwargs = _repo_kwargs(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
+    repo_kwargs = _repo_kwargs(active_role=active_role, instance_json=instance_json, instance_payload=instance_payload)
 
     if proposal_type == "start":
         if snapshot.get("task_state") in {"active", "blocked"}:
@@ -377,7 +380,7 @@ def propose_task(
             task_id = task_repo.next_task_id(task_payload["title"], **repo_kwargs)
         except ValueError as exc:
             return _service_rejection(str(exc))
-        task = task_repo.save_task(_new_task_doc(task_id=task_id, active_buddy=active_buddy, task=task_payload), **repo_kwargs)
+        task = task_repo.save_task(_new_task_doc(task_id=task_id, active_actor=active_actor, task=task_payload), **repo_kwargs)
         task_repo.append_history(
             **repo_kwargs,
             event="task.create",
@@ -389,7 +392,7 @@ def propose_task(
                 "evidence": evidence,
             },
         )
-        new_snapshot = current_snapshot(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
+        new_snapshot = current_snapshot(active_role=active_role, active_actor=active_actor, instance_json=instance_json, instance_payload=instance_payload)
         return _service_success(
             effect_summary=f"Started current task '{task_id}'.",
             snapshot=new_snapshot,
@@ -408,7 +411,7 @@ def propose_task(
         try:
             target = _normalize_target(
                 args.get("target"),
-                active_buddy=active_buddy,
+                active_role=active_role,
                 instance_json=instance_json,
                 instance_payload=instance_payload,
             )
@@ -426,7 +429,7 @@ def propose_task(
                 "evidence": evidence,
             },
         )
-        new_snapshot = current_snapshot(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
+        new_snapshot = current_snapshot(active_role=active_role, active_actor=active_actor, instance_json=instance_json, instance_payload=instance_payload)
         return _service_success(
             effect_summary=f"Requested task switch confirmation '{confirmation_id}'.",
             snapshot=new_snapshot,
@@ -437,7 +440,7 @@ def propose_task(
     if proposal_type in {"finish", "block"}:
         current_task = _current_full_task(
             snapshot,
-            active_buddy=active_buddy,
+            active_role=active_role,
             instance_json=instance_json,
             instance_payload=instance_payload,
         )
@@ -465,7 +468,7 @@ def propose_task(
             task_id=task_id,
             fields={"reason": reason, "evidence": evidence},
         )
-        new_snapshot = current_snapshot(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
+        new_snapshot = current_snapshot(active_role=active_role, active_actor=active_actor, instance_json=instance_json, instance_payload=instance_payload)
         return _service_success(
             effect_summary=f"Marked current task '{task_id}' as {updated['status']}.",
             snapshot=new_snapshot,
@@ -480,7 +483,8 @@ def propose_task(
 
 def confirm_task(
     *,
-    active_buddy: str,
+    active_role: str,
+    active_actor: Mapping[str, Any],
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     args: Mapping[str, Any],
@@ -506,8 +510,8 @@ def confirm_task(
     if not isinstance(reason, str):
         return _service_rejection("reason must be a string", correctable_fields=["reason"])
 
-    repo_kwargs = _repo_kwargs(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
-    snapshot = current_snapshot(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
+    repo_kwargs = _repo_kwargs(active_role=active_role, instance_json=instance_json, instance_payload=instance_payload)
+    snapshot = current_snapshot(active_role=active_role, active_actor=active_actor, instance_json=instance_json, instance_payload=instance_payload)
     pending = snapshot.get("pending_confirmation")
     if not isinstance(pending, Mapping):
         return _service_rejection("no pending confirmation exists", correctable_fields=["confirmation_id"])
@@ -528,7 +532,7 @@ def confirm_task(
             task_id=current_task_id,
             fields={"confirmation_id": confirmation_id, "reason": reason},
         )
-        new_snapshot = current_snapshot(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
+        new_snapshot = current_snapshot(active_role=active_role, active_actor=active_actor, instance_json=instance_json, instance_payload=instance_payload)
         return _service_success(
             effect_summary=f"Rejected task switch confirmation '{confirmation_id}'.",
             snapshot=new_snapshot,
@@ -554,7 +558,7 @@ def confirm_task(
             target_task_id = task_repo.next_task_id(normalized["title"], **repo_kwargs)
         except ValueError as exc:
             return _service_rejection(str(exc), correctable_fields=["confirmation_id"])
-        task_repo.save_task(_new_task_doc(task_id=target_task_id, active_buddy=active_buddy, task=normalized), **repo_kwargs)
+        task_repo.save_task(_new_task_doc(task_id=target_task_id, active_actor=active_actor, task=normalized), **repo_kwargs)
         created_ids.append(target_task_id)
     else:
         return _service_rejection("pending confirmation target mode is invalid", correctable_fields=["confirmation_id"])
@@ -565,7 +569,7 @@ def confirm_task(
         task_id=target_task_id,
         fields={"confirmation_id": confirmation_id, "reason": reason},
     )
-    new_snapshot = current_snapshot(active_buddy=active_buddy, instance_json=instance_json, instance_payload=instance_payload)
+    new_snapshot = current_snapshot(active_role=active_role, active_actor=active_actor, instance_json=instance_json, instance_payload=instance_payload)
     return _service_success(
         effect_summary=f"Accepted task switch confirmation '{confirmation_id}'.",
         snapshot=new_snapshot,

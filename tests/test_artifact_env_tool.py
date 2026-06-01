@@ -24,17 +24,17 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        instance_root = self._runtime_path(f"instances/{instance_id}")
+    def _instance_json(self, *, actor_id: str, role: str, status: str = "active") -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_root = self._runtime_path(f"instances/{actor_id}")
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         path = instance_root / "instance.json"
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": status,
                     "instance_root": str(instance_root),
                     "workspace_dir": str(workspace_dir),
@@ -53,20 +53,20 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         tool: str,
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-art-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "actor_id": actor_id,
+                "active_role": role,
                 "tool": tool,
                 "action": action,
                 "args": args,
@@ -101,11 +101,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _create_track(self, *, instance_json: Path, instance_id: str, track_id: str) -> dict[str, object]:
+    def _create_track(self, *, instance_json: Path, actor_id: str, track_id: str) -> dict[str, object]:
         return self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -117,12 +117,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
 
-    def test_legacy_kind_fixture_loads_as_template_without_shared_publication(self) -> None:
+    def test_legacy_kind_fixture_is_rejected_without_normalization(self) -> None:
         legacy = {
             "id": "art-legacy-normalize-r1",
             "title": "Legacy normalize",
             "task_id": "task-design-legacy",
-            "buddy": "design",
+            "role": "design",
             "kind": "design-handoff",
             "summary": "legacy summary",
             "content": {"body": "legacy body"},
@@ -137,17 +137,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(legacy, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-        normalized = env_store.get_artifact("art-legacy-normalize-r1")
-        self.assertIsNotNone(normalized)
-        assert isinstance(normalized, dict)
-        self.assertEqual(normalized.get("template"), "design")
-        self.assertEqual(normalized.get("body"), "legacy body")
-        self.assertEqual(normalized.get("status"), "draft")
-        self.assertIsNone(normalized.get("published_to_track"))
-        self.assertIn("design", normalized.get("authors", []))
+        with self.assertRaisesRegex(ValueError, "retired"):
+            env_store.get_artifact("art-legacy-normalize-r1")
 
     def test_validate_payload_rejects_retired_fields(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
         for field, value in (
             ("task_id", "task-old"),
             ("kind", "prd"),
@@ -155,8 +149,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ):
             payload = self._dispatch(
                 instance_json=instance_json,
-                instance_id="inst-pm-art",
-                buddy="pm",
+                actor_id="act-pm-art",
+                role="pm",
                 tool="artifact",
                 action="create_revision",
                 args={
@@ -186,8 +180,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "revision": 1,
                 "is_current": True,
                 "supersedes_artifact_id": None,
-                "created_by": "pm",
-                "authors": ["pm"],
+                "created_by_actor": {"actor_id": "act-pm-artifact-normalize", "role_id": "pm"},
+                "author_actors": [{"actor_id": "act-pm-artifact-normalize", "role_id": "pm"}],
                 "source_refs": None,
                 "created_at": "2026-05-22T10:00:00+08:00",
                 "updated_at": "2026-05-22T10:00:00+08:00",
@@ -207,16 +201,16 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "revision": 1,
             "is_current": True,
             "supersedes_artifact_id": None,
-            "created_by": "pm",
-            "authors": ["pm"],
+            "created_by_actor": {"actor_id": "act-pm-artifact-invalid", "role_id": "pm"},
+            "author_actors": [{"actor_id": "act-pm-artifact-invalid", "role_id": "pm"}],
             "source_refs": None,
             "created_at": "2026-05-22T10:00:00+08:00",
             "updated_at": "2026-05-22T10:00:00+08:00",
         }
         invalid_rows = (
-            {"attachment_id": "att-unsafe", "filename": "../escape.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by": "pm", "created_at": "2026-05-22T10:00:00+08:00"},
-            {"attachment_id": "att-missing-hash", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "created_by": "pm", "created_at": "2026-05-22T10:00:00+08:00"},
-            {"attachment_id": "att-bad-buddy", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by": "unknown", "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-unsafe", "filename": "../escape.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_actor": {"actor_id": "act-pm-attachment", "role_id": "pm"}, "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-missing-hash", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "created_by_actor": {"actor_id": "act-pm-attachment", "role_id": "pm"}, "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-bad-role", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_actor": {"actor_id": "act-unknown-attachment", "role_id": "unknown"}, "created_at": "2026-05-22T10:00:00+08:00"},
         )
         for row in invalid_rows:
             with self.subTest(row=row):
@@ -224,14 +218,14 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     env_store.validate_artifact({**base_artifact, "attachments": [row]})
 
     def test_create_revision_rejects_direct_publication_without_orphan(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        created_track = self._create_track(instance_json=instance_json, instance_id="inst-pm-art", track_id="track-orphan-guard")
+        instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
+        created_track = self._create_track(instance_json=instance_json, actor_id="act-pm-art", track_id="track-orphan-guard")
         self.assertTrue(created_track.get("ok"), msg=created_track)
 
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -254,8 +248,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         opened = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="open",
             args={"track_id": "track-orphan-guard"},
@@ -268,11 +262,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(track.get("close_proof"), [])
 
     def test_create_revision_rejects_status_published_without_mutation(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -292,11 +286,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(env_store.artifact_file("art-reject-status-r1").exists())
 
     def test_create_revision_creates_private_draft_without_task(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
         payload = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -323,8 +317,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("kind", artifact)
         self.assertNotIn("content", artifact)
 
-    def test_create_revision_enforces_buddy_template_allowlist(self) -> None:
-        buddy_cases = (
+    def test_create_revision_enforces_role_template_allowlist(self) -> None:
+        role_cases = (
             ("pm", ("brief", "decision", "note"), ("design", "proof")),
             ("design", ("design", "brief"), ("decision", "note", "proof")),
             ("dev", ("brief", "note"), ()),
@@ -332,52 +326,61 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ("market", ("brief",), ("design",)),
         )
 
-        for buddy, allowed_templates, rejected_templates in buddy_cases:
+        for role, allowed_templates, rejected_templates in role_cases:
             for template in allowed_templates:
-                artifact_id = f"art-{buddy}-{template}-allowed"
-                instance_id = f"inst-{buddy}-{template}-allowed"
-                instance_json = self._instance_json(instance_id=instance_id, buddy=buddy)
+                artifact_id = f"art-{role}-{template}-allowed"
+                actor_id = f"act-{role}-{template}-allowed"
+                instance_json = self._instance_json(actor_id=actor_id, role=role)
                 created = self._dispatch(
                     instance_json=instance_json,
-                    instance_id=instance_id,
-                    buddy=buddy,
+                    actor_id=actor_id,
+                    role=role,
                     tool="artifact",
                     action="create_revision",
                     args={
                         "artifact_id": artifact_id,
-                        "title": f"{buddy} {template} draft",
+                        "title": f"{role} {template} draft",
                         "summary": "allowed template",
                         "template": template,
-                        "body": f"{buddy} can write {template}",
+                        "body": f"{role} can write {template}",
                     },
                 )
-                with self.subTest(buddy=buddy, template=template, expected="allowed"):
+                with self.subTest(role=role, template=template, expected="allowed"):
                     self.assertTrue(created.get("ok"), msg=created)
                     stored = env_store.get_artifact(artifact_id)
                     self.assertIsInstance(stored, dict, msg=created)
                     assert isinstance(stored, dict)
                     self.assertEqual(stored.get("template"), template)
-                    self.assertEqual(stored.get("created_by"), buddy)
+                    self.assertEqual(
+                        stored.get("created_by_actor"),
+                        {"actor_id": self._runtime_actor_id(role=role, label=actor_id), "role_id": role},
+                    )
+                    self.assertEqual(
+                        stored.get("author_actors"),
+                        [{"actor_id": self._runtime_actor_id(role=role, label=actor_id), "role_id": role}],
+                    )
+                    self.assertNotIn("created_by", stored)
+                    self.assertNotIn("authors", stored)
 
             for template in rejected_templates:
-                artifact_id = f"art-{buddy}-{template}-denied"
-                instance_id = f"inst-{buddy}-{template}-denied"
-                instance_json = self._instance_json(instance_id=instance_id, buddy=buddy)
+                artifact_id = f"art-{role}-{template}-denied"
+                actor_id = f"act-{role}-{template}-denied"
+                instance_json = self._instance_json(actor_id=actor_id, role=role)
                 rejected = self._dispatch(
                     instance_json=instance_json,
-                    instance_id=instance_id,
-                    buddy=buddy,
+                    actor_id=actor_id,
+                    role=role,
                     tool="artifact",
                     action="create_revision",
                     args={
                         "artifact_id": artifact_id,
-                        "title": f"{buddy} {template} denied",
+                        "title": f"{role} {template} denied",
                         "summary": "rejected template",
                         "template": template,
-                        "body": f"{buddy} should not write {template}",
+                        "body": f"{role} should not write {template}",
                     },
                 )
-                with self.subTest(buddy=buddy, template=template, expected="rejected"):
+                with self.subTest(role=role, template=template, expected="rejected"):
                     self.assertFalse(rejected.get("ok"), msg=rejected)
                     self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_TEMPLATE_PERMISSION")
                     self.assertEqual(rejected.get("permission_boundary"), "artifact.template_permission")
@@ -386,12 +389,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     self.assertEqual(rejected.get("durability"), "none")
                     self.assertFalse(env_store.artifact_file(artifact_id).exists())
 
-    def test_update_metadata_rejects_template_not_declared_for_active_buddy_without_mutation(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-template-update", buddy="pm")
+    def test_update_metadata_rejects_template_not_declared_for_active_role_without_mutation(self) -> None:
+        instance_json = self._instance_json(actor_id="act-pm-template-update", role="pm")
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-template-update",
-            buddy="pm",
+            actor_id="act-pm-template-update",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -406,8 +409,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-template-update",
-            buddy="pm",
+            actor_id="act-pm-template-update",
+            role="pm",
             tool="artifact",
             action="update_metadata",
             args={"artifact_id": "art-pm-template-update", "template": "design"},
@@ -425,11 +428,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(stored.get("template"), "note")
 
     def test_draft_is_private_before_publication(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")
         self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -443,19 +446,19 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         owner_read = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-draft-private-r1"},
         )
         self.assertTrue(owner_read.get("ok"), msg=owner_read)
 
-        instance_dev = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+        instance_dev = self._instance_json(actor_id="act-dev-art", role="dev")
         non_owner = self._dispatch(
             instance_json=instance_dev,
-            instance_id="inst-dev-art",
-            buddy="dev",
+            actor_id="act-dev-art",
+            role="dev",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-draft-private-r1"},
@@ -465,14 +468,14 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(non_owner.get("permission_boundary"), "artifact.status")
 
     def test_draft_revision_does_not_replace_current_shared_material(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")
         self.assertTrue(
-            self._create_track(instance_json=instance_pm, instance_id="inst-pm-art", track_id="track-revision-draft").get("ok")
+            self._create_track(instance_json=instance_pm, actor_id="act-pm-art", track_id="track-revision-draft").get("ok")
         )
         r1 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -486,8 +489,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(r1.get("ok"), msg=r1)
         publish_r1 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -501,8 +504,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         r2 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -532,8 +535,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         opened = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="open",
             args={"track_id": "track-revision-draft"},
@@ -544,11 +547,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(track, dict)
         self.assertEqual([row.get("artifact_id") for row in track.get("shared_materials", [])], ["art-revision-r1"])
 
-        instance_dev = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+        instance_dev = self._instance_json(actor_id="act-dev-art", role="dev")
         denied = self._dispatch(
             instance_json=instance_dev,
-            instance_id="inst-dev-art",
-            buddy="dev",
+            actor_id="act-dev-art",
+            role="dev",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-revision-r2"},
@@ -557,12 +560,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
 
     def test_publish_exposes_current_artifact_to_all_buddies(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        self.assertTrue(self._create_track(instance_json=instance_pm, instance_id="inst-pm-art", track_id="track-art-pub").get("ok"))
+        instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")
+        self.assertTrue(self._create_track(instance_json=instance_pm, actor_id="act-pm-art", track_id="track-art-pub").get("ok"))
         created = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -577,8 +580,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -590,11 +593,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published.get("ok"), msg=published)
 
-        instance_dev = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+        instance_dev = self._instance_json(actor_id="act-dev-art", role="dev")
         readable = self._dispatch(
             instance_json=instance_dev,
-            instance_id="inst-dev-art",
-            buddy="dev",
+            actor_id="act-dev-art",
+            role="dev",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-pm-publish-r1"},
@@ -608,11 +611,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(artifact.get("currentness"), "current")
 
     def test_source_ref_invalid_artifact_id_rejects_without_artifact(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-art-source-invalid", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-art-source-invalid", role="pm")
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art-source-invalid",
-            buddy="pm",
+            actor_id="act-pm-art-source-invalid",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -629,32 +632,32 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(rejected.get("permission_boundary"), "source_refs.required_fields")
         self.assertFalse(env_store.artifact_file("art-source-invalid-r1").exists())
 
-    def test_source_ref_rejects_private_buddybox_logical_name_refs_without_mutation(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-art-source-buddybox", buddy="pm")
+    def test_source_ref_rejects_private_actor_private_logical_name_refs_without_mutation(self) -> None:
+        instance_json = self._instance_json(actor_id="act-pm-art-source-actor-private", role="pm")
         rejected_create = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art-source-buddybox",
-            buddy="pm",
+            actor_id="act-pm-art-source-actor-private",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
-                "artifact_id": "art-source-buddybox-r1",
+                "artifact_id": "art-source-actor-private-r1",
                 "title": "Invalid source ref type",
                 "summary": "",
                 "template": "note",
                 "body": "invalid source refs",
-                "source_refs": [{"type": "buddybox", "logical_name": "prototype/index.html"}],
+                "source_refs": [{"type": "actor_private", "logical_name": "prototype/index.html"}],
             },
         )
         self.assertFalse(rejected_create.get("ok"), msg=rejected_create)
         self.assertEqual((rejected_create.get("error") or {}).get("code"), "E_SOURCE_REFS")
         self.assertEqual(rejected_create.get("permission_boundary"), "source_refs.required_fields")
-        self.assertFalse(env_store.artifact_file("art-source-buddybox-r1").exists())
+        self.assertFalse(env_store.artifact_file("art-source-actor-private-r1").exists())
 
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art-source-buddybox",
-            buddy="pm",
+            actor_id="act-pm-art-source-actor-private",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -670,13 +673,13 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected_update = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art-source-buddybox",
-            buddy="pm",
+            actor_id="act-pm-art-source-actor-private",
+            role="pm",
             tool="artifact",
             action="update_metadata",
             args={
                 "artifact_id": "art-source-update-target",
-                "source_refs": [{"type": "buddybox", "logical_name": "prototype/index.html"}],
+                "source_refs": [{"type": "actor_private", "logical_name": "prototype/index.html"}],
             },
         )
         self.assertFalse(rejected_update.get("ok"), msg=rejected_update)
@@ -689,19 +692,19 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(stored.get("source_refs"), [{"type": "note", "label": "seed"}])
 
     def test_source_ref_full_read_claim_accepts_readable_published_artifact(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art-source-read", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art-source-read", role="pm")
         self.assertTrue(
             self._create_track(
                 instance_json=instance_pm,
-                instance_id="inst-pm-art-source-read",
+                actor_id="act-pm-art-source-read",
                 track_id="track-source-ref-readable",
             ).get("ok")
         )
 
         created = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-source-read",
-            buddy="pm",
+            actor_id="act-pm-art-source-read",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -716,8 +719,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-source-read",
-            buddy="pm",
+            actor_id="act-pm-art-source-read",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -729,11 +732,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published.get("ok"), msg=published)
 
-        instance_dev = self._instance_json(instance_id="inst-dev-art-source-read", buddy="dev")
+        instance_dev = self._instance_json(actor_id="act-dev-art-source-read", role="dev")
         derived = self._dispatch(
             instance_json=instance_dev,
-            instance_id="inst-dev-art-source-read",
-            buddy="dev",
+            actor_id="act-dev-art-source-read",
+            role="dev",
             tool="artifact",
             action="create_revision",
             args={
@@ -759,11 +762,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("source_run_id", persisted)
 
     def test_source_ref_full_read_claim_rejects_unreadable_private_draft(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art-source-private", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art-source-private", role="pm")
         created = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-source-private",
-            buddy="pm",
+            actor_id="act-pm-art-source-private",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -776,11 +779,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(created.get("ok"), msg=created)
 
-        instance_dev = self._instance_json(instance_id="inst-dev-art-source-private", buddy="dev")
+        instance_dev = self._instance_json(actor_id="act-dev-art-source-private", role="dev")
         rejected = self._dispatch(
             instance_json=instance_dev,
-            instance_id="inst-dev-art-source-private",
-            buddy="dev",
+            actor_id="act-dev-art-source-private",
+            role="dev",
             tool="artifact",
             action="create_revision",
             args={
@@ -799,13 +802,13 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(env_store.artifact_file("art-source-private-denied-r1").exists())
 
     def test_superseded_published_artifact_remains_readable_and_traceable(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        self.assertTrue(self._create_track(instance_json=instance_pm, instance_id="inst-pm-art", track_id="track-revision-trace").get("ok"))
+        instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")
+        self.assertTrue(self._create_track(instance_json=instance_pm, actor_id="act-pm-art", track_id="track-revision-trace").get("ok"))
 
         created_r1 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -820,8 +823,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         publish_r1 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-revision-trace", "artifact_id": "art-trace-r1", "label": "Brief", "summary": "v1"},
@@ -830,8 +833,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         created_r2 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -846,8 +849,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created_r2.get("ok"), msg=created_r2)
         publish_r2 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-revision-trace", "artifact_id": "art-trace-r2", "label": "Brief", "summary": "v2"},
@@ -861,8 +864,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         opened = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="open",
             args={"track_id": "track-revision-trace"},
@@ -882,11 +885,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(current_map["art-trace-r1"])
         self.assertTrue(current_map["art-trace-r2"])
 
-        instance_dev = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+        instance_dev = self._instance_json(actor_id="act-dev-art", role="dev")
         r1_read = self._dispatch(
             instance_json=instance_dev,
-            instance_id="inst-dev-art",
-            buddy="dev",
+            actor_id="act-dev-art",
+            role="dev",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-trace-r1"},
@@ -897,8 +900,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         r2_read = self._dispatch(
             instance_json=instance_dev,
-            instance_id="inst-dev-art",
-            buddy="dev",
+            actor_id="act-dev-art",
+            role="dev",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-trace-r2"},
@@ -908,7 +911,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((r2_read.get("artifact") or {}).get("currentness"), "current")
 
     def test_create_revision_from_archived_published_artifact_rejects_without_new_artifact(self) -> None:
-        track = env_store.create_track("track-art-revision-archived", "Archived Revision", owner_buddy="pm")
+        track = env_store.create_track("track-art-revision-archived", "Archived Revision", owner_role="pm")
         artifact = env_store.create_artifact_revision(
             artifact_id="art-revision-archived-r1",
             title="Archived source",
@@ -924,17 +927,17 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id=str(track["id"]),
             artifact_id=str(artifact["id"]),
             label="Archived source",
-            from_buddy="pm",
+            from_role="pm",
             summary="source",
         )
         env_store.update_track(str(track["id"]), {"archived_at": "2026-05-19T00:00:00Z"})
         before_artifacts = {row["id"] for row in env_store.list_artifacts()}
-        instance_json = self._instance_json(instance_id="inst-pm-art-archived-revision", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-art-archived-revision", role="pm")
 
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-art-archived-revision",
-            buddy="pm",
+            actor_id="act-pm-art-archived-revision",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -950,13 +953,13 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(set(row["id"] for row in env_store.list_artifacts()), before_artifacts)
 
     def test_archive_track_blocks_track_open_and_published_artifact_reads(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        self.assertTrue(self._create_track(instance_json=instance_pm, instance_id="inst-pm-art", track_id="track-art-archive").get("ok"))
+        instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")
+        self.assertTrue(self._create_track(instance_json=instance_pm, actor_id="act-pm-art", track_id="track-art-archive").get("ok"))
 
         created = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -971,8 +974,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -986,8 +989,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         archived = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="archive",
             args={"track_id": "track-art-archive"},
@@ -996,8 +999,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         track_open = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art",
-            buddy="pm",
+            actor_id="act-pm-art",
+            role="pm",
             tool="track",
             action="open",
             args={"track_id": "track-art-archive"},
@@ -1005,27 +1008,27 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(track_open.get("ok"), msg=track_open)
         self.assertEqual(track_open.get("permission_boundary"), "track.lifecycle_status")
 
-        for buddy, instance_id in (("pm", "inst-pm-art"), ("dev", "inst-dev-art")):
-            instance_json = instance_pm if buddy == "pm" else self._instance_json(instance_id=instance_id, buddy=buddy)
+        for role, actor_id in (("pm", "act-pm-art"), ("dev", "act-dev-art")):
+            instance_json = instance_pm if role == "pm" else self._instance_json(actor_id=actor_id, role=role)
             denied = self._dispatch(
                 instance_json=instance_json,
-                instance_id=instance_id,
-                buddy=buddy,
+                actor_id=actor_id,
+                role=role,
                 tool="artifact",
                 action="get",
                 args={"artifact_id": "art-pm-archive-r1"},
             )
-            with self.subTest(buddy=buddy):
+            with self.subTest(role=role):
                 self.assertFalse(denied.get("ok"), msg=denied)
                 self.assertEqual(denied.get("permission_boundary"), "track.lifecycle_status")
 
     def test_list_returns_owner_draft_summaries_without_body(self) -> None:
-        shared_instance_id = "inst-art-list-owner"
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        shared_actor_id = "act-art-list-owner"
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         created_pm_brief = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1040,8 +1043,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created_pm_brief.get("ok"), msg=created_pm_brief)
         created_pm_note = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1055,11 +1058,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(created_pm_note.get("ok"), msg=created_pm_note)
 
-        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        instance_dev = self._instance_json(actor_id=shared_actor_id, role="dev")
         created_dev_private = self._dispatch(
             instance_json=instance_dev,
-            instance_id=shared_instance_id,
-            buddy="dev",
+            actor_id=shared_actor_id,
+            role="dev",
             tool="artifact",
             action="create_revision",
             args={
@@ -1072,11 +1075,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(created_dev_private.get("ok"), msg=created_dev_private)
 
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         listed = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
             args={},
@@ -1114,19 +1117,19 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertIn(key, row, msg=row)
 
     def test_list_returns_published_material_proof_and_history_summaries(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art-list-published", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art-list-published", role="pm")
         self.assertTrue(
             self._create_track(
                 instance_json=instance_pm,
-                instance_id="inst-pm-art-list-published",
+                actor_id="act-pm-art-list-published",
                 track_id="track-art-list-published",
             ).get("ok")
         )
 
         created_r1 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-published",
-            buddy="pm",
+            actor_id="act-pm-art-list-published",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1140,8 +1143,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created_r1.get("ok"), msg=created_r1)
         published_r1 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-published",
-            buddy="pm",
+            actor_id="act-pm-art-list-published",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -1153,11 +1156,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published_r1.get("ok"), msg=published_r1)
 
-        instance_test = self._instance_json(instance_id="inst-pm-art-list-published", buddy="test")
+        instance_test = self._instance_json(actor_id="act-pm-art-list-published", role="test")
         created_proof = self._dispatch(
             instance_json=instance_test,
-            instance_id="inst-pm-art-list-published",
-            buddy="test",
+            actor_id="act-pm-art-list-published",
+            role="test",
             tool="artifact",
             action="create_revision",
             args={
@@ -1171,8 +1174,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created_proof.get("ok"), msg=created_proof)
         published_proof = self._dispatch(
             instance_json=instance_test,
-            instance_id="inst-pm-art-list-published",
-            buddy="test",
+            actor_id="act-pm-art-list-published",
+            role="test",
             tool="track",
             action="add_proof",
             args={
@@ -1184,11 +1187,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published_proof.get("ok"), msg=published_proof)
 
-        instance_pm = self._instance_json(instance_id="inst-pm-art-list-published", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art-list-published", role="pm")
         created_r2 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-published",
-            buddy="pm",
+            actor_id="act-pm-art-list-published",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1203,8 +1206,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created_r2.get("ok"), msg=created_r2)
         published_r2 = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-published",
-            buddy="pm",
+            actor_id="act-pm-art-list-published",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -1218,8 +1221,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         listed = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-published",
-            buddy="pm",
+            actor_id="act-pm-art-list-published",
+            role="pm",
             tool="artifact",
             action="list",
             args={"track_id": "track-art-list-published"},
@@ -1247,20 +1250,20 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertNotIn("body", row, msg=row)
 
     def test_list_filters_are_simple_and_title_summary_only(self) -> None:
-        shared_instance_id = "inst-art-list-filter"
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        shared_actor_id = "act-art-list-filter"
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         self.assertTrue(
             self._create_track(
                 instance_json=instance_pm,
-                instance_id=shared_instance_id,
+                actor_id=shared_actor_id,
                 track_id="track-art-list-filter",
             ).get("ok")
         )
 
         created_pm_brief = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1275,8 +1278,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_pm,
-                instance_id=shared_instance_id,
-                buddy="pm",
+                actor_id=shared_actor_id,
+                role="pm",
                 tool="track",
                 action="add_material",
                 args={
@@ -1288,11 +1291,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ).get("ok")
         )
 
-        instance_design = self._instance_json(instance_id=shared_instance_id, buddy="design")
+        instance_design = self._instance_json(actor_id=shared_actor_id, role="design")
         created_design = self._dispatch(
             instance_json=instance_design,
-            instance_id=shared_instance_id,
-            buddy="design",
+            actor_id=shared_actor_id,
+            role="design",
             tool="artifact",
             action="create_revision",
             args={
@@ -1307,8 +1310,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_design,
-                instance_id=shared_instance_id,
-                buddy="design",
+                actor_id=shared_actor_id,
+                role="design",
                 tool="track",
                 action="add_material",
                 args={
@@ -1320,12 +1323,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ).get("ok")
         )
 
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
-        instance_test = self._instance_json(instance_id=shared_instance_id, buddy="test")
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
+        instance_test = self._instance_json(actor_id=shared_actor_id, role="test")
         created_body_only = self._dispatch(
             instance_json=instance_test,
-            instance_id=shared_instance_id,
-            buddy="test",
+            actor_id=shared_actor_id,
+            role="test",
             tool="artifact",
             action="create_revision",
             args={
@@ -1340,8 +1343,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_test,
-                instance_id=shared_instance_id,
-                buddy="test",
+                actor_id=shared_actor_id,
+                role="test",
                 tool="track",
                 action="add_proof",
                 args={
@@ -1353,11 +1356,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ).get("ok")
         )
 
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         created_draft = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1372,8 +1375,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         q_signup = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
             args={"q": "signup"},
@@ -1389,21 +1392,21 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         created_by_design = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
-            args={"created_by": "design"},
+            args={"created_by_role": "design"},
         )
         self.assertTrue(created_by_design.get("ok"), msg=created_by_design)
         for row in created_by_design.get("artifacts", []):
             if isinstance(row, dict):
-                self.assertEqual(row.get("created_by"), "design", msg=row)
+                self.assertEqual((row.get("created_by_actor") or {}).get("role_id"), "design", msg=row)
 
         template_brief = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
             args={"template": "brief"},
@@ -1415,8 +1418,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         published_only = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
             args={"status": "published"},
@@ -1431,8 +1434,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         limited = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
             args={"limit": 1},
@@ -1445,8 +1448,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         track_scoped = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
             args={"track_id": "track-art-list-filter"},
@@ -1458,8 +1461,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         default_limit = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="list",
             args={},
@@ -1471,7 +1474,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertLessEqual(len(default_rows), 20)
 
     def test_list_rejects_invalid_filters_without_state_change(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art-list-invalid", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art-list-invalid", role="pm")
         cases = [
             {"unsupported": "x"},
             {"template": "prd"},
@@ -1486,8 +1489,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for args in cases:
             result = self._dispatch(
                 instance_json=instance_pm,
-                instance_id="inst-pm-art-list-invalid",
-                buddy="pm",
+                actor_id="act-pm-art-list-invalid",
+                role="pm",
                 tool="artifact",
                 action="list",
                 args=args,
@@ -1502,18 +1505,18 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertTrue(str(result.get("why_blocked")).strip(), msg=result)
 
     def test_list_hides_archived_track_artifacts_and_rejects_archived_track_filter(self) -> None:
-        instance_pm = self._instance_json(instance_id="inst-pm-art-list-archived", buddy="pm")
+        instance_pm = self._instance_json(actor_id="act-pm-art-list-archived", role="pm")
         self.assertTrue(
             self._create_track(
                 instance_json=instance_pm,
-                instance_id="inst-pm-art-list-archived",
+                actor_id="act-pm-art-list-archived",
                 track_id="track-art-list-archived",
             ).get("ok")
         )
         created = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-archived",
-            buddy="pm",
+            actor_id="act-pm-art-list-archived",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1528,8 +1531,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_pm,
-                instance_id="inst-pm-art-list-archived",
-                buddy="pm",
+                actor_id="act-pm-art-list-archived",
+                role="pm",
                 tool="track",
                 action="add_material",
                 args={
@@ -1543,8 +1546,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_pm,
-                instance_id="inst-pm-art-list-archived",
-                buddy="pm",
+                actor_id="act-pm-art-list-archived",
+                role="pm",
                 tool="track",
                 action="archive",
                 args={"track_id": "track-art-list-archived"},
@@ -1553,8 +1556,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         listed = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-archived",
-            buddy="pm",
+            actor_id="act-pm-art-list-archived",
+            role="pm",
             tool="artifact",
             action="list",
             args={},
@@ -1569,8 +1572,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         track_filtered = self._dispatch(
             instance_json=instance_pm,
-            instance_id="inst-pm-art-list-archived",
-            buddy="pm",
+            actor_id="act-pm-art-list-archived",
+            role="pm",
             tool="artifact",
             action="list",
             args={"track_id": "track-art-list-archived"},
@@ -1580,17 +1583,17 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(track_filtered.get("durability"), "none", msg=track_filtered)
 
     def test_attach_file_creates_artifact_owned_attachment_summary_without_body_blob(self) -> None:
-        instance_id = "inst-design-attach"
-        instance_json = self._instance_json(instance_id=instance_id, buddy="design")
-        normalized_instance_id = self._runtime_instance_id(buddy="design", label=instance_id)
-        source = self._runtime_path(f"instances/{normalized_instance_id}/workspace/buddybox/screenshots/desktop.png")
+        actor_id = "act-design-attach"
+        instance_json = self._instance_json(actor_id=actor_id, role="design")
+        normalized_actor_id = self._runtime_actor_id(role="design", label=actor_id)
+        source = self._runtime_path(f"instances/{normalized_actor_id}/workspace/private/screenshots/desktop.png")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n\x1a\n")
 
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="design",
+            actor_id=actor_id,
+            role="design",
             tool="artifact",
             action="create_revision",
             args={
@@ -1605,8 +1608,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         attached = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="design",
+            actor_id=actor_id,
+            role="design",
             tool="artifact",
             action="attach_file",
             args={
@@ -1636,8 +1639,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         read = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="design",
+            actor_id=actor_id,
+            role="design",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-design-attach-r1"},
@@ -1656,11 +1659,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("path", attachments[0])
 
     def test_list_attachments_returns_empty_list_for_readable_artifact_without_attachments(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-pm-empty-attachments", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-empty-attachments", role="pm")
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-empty-attachments",
-            buddy="pm",
+            actor_id="act-pm-empty-attachments",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1675,8 +1678,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         listed = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-pm-empty-attachments",
-            buddy="pm",
+            actor_id="act-pm-empty-attachments",
+            role="pm",
             tool="artifact",
             action="list_attachments",
             args={"artifact_id": "art-pm-empty-attachments"},
@@ -1684,16 +1687,16 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(listed.get("ok"), msg=listed)
         self.assertEqual(listed.get("attachments"), [])
 
-    def test_published_attachment_is_readable_by_other_buddy_through_artifact_visibility(self) -> None:
-        instance_id = "inst-attach-published"
-        instance_pm = self._instance_json(instance_id=instance_id, buddy="pm")
-        normalized_instance_id = self._runtime_instance_id(buddy="pm", label=instance_id)
-        created_track = self._create_track(instance_json=instance_pm, instance_id=instance_id, track_id="track-attach-published")
+    def test_published_attachment_is_readable_by_other_role_through_artifact_visibility(self) -> None:
+        actor_id = "act-attach-published"
+        instance_pm = self._instance_json(actor_id=actor_id, role="pm")
+        normalized_actor_id = self._runtime_actor_id(role="pm", label=actor_id)
+        created_track = self._create_track(instance_json=instance_pm, actor_id=actor_id, track_id="track-attach-published")
         self.assertTrue(created_track.get("ok"), msg=created_track)
         created = self._dispatch(
             instance_json=instance_pm,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1705,13 +1708,13 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(created.get("ok"), msg=created)
-        source = self._runtime_path(f"instances/{normalized_instance_id}/workspace/buddybox/evidence/evidence.txt")
+        source = self._runtime_path(f"instances/{normalized_actor_id}/workspace/private/evidence/evidence.txt")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("hello from PM", encoding="utf-8")
         attached = self._dispatch(
             instance_json=instance_pm,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="artifact",
             action="attach_file",
             args={
@@ -1725,8 +1728,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         attachment_id = attached["attachment"]["attachment_id"]
         published = self._dispatch(
             instance_json=instance_pm,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -1738,11 +1741,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published.get("ok"), msg=published)
 
-        instance_dev = self._instance_json(instance_id=instance_id, buddy="dev")
+        instance_dev = self._instance_json(actor_id=actor_id, role="dev")
         listed = self._dispatch(
             instance_json=instance_dev,
-            instance_id=instance_id,
-            buddy="dev",
+            actor_id=actor_id,
+            role="dev",
             tool="artifact",
             action="list_attachments",
             args={"artifact_id": "art-pm-attach-published"},
@@ -1752,8 +1755,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         fetched = self._dispatch(
             instance_json=instance_dev,
-            instance_id=instance_id,
-            buddy="dev",
+            actor_id=actor_id,
+            role="dev",
             tool="artifact",
             action="get_attachment",
             args={
@@ -1765,14 +1768,14 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(fetched.get("content_base64"), "aGVsbG8gZnJvbSBQTQ==")
 
     def test_attach_file_rejects_inline_blob_payload_without_mutation(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-attach-inline-reject", buddy="design")
-        source = self._runtime_path("instances/inst-attach-inline-reject/workspace/buddybox/screenshots/desktop.png")
+        instance_json = self._instance_json(actor_id="act-attach-inline-reject", role="design")
+        source = self._runtime_path("instances/act-attach-inline-reject/workspace/private/screenshots/desktop.png")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n")
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-attach-inline-reject",
-            buddy="design",
+            actor_id="act-attach-inline-reject",
+            role="design",
             tool="artifact",
             action="create_revision",
             args={
@@ -1787,8 +1790,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-attach-inline-reject",
-            buddy="design",
+            actor_id="act-attach-inline-reject",
+            role="design",
             tool="artifact",
             action="attach_file",
             args={
@@ -1806,12 +1809,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(stored, dict)
         self.assertEqual(stored.get("attachments"), [])
 
-    def test_attach_file_rejects_retired_buddybox_source_field_without_mutation(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-attach-retired-field", buddy="design")
+    def test_attach_file_rejects_retired_actor_private_source_field_without_mutation(self) -> None:
+        instance_json = self._instance_json(actor_id="act-attach-retired-field", role="design")
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-attach-retired-field",
-            buddy="design",
+            actor_id="act-attach-retired-field",
+            role="design",
             tool="artifact",
             action="create_revision",
             args={
@@ -1824,11 +1827,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(created.get("ok"), msg=created)
 
-        retired_field = "_".join(["source", "buddybox", "logical", "name"])
+        retired_field = "_".join(["source", "actor_private", "logical", "name"])
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-attach-retired-field",
-            buddy="design",
+            actor_id="act-attach-retired-field",
+            role="design",
             tool="artifact",
             action="attach_file",
             args={
@@ -1847,12 +1850,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(stored.get("attachments"), [])
 
     def test_attach_file_rejects_invalid_source_paths_without_mutation(self) -> None:
-        instance_id = "inst-attach-invalid-source"
-        instance_json = self._instance_json(instance_id=instance_id, buddy="design")
+        actor_id = "act-attach-invalid-source"
+        instance_json = self._instance_json(actor_id=actor_id, role="design")
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="design",
+            actor_id=actor_id,
+            role="design",
             tool="artifact",
             action="create_revision",
             args={
@@ -1865,26 +1868,26 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(created.get("ok"), msg=created)
 
-        buddybox_root = self._runtime_path(f"instances/{instance_id}/workspace/buddybox")
-        buddybox_root.mkdir(parents=True, exist_ok=True)
-        directory_source = buddybox_root / "dir-source"
+        actor_private_root = self._runtime_path(f"instances/{actor_id}/workspace/private")
+        actor_private_root.mkdir(parents=True, exist_ok=True)
+        directory_source = actor_private_root / "dir-source"
         directory_source.mkdir(parents=True, exist_ok=True)
-        empty_source = buddybox_root / "empty.txt"
+        empty_source = actor_private_root / "empty.txt"
         empty_source.write_bytes(b"")
-        missing_source = buddybox_root / "missing.txt"
+        missing_source = actor_private_root / "missing.txt"
         outside_runtime_source = self._runtime_path("external/outside.txt")
         outside_runtime_source.parent.mkdir(parents=True, exist_ok=True)
         outside_runtime_source.write_text("outside\n", encoding="utf-8")
         state_source = self._runtime_path("buddyswitch/objects/artifacts/not-allowed.txt")
         state_source.parent.mkdir(parents=True, exist_ok=True)
         state_source.write_text("state\n", encoding="utf-8")
-        global_tmp_source = Path("/tmp") / f"buddyswitch-attach-{instance_id}.txt"
+        global_tmp_source = Path("/tmp") / f"buddyswitch-attach-{actor_id}.txt"
         global_tmp_source.write_text("tmp\n", encoding="utf-8")
         source_root = ROOT / "README.md"
         escape_target = self._runtime_path("escape/secret.txt")
         escape_target.parent.mkdir(parents=True, exist_ok=True)
         escape_target.write_text("secret\n", encoding="utf-8")
-        symlink_source = buddybox_root / "links" / "escape.txt"
+        symlink_source = actor_private_root / "links" / "escape.txt"
         symlink_source.parent.mkdir(parents=True, exist_ok=True)
         symlink_source.symlink_to(escape_target)
         self.addCleanup(global_tmp_source.unlink, missing_ok=True)
@@ -1903,8 +1906,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for name, path in cases.items():
             rejected = self._dispatch(
                 instance_json=instance_json,
-                instance_id=instance_id,
-                buddy="design",
+                actor_id=actor_id,
+                role="design",
                 tool="artifact",
                 action="attach_file",
                 args={
@@ -1925,11 +1928,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(stored.get("attachments"), [])
 
     def test_get_attachment_rejects_unknown_attachment_id_without_mutation(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-unknown-attachment", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-unknown-attachment", role="pm")
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-unknown-attachment",
-            buddy="pm",
+            actor_id="act-unknown-attachment",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1944,8 +1947,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-unknown-attachment",
-            buddy="pm",
+            actor_id="act-unknown-attachment",
+            role="pm",
             tool="artifact",
             action="get_attachment",
             args={"artifact_id": "art-unknown-attachment", "attachment_id": "att-missing"},
@@ -1955,19 +1958,19 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(rejected.get("durability"), "none")
 
     def test_get_relation_summary_includes_publication_and_lineage(self) -> None:
-        shared_instance_id = "inst-art-rel-lineage"
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        shared_actor_id = "act-art-rel-lineage"
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         self.assertTrue(
             self._create_track(
                 instance_json=instance_pm,
-                instance_id=shared_instance_id,
+                actor_id=shared_actor_id,
                 track_id="track-art-rel-lineage",
             ).get("ok")
         )
         created_r1 = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -1982,8 +1985,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_pm,
-                instance_id=shared_instance_id,
-                buddy="pm",
+                actor_id=shared_actor_id,
+                role="pm",
                 tool="track",
                 action="add_material",
                 args={
@@ -1995,11 +1998,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ).get("ok")
         )
 
-        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        instance_dev = self._instance_json(actor_id=shared_actor_id, role="dev")
         created_dev_private = self._dispatch(
             instance_json=instance_dev,
-            instance_id=shared_instance_id,
-            buddy="dev",
+            actor_id=shared_actor_id,
+            role="dev",
             tool="artifact",
             action="create_revision",
             args={
@@ -2013,11 +2016,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(created_dev_private.get("ok"), msg=created_dev_private)
 
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         created_r2 = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -2033,8 +2036,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_pm,
-                instance_id=shared_instance_id,
-                buddy="pm",
+                actor_id=shared_actor_id,
+                role="pm",
                 tool="track",
                 action="add_material",
                 args={
@@ -2048,8 +2051,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         fetched = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-lineage-r1"},
@@ -2078,19 +2081,19 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("art-lineage-private-r2", superseded_by)
 
     def test_get_relation_summary_includes_permission_filtered_incoming_refs(self) -> None:
-        shared_instance_id = "inst-art-rel-incoming"
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        shared_actor_id = "act-art-rel-incoming"
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         self.assertTrue(
             self._create_track(
                 instance_json=instance_pm,
-                instance_id=shared_instance_id,
+                actor_id=shared_actor_id,
                 track_id="track-art-rel-incoming",
             ).get("ok")
         )
         created_target = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -2105,8 +2108,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(
             self._dispatch(
                 instance_json=instance_pm,
-                instance_id=shared_instance_id,
-                buddy="pm",
+                actor_id=shared_actor_id,
+                role="pm",
                 tool="track",
                 action="add_material",
                 args={
@@ -2120,8 +2123,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         visible_source = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -2135,11 +2138,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(visible_source.get("ok"), msg=visible_source)
 
-        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        instance_dev = self._instance_json(actor_id=shared_actor_id, role="dev")
         private_source = self._dispatch(
             instance_json=instance_dev,
-            instance_id=shared_instance_id,
-            buddy="dev",
+            actor_id=shared_actor_id,
+            role="dev",
             tool="artifact",
             action="create_revision",
             args={
@@ -2153,16 +2156,16 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(private_source.get("ok"), msg=private_source)
 
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         request_target = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": "track-art-rel-incoming",
-                "to_buddy": "dev",
+                "to_role": "dev",
                 "title": "Use target",
                 "summary": "Target ref request",
                 "target_refs": [{"type": "artifact", "id": "art-rel-target"}],
@@ -2174,13 +2177,13 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         request_result = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": "track-art-rel-incoming",
-                "to_buddy": "dev",
+                "to_role": "dev",
                 "title": "Produce result",
                 "summary": "Result ref request",
                 "target_refs": [{"type": "track", "id": "track-art-rel-incoming"}],
@@ -2189,11 +2192,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(request_result.get("ok"), msg=request_result)
         request_result_id = str(request_result.get("request_id") or "")
         self.assertTrue(request_result_id)
-        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        instance_dev = self._instance_json(actor_id=shared_actor_id, role="dev")
         accepted = self._dispatch(
             instance_json=instance_dev,
-            instance_id=shared_instance_id,
-            buddy="dev",
+            actor_id=shared_actor_id,
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": request_result_id},
@@ -2201,8 +2204,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(accepted.get("ok"), msg=accepted)
         completed = self._dispatch(
             instance_json=instance_dev,
-            instance_id=shared_instance_id,
-            buddy="dev",
+            actor_id=shared_actor_id,
+            role="dev",
             tool="request",
             action="complete",
             args={
@@ -2212,11 +2215,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(completed.get("ok"), msg=completed)
 
-        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         added_update = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="track",
             action="add_update",
             args={
@@ -2239,8 +2242,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         comment_root = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="comment",
             action="add",
             args={
@@ -2255,8 +2258,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         comment_section = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="comment",
             action="add",
             args={
@@ -2272,8 +2275,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         fetched = self._dispatch(
             instance_json=instance_pm,
-            instance_id=shared_instance_id,
-            buddy="pm",
+            actor_id=shared_actor_id,
+            role="pm",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-rel-target"},

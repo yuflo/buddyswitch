@@ -71,7 +71,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn("_append_event_to_endpoint", source)
         self.assertNotIn("open(\"a\"", source)
 
-    def test_no_fuzzy_to_buddy_or_ambiguous_status_in_daemon_delivery_path(self) -> None:
+    def test_no_fuzzy_to_role_or_ambiguous_status_in_daemon_delivery_path(self) -> None:
         daemon_delivery_files = [
             path
             for path in _existing_sources()
@@ -80,8 +80,8 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         source = "\n".join(path.read_text(encoding="utf-8") for path in daemon_delivery_files)
         source += "\n" + _class_source(ROOT / "scripts" / "env" / "tool_runtime" / "context.py", "DaemonAccess")
 
-        self.assertNotIn("to_buddy: str", source)
-        self.assertNotIn("to_buddy=", source)
+        self.assertNotIn("to_role: str", source)
+        self.assertNotIn("to_role=", source)
         self.assertNotIn("notify_message_available", source)
         self.assertNotIn("resolve_notification_target", source)
         self.assertNotIn("ambiguous_online_actor", source)

@@ -139,17 +139,17 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(
         self,
         *,
-        instance_id: str = "inst-search-example",
-        buddy: str = "market",
+        actor_id: str = "act-search-example",
+        role: str = "market",
         browser_port: object = 9222,
     ) -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        instance_json = self._runtime_path(f"{instance_id}.json")
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_json = self._runtime_path(f"{actor_id}.json")
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "current_task_id": None,
                     "current_track_id": None,
@@ -172,16 +172,16 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         action: str,
         args: dict[str, object],
         instance_json: Path,
-        instance_id: str = "inst-search-example",
-        buddy: str = "market",
+        actor_id: str = "act-search-example",
+        role: str = "market",
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         manifest = env_manifest.load_manifest(MANIFEST)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return dispatch_env_tool_request(
             payload={"tool": "search", "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
             manifest=manifest,
@@ -274,14 +274,14 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((unknown_engine_payload.get("error") or {}).get("code"), "E_RUNTIME_BROKER_UNAVAILABLE")
 
     def test_search_status_reports_market_profile_backend_and_native_search_boundary(self) -> None:
-        instance_json = self._instance_json(buddy="market", browser_port=9222)
+        instance_json = self._instance_json(role="market", browser_port=9222)
 
-        response = self._dispatch(action="status", args={}, instance_json=instance_json, buddy="market")
+        response = self._dispatch(action="status", args={}, instance_json=instance_json, role="market")
 
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("tool"), "search")
         self.assertEqual(response.get("action"), "search.status")
-        self.assertEqual(response.get("active_buddy"), "market")
+        self.assertEqual(response.get("active_role"), "market")
         self.assertEqual(response.get("native_codex_web_search"), "disabled")
         self.assertEqual(response.get("available_backends"), ["browser"])
         backend_status = response.get("backend_status")
@@ -307,9 +307,9 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("market_workflow", response)
 
     def test_search_status_reports_non_market_boundary_without_market_workflow_default(self) -> None:
-        instance_json = self._instance_json(buddy="dev", browser_port=9222)
+        instance_json = self._instance_json(role="dev", browser_port=9222)
 
-        response = self._dispatch(action="status", args={}, instance_json=instance_json, buddy="dev")
+        response = self._dispatch(action="status", args={}, instance_json=instance_json, role="dev")
 
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("capability_boundary", {}).get("browser_cockpit"), "available")
@@ -318,13 +318,13 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertNotIn(forbidden, response)
 
     def test_search_request_browser_returns_actionable_instruction_without_opening_page(self) -> None:
-        instance_json = self._instance_json(buddy="market", browser_port=9222)
+        instance_json = self._instance_json(role="market", browser_port=9222)
 
         response = self._dispatch(
             action="request",
             args={"query": "creator analytics pain", "backend": "browser", "engine": "reddit"},
             instance_json=instance_json,
-            buddy="market",
+            role="market",
         )
 
         self.assertTrue(response.get("ok"), msg=response)
@@ -400,13 +400,13 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND")
 
     def test_search_request_search_api_returns_market_approval_required(self) -> None:
-        instance_json = self._instance_json(buddy="market")
+        instance_json = self._instance_json(role="market")
 
         response = self._dispatch(
             action="request",
             args={"query": "creator analytics pain", "backend": "search_api", "engine": "web"},
             instance_json=instance_json,
-            buddy="market",
+            role="market",
         )
 
         self.assertFalse(response.get("ok"), msg=response)
@@ -416,13 +416,13 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._assert_next_option(response, tool="search", action="open_browser")
 
     def test_search_request_search_api_returns_non_market_provider_unavailable(self) -> None:
-        instance_json = self._instance_json(buddy="dev")
+        instance_json = self._instance_json(role="dev")
 
         response = self._dispatch(
             action="request",
             args={"query": "release notes", "backend": "search_api", "engine": "web"},
             instance_json=instance_json,
-            buddy="dev",
+            role="dev",
         )
 
         self.assertFalse(response.get("ok"), msg=response)

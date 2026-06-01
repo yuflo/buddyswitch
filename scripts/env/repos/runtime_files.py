@@ -43,8 +43,7 @@ def _recompute_runtime_roots() -> None:
     global REQUESTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
-    global BUDDYBOX_LOCAL_DIR
-    legacy_buddybox_local_dir: Path
+    global ACTOR_PRIVATE_DIR
 
     if _RUNTIME_ROOT_OVERRIDE is None:
         ROOT = _default_repo_root()
@@ -63,8 +62,7 @@ def _recompute_runtime_roots() -> None:
     REQUESTS_DIR = OBJECTS_ROOT / "requests"
     CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
     LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
-    legacy_buddybox_local_dir = LOCAL_ROOT / "buddybox"
-    BUDDYBOX_LOCAL_DIR = legacy_buddybox_local_dir
+    ACTOR_PRIVATE_DIR = LOCAL_ROOT / "actor-private"
     for listener in _RUNTIME_ROOT_LISTENERS:
         listener()
 
@@ -112,8 +110,8 @@ def runtime_workspace_root(instance_payload: dict[str, Any] | None = None) -> Pa
     return ROOT
 
 
-def buddybox_local_dir(instance_payload: dict[str, Any] | None = None) -> Path:
-    return runtime_workspace_root(instance_payload) / "buddybox"
+def actor_private_dir(instance_payload: dict[str, Any] | None = None) -> Path:
+    return runtime_workspace_root(instance_payload) / "private"
 
 
 def instance_tmp_dir(instance_payload: dict[str, Any] | None = None) -> Path:
@@ -144,25 +142,25 @@ def instance_root_from_context(
 
 def taskbox_root(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> Path:
-    require_id(active_buddy, "buddy")
+    require_id(active_role, "role")
     return instance_root_from_context(
         instance_json=instance_json,
         instance_payload=instance_payload,
-    ) / "taskbox" / active_buddy
+    ) / "taskbox" / active_role
 
 
 def taskbox_tasks_dir(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> Path:
     return taskbox_root(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     ) / "tasks"
@@ -170,12 +168,12 @@ def taskbox_tasks_dir(
 
 def taskbox_history_file(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> Path:
     return taskbox_root(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     ) / "history.md"
@@ -207,11 +205,11 @@ def require_runtime_workspace_write_root(root: Path | None = None) -> None:
     candidate = ROOT if root is None else root
     shared_root_raw = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
     state_root_raw = os.environ.get("BUDDYSWITCH_STATE_ROOT")
-    instance_id_raw = os.environ.get("BUDDYSWITCH_INSTANCE_ID")
+    actor_id_raw = os.environ.get("BUDDYSWITCH_ACTOR_ID")
 
     if is_runtime_workspace(candidate):
         return
-    if isinstance(instance_id_raw, str) and instance_id_raw.strip():
+    if isinstance(actor_id_raw, str) and actor_id_raw.strip():
         if isinstance(shared_root_raw, str) and shared_root_raw.strip():
             shared_root = Path(shared_root_raw.strip()).expanduser().resolve(strict=False)
             session_state_root = (
@@ -224,7 +222,7 @@ def require_runtime_workspace_write_root(root: Path | None = None) -> None:
                 return
     raise ValueError(
         "BuddySwitch runtime writes are blocked in the source checkout. "
-        "Start the launcher workspace with ./buddyswitch-codex instance start --buddy <buddy> and rerun there."
+        "Start the launcher workspace with ./buddyswitch-codex instance start --role <role> and rerun there."
     )
 
 

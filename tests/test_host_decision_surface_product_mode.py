@@ -24,12 +24,12 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_id = self._runtime_instance_id(buddy="market", label="inst-market-decision-surface")
-        self.instance_root = self._runtime_path(f"instances/{self.instance_id}")
+        self.actor_id = self._runtime_actor_id(role="market", label="act-market-decision-surface")
+        self.instance_root = self._runtime_path(f"instances/{self.actor_id}")
         self.instance_json = self.instance_root / "instance.json"
         self.instance_payload = {
-            "instance_id": self.instance_id,
-            "buddy": "market",
+            "actor_id": self.actor_id,
+            "role": "market",
             "status": "active",
             "instance_root": str(self.instance_root),
             "workspace_dir": str(self.instance_root / "workspace"),
@@ -41,14 +41,18 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         (taskbox_root / "history.md").write_text("", encoding="utf-8")
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _seed_taskbox_task(self, *, buddy: str, task_id: str, title: str, track_id: str | None = None) -> None:
-        path = self.instance_root / "taskbox" / buddy / "tasks" / f"{task_id}.json"
+    def _seed_taskbox_task(self, *, role: str, task_id: str, title: str, track_id: str | None = None) -> None:
+        path = self.instance_root / "taskbox" / role / "tasks" / f"{task_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
+        actor_id = self.actor_id if role == self.instance_payload.get("role") else self._runtime_actor_id(
+            role=role,
+            label=f"act-{role}-decision-surface",
+        )
         path.write_text(
             json.dumps(
                 {
                     "id": task_id,
-                    "owner_buddy": buddy,
+                    "owner_actor": {"actor_id": actor_id, "role_id": role},
                     "title": title,
                     "summary": "",
                     "status": "active",
@@ -66,14 +70,14 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             encoding="utf-8",
         )
 
-    def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-market-decision-surface")
+    def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label="act-market-decision-surface")
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=self.instance_json,
-            instance_payload={**self.instance_payload, "instance_id": instance_id, "buddy": buddy},
+            instance_payload={**self.instance_payload, "actor_id": actor_id, "role": role},
             manifest=self.manifest,
             manifest_path=self.manifest_path,
         )
@@ -82,19 +86,19 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         track = env_store.create_track(
             "track-market-decision",
             "Market Decision",
-            owner_buddy="pm",
+            owner_role="pm",
             outcome="Ship market decision with clear positioning.",
             appetite="1 day",
             now={"next": "Scan market", "blocker": None},
         )
-        self._seed_taskbox_task(buddy="market", task_id="task-market-decision", title="Scan market", track_id=str(track["id"]))
+        self._seed_taskbox_task(role="market", task_id="task-market-decision", title="Scan market", track_id=str(track["id"]))
         request_created = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": str(track["id"]),
-                "to_buddy": "market",
+                "to_role": "market",
                 "title": "Collect market proof",
                 "summary": "Scan competitors and report signal quality.",
                 "target_refs": [{"type": "track", "id": str(track["id"])}],
@@ -102,7 +106,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(request_created["ok"], msg=request_created)
 
-        response = self._dispatch(buddy="market", tool="context", action="summarize", args={})
+        response = self._dispatch(role="market", tool="context", action="summarize", args={})
         self.assertTrue(response["ok"], msg=response)
         self.assertEqual(response["decision_surface"]["binding_state"]["state"], "runless")
         self.assertNotIn("has_memories", response["decision_surface"]["context_readiness"])
@@ -118,7 +122,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
         self.assertTrue({"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}.issubset(set(affordances)))
-        self.assertNotIn("buddybox", affordances)
+        self.assertNotIn("private", affordances)
         self.assertNotIn("handoff", affordances)
         self.assertNotIn("project_source", affordances)
         writable_surfaces = response.get("writable_surfaces")
@@ -127,14 +131,14 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         persistent = writable_surfaces.get("persistent_files")
         self.assertIsInstance(persistent, dict, msg=writable_surfaces)
         assert isinstance(persistent, dict)
-        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
-        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_ACTOR_PRIVATE_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "private")
 
     def test_context_summarize_includes_compact_artifacts_comments_and_updates(self) -> None:
         track = env_store.create_track(
             "track-context-entry-surface",
             "Entry Surface",
-            owner_buddy="pm",
+            owner_role="pm",
             outcome="Validate compact entry surface.",
             appetite="1 day",
             now={"next": "Seed artifacts", "blocker": None},
@@ -154,7 +158,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             track_id=str(track["id"]),
             artifact_id=str(artifact["id"]),
             label="Entry",
-            from_buddy="pm",
+            from_role="pm",
             summary="Entry summary",
         )
         proof = env_store.create_artifact_revision(
@@ -172,16 +176,16 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             track_id=str(track["id"]),
             artifact_id=str(proof["id"]),
             label="Proof",
-            from_buddy="pm",
+            from_role="pm",
             summary="Proof summary",
         )
         created_request = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": str(track["id"]),
-                "to_buddy": "market",
+                "to_role": "market",
                 "title": "Validate entry surface",
                 "summary": "Check entry artifacts and updates.",
                 "target_refs": [{"type": "artifact", "id": str(artifact["id"])}],
@@ -189,7 +193,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(created_request.get("ok"), msg=created_request)
         added_comment = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="comment",
             action="add",
             args={
@@ -200,7 +204,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(added_comment.get("ok"), msg=added_comment)
         added_update = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_update",
             args={
@@ -212,7 +216,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(added_update.get("ok"), msg=added_update)
 
-        summary = self._dispatch(buddy="market", tool="context", action="summarize", args={})
+        summary = self._dispatch(role="market", tool="context", action="summarize", args={})
         self.assertTrue(summary.get("ok"), msg=summary)
         self.assertIn("candidate_artifacts", summary)
         self.assertIn("candidate_requests", summary)
@@ -249,7 +253,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         track_a = env_store.create_track(
             "track-context-filter-a",
             "Filter A",
-            owner_buddy="pm",
+            owner_role="pm",
             outcome="A",
             appetite="1 day",
             now={"next": "A", "blocker": None},
@@ -257,7 +261,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         track_b = env_store.create_track(
             "track-context-filter-b",
             "Filter B",
-            owner_buddy="pm",
+            owner_role="pm",
             outcome="B",
             appetite="1 day",
             now={"next": "B", "blocker": None},
@@ -288,23 +292,23 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             track_id=str(track_a["id"]),
             artifact_id=str(art_a["id"]),
             label="A",
-            from_buddy="pm",
+            from_role="pm",
             summary="A",
         )
         env_store.publish_track_material(
             track_id=str(track_b["id"]),
             artifact_id=str(art_b["id"]),
             label="B",
-            from_buddy="pm",
+            from_role="pm",
             summary="B",
         )
         request_a = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": str(track_a["id"]),
-                "to_buddy": "market",
+                "to_role": "market",
                 "title": "Request A",
                 "summary": "A",
                 "target_refs": [{"type": "artifact", "id": str(art_a["id"])}],
@@ -312,12 +316,12 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(request_a.get("ok"), msg=request_a)
         request_b = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": str(track_b["id"]),
-                "to_buddy": "market",
+                "to_role": "market",
                 "title": "Request B",
                 "summary": "B",
                 "target_refs": [{"type": "artifact", "id": str(art_b["id"])}],
@@ -325,7 +329,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(request_b.get("ok"), msg=request_b)
         comment_a = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="comment",
             action="add",
             args={
@@ -336,7 +340,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(comment_a.get("ok"), msg=comment_a)
         comment_b = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="comment",
             action="add",
             args={
@@ -347,7 +351,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(comment_b.get("ok"), msg=comment_b)
         update_a = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_update",
             args={
@@ -359,7 +363,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertTrue(update_a.get("ok"), msg=update_a)
         update_b = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_update",
             args={
@@ -372,7 +376,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertTrue(update_b.get("ok"), msg=update_b)
 
         filtered = self._dispatch(
-            buddy="market",
+            role="market",
             tool="context",
             action="summarize",
             args={"track_id": "track-context-filter-a"},
@@ -396,7 +400,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
                 self.assertEqual(row.get("track_id"), "track-context-filter-a", msg=row)
 
         empty = self._dispatch(
-            buddy="market",
+            role="market",
             tool="context",
             action="summarize",
             args={"track_id": "track-context-filter-missing"},
@@ -409,14 +413,14 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(empty.get("recent_updates"), [])
 
     def test_market_evidence_requires_target_scoped_args(self) -> None:
-        response = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={"reason": "no target"})
+        response = self._dispatch(role="market", tool="evidence", action="issue_browser", args={"reason": "no target"})
         self.assertFalse(response["ok"])
         self.assertEqual(response["permission_boundary"], "request-payload")
         self.assertIn("unsupported payload fields", response["why_blocked"].lower())
 
     def test_non_pm_track_write_rejected_by_authority_boundary(self) -> None:
         response = self._dispatch(
-            buddy="design",
+            role="design",
             tool="track",
             action="create",
             args={
@@ -434,8 +438,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(response.get("active_role"), "design")
         self.assertEqual(response.get("allowed_roles"), ["pm"])
 
-    def test_pm_page_prototype_decision_surface_prefers_direct_private_buddybox_directory_without_phrase_rule(self) -> None:
-        pm_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md").read_text(
+    def test_pm_page_prototype_decision_surface_prefers_direct_private_actor_private_directory_without_phrase_rule(self) -> None:
+        pm_agents = (ROOT / "tools" / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("project.access=", pm_agents)
@@ -444,7 +448,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertIn("context.get.tool_catalog", pm_agents)
         self.assertNotIn("python3 scripts/env/client.py", pm_agents)
 
-        summary = self._dispatch(buddy="pm", tool="context", action="summarize", args={})
+        summary = self._dispatch(role="pm", tool="context", action="summarize", args={})
         self.assertTrue(summary["ok"], msg=summary)
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
@@ -467,23 +471,23 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         assert isinstance(context_tool, dict)
         assert isinstance(evidence, dict)
         assert isinstance(search, dict)
-        self.assertNotIn("buddybox", affordances)
+        self.assertNotIn("private", affordances)
         writable_surfaces = summary.get("writable_surfaces")
         self.assertIsInstance(writable_surfaces, dict, msg=summary)
         assert isinstance(writable_surfaces, dict)
         persistent = writable_surfaces.get("persistent_files")
         self.assertIsInstance(persistent, dict, msg=writable_surfaces)
         assert isinstance(persistent, dict)
-        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
-        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_ACTOR_PRIVATE_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "private")
         for compact in (artifact, task, track, context_tool, evidence, search):
             for key in ("capability", "when_to_use", "when_not_to_use", "returns", "state_effect"):
                 self.assertIn(key, compact, msg=compact)
 
-        context_get = self._dispatch(buddy="pm", tool="context", action="get", args={})
+        context_get = self._dispatch(role="pm", tool="context", action="get", args={})
         self.assertTrue(context_get["ok"], msg=context_get)
-        self.assertNotIn("buddybox", context_get["tool_catalog"])
-        self.assertNotIn("buddybox.write", context_get["operation_semantics"])
+        self.assertNotIn("private", context_get["tool_catalog"])
+        self.assertNotIn("actor_private.write", context_get["operation_semantics"])
         semantic_payload = json.dumps(
             {"summary": affordances, "writable_surfaces": writable_surfaces},
             ensure_ascii=True,
@@ -493,7 +497,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
 
         product_objects_root = self._runtime_path("buddyswitch/objects")
         before = sorted(path.relative_to(product_objects_root).as_posix() for path in product_objects_root.rglob("*.json"))
-        target = self.instance_root / "workspace" / "buddybox" / "prototypes" / "simple-page.html"
+        target = self.instance_root / "workspace" / "private" / "prototypes" / "simple-page.html"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("<!doctype html><html><body><h1>Prototype</h1></body></html>", encoding="utf-8")
         self.assertTrue(target.exists())

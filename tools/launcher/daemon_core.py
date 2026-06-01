@@ -126,9 +126,9 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _state_payload(instance_id: str, main_thread_id: str) -> dict[str, Any]:
+def _state_payload(actor_id: str, main_thread_id: str) -> dict[str, Any]:
     return {
-        "instance_id": instance_id,
+        "actor_id": actor_id,
         "main_thread_id": main_thread_id,
         "daemon_origin_turn_ids": [],
         "ready": None,
@@ -202,16 +202,16 @@ class DaemonState:
         self.payload = payload
 
     @classmethod
-    def load(cls, *, instance_root: Path, instance_id: str, main_thread_id: str) -> DaemonState:
+    def load(cls, *, instance_root: Path, actor_id: str, main_thread_id: str) -> DaemonState:
         path = daemon_state_file(instance_root)
-        payload = _state_payload(instance_id, main_thread_id)
+        payload = _state_payload(actor_id, main_thread_id)
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return cls(path=path, payload=payload)
         if isinstance(loaded, dict):
             payload.update(loaded)
-        payload["instance_id"] = instance_id
+        payload["actor_id"] = actor_id
         payload["main_thread_id"] = main_thread_id
         for field in LEGACY_STATE_FIELDS:
             payload.pop(field, None)
@@ -349,10 +349,10 @@ class DaemonContext:
         *,
         instance_json: Path,
         instance_payload: dict[str, Any],
-        instance_id: str,
+        actor_id: str,
         instance_root: Path,
         main_thread_id: str,
-        buddy: str,
+        role: str,
         workspace_dir: Path,
         project_workspace_dir: Path,
         socket_path: Path,
@@ -360,10 +360,10 @@ class DaemonContext:
     ) -> None:
         self.instance_json = instance_json
         self.instance_payload = instance_payload
-        self.instance_id = instance_id
+        self.actor_id = actor_id
         self.instance_root = instance_root
         self.main_thread_id = main_thread_id
-        self.buddy = buddy
+        self.role = role
         self.workspace_dir = workspace_dir
         self.project_workspace_dir = project_workspace_dir
         self.socket_path = socket_path
@@ -402,12 +402,12 @@ def load_daemon_context(instance_json: Path) -> DaemonContext:
     payload = json.loads(instance_json.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"instance JSON must contain an object: {instance_json}")
-    instance_id = _string_field(payload, "instance_id")
-    buddy = _string_field(payload, "buddy")
+    actor_id = _string_field(payload, "actor_id")
+    role = _string_field(payload, "role")
     main_thread_id = _string_field(payload, "thread_id")
     instance_root_text = _string_field(payload, "instance_root")
     workspace_dir_text = _string_field(payload, "workspace_dir")
-    if not instance_id or not buddy or not main_thread_id or not instance_root_text or not workspace_dir_text:
+    if not actor_id or not role or not main_thread_id or not instance_root_text or not workspace_dir_text:
         raise ValueError(f"instance JSON is missing daemon fields: {instance_json}")
     instance_root = Path(instance_root_text)
     workspace_dir = Path(workspace_dir_text)
@@ -416,29 +416,29 @@ def load_daemon_context(instance_json: Path) -> DaemonContext:
     socket_path = (
         Path(socket_text)
         if socket_text
-        else app_server.effective_socket_path(instance_id, instance_root, app_server.marker_file(instance_root))
+        else app_server.effective_socket_path(actor_id, instance_root, app_server.marker_file(instance_root))
     )
     return DaemonContext(
         instance_json=instance_json,
         instance_payload=payload,
-        instance_id=instance_id,
+        actor_id=actor_id,
         instance_root=instance_root,
         main_thread_id=main_thread_id,
-        buddy=buddy,
+        role=role,
         workspace_dir=workspace_dir,
         project_workspace_dir=project_workspace_dir,
         socket_path=socket_path,
     )
 
 
-def actor_address_for_context(context: DaemonContext) -> actor_profile.RuntimeActorAddress:
-    record = actor_profile.runtime_instance_record_from_dispatch(
-        instance_id=context.instance_id,
-        active_buddy=context.buddy,
+def actor_address_for_context(context: DaemonContext) -> actor_profile.ActorAddress:
+    record = actor_profile.runtime_actor_record_from_dispatch(
+        actor_id=context.actor_id,
+        role_id=context.role,
         instance_json=context.instance_json,
         instance_payload=context.instance_payload,
     )
-    return actor_profile.resolve_runtime_actor_profile(record).actor_address
+    return actor_profile.resolve_actor_profile(record).actor_address
 
 
 def central_daemon_socket_path(context: DaemonContext) -> Path:
@@ -455,7 +455,7 @@ def central_daemon_socket_path(context: DaemonContext) -> Path:
 
 def register_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.RuntimeActorAddress,
+    actor_address: actor_profile.ActorAddress,
 ) -> dict[str, Any]:
     return daemon_client.register_actor(
         actor_address=actor_address.to_payload(),
@@ -470,7 +470,7 @@ def register_daemon_actor(
 
 def unregister_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.RuntimeActorAddress,
+    actor_address: actor_profile.ActorAddress,
 ) -> dict[str, Any]:
     return daemon_client.unregister_actor(
         actor_address=actor_address.to_payload(),
@@ -480,7 +480,7 @@ def unregister_daemon_actor(
 
 def safe_unregister_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.RuntimeActorAddress,
+    actor_address: actor_profile.ActorAddress,
     *,
     state: DaemonState | None = None,
 ) -> dict[str, Any]:
@@ -502,7 +502,7 @@ def safe_unregister_daemon_actor(
 
 def heartbeat_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.RuntimeActorAddress,
+    actor_address: actor_profile.ActorAddress,
 ) -> dict[str, Any]:
     return daemon_client.heartbeat_actor(
         actor_address=actor_address.to_payload(),
@@ -514,7 +514,7 @@ def start_daemon_mailbox(
     *,
     context: DaemonContext,
     state: DaemonState,
-    actor_address: actor_profile.RuntimeActorAddress,
+    actor_address: actor_profile.ActorAddress,
     mailbox_handlers: list[Any] | tuple[Any, ...],
 ) -> daemon_mailbox.DaemonMailboxServer:
     server = daemon_mailbox.DaemonMailboxServer(
@@ -533,7 +533,7 @@ def start_daemon_mailbox(
             return server
         time.sleep(DAEMON_READY_POLL_SECONDS)
     server.close()
-    raise RuntimeError(f"daemon mailbox did not become ready for {context.instance_id}")
+    raise RuntimeError(f"daemon mailbox did not become ready for {context.actor_id}")
 
 
 def bind_main_thread(context: DaemonContext, client: Any) -> None:
@@ -553,7 +553,7 @@ def bind_main_thread(context: DaemonContext, client: Any) -> None:
     thread = result.get("thread")
     if not isinstance(thread, dict) or _string_field(thread, "id") != context.main_thread_id:
         raise app_server.AppServerProtocolError(
-            f"thread/resume returned unexpected thread id for {context.instance_id}"
+            f"thread/resume returned unexpected thread id for {context.actor_id}"
         )
 
 
@@ -647,7 +647,7 @@ def daemon_status(
         pid = None
     state = DaemonState.load(
         instance_root=context.instance_root,
-        instance_id=context.instance_id,
+        actor_id=context.actor_id,
         main_thread_id=context.main_thread_id,
     )
     ready = bool(pid is not None and pid_live and state.ready_for(pid, context.main_thread_id))
@@ -687,7 +687,7 @@ def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] |
     log_path.touch(exist_ok=True)
     state = DaemonState.load(
         instance_root=context.instance_root,
-        instance_id=context.instance_id,
+        actor_id=context.actor_id,
         main_thread_id=context.main_thread_id,
     )
     state.register_handlers(_handler_names(handlers))
@@ -727,7 +727,7 @@ def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] |
     while time.monotonic() < deadline:
         wait_state = DaemonState.load(
             instance_root=context.instance_root,
-            instance_id=context.instance_id,
+            actor_id=context.actor_id,
             main_thread_id=context.main_thread_id,
         )
         if wait_state.ready_for(process.pid, context.main_thread_id):
@@ -739,11 +739,11 @@ def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] |
             return status
         if process.poll() is not None:
             _remove_path(pid_path)
-            raise RuntimeError(f"daemon exited before ready for {context.instance_id}; see {log_path}")
+            raise RuntimeError(f"daemon exited before ready for {context.actor_id}; see {log_path}")
         time.sleep(DAEMON_READY_POLL_SECONDS)
     _terminate_pid(process.pid)
     _remove_path(pid_path)
-    raise RuntimeError(f"daemon did not become ready for {context.instance_id}; see {log_path}")
+    raise RuntimeError(f"daemon did not become ready for {context.actor_id}; see {log_path}")
 
 
 def stop_daemon(instance_json: Path) -> dict[str, Any]:
@@ -751,7 +751,7 @@ def stop_daemon(instance_json: Path) -> dict[str, Any]:
     actor_address = actor_address_for_context(context)
     state = DaemonState.load(
         instance_root=context.instance_root,
-        instance_id=context.instance_id,
+        actor_id=context.actor_id,
         main_thread_id=context.main_thread_id,
     )
     pid_path = daemon_pid_file(context.instance_root)
@@ -781,7 +781,7 @@ def run_daemon(
     actor_address = actor_address_for_context(context)
     state = DaemonState.load(
         instance_root=context.instance_root,
-        instance_id=context.instance_id,
+        actor_id=context.actor_id,
         main_thread_id=context.main_thread_id,
     )
     state.save()

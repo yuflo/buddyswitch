@@ -26,18 +26,18 @@ _ACTION_DEFINITION_MAP = {
     ]
 }
 
-_DISCOVERY_EXCLUDED_TOOLS = {"buddybox"}
+_DISCOVERY_EXCLUDED_TOOLS: set[str] = set()
 
 class ContextServiceContext(TypedDict):
-    active_buddy: str
-    instance_id: str
+    active_role: str
+    actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
     manifest_path: Path | None
 
 
-def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+def _reject_payload(*, action: str, active_role: str, message: str) -> dict[str, Any]:
     correctable_fields: list[str] | None = None
     if "unsupported payload fields:" in message:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
@@ -51,7 +51,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
     return tool_results.rejection(
         tool="context",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code="E_CONTEXT_PAYLOAD",
         message=message,
         permission_boundary="context.filter",
@@ -69,7 +69,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
     )
 
 
-def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
+def _require_allowed_fields(action: str, args: dict[str, Any], active_role: str) -> dict[str, Any] | None:
     _, action_name = action.split(".", 1)
     allowed = set()
     for row in _ACTION_DEFINITION_MAP.get("actions", []):
@@ -80,7 +80,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
     if unknown:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
         )
     return None
@@ -144,7 +144,7 @@ def _source_root_from_runtime_projection(
 
 def _load_active_env_profile(
     context: ContextServiceContext,
-    active_buddy: str,
+    active_role: str,
 ) -> dict[str, Any]:
     manifest_path_raw = context.get("manifest_path")
     if manifest_path_raw is None:
@@ -152,7 +152,7 @@ def _load_active_env_profile(
     manifest_path = Path(str(manifest_path_raw)).expanduser().resolve(strict=False)
     repo_root = _repo_root_from_manifest_path(manifest_path)
     return env_profiles.require_env_profile(
-        active_buddy,
+        active_role,
         manifest_path=manifest_path,
         repo_root=repo_root,
     )
@@ -175,13 +175,13 @@ def _classify_source_root(root: Path, *, limit: int = 20) -> tuple[str, list[str
 def _source_workspace_rejection(
     *,
     action: str,
-    active_buddy: str,
+    active_role: str,
     message: str,
 ) -> dict[str, Any]:
     return tool_results.rejection(
         tool="context",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code="E_CONTEXT_SOURCE_WORKSPACE",
         message=message,
         permission_boundary="context.source_workspace",
@@ -200,12 +200,12 @@ def _source_workspace_rejection(
 
 def _build_source_workspace(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_payload: dict[str, Any],
     context: ContextServiceContext,
     include_resolved_path: bool,
 ) -> dict[str, Any]:
-    profile = _load_active_env_profile(context, active_buddy)
+    profile = _load_active_env_profile(context, active_role)
     project_path = str(profile.get("project", {}).get("path", "")).strip()
     if not project_path:
         raise ValueError("env profile project.path is missing")
@@ -233,7 +233,7 @@ def _build_source_workspace(
 
     state, entries, truncated = _classify_source_root(source_root)
     source_workspace: dict[str, Any] = {
-        "active_buddy": active_buddy,
+        "active_role": active_role,
         "path": project_path,
         "access": source_root_access,
         "can_write_source": source_root_access == "write",
@@ -251,32 +251,42 @@ def _build_source_workspace(
     return source_workspace
 
 
-def _candidate_track_row(*, track: dict[str, Any], active_buddy: str) -> dict[str, Any]:
-    role = "owner" if track.get("owner_buddy") == active_buddy else "collaborator"
+def _candidate_track_row(*, track: dict[str, Any], active_role: str) -> dict[str, Any]:
+    role = "owner" if track.get("owner_role") == active_role else "collaborator"
     return {
         "track_id": track.get("id"),
         "title": track.get("title"),
         "outcome": track.get("outcome", ""),
-        "owner_buddy": track.get("owner_buddy"),
+        "owner_role": track.get("owner_role"),
+        "created_by_actor": track.get("created_by_actor"),
         "state": track.get("state"),
         "health": track.get("health"),
         "now": track.get("now"),
-        "active_buddy_role": role,
+        "active_role_relation": role,
         "updated_at": track.get("updated_at"),
     }
 
 
-def _candidate_request_row(*, request: dict[str, Any], active_buddy: str) -> dict[str, Any]:
-    direction = "incoming" if request.get("to_buddy") == active_buddy else "outgoing"
-    if active_buddy == "pm" and request.get("to_buddy") != active_buddy and request.get("from_buddy") != active_buddy:
+def _request_from_actor_role(request: dict[str, Any]) -> str | None:
+    from_actor = request.get("from_actor")
+    if not isinstance(from_actor, dict):
+        return None
+    role_id = from_actor.get("role_id")
+    return role_id if isinstance(role_id, str) and role_id else None
+
+
+def _candidate_request_row(*, request: dict[str, Any], active_role: str) -> dict[str, Any]:
+    from_role = _request_from_actor_role(request)
+    direction = "incoming" if request.get("to_role") == active_role else "outgoing"
+    if active_role == "pm" and request.get("to_role") != active_role and from_role != active_role:
         direction = "pm-visible"
     result_refs = request.get("result_refs")
     blocker = request.get("blocker")
     return {
         "request_id": request.get("id"),
         "track_id": request.get("track_id"),
-        "from_buddy": request.get("from_buddy"),
-        "to_buddy": request.get("to_buddy"),
+        "from_actor": request.get("from_actor"),
+        "to_role": request.get("to_role"),
         "title": request.get("title"),
         "status": request.get("status"),
         "direction": direction,
@@ -320,7 +330,7 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
         "request_lifecycle_visibility": str(operation_semantics["request.create"]["visibility"]),
         "search_boundary": str(affordances["search"]["object_model"]),
         "evidence_boundary": str(affordances["evidence"]["object_model"]),
-        "writable_file_surface": "$BUDDYSWITCH_BUDDYBOX_DIR for persistent private files; $BUDDYSWITCH_INSTANCE_TMP for temporary files.",
+        "writable_file_surface": "$BUDDYSWITCH_ACTOR_PRIVATE_DIR for persistent private files; $BUDDYSWITCH_INSTANCE_TMP for temporary files.",
     }
 
 
@@ -333,14 +343,14 @@ def _visible_tracks(*, track_filter: str | None, limit_value: int, context: Cont
 
 def _visible_tasks(
     *,
-    active_buddy: str,
+    active_role: str,
     task_filter: str | None,
     visible_track_ids: set[str],
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
     tasks = context.repos.task.list_tasks(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=context["instance_json"],
         instance_payload=context["instance_payload"],
     )
@@ -360,20 +370,20 @@ def _visible_tasks(
 def _candidate_artifact_rows(
     *,
     track_filter: str | None,
-    active_buddy: str,
+    active_role: str,
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
     normalized_track_filter = track_filter.strip() if isinstance(track_filter, str) and track_filter.strip() else None
     rows: list[dict[str, Any]] = []
     for artifact in context.repos.artifact.list_artifacts():
-        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_buddy)
+        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_role)
         if not bool(decision.get("allowed")):
             continue
         if not _context_artifact_row_allowed(
             artifact=artifact,
             decision=decision,
-            active_buddy=active_buddy,
+            active_role=active_role,
             track_filter=normalized_track_filter,
         ):
             continue
@@ -383,12 +393,13 @@ def _candidate_artifact_rows(
         comment_counts = context.rules.artifact_relations.comment_counts_for_artifact(artifact_id)
         relation_counts = context.rules.artifact_relations.relation_counts_for_artifact(
             artifact_id=artifact_id,
-            active_buddy=active_buddy,
+            active_role=active_role,
+            active_actor_address=context.actor_address.to_payload(),
         )
         rows.append(
             context.rules.artifact_visibility.artifact_list_row(
                 artifact,
-                active_buddy,
+                active_role,
                 comment_counts=comment_counts,
                 relation_counts=relation_counts,
             )
@@ -401,7 +412,7 @@ def _context_artifact_row_allowed(
     *,
     artifact: dict[str, Any],
     decision: dict[str, Any],
-    active_buddy: str,
+    active_role: str,
     track_filter: str | None,
 ) -> bool:
     relation = decision.get("relation")
@@ -411,7 +422,7 @@ def _context_artifact_row_allowed(
         return relation in {"track_material", "track_proof"}
     if relation in {"track_material", "track_proof"}:
         return True
-    return artifact.get("status") == "draft" and artifact.get("created_by") == active_buddy
+    return artifact.get("status") == "draft" and artifact.get("created_by") == active_role
 
 
 def _open_comment_thread_rows(
@@ -459,7 +470,7 @@ def _open_comment_thread_rows(
                 "target_type": target_type,
                 "target_id": latest.get("target_id"),
                 "latest_comment_id": latest.get("id"),
-                "latest_by_buddy": latest.get("by_buddy"),
+                "latest_by_actor": latest.get("by_actor"),
                 "open_comment_count": open_count,
                 "updated_at": latest.get("created_at"),
             }
@@ -489,7 +500,7 @@ def _recent_update_rows(
                     "update_id": update.get("id"),
                     "kind": update.get("kind"),
                     "summary": update.get("summary"),
-                    "by_buddy": update.get("by_buddy"),
+                    "by_actor": update.get("by_actor"),
                     "ref_count": ref_count,
                     "created_at": update.get("created_at"),
                 }
@@ -503,7 +514,7 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
     inbox = context.rules.message.filter_inbox_messages(
         messages=context.repos.message.list_messages(),
         active_actor_address=active_actor_address,
-        sender_buddy=None,
+        sender_role=None,
         q=None,
         limit=limit_value,
     )
@@ -528,7 +539,7 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
 
 def _visible_requests(
     *,
-    active_buddy: str,
+    active_role: str,
     track_filter: str | None,
     visible_track_ids: set[str],
     limit_value: int,
@@ -549,10 +560,10 @@ def _visible_requests(
             context.rules.comment_target.assert_target_readable(
                 target_type="track",
                 target_id=track_id,
-                active_buddy=active_buddy,
+                active_role=active_role,
                 action="context.get",
             )
-            context.rules.request.ensure_visible(request, active_buddy)
+            context.rules.request.ensure_visible(request, active_role, context.actor_address)
         except (
             context.rules.comment_target.CommentTargetPayloadError,
             context.rules.comment_target.CommentTargetScopeError,
@@ -567,7 +578,7 @@ def _visible_requests(
 
 def _current_context_sections(
     *,
-    active_buddy: str,
+    active_role: str,
     args: dict[str, Any],
     instance_payload: dict[str, Any],
     include_resolved_path: bool,
@@ -585,7 +596,7 @@ def _current_context_sections(
     )
     visible_track_ids = {row.get("id") for row in visible_tracks if isinstance(row.get("id"), str)}
     visible_tasks = _visible_tasks(
-        active_buddy=active_buddy,
+        active_role=active_role,
         task_filter=task_filter if isinstance(task_filter, str) else None,
         visible_track_ids=visible_track_ids,
         limit_value=limit_value,
@@ -593,12 +604,12 @@ def _current_context_sections(
     )
     visible_artifacts = _candidate_artifact_rows(
         track_filter=track_filter if isinstance(track_filter, str) else None,
-        active_buddy=active_buddy,
+        active_role=active_role,
         limit_value=limit_value,
         context=context,
     )
     visible_requests = _visible_requests(
-        active_buddy=active_buddy,
+        active_role=active_role,
         track_filter=track_filter if isinstance(track_filter, str) else None,
         visible_track_ids=visible_track_ids,
         limit_value=limit_value,
@@ -622,15 +633,15 @@ def _current_context_sections(
     actor_address = context.actor_address.to_payload()
     message_cues = _message_cues(limit_value=limit_value, context=context)
     source_workspace = _build_source_workspace(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_payload=instance_payload,
         context=context,
         include_resolved_path=include_resolved_path,
     )
 
     writable_surfaces = _build_writable_surfaces(instance_payload)
-    candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
-    candidate_requests = [_candidate_request_row(request=row, active_buddy=active_buddy) for row in visible_requests]
+    candidate_tracks = [_candidate_track_row(track=row, active_role=active_role) for row in visible_tracks]
+    candidate_requests = [_candidate_request_row(request=row, active_role=active_role) for row in visible_requests]
     candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {
@@ -656,7 +667,7 @@ def _current_context_sections(
         ),
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},
-            "active_buddy_relation": {"role": "explicit-id-tools"},
+            "active_role_relation": {"role": "explicit-id-tools"},
             "context_readiness": {
                 "has_tracks": bool(visible_tracks),
                 "has_tasks": bool(visible_tasks),
@@ -685,8 +696,8 @@ def _build_writable_surfaces(instance_payload: dict[str, Any]) -> dict[str, Any]
     return {
         "persistent_files": {
             "kind": "host_writable_directory",
-            "env": "BUDDYSWITCH_BUDDYBOX_DIR",
-            "workspace_relative_root": "buddybox",
+            "env": "BUDDYSWITCH_ACTOR_PRIVATE_DIR",
+            "workspace_relative_root": "private",
             "durability": "active_instance_persistent",
             "mutates_product_state": False,
         },
@@ -707,8 +718,8 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "track.open / track.list via runtime env tools",
         },
         "tasks": {
-            "description": "Active-buddy private task hints and checklists.",
-            "scope": "active-buddy private task state",
+            "description": "Active-role private task hints and checklists.",
+            "scope": "active-role private task state",
             "source_of_truth": "task.current / task.propose / task.confirm via runtime env tools",
         },
         "artifacts": {
@@ -727,7 +738,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "comment.list via runtime env tools",
         },
         "requests": {
-            "description": "Cross-buddy durable collaboration request lifecycle rows.",
+            "description": "Cross-role durable collaboration request lifecycle rows.",
             "scope": "requester-recipient-pm visible request state",
             "source_of_truth": "request.list / request.get via runtime env tools",
         },
@@ -739,7 +750,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "grants_write_authority": False,
         },
         "source_workspace": {
-            "description": "Runtime product source root facts for the active buddy.",
+            "description": "Runtime product source root facts for the active role.",
             "scope": "read-only source orientation",
             "source_of_truth": "env profile project.path/access and instance workspace projection",
             "mutates_product_state": False,
@@ -751,14 +762,14 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
 
 def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.get"
-    active_buddy = context["active_buddy"]
-    payload_error = _require_allowed_fields(action, args, active_buddy)
+    active_role = context["active_role"]
+    payload_error = _require_allowed_fields(action, args, active_role)
     if payload_error is not None:
         return payload_error
 
     try:
         sections = _current_context_sections(
-            active_buddy=active_buddy,
+            active_role=active_role,
             args=args,
             instance_payload=context["instance_payload"],
             include_resolved_path=True,
@@ -767,13 +778,13 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
     except Exception as exc:
         return _source_workspace_rejection(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
         )
     return tool_results.success(
         tool="context",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary="Returned full runtime context sections plus source_workspace facts, writable_surfaces facts, full tool catalog, and full operation semantics.",
         state_changed=False,
         durability="none",
@@ -788,14 +799,14 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
 
 def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.summarize"
-    active_buddy = context["active_buddy"]
-    payload_error = _require_allowed_fields(action, args, active_buddy)
+    active_role = context["active_role"]
+    payload_error = _require_allowed_fields(action, args, active_role)
     if payload_error is not None:
         return payload_error
 
     try:
         sections = _current_context_sections(
-            active_buddy=active_buddy,
+            active_role=active_role,
             args=args,
             instance_payload=context["instance_payload"],
             include_resolved_path=False,
@@ -804,7 +815,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     except Exception as exc:
         return _source_workspace_rejection(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
         )
     summary = {
@@ -828,7 +839,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     return tool_results.success(
         tool="context",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary="Returned compact context orientation with source_workspace facts, writable_surfaces facts, candidate ids, and first-pass tool affordances.",
         state_changed=False,
         durability="none",
@@ -843,15 +854,15 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
 
 def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.list_sources"
-    active_buddy = context["active_buddy"]
-    payload_error = _require_allowed_fields(action, args, active_buddy)
+    active_role = context["active_role"]
+    payload_error = _require_allowed_fields(action, args, active_role)
     if payload_error is not None:
         return payload_error
 
     return tool_results.success(
         tool="context",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary="Returned read-only context source descriptors, including source_workspace orientation semantics.",
         state_changed=False,
         durability="none",

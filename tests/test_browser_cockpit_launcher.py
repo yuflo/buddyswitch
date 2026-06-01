@@ -21,12 +21,12 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
-    def _write_instance_record(self, shared_root: Path, instance_id: str = "inst-pm-browser") -> Path:
-        instance_root = shared_root / "instances" / instance_id
+    def _write_instance_record(self, shared_root: Path, actor_id: str = "act-pm-browser") -> Path:
+        instance_root = shared_root / "instances" / actor_id
         instance_root.mkdir(parents=True, exist_ok=True)
         payload = {
-            "instance_id": instance_id,
-            "buddy": "pm",
+            "actor_id": actor_id,
+            "role": "pm",
             "status": "inactive",
             "current_task_id": None,
             "current_track_id": None,
@@ -366,11 +366,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CHROME_ARGV_FILE"] = str(chrome_argv_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            instance_root = self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            instance_root = self._write_instance_record(shared_root, actor_id)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -439,11 +439,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            instance_root = self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            instance_root = self._write_instance_record(shared_root, actor_id)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -489,11 +489,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            self._write_instance_record(shared_root, actor_id)
 
             status = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "status", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "status", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -520,8 +520,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            self._write_instance_record(shared_root, actor_id)
 
             for url in (
                 "chrome://signin/",
@@ -535,7 +535,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                         pages=[{"id": "only-page", "type": "page", "url": url}],
                     )
                     status = subprocess.run(
-                        [str(LAUNCHER), "env", "browser", "status", "--instance", instance_id],
+                        [str(LAUNCHER), "env", "browser", "status", "--instance", actor_id],
                         cwd=ROOT,
                         env=env,
                         text=True,
@@ -562,8 +562,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            self._write_instance_record(shared_root, actor_id)
 
             for url in ("http://example.com/", "https://example.com/"):
                 with self.subTest(url=url):
@@ -573,7 +573,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                         pages=[{"id": "normal-page", "type": "page", "url": url}],
                     )
                     status = subprocess.run(
-                        [str(LAUNCHER), "env", "browser", "status", "--instance", instance_id],
+                        [str(LAUNCHER), "env", "browser", "status", "--instance", actor_id],
                         cwd=ROOT,
                         env=env,
                         text=True,
@@ -616,11 +616,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            self._write_instance_record(shared_root, actor_id)
 
             ensure = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -671,11 +671,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            self._write_instance_record(shared_root, actor_id)
 
             ensure = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -731,11 +731,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser"
-            self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser"
+            self._write_instance_record(shared_root, actor_id)
 
             ensure = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -784,7 +784,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("env browser ensure requires --instance <instance-id>", completed.stderr)
+            self.assertIn("env browser ensure requires --instance <actor-id>", completed.stderr)
             self.assertFalse(shared_root.exists(), "ensure without --instance must fail before creating shared state")
 
     def test_browser_ensure_repairs_raw_cockpit_mcp_with_matching_browser_url(self) -> None:
@@ -813,8 +813,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser-raw-mcp"
-            instance_root = self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser-raw-mcp"
+            instance_root = self._write_instance_record(shared_root, actor_id)
             instance_codex_home = instance_root / "codex-home"
             instance_codex_home.mkdir(parents=True, exist_ok=True)
             (instance_codex_home / "config.toml").write_text(
@@ -827,7 +827,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             )
 
             completed = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,

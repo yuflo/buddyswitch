@@ -22,14 +22,14 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         self.roles = frozenset(
-            buddy["id"] for buddy in self.manifest.get("buddies", []) if isinstance(buddy, dict)
+            role["id"] for role in self.manifest.get("roles", []) if isinstance(role, dict)
         )
         self.operation_semantics = tool_registry.operation_semantics()
 
     def _subject(self, role: str) -> AuthSubject:
         return AuthSubject(role_id=role)
 
-    def test_manifest_buddy_ids_are_runtime_roles(self) -> None:
+    def test_manifest_roles_are_runtime_roles(self) -> None:
         self.assertEqual(self.roles, role_auth.manifest_role_ids(self.manifest))
         self.assertEqual(self.roles, frozenset({"market", "pm", "design", "dev", "test"}))
 

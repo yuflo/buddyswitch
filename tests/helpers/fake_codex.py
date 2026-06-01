@@ -69,7 +69,7 @@ def append_process_registry(payload: dict[str, object]) -> None:
         "pgid": os.getpgrp(),
         "argv": argv,
         "cwd": payload.get("cwd"),
-        "instance_id": payload.get("instance_id"),
+        "actor_id": payload.get("actor_id"),
         "instance_json": payload.get("instance_json"),
     }
     instance_json = payload.get("instance_json")
@@ -219,7 +219,7 @@ def maybe_capture_runtime_smoke() -> list[dict[str, object]] | None:
     smoke_commands = (
         ("turn_runtime.status", ["python3", "scripts/turn_runtime.py", "status"]),
         ("context.summarize", ["python3", "scripts/env/client.py", "context", "summarize"]),
-        ("buddybox.desc", ["python3", "scripts/env/client.py", "buddybox", "desc"]),
+        ("actor_private.desc", ["python3", "scripts/env/client.py", "actor_private", "desc"]),
         ("search.status", ["python3", "scripts/env/client.py", "search", "status"]),
     )
     for name, command in smoke_commands:
@@ -741,7 +741,7 @@ def handle_rpc_message(
             "rpc_method": method,
             "params": params,
             "cwd": os.getcwd(),
-            "instance_id": entry.get("instance_id"),
+            "actor_id": entry.get("actor_id"),
             "client_name": client_name,
         }
     )
@@ -750,7 +750,7 @@ def handle_rpc_message(
     if method == "initialize":
         return rpc_result_response(request_id, {"userAgent": "codex/1.0.0"})
 
-    default_thread_id = str(entry.get("instance_id") or "thread-test")
+    default_thread_id = str(entry.get("actor_id") or "thread-test")
     state = load_server_state(f"thread-{default_thread_id}")
     if method == "thread/resume":
         attempt_count = state.get("thread_resume_attempt_count")
@@ -880,7 +880,7 @@ def send_json(sock: socket.socket, payload: dict[str, object]) -> None:
 
 
 def _daemon_notifications(entry: dict[str, object]) -> list[dict[str, object]]:
-    default_thread_id = str(entry.get("instance_id") or "thread-test")
+    default_thread_id = str(entry.get("actor_id") or "thread-test")
     state = load_server_state(f"thread-{default_thread_id}")
     notifications = state.get("daemon_notifications")
     if not isinstance(notifications, list):
@@ -897,7 +897,7 @@ def send_daemon_notifications(sock: socket.socket, entry: dict[str, object], *, 
                 "notification_method": notification.get("method"),
                 "params": notification.get("params"),
                 "cwd": os.getcwd(),
-                "instance_id": entry.get("instance_id"),
+                "actor_id": entry.get("actor_id"),
                 "client_name": client_name,
             }
         )
@@ -914,7 +914,7 @@ def send_daemon_started_turn_completion(
 ) -> None:
     if request.get("method") != "turn/start" or response is None:
         return
-    default_thread_id = str(entry.get("instance_id") or "thread-test")
+    default_thread_id = str(entry.get("actor_id") or "thread-test")
     state = load_server_state(f"thread-{default_thread_id}")
     if not state.get("daemon_emit_completion_for_started_turn"):
         return
@@ -953,7 +953,7 @@ def send_daemon_started_turn_completion(
             "notification_method": notification.get("method"),
             "params": notification.get("params"),
             "cwd": os.getcwd(),
-            "instance_id": entry.get("instance_id"),
+            "actor_id": entry.get("actor_id"),
             "client_name": client_name,
         }
     )
@@ -1004,7 +1004,7 @@ def handle_websocket_connection(sock: socket.socket, entry: dict[str, object]) -
                 params = message.get("params")
                 thread_id = params.get("threadId") if isinstance(params, dict) else None
                 if isinstance(thread_id, str) and thread_id:
-                    default_thread_id = str(entry.get("instance_id") or "thread-test")
+                    default_thread_id = str(entry.get("actor_id") or "thread-test")
                     state = load_server_state(f"thread-{default_thread_id}")
                     state["daemon_subscribed_thread_id"] = thread_id
                     save_server_state(state)
@@ -1079,10 +1079,10 @@ def main(argv: list[str]) -> int:
         "tmp": os.environ.get("TMP"),
         "temp": os.environ.get("TEMP"),
         "tmpprefix": os.environ.get("TMPPREFIX"),
-        "active_buddy": os.environ.get("BUDDYSWITCH_ACTIVE_BUDDY"),
-        "instance_id": os.environ.get("BUDDYSWITCH_INSTANCE_ID"),
+        "active_role": os.environ.get("BUDDYSWITCH_ROLE_ID"),
+        "actor_id": os.environ.get("BUDDYSWITCH_ACTOR_ID"),
         "instance_json": os.environ.get("BUDDYSWITCH_INSTANCE_JSON"),
-        "buddybox_dir": os.environ.get("BUDDYSWITCH_BUDDYBOX_DIR"),
+        "actor_private_dir": os.environ.get("BUDDYSWITCH_ACTOR_PRIVATE_DIR"),
         "instance_tmp": os.environ.get("BUDDYSWITCH_INSTANCE_TMP"),
         "project_workspace_dir": os.environ.get("BUDDYSWITCH_PROJECT_WORKSPACE_DIR"),
         "runtime_broker_socket": os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_SOCKET"),

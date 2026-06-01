@@ -67,11 +67,11 @@ _buddyswitch_runtime_broker_effective_socket() {
     printf '%s\n' "${default_socket}"
     return 0
   fi
-  fallback_socket="$(python3 - "${BUDDYSWITCH_INSTANCE_ID}" <<'PY'
+  fallback_socket="$(python3 - "${BUDDYSWITCH_ACTOR_ID}" <<'PY'
 import hashlib
 import sys
-instance_id = sys.argv[1]
-digest = hashlib.sha1(instance_id.encode("utf-8")).hexdigest()[:12]
+actor_id = sys.argv[1]
+digest = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()[:12]
 print(f"/tmp/buddyswitch-runtime-{digest}.sock")
 PY
 )"

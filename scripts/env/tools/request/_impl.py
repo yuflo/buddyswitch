@@ -26,11 +26,51 @@ _ACTION_DEFINITION_MAP = {
 
 
 class RequestServiceContext(TypedDict):
-    active_buddy: str
-    instance_id: str
+    active_role: str
+    actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
+
+
+def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
+    if hasattr(value, "to_payload"):
+        payload = value.to_payload()
+    else:
+        payload = value
+    if not isinstance(payload, dict):
+        raise ValueError(f"{field} must be an object")
+    unknown = sorted(key for key in payload if key not in {"actor_id", "role_id"})
+    if unknown:
+        raise ValueError(f"{field} contains unsupported fields: {', '.join(unknown)}")
+    actor_id = payload.get("actor_id")
+    role_id = payload.get("role_id")
+    if not isinstance(actor_id, str) or not actor_id.strip():
+        raise ValueError(f"{field}.actor_id must be a non-empty string")
+    if not isinstance(role_id, str) or not role_id.strip():
+        raise ValueError(f"{field}.role_id must be a non-empty string")
+    return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
+
+
+def _context_actor_address(context: Any) -> dict[str, str]:
+    value = getattr(context, "actor_address", None)
+    if value is not None:
+        return _actor_address_payload(value, "active_actor")
+    return _actor_address_payload(context["active_actor"], "active_actor")
+
+
+def _request_from_actor_role(row: dict[str, Any]) -> str | None:
+    try:
+        return _actor_address_payload(row.get("from_actor"), "request.from_actor")["role_id"]
+    except ValueError:
+        return None
+
+
+def _request_from_actor_id(row: dict[str, Any]) -> str | None:
+    try:
+        return _actor_address_payload(row.get("from_actor"), "request.from_actor")["actor_id"]
+    except ValueError:
+        return None
 
 
 def _allowed(action: str) -> set[str]:
@@ -44,7 +84,7 @@ def _allowed(action: str) -> set[str]:
 def _reject_payload(
     *,
     action: str,
-    active_buddy: str,
+    active_role: str,
     message: str,
     correctable_fields: list[str] | None = None,
     field_errors: list[dict[str, Any]] | None = None,
@@ -52,7 +92,7 @@ def _reject_payload(
     return tool_results.rejection(
         tool="request",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code="E_REQUEST_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
@@ -74,7 +114,7 @@ def _reject_payload(
 def _reject_scope(
     *,
     action: str,
-    active_buddy: str,
+    active_role: str,
     code: str,
     boundary: str,
     message: str,
@@ -86,7 +126,7 @@ def _reject_scope(
     return tool_results.rejection(
         tool="request",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code=code,
         message=message,
         permission_boundary=boundary,
@@ -107,14 +147,14 @@ def _reject_scope(
 def _reject_state(
     *,
     action: str,
-    active_buddy: str,
+    active_role: str,
     message: str,
     correctable_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     return tool_results.rejection(
         tool="request",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code="E_REQUEST_STATE",
         message=message,
         permission_boundary="request.state",
@@ -131,12 +171,12 @@ def _reject_state(
     )
 
 
-def _assert_track_readable(*, track_id: str, action: str, active_buddy: str, context: RequestServiceContext) -> dict[str, Any]:
+def _assert_track_readable(*, track_id: str, action: str, active_role: str, context: RequestServiceContext) -> dict[str, Any]:
     try:
         return context.rules.comment_target.assert_target_readable(
             target_type="track",
             target_id=track_id,
-            active_buddy=active_buddy,
+            active_role=active_role,
             action=action,
         )
     except context.rules.comment_target.CommentTargetPayloadError as exc:
@@ -161,7 +201,7 @@ def _assert_ref_readable_in_track_context(
     ref: dict[str, str],
     track_id: str,
     action: str,
-    active_buddy: str,
+    active_role: str,
     context: RequestServiceContext,
 ) -> None:
     ref_type = ref["type"]
@@ -175,7 +215,7 @@ def _assert_ref_readable_in_track_context(
         _assert_track_readable(
             track_id=track_id,
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             context=context,
         )
         return
@@ -191,7 +231,7 @@ def _assert_ref_readable_in_track_context(
             context.rules.comment_target.assert_target_readable(
                 target_type="artifact",
                 target_id=ref_id,
-                active_buddy=active_buddy,
+                active_role=active_role,
                 action=action,
             )
         except context.rules.comment_target.CommentTargetPayloadError as exc:
@@ -276,7 +316,7 @@ def _assert_ref_readable_in_track_context(
         context.rules.comment_target.assert_target_readable(
             target_type=target_type,
             target_id=target_id,
-            active_buddy=active_buddy,
+            active_role=active_role,
             action=action,
         )
     except context.rules.comment_target.CommentTargetPayloadError as exc:
@@ -299,12 +339,12 @@ def _assert_ref_readable_in_track_context(
 def _reject_from_scope_exc(
     *,
     action: str,
-    active_buddy: str,
+    active_role: str,
     exc: Exception,
 ) -> dict[str, Any]:
     return _reject_scope(
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code=getattr(exc, "code", "E_REQUEST_SCOPE"),
         boundary=getattr(exc, "permission_boundary", "request.scope"),
         message=str(exc),
@@ -317,24 +357,24 @@ def _reject_from_scope_exc(
 
 def create_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.create"
-    active_buddy = context["active_buddy"]
+    active_role = context["active_role"]
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
             correctable_fields=unknown,
         )
     raw_track_id = args.get("track_id")
     if not isinstance(raw_track_id, str) or not raw_track_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="track_id is required", correctable_fields=["track_id"])
+        return _reject_payload(action=action, active_role=active_role, message="track_id is required", correctable_fields=["track_id"])
     track_id = raw_track_id.strip()
     track = context.repos.track.get_track(track_id)
     if track is None:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=f"track not found: {track_id}",
             correctable_fields=["track_id"],
         )
@@ -342,19 +382,20 @@ def create_request(*, args: dict[str, Any], context: RequestServiceContext) -> d
         _assert_track_readable(
             track_id=track_id,
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             context=context,
         )
         normalized = context.rules.request.normalize_create_args(
             args=args,
-            active_buddy=active_buddy,
+            active_role=active_role,
+            active_actor_address=_context_actor_address(context),
             manifest=context["manifest"],
             track=track,
             readable_ref_checker=lambda ref, bound_track_id: _assert_ref_readable_in_track_context(
                 ref=ref,
                 track_id=bound_track_id,
                 action=action,
-                active_buddy=active_buddy,
+                active_role=active_role,
                 context=context,
             ),
             allowed_fields=_allowed(action),
@@ -362,19 +403,19 @@ def create_request(*, args: dict[str, Any], context: RequestServiceContext) -> d
     except context.rules.request.RequestPayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
             field_errors=exc.field_errors,
         )
     except context.rules.request.RequestScopeError as exc:
-        return _reject_from_scope_exc(action=action, active_buddy=active_buddy, exc=exc)
+        return _reject_from_scope_exc(action=action, active_role=active_role, exc=exc)
 
     try:
         request = context.repos.request.create_request(
             track_id=normalized["track_id"],
-            from_buddy=normalized["from_buddy"],
-            to_buddy=normalized["to_buddy"],
+            from_actor=normalized["from_actor"],
+            to_role=normalized["to_role"],
             title=normalized["title"],
             summary=normalized["summary"],
             target_refs=normalized["target_refs"],
@@ -385,15 +426,19 @@ def create_request(*, args: dict[str, Any], context: RequestServiceContext) -> d
             blocked_at=None,
             completed_at=None,
             canceled_at=None,
+            accepted_by_actor=None,
+            blocked_by_actor=None,
+            completed_by_actor=None,
+            canceled_by_actor=None,
         )
     except ValueError as exc:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+        return _reject_payload(action=action, active_role=active_role, message=str(exc))
 
     return tool_results.success(
         tool="request",
         action=action,
-        active_buddy=active_buddy,
-        effect_summary=f"Created one durable request '{request['id']}' from '{request['from_buddy']}' to '{request['to_buddy']}'.",
+        active_role=active_role,
+        effect_summary=f"Created one durable request '{request['id']}' from '{request['from_actor']}' to '{request['to_role']}'.",
         state_changed=True,
         durability="durable",
         created_ids=[request["id"]],
@@ -408,7 +453,7 @@ def create_request(*, args: dict[str, Any], context: RequestServiceContext) -> d
 
 def list_requests(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.list"
-    active_buddy = context["active_buddy"]
+    active_role = context["active_role"]
     try:
         normalized = context.rules.request.normalize_list_args(
             args=args,
@@ -418,7 +463,7 @@ def list_requests(*, args: dict[str, Any], context: RequestServiceContext) -> di
     except context.rules.request.RequestPayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
             field_errors=exc.field_errors,
@@ -433,36 +478,37 @@ def list_requests(*, args: dict[str, Any], context: RequestServiceContext) -> di
             _assert_track_readable(
                 track_id=track_id,
                 action=action,
-                active_buddy=active_buddy,
+                active_role=active_role,
                 context=context,
             )
-            context.rules.request.ensure_visible(row, active_buddy)
+            context.rules.request.ensure_visible(row, active_role, _context_actor_address(context))
         except context.rules.request.RequestScopeError:
             continue
         visible_rows.append(row)
 
     if normalized["box"] == "inbox":
-        visible_rows = [row for row in visible_rows if row.get("to_buddy") == active_buddy]
+        visible_rows = [row for row in visible_rows if row.get("to_role") == active_role]
     elif normalized["box"] == "outbox":
-        visible_rows = [row for row in visible_rows if row.get("from_buddy") == active_buddy]
+        active_actor_id = _context_actor_address(context)["actor_id"]
+        visible_rows = [row for row in visible_rows if _request_from_actor_id(row) == active_actor_id]
 
     if normalized["status"] is not None:
         visible_rows = [row for row in visible_rows if row.get("status") == normalized["status"]]
     if normalized["track_id"] is not None:
         visible_rows = [row for row in visible_rows if row.get("track_id") == normalized["track_id"]]
-    if normalized["buddy"] is not None:
+    if normalized["role"] is not None:
         visible_rows = [
-            row for row in visible_rows if row.get("from_buddy") == normalized["buddy"] or row.get("to_buddy") == normalized["buddy"]
+            row for row in visible_rows if _request_from_actor_role(row) == normalized["role"] or row.get("to_role") == normalized["role"]
         ]
 
     return tool_results.success(
         tool="request",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary=f"Returned {len(visible_rows)} visible request row(s).",
         state_changed=False,
         durability="none",
-        read_scope="visible cross-buddy request rows",
+        read_scope="visible cross-role request rows",
         allowed_next_actions=[
             "Use request.get with request_id for one request row.",
             "Use request.accept/block/complete/cancel when authority and state allow.",
@@ -476,12 +522,12 @@ def list_requests(*, args: dict[str, Any], context: RequestServiceContext) -> di
 
 def get_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.get"
-    active_buddy = context["active_buddy"]
+    active_role = context["active_role"]
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
             correctable_fields=unknown,
         )
@@ -490,7 +536,7 @@ def get_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict
     except context.rules.request.RequestPayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
             field_errors=exc.field_errors,
@@ -499,7 +545,7 @@ def get_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict
     if request is None:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=f"request not found: {request_id}",
             correctable_fields=["request_id"],
         )
@@ -507,16 +553,17 @@ def get_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict
         _assert_track_readable(
             track_id=str(request.get("track_id")),
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             context=context,
         )
-        context.rules.request.ensure_visible(request, active_buddy)
+        context.rules.request.ensure_visible(request, active_role, _context_actor_address(context))
+        context.rules.request.ensure_visible(request, active_role, _context_actor_address(context))
     except context.rules.request.RequestScopeError as exc:
-        return _reject_from_scope_exc(action=action, active_buddy=active_buddy, exc=exc)
+        return _reject_from_scope_exc(action=action, active_role=active_role, exc=exc)
     return tool_results.success(
         tool="request",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary=f"Read one request row '{request_id}'.",
         state_changed=False,
         durability="none",
@@ -532,14 +579,14 @@ def _load_request_for_mutation(
     *,
     action: str,
     args: dict[str, Any],
-    active_buddy: str,
+    active_role: str,
     context: RequestServiceContext,
 ) -> tuple[str, dict[str, Any]] | dict[str, Any]:
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
             correctable_fields=unknown,
         )
@@ -548,7 +595,7 @@ def _load_request_for_mutation(
     except context.rules.request.RequestPayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
             field_errors=exc.field_errors,
@@ -557,7 +604,7 @@ def _load_request_for_mutation(
     if request is None:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=f"request not found: {request_id}",
             correctable_fields=["request_id"],
         )
@@ -565,19 +612,19 @@ def _load_request_for_mutation(
         _assert_track_readable(
             track_id=str(request.get("track_id")),
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             context=context,
         )
     except context.rules.request.RequestPayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
             field_errors=exc.field_errors,
         )
     except context.rules.request.RequestScopeError as exc:
-        return _reject_from_scope_exc(action=action, active_buddy=active_buddy, exc=exc)
+        return _reject_from_scope_exc(action=action, active_role=active_role, exc=exc)
     return request_id, request
 
 
@@ -588,8 +635,8 @@ def _mutate_request(
     context: RequestServiceContext,
     patch_builder: Any,
 ) -> dict[str, Any]:
-    active_buddy = context["active_buddy"]
-    loaded = _load_request_for_mutation(action=action, args=args, active_buddy=active_buddy, context=context)
+    active_role = context["active_role"]
+    loaded = _load_request_for_mutation(action=action, args=args, active_role=active_role, context=context)
     if isinstance(loaded, dict):
         return loaded
     request_id, request = loaded
@@ -598,17 +645,17 @@ def _mutate_request(
     except context.rules.request.RequestPayloadError as exc:
         return _reject_payload(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
             field_errors=exc.field_errors,
         )
     except context.rules.request.RequestScopeError as exc:
-        return _reject_from_scope_exc(action=action, active_buddy=active_buddy, exc=exc)
+        return _reject_from_scope_exc(action=action, active_role=active_role, exc=exc)
     except context.rules.request.RequestStateError as exc:
         return _reject_state(
             action=action,
-            active_buddy=active_buddy,
+            active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
         )
@@ -616,13 +663,13 @@ def _mutate_request(
     try:
         updated = context.repos.request.update_request(request_id, patch)
     except ValueError as exc:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+        return _reject_payload(action=action, active_role=active_role, message=str(exc))
 
     change_name = str(updated.get("status") or "updated")
     return tool_results.success(
         tool="request",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary=f"Updated request '{request_id}' status to '{updated.get('status')}'.",
         state_changed=True,
         durability="durable",
@@ -638,14 +685,15 @@ def _mutate_request(
 
 def accept_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.accept"
-    active_buddy = context["active_buddy"]
+    active_role = context["active_role"]
     return _mutate_request(
         action=action,
         args=args,
         context=context,
         patch_builder=lambda request: context.rules.request.accept_patch(
             request,
-            active_buddy,
+            active_role,
+            _context_actor_address(context),
             context.now(),
         ),
     )
@@ -653,7 +701,7 @@ def accept_request(*, args: dict[str, Any], context: RequestServiceContext) -> d
 
 def block_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.block"
-    active_buddy = context["active_buddy"]
+    active_role = context["active_role"]
     blocker = args.get("blocker")
     return _mutate_request(
         action=action,
@@ -661,7 +709,8 @@ def block_request(*, args: dict[str, Any], context: RequestServiceContext) -> di
         context=context,
         patch_builder=lambda request: context.rules.request.block_patch(
             request,
-            active_buddy,
+            active_role,
+            _context_actor_address(context),
             blocker if isinstance(blocker, str) else "",
             context.now(),
         ),
@@ -670,7 +719,7 @@ def block_request(*, args: dict[str, Any], context: RequestServiceContext) -> di
 
 def complete_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.complete"
-    active_buddy = context["active_buddy"]
+    active_role = context["active_role"]
 
     def _builder(request: dict[str, Any]) -> dict[str, Any]:
         result_refs = context.rules.request.normalize_ref_items(args.get("result_refs"), "result_refs")
@@ -684,10 +733,10 @@ def complete_request(*, args: dict[str, Any], context: RequestServiceContext) ->
                 ref=ref,
                 track_id=str(request.get("track_id")),
                 action=action,
-                active_buddy=active_buddy,
+                active_role=active_role,
                 context=context,
             )
-        return context.rules.request.complete_patch(request, active_buddy, result_refs, context.now())
+        return context.rules.request.complete_patch(request, active_role, _context_actor_address(context), result_refs, context.now())
 
     return _mutate_request(
         action=action,
@@ -699,12 +748,12 @@ def complete_request(*, args: dict[str, Any], context: RequestServiceContext) ->
 
 def cancel_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.cancel"
-    active_buddy = context["active_buddy"]
+    active_role = context["active_role"]
     return _mutate_request(
         action=action,
         args=args,
         context=context,
-        patch_builder=lambda request: context.rules.request.cancel_patch(request, active_buddy, context.now()),
+        patch_builder=lambda request: context.rules.request.cancel_patch(request, _context_actor_address(context), context.now()),
     )
 
 

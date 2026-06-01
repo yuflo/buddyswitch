@@ -15,7 +15,7 @@ description: Use when PM work depends on track, task, artifact, request, message
 
 ## Do not use when
 - The user only asks for a new product direction with no durable context to inspect.
-- Another buddy owns the primary work and PM only needs to wait for an output.
+- Another role owns the primary work and PM only needs to wait for an output.
 
 ## Inputs
 - User request, track id, task id, artifact ids, request/comment/message ids, proof ids, and visible thread context.
@@ -40,7 +40,7 @@ description: Use when PM work depends on track, task, artifact, request, message
 - Use env tools for durable state.
 - Read exact payload and response fields from runtime discovery, not this skill.
 - Do not edit projected runtime storage directly.
-- Use private buddybox drafts only for PM working notes; use artifacts when content must be product-readable.
+- Use private workspace drafts only for PM working notes; use artifacts when content must be product-readable.
 
 ## Examples
 - Input: "Continue track T with design artifact A and test proof P." Output: facts from `track.open`, full-body findings from A and P, current blockers, and one next PM action.

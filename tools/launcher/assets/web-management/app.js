@@ -87,7 +87,7 @@
 
   function createState() {
     return {
-      buddies: [],
+      roles: [],
       instances: [],
       selectedBuddy: '',
       selectedInstanceId: '',
@@ -146,13 +146,13 @@
 
     state.instances.forEach(function (instance) {
       const row = document.createElement('tr');
-      if (instance.instance_id === state.selectedInstanceId) {
+      if (instance.actor_id === state.selectedInstanceId) {
         row.className = 'is-selected';
         row.setAttribute('aria-current', 'true');
       }
       row.innerHTML = [
-        '<td><span class="cell-strong mono-value long-value">' + escapeHtml(formatValue(instance.instance_id)) + '</span></td>',
-        '<td>' + escapeHtml(formatValue(instance.buddy)) + '</td>',
+        '<td><span class="cell-strong mono-value long-value">' + escapeHtml(formatValue(instance.actor_id)) + '</span></td>',
+        '<td>' + escapeHtml(formatValue(instance.role)) + '</td>',
         '<td>' + badge(instance.status) + '</td>',
         '<td>' + badge(resolveHealthLabel(instance)) + '</td>',
         '<td><span class="mono-value long-value">' + escapeHtml(formatValue(instance.thread_id)) + '</span></td>',
@@ -160,7 +160,7 @@
         '<td><span class="cell-muted long-value">' + escapeHtml(formatValue(instance.updated_at)) + '</span></td>',
       ].join('');
       row.addEventListener('click', function () {
-        selectInstance(state, elements, instance.instance_id);
+        selectInstance(state, elements, instance.actor_id);
       });
       elements.instancesBody.appendChild(row);
     });
@@ -169,8 +169,8 @@
   function renderDetail(state, elements) {
     const instance = state.selectedInstance;
     const detailRows = [
-      ['Instance', instance && instance.instance_id, 'mono-value long-value'],
-      ['Buddy', instance && instance.buddy, ''],
+      ['Instance', instance && instance.actor_id, 'mono-value long-value'],
+      ['Role', instance && instance.role, ''],
       ['Status', instance && instance.status, ''],
       ['Health', instance && resolveHealthLabel(instance), ''],
       ['Thread', instance && instance.thread_id, 'mono-value long-value'],
@@ -234,12 +234,12 @@
     if (elements.buddySelect.options.length === 0) {
       const placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = 'Select buddy';
+      placeholder.textContent = 'Select role';
       elements.buddySelect.appendChild(placeholder);
-      state.buddies.forEach(function (buddy) {
+      state.roles.forEach(function (role) {
         const option = document.createElement('option');
-        option.value = buddy.id;
-        option.textContent = buddy.label + ' (' + buddy.id + ')';
+        option.value = role.id;
+        option.textContent = role.label + ' (' + role.id + ')';
         elements.buddySelect.appendChild(option);
       });
     }
@@ -282,25 +282,25 @@
     const previousSelectedInstanceId = state.selectedInstanceId;
     const [healthPayload, buddiesPayload, instancesPayload] = await Promise.all([
       fetchJson('/api/health'),
-      fetchJson('/api/buddies'),
+      fetchJson('/api/roles'),
       fetchJson('/api/instances'),
     ]);
     state.healthOk = Boolean(healthPayload.ok);
-    state.buddies = buddiesPayload.buddies || [];
-    if (!state.selectedBuddy && state.buddies.length > 0) {
-      state.selectedBuddy = state.buddies[0].id;
+    state.roles = buddiesPayload.roles || [];
+    if (!state.selectedBuddy && state.roles.length > 0) {
+      state.selectedBuddy = state.roles[0].id;
     }
     state.instances = instancesPayload.instances || [];
     if (state.selectedInstanceId) {
       const stillPresent = state.instances.some(function (instance) {
-        return instance.instance_id === state.selectedInstanceId;
+        return instance.actor_id === state.selectedInstanceId;
       });
       if (!stillPresent) {
         state.selectedInstanceId = '';
       }
     }
     if (!state.selectedInstanceId && state.instances.length > 0) {
-      state.selectedInstanceId = state.instances[0].instance_id;
+      state.selectedInstanceId = state.instances[0].actor_id;
     }
     if (state.selectedInstanceId !== previousSelectedInstanceId) {
       clearOpenTuiFeedback(state);
@@ -351,10 +351,10 @@
       const payload = await fetchJson('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buddy: state.selectedBuddy }),
+        body: JSON.stringify({ role: state.selectedBuddy }),
       });
-      state.selectedInstanceId = payload.instance_id;
-      state.message = 'Created ' + payload.instance_id + '.';
+      state.selectedInstanceId = payload.actor_id;
+      state.message = 'Created ' + payload.actor_id + '.';
       clearOpenTuiFeedback(state);
       await refreshAll(state, elements);
     } catch (error) {
@@ -446,7 +446,7 @@
       return;
     }
     const elements = {
-      buddySelect: document.getElementById('buddy-select'),
+      buddySelect: document.getElementById('role-select'),
       createButton: document.getElementById('create-button'),
       refreshButton: document.getElementById('refresh-button'),
       serverStatus: document.getElementById('server-status'),

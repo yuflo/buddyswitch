@@ -82,22 +82,22 @@ class RuntimeWorkspaceTestMixin:
     def _state_path(self, repo_path: str) -> Path:
         return self.runtime_state_root / repo_path
 
-    def _runtime_instance_id(self, *, buddy: str, label: str) -> str:
-        if isinstance(label, str) and label.startswith(f"inst-{buddy}-"):
-            suffix = label.removeprefix(f"inst-{buddy}-")
+    def _runtime_actor_id(self, *, role: str, label: str) -> str:
+        if isinstance(label, str) and label.startswith(f"act-{role}-"):
+            suffix = label.removeprefix(f"act-{role}-")
             if len(suffix) == 12 and all(char in "0123456789abcdef" for char in suffix):
                 return label
-        digest = hashlib.sha1(f"{buddy}:{label}".encode("utf-8")).hexdigest()[:12]
-        return f"inst-{buddy}-{digest}"
+        digest = hashlib.sha1(f"{role}:{label}".encode("utf-8")).hexdigest()[:12]
+        return f"act-{role}-{digest}"
 
-    def _instance_root(self, instance_id: str) -> Path:
-        return self.runtime_root / "instances" / instance_id
+    def _instance_root(self, actor_id: str) -> Path:
+        return self.runtime_root / "instances" / actor_id
 
-    def _taskbox_root(self, *, instance_id: str, buddy: str) -> Path:
-        return self._instance_root(instance_id) / "taskbox" / buddy
+    def _taskbox_root(self, *, actor_id: str, role: str) -> Path:
+        return self._instance_root(actor_id) / "taskbox" / role
 
-    def _ensure_taskbox(self, *, instance_id: str, buddy: str) -> Path:
-        root = self._taskbox_root(instance_id=instance_id, buddy=buddy)
+    def _ensure_taskbox(self, *, actor_id: str, role: str) -> Path:
+        root = self._taskbox_root(actor_id=actor_id, role=role)
         (root / "tasks").mkdir(parents=True, exist_ok=True)
         history_file = root / "history.md"
         if not history_file.exists():
@@ -107,8 +107,8 @@ class RuntimeWorkspaceTestMixin:
     def _write_taskbox_task(
         self,
         *,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         task_id: str,
         title: str,
         summary: str = "",
@@ -122,13 +122,13 @@ class RuntimeWorkspaceTestMixin:
     ) -> Path:
         if closed_at is None and status in {"done", "archived"}:
             closed_at = updated_at
-        root = self._ensure_taskbox(instance_id=instance_id, buddy=buddy)
+        root = self._ensure_taskbox(actor_id=actor_id, role=role)
         task_path = root / "tasks" / f"{task_id}.json"
         task_path.write_text(
             json.dumps(
                 {
                     "id": task_id,
-                    "owner_buddy": buddy,
+                    "owner_actor": {"actor_id": actor_id, "role_id": role},
                     "title": title,
                     "summary": summary,
                     "status": status,

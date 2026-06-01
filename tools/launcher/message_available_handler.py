@@ -17,12 +17,12 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import daemon_core  # noqa: E402
 import daemon_mailbox  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime.actor_profile import RuntimeActorAddress  # noqa: E402
+from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
 
-def _context_actor_address(context: Any) -> RuntimeActorAddress:
+def _context_actor_address(context: Any) -> ActorAddress:
     value = getattr(context, "actor_address", None)
-    if isinstance(value, RuntimeActorAddress):
+    if isinstance(value, ActorAddress):
         return value
     return daemon_core.actor_address_for_context(context)
 
@@ -45,7 +45,7 @@ class MessageAvailableHandler:
         try:
             normalized = daemon_mailbox.validate_daemon_signal(signal)
             local_actor = _context_actor_address(context)
-            target_actor = RuntimeActorAddress.from_payload(normalized["target_actor_address"])
+            target_actor = ActorAddress.from_payload(normalized["target_actor_address"])
             if target_actor != local_actor:
                 return daemon_core.HandlerResult.failed("wrong target actor for message.available signal")
             payload = normalized["payload"]

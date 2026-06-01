@@ -86,7 +86,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
         *,
         config_path: Path,
         shared_root: Path,
-        buddy: str,
+        role: str,
         instance_root: Path,
         workspace_dir: Path,
         project_workspace_dir: Path,
@@ -106,8 +106,8 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             str(shared_root),
             "--source-codex-home",
             str(shared_root / "source-codex-home"),
-            "--buddy",
-            buddy,
+            "--role",
+            role,
             "--instance-root",
             str(instance_root),
             "--workspace-dir",
@@ -137,7 +137,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-pm-example"
+            instance_root = shared_root / "instances" / "act-pm-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             product_source_root = project_workspace_dir / "projects" / "app"
@@ -146,7 +146,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="pm",
+                role="pm",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -169,7 +169,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
             self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
             self.assertNotIn(
-                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").resolve(strict=False)),
+                str((workspace_dir / "buddyswitch" / "local" / "private" / "pm").resolve(strict=False)),
                 filesystem,
             )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
@@ -178,7 +178,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "private").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
@@ -208,7 +208,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-pm-example"
+            instance_root = shared_root / "instances" / "act-pm-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = temp_root / "config.toml"
@@ -221,7 +221,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="pm",
+                role="pm",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -248,7 +248,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-dev-example"
+            instance_root = shared_root / "instances" / "act-dev-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             product_source_root = project_workspace_dir / "projects" / "app"
@@ -257,7 +257,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="dev",
+                role="dev",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -276,12 +276,12 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
             self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
             self.assertNotIn(
-                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "dev").resolve(strict=False)),
+                str((workspace_dir / "buddyswitch" / "local" / "private" / "dev").resolve(strict=False)),
                 filesystem,
             )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertIn(str(product_source_root.resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "private").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
@@ -295,7 +295,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-dev-hardening"
+            instance_root = shared_root / "instances" / "act-dev-hardening"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             product_source_root = project_workspace_dir / "projects" / "app"
@@ -304,7 +304,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="dev",
+                role="dev",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -322,12 +322,12 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(
-                str((workspace_dir / "buddyswitch/local/buddybox/pm").resolve(strict=False)),
+                str((workspace_dir / "buddyswitch/local/private/pm").resolve(strict=False)),
                 writable_paths,
             )
 
             self.assertIn(str(product_source_root.resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "private").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
@@ -339,7 +339,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-pm-example"
+            instance_root = shared_root / "instances" / "act-pm-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = temp_root / "config.toml"
@@ -347,7 +347,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="pm",
+                role="pm",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -364,18 +364,18 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
             self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
             self.assertNotIn(
-                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").resolve(strict=False)),
+                str((workspace_dir / "buddyswitch" / "local" / "private" / "pm").resolve(strict=False)),
                 filesystem,
             )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
-            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "private").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
 
     def test_patch_keeps_mcp_sections_and_forces_approve(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-market-example"
+            instance_root = shared_root / "instances" / "act-market-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = temp_root / "config.toml"
@@ -396,7 +396,7 @@ default_tools_approval_mode = "ask"
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="market",
+                role="market",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -415,7 +415,7 @@ default_tools_approval_mode = "ask"
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-pm-example"
+            instance_root = shared_root / "instances" / "act-pm-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = temp_root / "config.toml"
@@ -434,7 +434,7 @@ web_search = "cached"
                 completed = self._run_patch(
                     config_path=config_path,
                     shared_root=shared_root,
-                    buddy="pm",
+                    role="pm",
                     instance_root=instance_root,
                     workspace_dir=workspace_dir,
                     project_workspace_dir=project_workspace_dir,
@@ -459,7 +459,7 @@ web_search = "cached"
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-pm-example"
+            instance_root = shared_root / "instances" / "act-pm-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = temp_root / "config.toml"
@@ -468,7 +468,7 @@ web_search = "cached"
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="pm",
+                role="pm",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -495,7 +495,7 @@ web_search = "cached"
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-pm-sandbox-smoke"
+            instance_root = shared_root / "instances" / "act-pm-sandbox-smoke"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = instance_root / "codex-home" / "config.toml"
@@ -507,7 +507,7 @@ web_search = "cached"
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="pm",
+                role="pm",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -547,7 +547,7 @@ web_search = "cached"
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            dev_instance_root = shared_root / "instances" / "inst-dev-source-root-smoke"
+            dev_instance_root = shared_root / "instances" / "act-dev-source-root-smoke"
             dev_workspace_dir = dev_instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             product_source_root = project_workspace_dir / "projects" / "app"
@@ -561,7 +561,7 @@ web_search = "cached"
             completed = self._run_patch(
                 config_path=dev_config_path,
                 shared_root=shared_root,
-                buddy="dev",
+                role="dev",
                 instance_root=dev_instance_root,
                 workspace_dir=dev_workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -632,7 +632,7 @@ web_search = "cached"
                     self.assertNotEqual(denied.returncode, 0, msg=denied.stdout + denied.stderr)
                     self.assertFalse(target.exists(), msg=str(target))
 
-            pm_instance_root = shared_root / "instances" / "inst-pm-source-root-smoke"
+            pm_instance_root = shared_root / "instances" / "act-pm-source-root-smoke"
             pm_workspace_dir = pm_instance_root / "workspace"
             pm_config_path = pm_instance_root / "codex-home" / "config.toml"
             source_probe = product_source_root / "pm-readable.txt"
@@ -642,7 +642,7 @@ web_search = "cached"
             pm_completed = self._run_patch(
                 config_path=pm_config_path,
                 shared_root=shared_root,
-                buddy="pm",
+                role="pm",
                 instance_root=pm_instance_root,
                 workspace_dir=pm_workspace_dir,
                 project_workspace_dir=project_workspace_dir,
@@ -703,7 +703,7 @@ web_search = "cached"
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
-            instance_root = shared_root / "instances" / "inst-unknown-example"
+            instance_root = shared_root / "instances" / "act-unknown-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = temp_root / "config.toml"
@@ -713,7 +713,7 @@ web_search = "cached"
             completed = self._run_patch(
                 config_path=config_path,
                 shared_root=shared_root,
-                buddy="unknown",
+                role="unknown",
                 instance_root=instance_root,
                 workspace_dir=workspace_dir,
                 project_workspace_dir=project_workspace_dir,

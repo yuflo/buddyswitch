@@ -25,7 +25,7 @@ class BrokerPaths:
     log_file: Path
 
 
-def resolve_socket_path(instance_id: str, instance_root: Path, marker_file: Path) -> Path:
+def resolve_socket_path(actor_id: str, instance_root: Path, marker_file: Path) -> Path:
     if marker_file.exists():
         raw = marker_file.read_text(encoding="utf-8").strip()
         if raw:
@@ -35,7 +35,7 @@ def resolve_socket_path(instance_id: str, instance_root: Path, marker_file: Path
     if len(str(default_socket)) < 100:
         return default_socket
 
-    digest = hashlib.sha1(instance_id.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()[:12]
     return Path(f"/tmp/buddyswitch-runtime-{digest}.sock")
 
 
@@ -67,8 +67,8 @@ def _socket_is_unix(path: Path) -> bool:
 def ping_broker(
     paths: BrokerPaths,
     *,
-    expected_instance_id: str,
-    expected_active_buddy: str,
+    expected_actor_id: str,
+    expected_active_role: str,
     timeout_seconds: float = 0.75,
 ) -> dict[str, Any]:
     request_id = f"req-ping-{int(time.time() * 1000)}"
@@ -175,21 +175,21 @@ def ping_broker(
                 "retriable": False,
             },
         }
-    if result.get("instance_id") != expected_instance_id:
+    if result.get("actor_id") != expected_actor_id:
         return {
             "ok": False,
             "error": {
                 "code": "E_RUNTIME_BROKER_PERMISSION",
-                "message": "runtime broker ping instance_id mismatch",
+                "message": "runtime broker ping actor_id mismatch",
                 "retriable": False,
             },
         }
-    if result.get("active_buddy") != expected_active_buddy:
+    if result.get("active_role") != expected_active_role:
         return {
             "ok": False,
             "error": {
                 "code": "E_RUNTIME_BROKER_PERMISSION",
-                "message": "runtime broker ping active_buddy mismatch",
+                "message": "runtime broker ping active_role mismatch",
                 "retriable": False,
             },
         }
@@ -228,8 +228,8 @@ def _cleanup_failed_startup_artifacts(paths: BrokerPaths) -> None:
 def broker_status(
     paths: BrokerPaths,
     *,
-    expected_instance_id: str,
-    expected_active_buddy: str,
+    expected_actor_id: str,
+    expected_active_role: str,
     expected_workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
@@ -298,8 +298,8 @@ def broker_status(
 
     ping = ping_broker(
         paths,
-        expected_instance_id=expected_instance_id,
-        expected_active_buddy=expected_active_buddy,
+        expected_actor_id=expected_actor_id,
+        expected_active_role=expected_active_role,
     )
     if ping.get("ok") is True:
         result = ping.get("result") if isinstance(ping.get("result"), dict) else {}
@@ -395,8 +395,8 @@ def broker_status(
                     return status
 
         status["healthy"] = True
-        status["instance_id"] = result.get("instance_id")
-        status["active_buddy"] = result.get("active_buddy")
+        status["actor_id"] = result.get("actor_id")
+        status["active_role"] = result.get("active_role")
         status["socket_path"] = result.get("socket_path") or status["socket_path"]
         status["ping"] = result
         return status
@@ -453,15 +453,15 @@ def ensure_broker(
     *,
     instance_json_path: Path,
     manifest_path: Path,
-    expected_instance_id: str,
-    expected_active_buddy: str,
+    expected_actor_id: str,
+    expected_active_role: str,
     expected_workspace_root: Path | None = None,
     startup_timeout_seconds: float = 3.0,
 ) -> dict[str, Any]:
     status = broker_status(
         paths,
-        expected_instance_id=expected_instance_id,
-        expected_active_buddy=expected_active_buddy,
+        expected_actor_id=expected_actor_id,
+        expected_active_role=expected_active_role,
         expected_workspace_root=expected_workspace_root,
     )
     if status.get("healthy") is True:
@@ -502,8 +502,8 @@ def ensure_broker(
     while time.monotonic() < deadline:
         ping = ping_broker(
             paths,
-            expected_instance_id=expected_instance_id,
-            expected_active_buddy=expected_active_buddy,
+            expected_actor_id=expected_actor_id,
+            expected_active_role=expected_active_role,
             timeout_seconds=0.5,
         )
         if ping.get("ok") is True:
@@ -512,8 +512,8 @@ def ensure_broker(
 
         latest_status = broker_status(
             paths,
-            expected_instance_id=expected_instance_id,
-            expected_active_buddy=expected_active_buddy,
+            expected_actor_id=expected_actor_id,
+            expected_active_role=expected_active_role,
             expected_workspace_root=expected_workspace_root,
         )
         if latest_status.get("healthy") is True:

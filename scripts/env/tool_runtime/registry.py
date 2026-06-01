@@ -321,7 +321,8 @@ def _reject(
     *,
     tool: str | None,
     action: str | None,
-    active_buddy: str,
+    active_actor: dict[str, Any],
+    active_role: str,
     code: str,
     message: str,
     permission_boundary: str,
@@ -337,7 +338,8 @@ def _reject(
     return tool_results.rejection(
         tool=fallback_tool,
         action=semantic_action,
-        active_buddy=active_buddy,
+        active_actor=active_actor,
+        active_role=active_role,
         code=code,
         message=message,
         permission_boundary=permission_boundary,
@@ -362,35 +364,41 @@ def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) 
         raise TypeError(f"{_tool_module_name(tool)}.invoke must return an object")
     response.setdefault("tool", tool)
     response.setdefault("action", _semantic_action(tool=tool, action=action))
+    active_actor = getattr(context, "active_actor", None)
+    if active_actor is not None and hasattr(active_actor, "to_payload"):
+        response["active_actor"] = active_actor.to_payload()
+    response["active_role"] = getattr(getattr(context, "active_role", None), "role_id", context.get("active_role"))
     return response
 
 
 def dispatch_env_tool_request(
     *,
     payload: dict[str, Any],
-    active_buddy: str,
-    instance_id: str,
+    active_role: str,
+    actor_id: str,
     instance_json: Path,
     instance_payload: dict[str, Any],
     manifest: dict[str, Any],
     manifest_path: Path | None = None,
 ) -> dict[str, Any]:
-    instance_record = actor_profile.runtime_instance_record_from_dispatch(
-        instance_id=instance_id,
-        active_buddy=active_buddy,
+    instance_record = actor_profile.runtime_actor_record_from_dispatch(
+        actor_id=actor_id,
+        role_id=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
-    runtime_actor = actor_profile.resolve_runtime_actor_profile(instance_record)
-    active_buddy = runtime_actor.active_buddy
-    instance_id = runtime_actor.instance_id
+    runtime_actor = actor_profile.resolve_actor_profile(instance_record)
+    active_actor = runtime_actor.active_actor.to_payload()
+    active_role = runtime_actor.role_id
+    actor_id = runtime_actor.actor_id
 
     raw_tool = payload.get("tool")
     if not isinstance(raw_tool, str) or not raw_tool.strip():
         return _reject(
             tool=None,
             action=None,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code="E_ENV_TOOL",
             message="env.tool payload.tool must be a non-empty string",
             permission_boundary="env.tool",
@@ -413,7 +421,8 @@ def dispatch_env_tool_request(
             return _reject(
                 tool=tool,
                 action=None,
-                active_buddy=active_buddy,
+                active_actor=active_actor,
+                active_role=active_role,
                 code="E_ENV_TOOL_CATALOG",
                 message=f"env.tool package '{tool}' exists but its definition is unavailable",
                 permission_boundary="env.tool.catalog",
@@ -429,7 +438,8 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=None,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code="E_ENV_TOOL",
             message=f"unsupported env.tool payload.tool: {tool}",
             permission_boundary="env.tool",
@@ -449,7 +459,8 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=None,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code="E_ENV_TOOL",
             message="env.tool payload.action must be a non-empty string",
             permission_boundary="env.tool",
@@ -467,7 +478,8 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code="E_ENV_TOOL",
             message=f"unsupported env.tool payload.action for {tool}: {action}",
             permission_boundary="env.tool",
@@ -488,7 +500,7 @@ def dispatch_env_tool_request(
         return auth_feedback.role_auth_rejection(
             tool=tool,
             action=action,
-            active_buddy=active_buddy,
+            active_actor=runtime_actor.active_actor,
             decision=auth_decision,
         )
 
@@ -497,7 +509,8 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code="E_ENV_TOOL_PAYLOAD",
             message="env.tool payload.args must be an object",
             permission_boundary="request-payload",
@@ -526,7 +539,8 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=action,
-            active_buddy=active_buddy,
+            active_actor=active_actor,
+            active_role=active_role,
             code="E_ENV_TOOL_DISPATCH",
             message=f"failed to invoke env tool {tool}.{action}: {exc}",
             permission_boundary="env.tool.dispatch",

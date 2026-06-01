@@ -81,17 +81,17 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id="task",
         title="Task Management",
-        description="Read, propose, and confirm active-buddy private task state inside the instance-local taskbox.",
-        scope="instance-local active-buddy private taskbox",
-        capability_boundary="Only the active buddy's taskbox inside the active instance is readable and writable.",
+        description="Read, propose, and confirm active actor private task state inside the instance-local taskbox.",
+        scope="instance-local active actor private taskbox",
+        capability_boundary="Only the active role's taskbox inside the active instance is readable and writable.",
         object_model=(
-            "Tasks live in the active instance taskbox under taskbox/<buddy>. "
-            "Each task is a private work item for the active buddy, not shared product state. "
+            "Tasks live in the active instance taskbox under taskbox/<role>. "
+            "Each task is a private work item for the active role, not shared product state. "
             "task.current reads the canonical TaskSnapshot. task.propose and task.confirm are the only public taskbox mutation actions. "
             "Task refs and track_id are private context links; they do not publish or share those objects."
         ),
         use_when=(
-            "You need to understand, start, switch, finish, block, or confirm active-buddy private task state.",
+            "You need to understand, start, switch, finish, block, or confirm active actor private task state.",
         ),
         do_not_use_when=(
             "You need to change shared track/artifact/message/comment/request state rather than the private taskbox.",
@@ -100,7 +100,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="current",
                 title="task.current",
-                description="Read the canonical active-buddy TaskSnapshot from taskbox history and task docs.",
+                description="Read the canonical active-role TaskSnapshot from taskbox history and task docs.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -118,13 +118,13 @@ def _build_definition() -> ToolDefinition:
                 kind="read",
                 mutates="none",
                 required_permission="task.read",
-                authority="task.buddy_scope",
-                visibility="active-buddy private",
+                authority="task.role_scope",
+                visibility="active actor private",
                 durability="none",
                 result_content_level="TaskSnapshot",
                 success_effect="Returns the canonical current task snapshot without mutating taskbox state.",
                 failure_state_guarantee="Rejected reads do not mutate taskbox files or shared runtime objects.",
-                reads=("instance-local taskbox history", "current active-buddy taskbox task"),
+                reads=("instance-local taskbox history", "current active-role taskbox task"),
                 writes=(),
                 does_not_write=(
                     "taskbox task docs",
@@ -135,7 +135,7 @@ def _build_definition() -> ToolDefinition:
                     "message state",
                     "comment state",
                     "request state",
-                    "buddybox file contents",
+                    "actor_private file contents",
                 ),
                 preconditions=("env.tool role-action policy allows this action for the active role",),
                 returns=("snapshot",),
@@ -153,7 +153,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="propose",
                 title="task.propose",
-                description="Propose a task start, switch, finish, or block transition in the active-buddy taskbox.",
+                description="Propose a task start, switch, finish, or block transition in the active-role taskbox.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -187,14 +187,14 @@ def _build_definition() -> ToolDefinition:
                 kind="write",
                 mutates="runtime_files",
                 required_permission="task.propose",
-                authority="task.buddy_scope",
-                visibility="active-buddy private",
+                authority="task.role_scope",
+                visibility="active actor private",
                 durability="durable",
                 result_content_level="TaskSnapshot plus changed task or confirmation",
-                success_effect="Writes only active-buddy taskbox task docs and history for accepted task proposals.",
+                success_effect="Writes only active-role taskbox task docs and history for accepted task proposals.",
                 failure_state_guarantee="Rejected proposals do not mutate taskbox files, history, or shared runtime objects.",
                 reads=("canonical TaskSnapshot", "instance-local taskbox task docs"),
-                writes=("instance-local active-buddy taskbox task", "instance-local taskbox history"),
+                writes=("instance-local active-role taskbox task", "instance-local taskbox history"),
                 does_not_write=(
                     "shared runtime task objects",
                     "track state",
@@ -203,7 +203,7 @@ def _build_definition() -> ToolDefinition:
                     "message state",
                     "comment state",
                     "request state",
-                    "buddybox file contents",
+                    "actor_private file contents",
                 ),
                 preconditions=("env.tool role-action policy allows this action for the active role",),
                 returns=("snapshot", "task", "pending_confirmation"),
@@ -221,7 +221,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="confirm",
                 title="task.confirm",
-                description="Accept or reject the one pending active-buddy task switch confirmation.",
+                description="Accept or reject the one pending active-role task switch confirmation.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -246,14 +246,14 @@ def _build_definition() -> ToolDefinition:
                 kind="write",
                 mutates="runtime_files",
                 required_permission="task.confirm",
-                authority="task.buddy_scope",
-                visibility="active-buddy private",
+                authority="task.role_scope",
+                visibility="active actor private",
                 durability="durable",
                 result_content_level="TaskSnapshot plus confirmation outcome",
                 success_effect="Accepts or rejects a pending task switch and appends taskbox history.",
                 failure_state_guarantee="Rejected confirmations do not mutate taskbox files, history, or shared runtime objects.",
                 reads=("canonical TaskSnapshot", "instance-local taskbox task docs"),
-                writes=("instance-local active-buddy taskbox task", "instance-local taskbox history"),
+                writes=("instance-local active-role taskbox task", "instance-local taskbox history"),
                 does_not_write=(
                     "shared runtime task objects",
                     "track state",
@@ -262,7 +262,7 @@ def _build_definition() -> ToolDefinition:
                     "message state",
                     "comment state",
                     "request state",
-                    "buddybox file contents",
+                    "actor_private file contents",
                 ),
                 preconditions=("env.tool role-action policy allows this action for the active role", "one pending task switch confirmation exists"),
                 returns=("snapshot", "task"),

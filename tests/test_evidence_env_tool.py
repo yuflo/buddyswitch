@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.repos import artifacts as artifact_repo  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -23,15 +24,15 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, buddy: str, instance_id: str) -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        path = self._runtime_path(f"instances/{instance_id}/instance.json")
+    def _instance_json(self, *, role: str, actor_id: str) -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        path = self._runtime_path(f"instances/{actor_id}/instance.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -49,20 +50,20 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
                 "request_id": f"req-evidence-{uuid.uuid4().hex}",
                 "method": "env.tool",
                 "params": {
-                    "instance_id": instance_id,
-                    "active_buddy": buddy,
+                    "actor_id": actor_id,
+                    "active_role": role,
                     "tool": "evidence",
                     "action": action,
                     "args": args,
@@ -93,7 +94,21 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _seed_market_targets(self) -> str:
+    def _seed_market_targets(self, *, actor_id: str | None = None) -> str:
+        if actor_id is not None:
+            actor = {"actor_id": self._runtime_actor_id(role="market", label=actor_id), "role_id": "market"}
+            artifact = artifact_repo.create_artifact_revision(
+                artifact_id="art-market-evidence-r1",
+                title="Market brief",
+                summary="seed",
+                body="market",
+                template="brief",
+                supersedes_artifact_id=None,
+                created_by_actor=actor,
+                author_actors=[actor],
+                source_refs=[{"type": "note", "label": "seed"}],
+            )
+            return artifact["id"]
         artifact = env_store.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
             title="Market brief",
@@ -108,13 +123,13 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return artifact["id"]
 
     def test_issue_browser_is_target_scoped_and_runless(self) -> None:
-        artifact_id = self._seed_market_targets()
-        instance_json = self._instance_json(buddy="market", instance_id="inst-market-evidence")
+        artifact_id = self._seed_market_targets(actor_id="act-market-evidence")
+        instance_json = self._instance_json(role="market", actor_id="act-market-evidence")
 
         issued = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-evidence",
-            buddy="market",
+            actor_id="act-market-evidence",
+            role="market",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": artifact_id, "mode": "browser-cockpit-preflight"},
         )
@@ -126,17 +141,17 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(evidence, dict)
         self.assertEqual(evidence.get("target_type"), "artifact")
         self.assertEqual(evidence.get("target_id"), artifact_id)
-        self.assertEqual(evidence.get("active_buddy"), "market")
+        self.assertEqual(evidence.get("active_role"), "market")
         self.assertNotIn("run_id", evidence)
 
     def test_approve_downgrade_requires_reason_and_owns_target(self) -> None:
-        artifact_id = self._seed_market_targets()
-        instance_json = self._instance_json(buddy="market", instance_id="inst-market-downgrade")
+        artifact_id = self._seed_market_targets(actor_id="act-market-downgrade")
+        instance_json = self._instance_json(role="market", actor_id="act-market-downgrade")
 
         missing_reason = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-downgrade",
-            buddy="market",
+            actor_id="act-market-downgrade",
+            role="market",
             action="approve_downgrade",
             args={"target_type": "artifact", "target_id": artifact_id, "reason": " "},
         )
@@ -145,8 +160,8 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected_memory = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-downgrade",
-            buddy="market",
+            actor_id="act-market-downgrade",
+            role="market",
             action="approve_downgrade",
             args={"target_type": "memory", "target_id": "mem-old", "reason": "Manual fallback approved."},
         )
@@ -157,8 +172,8 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         approved = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-downgrade",
-            buddy="market",
+            actor_id="act-market-downgrade",
+            role="market",
             action="approve_downgrade",
             args={"target_type": "artifact", "target_id": artifact_id, "reason": "Manual fallback approved."},
         )
@@ -170,27 +185,27 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(evidence.get("target_id"), artifact_id)
         self.assertEqual(evidence.get("reason"), "Manual fallback approved.")
 
-    def test_cross_buddy_target_is_rejected(self) -> None:
+    def test_cross_role_target_is_rejected(self) -> None:
         artifact_id = self._seed_market_targets()
-        design_instance = self._instance_json(buddy="design", instance_id="inst-design-evidence")
+        design_instance = self._instance_json(role="design", actor_id="act-design-evidence")
 
         denied = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-evidence",
-            buddy="design",
+            actor_id="act-design-evidence",
+            role="design",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": artifact_id},
         )
         self.assertFalse(denied.get("ok"), msg=denied)
         self.assertEqual((denied.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_SCOPE")
-        self.assertEqual(denied.get("permission_boundary"), "artifact.authors")
+        self.assertEqual(denied.get("permission_boundary"), "artifact.author_actors")
 
     def test_missing_artifact_target_is_rejected_without_token(self) -> None:
-        instance_json = self._instance_json(buddy="market", instance_id="inst-market-missing-target")
+        instance_json = self._instance_json(role="market", actor_id="act-market-missing-target")
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-missing-target",
-            buddy="market",
+            actor_id="act-market-missing-target",
+            role="market",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": "art-market-missing-target"},
         )
@@ -201,25 +216,25 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_readable_but_not_authored_target_is_rejected(self) -> None:
         artifact_id = self._seed_market_targets()
-        env_store.create_track("track-market-readable", "Readable Market Track", owner_buddy="market")
+        env_store.create_track("track-market-readable", "Readable Market Track", owner_role="market")
         env_store.publish_track_material(
             track_id="track-market-readable",
             artifact_id=artifact_id,
             label="Market published artifact",
-            from_buddy="market",
+            from_role="market",
             summary="readable publication",
         )
-        design_instance = self._instance_json(buddy="design", instance_id="inst-design-readable-target")
+        design_instance = self._instance_json(role="design", actor_id="act-design-readable-target")
         rejected = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-readable-target",
-            buddy="design",
+            actor_id="act-design-readable-target",
+            role="design",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": artifact_id},
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_SCOPE")
-        self.assertEqual(rejected.get("permission_boundary"), "artifact.authors")
+        self.assertEqual(rejected.get("permission_boundary"), "artifact.author_actors")
         self.assertNotIn("tool_evidence", rejected)
 
 

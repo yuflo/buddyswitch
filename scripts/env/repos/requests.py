@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
 VALID_REQUEST_STATUS = ("open", "accepted", "blocked", "done", "canceled")
@@ -14,8 +15,8 @@ _REF_TYPES = {"track", "artifact", "comment"}
 _REQUEST_FIELDS = {
     "id",
     "track_id",
-    "from_buddy",
-    "to_buddy",
+    "from_actor",
+    "to_role",
     "title",
     "summary",
     "target_refs",
@@ -28,6 +29,10 @@ _REQUEST_FIELDS = {
     "blocked_at",
     "completed_at",
     "canceled_at",
+    "accepted_by_actor",
+    "blocked_by_actor",
+    "completed_by_actor",
+    "canceled_by_actor",
 }
 
 
@@ -72,6 +77,19 @@ def _normalize_refs(value: Any, *, field: str) -> list[dict[str, str]]:
     return [_normalize_ref_row(row, field=f"{field}[{idx}]") for idx, row in enumerate(value)]
 
 
+def _normalize_actor(value: Any, field: str) -> dict[str, str]:
+    try:
+        return ActorAddress.from_payload(value).to_payload()
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
+
+
+def _optional_actor(value: Any, field: str) -> dict[str, str] | None:
+    if value is None:
+        return None
+    return _normalize_actor(value, field)
+
+
 def request_file(request_id: str) -> Path:
     return runtime_files.REQUESTS_DIR / f"{runtime_files.require_id(request_id, 'request id')}.json"
 
@@ -83,8 +101,8 @@ def _validate_request(request: dict[str, Any]) -> dict[str, Any]:
 
     request_id = runtime_files.require_id(request.get("id", ""), "request.id")
     track_id = runtime_files.require_id(request.get("track_id", ""), "request.track_id")
-    from_buddy = _require_non_empty_text(request.get("from_buddy"), "request.from_buddy")
-    to_buddy = _require_non_empty_text(request.get("to_buddy"), "request.to_buddy")
+    from_actor = _normalize_actor(request.get("from_actor"), "request.from_actor")
+    to_role = _require_non_empty_text(request.get("to_role"), "request.to_role")
     title = _require_non_empty_text(request.get("title"), "request.title")
     summary = _require_non_empty_text(request.get("summary"), "request.summary")
     target_refs = _normalize_refs(request.get("target_refs"), field="request.target_refs")
@@ -99,12 +117,16 @@ def _validate_request(request: dict[str, Any]) -> dict[str, Any]:
     blocked_at = _optional_non_empty_text(request.get("blocked_at"), "request.blocked_at")
     completed_at = _optional_non_empty_text(request.get("completed_at"), "request.completed_at")
     canceled_at = _optional_non_empty_text(request.get("canceled_at"), "request.canceled_at")
+    accepted_by_actor = _optional_actor(request.get("accepted_by_actor"), "request.accepted_by_actor")
+    blocked_by_actor = _optional_actor(request.get("blocked_by_actor"), "request.blocked_by_actor")
+    completed_by_actor = _optional_actor(request.get("completed_by_actor"), "request.completed_by_actor")
+    canceled_by_actor = _optional_actor(request.get("canceled_by_actor"), "request.canceled_by_actor")
 
     return {
         "id": request_id,
         "track_id": track_id,
-        "from_buddy": from_buddy,
-        "to_buddy": to_buddy,
+        "from_actor": from_actor,
+        "to_role": to_role,
         "title": title,
         "summary": summary,
         "target_refs": target_refs,
@@ -117,6 +139,10 @@ def _validate_request(request: dict[str, Any]) -> dict[str, Any]:
         "blocked_at": blocked_at,
         "completed_at": completed_at,
         "canceled_at": canceled_at,
+        "accepted_by_actor": accepted_by_actor,
+        "blocked_by_actor": blocked_by_actor,
+        "completed_by_actor": completed_by_actor,
+        "canceled_by_actor": canceled_by_actor,
     }
 
 
@@ -153,8 +179,8 @@ def save_request(request: dict[str, Any]) -> dict[str, Any]:
 def create_request(
     *,
     track_id: str,
-    from_buddy: str,
-    to_buddy: str,
+    from_actor: dict[str, Any],
+    to_role: str,
     title: str,
     summary: str,
     target_refs: list[dict[str, Any]] | None = None,
@@ -166,6 +192,10 @@ def create_request(
     blocked_at: str | None = None,
     completed_at: str | None = None,
     canceled_at: str | None = None,
+    accepted_by_actor: dict[str, Any] | None = None,
+    blocked_by_actor: dict[str, Any] | None = None,
+    completed_by_actor: dict[str, Any] | None = None,
+    canceled_by_actor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     request_value = request_id.strip() if isinstance(request_id, str) and request_id.strip() else f"req-{uuid.uuid4().hex[:12]}"
     runtime_files.require_id(request_value, "request id")
@@ -174,8 +204,8 @@ def create_request(
         {
             "id": request_value,
             "track_id": track_id,
-            "from_buddy": from_buddy,
-            "to_buddy": to_buddy,
+            "from_actor": from_actor,
+            "to_role": to_role,
             "title": title,
             "summary": summary,
             "target_refs": target_refs if target_refs is not None else [],
@@ -188,6 +218,10 @@ def create_request(
             "blocked_at": blocked_at,
             "completed_at": completed_at,
             "canceled_at": canceled_at,
+            "accepted_by_actor": accepted_by_actor,
+            "blocked_by_actor": blocked_by_actor,
+            "completed_by_actor": completed_by_actor,
+            "canceled_by_actor": canceled_by_actor,
         }
     )
 

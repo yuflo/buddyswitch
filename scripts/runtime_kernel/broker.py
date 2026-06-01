@@ -23,16 +23,16 @@ def _session_context(
     request_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     params = request_params if isinstance(request_params, dict) else {}
-    instance_id = params.get("instance_id") if isinstance(params.get("instance_id"), str) else None
-    active_buddy = params.get("active_buddy") if isinstance(params.get("active_buddy"), str) else None
+    actor_id = params.get("actor_id") if isinstance(params.get("actor_id"), str) else None
+    active_role = params.get("active_role") if isinstance(params.get("active_role"), str) else None
     payload: dict[str, Any] = {}
-    if isinstance(instance_id, str) and isinstance(active_buddy, str):
-        payload = {"instance_id": instance_id, "buddy": active_buddy}
+    if isinstance(actor_id, str) and isinstance(active_role, str):
+        payload = {"actor_id": actor_id, "role": active_role}
     return {
         "instance_json": instance_json_path,
         "manifest_path": manifest_path,
-        "instance_id": instance_id,
-        "active_buddy": active_buddy,
+        "actor_id": actor_id,
+        "active_role": active_role,
         "payload": payload,
     }
 
@@ -190,17 +190,17 @@ def _expected_runtime_context(instance_json_path: Path) -> tuple[str, str, Path 
     payload = json.loads(instance_json_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"instance record must be object: {instance_json_path}")
-    instance_id = payload.get("instance_id")
-    active_buddy = payload.get("buddy")
-    if not isinstance(instance_id, str) or not instance_id.strip():
-        raise ValueError(f"instance record missing instance_id: {instance_json_path}")
-    if not isinstance(active_buddy, str) or not active_buddy.strip():
-        raise ValueError(f"instance record missing buddy: {instance_json_path}")
+    actor_id = payload.get("actor_id")
+    active_role = payload.get("role")
+    if not isinstance(actor_id, str) or not actor_id.strip():
+        raise ValueError(f"instance record missing actor_id: {instance_json_path}")
+    if not isinstance(active_role, str) or not active_role.strip():
+        raise ValueError(f"instance record missing role: {instance_json_path}")
     workspace_dir = payload.get("workspace_dir")
     workspace_root = None
     if isinstance(workspace_dir, str) and workspace_dir.strip():
         workspace_root = Path(workspace_dir.strip()).resolve(strict=False)
-    return instance_id.strip(), active_buddy.strip(), workspace_root
+    return actor_id.strip(), active_role.strip(), workspace_root
 
 
 def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
@@ -224,21 +224,21 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         payload = lifecycle.stop_broker(paths)
         return (0 if payload.get("ok") else 1), payload
 
-    expected_instance_id, expected_active_buddy, expected_workspace_root = _expected_runtime_context(args.instance_json)
+    expected_actor_id, expected_active_role, expected_workspace_root = _expected_runtime_context(args.instance_json)
 
     if args.command == "ping":
         payload = lifecycle.ping_broker(
             paths,
-            expected_instance_id=expected_instance_id,
-            expected_active_buddy=expected_active_buddy,
+            expected_actor_id=expected_actor_id,
+            expected_active_role=expected_active_role,
         )
         return (0 if payload.get("ok") else 1), payload
 
     if args.command == "status":
         payload = lifecycle.broker_status(
             paths,
-            expected_instance_id=expected_instance_id,
-            expected_active_buddy=expected_active_buddy,
+            expected_actor_id=expected_actor_id,
+            expected_active_role=expected_active_role,
             expected_workspace_root=expected_workspace_root,
         )
         return (0 if payload.get("healthy") else 1), payload
@@ -248,8 +248,8 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             paths,
             instance_json_path=args.instance_json,
             manifest_path=args.manifest,
-            expected_instance_id=expected_instance_id,
-            expected_active_buddy=expected_active_buddy,
+            expected_actor_id=expected_actor_id,
+            expected_active_role=expected_active_role,
             expected_workspace_root=expected_workspace_root,
         )
         return (0 if payload.get("ok") else 1), payload

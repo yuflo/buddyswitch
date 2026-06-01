@@ -55,11 +55,11 @@ def assert_target_readable(
     *,
     target_type: str,
     target_id: str,
-    active_buddy: str,
+    active_role: str,
     action: str,
 ) -> dict[str, Any]:
     if target_type == "track":
-        track_decision = artifact_visibility_domain.assert_track_readable(target_id, active_buddy=active_buddy, action=action)
+        track_decision = artifact_visibility_domain.assert_track_readable(target_id, active_role=active_role, action=action)
         if not bool(track_decision.get("ok")):
             message = str(track_decision.get("message", f"track not found: {target_id}"))
             boundary = str(track_decision.get("permission_boundary", "track.lifecycle_status"))
@@ -79,7 +79,7 @@ def assert_target_readable(
     if artifact is None:
         raise CommentTargetPayloadError(f"artifact not found: {target_id}", correctable_fields=["target_id"])
 
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
     if not bool(decision.get("allowed")):
         raise CommentTargetScopeError(
             message=str(decision.get("why", "artifact read denied")),

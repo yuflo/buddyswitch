@@ -96,11 +96,11 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='artifact',
         title='Artifact Bodies',
-        description='Discover readable artifact summaries, read full artifact bodies, and manage active-buddy private drafts/metadata.',
+        description='Discover readable artifact summaries, read full artifact bodies, and manage active actor private drafts/metadata.',
         scope='private drafts and published track material/proof artifacts',
         capability_boundary='Private drafts are owner-scoped until published on a non-archived track.',
         object_model=(
-            'Artifacts are buddy-authored product content records. Draft revisions are owner-scoped until track.add_material or track.add_proof publishes them to shared track state; artifact.get returns full body content only for readable artifact ids.'
+            'Artifacts are role-authored product content records. Draft revisions are owner-scoped until track.add_material or track.add_proof publishes them to shared track state; artifact.get returns full body content only for readable artifact ids.'
         ),
         use_when=(
             'You need full body reads or private draft artifact mutation.',
@@ -122,9 +122,9 @@ def _build_definition() -> ToolDefinition:
                             'type': 'string',
                             'description': 'Optional readable track id filter.',
                         },
-                        'created_by': {
+                        'created_by_role': {
                             'type': 'string',
-                            'description': 'Optional creator buddy id filter.',
+                            'description': 'Optional creator role id filter.',
                         },
                         'template': {
                             'type': 'string',
@@ -154,7 +154,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
-                visibility='active-buddy readable artifact summaries',
+                visibility='active-role readable artifact summaries',
                 durability='none',
                 result_content_level='summary rows only',
                 success_effect='Returns readable artifact summaries and filters without loading full markdown bodies.',
@@ -169,7 +169,7 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'filters are valid and within readable scope boundaries',
@@ -218,7 +218,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
-                visibility='active-buddy readable artifact body',
+                visibility='active-role readable artifact body',
                 durability='none',
                 result_content_level='full markdown body',
                 success_effect='Returns one readable artifact including full markdown body.',
@@ -232,7 +232,7 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'artifact_id references a readable artifact',
@@ -260,7 +260,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='create_revision',
                 title='artifact.create_revision',
-                description='Create one active-buddy private draft artifact revision.',
+                description='Create one active actor private draft artifact revision.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -310,18 +310,18 @@ def _build_definition() -> ToolDefinition:
                 kind='write',
                 mutates='runtime_objects',
                 required_permission='artifact.create',
-                authority='artifact.buddy_scope',
+                authority='artifact.actor_scope',
                 visibility='owner-scoped draft until track publication',
                 durability='durable',
                 result_content_level='artifact row with draft body',
-                success_effect='Creates one active-buddy private draft artifact revision; publication starts only with track.add_material or track.add_proof.',
+                success_effect='Creates one active actor private draft artifact revision; publication starts only with track.add_material or track.add_proof.',
                 failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
                 reads=(
                     'optional superseded artifact',
                     'source refs metadata',
                 ),
                 writes=(
-                    'active-buddy private draft artifact revision',
+                    'active actor private draft artifact revision',
                 ),
                 does_not_write=(
                     'track state',
@@ -331,7 +331,7 @@ def _build_definition() -> ToolDefinition:
                     'track.add_proof publication path',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'env.tool role-action policy allows this action for the active role',
@@ -361,7 +361,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='update_metadata',
                 title='artifact.update_metadata',
-                description='Update metadata on one active-buddy-owned artifact.',
+                description='Update metadata on one active-actor-owned artifact.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -369,7 +369,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'artifact_id': {
                             'type': 'string',
-                            'description': 'Active-buddy-owned artifact id to update.',
+                            'description': 'Active-role-owned artifact id to update.',
                         },
                         'title': {
                             'type': 'string',
@@ -407,17 +407,17 @@ def _build_definition() -> ToolDefinition:
                 kind='write',
                 mutates='runtime_objects',
                 required_permission='artifact.update',
-                authority='artifact.buddy_scope',
+                authority='artifact.actor_scope',
                 visibility='owner-scoped unless already published through track state',
                 durability='durable',
                 result_content_level='artifact row',
-                success_effect='Patches metadata or body on one active-buddy-owned artifact without changing track publication slots.',
+                success_effect='Patches metadata or body on one active-actor-owned artifact without changing track publication slots.',
                 failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
                 reads=(
-                    'one active-buddy-owned artifact',
+                    'one active-actor-owned artifact',
                 ),
                 writes=(
-                    'active-buddy-owned artifact metadata/body',
+                    'active-actor-owned artifact metadata/body',
                 ),
                 does_not_write=(
                     'track state',
@@ -425,16 +425,16 @@ def _build_definition() -> ToolDefinition:
                     'track proof slot',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    'artifact_id references an active-buddy-owned artifact',
+                    'artifact_id references an active-actor-owned artifact',
                 ),
                 returns=(
                     'artifact',
                 ),
                 use_when=(
-                    'You need to patch metadata or body on an existing active-buddy artifact id.',
+                    'You need to patch metadata or body on an existing active-actor artifact id.',
                     'You want to adjust title/summary/template/source refs without creating a new revision id.',
                 ),
                 do_not_use_when=(
@@ -454,7 +454,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='attach_file',
                 title='artifact.attach_file',
-                description='Attach one existing file from the active instance buddybox directory to an active-buddy-owned draft artifact.',
+                description='Attach one existing file from the active actor private directory to an active-actor-owned draft artifact.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -462,7 +462,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'artifact_id': {
                             'type': 'string',
-                            'description': 'Active-buddy-owned draft artifact id to attach a file to.',
+                            'description': 'Active-role-owned draft artifact id to attach a file to.',
                         },
                         'filename': {
                             'type': 'string',
@@ -470,7 +470,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'source_path': {
                             'type': 'string',
-                            'description': 'Existing source file path under the active instance buddybox directory.',
+                            'description': 'Existing source file path under the active actor private directory.',
                         },
                         'content_type': {
                             'type': 'string',
@@ -482,15 +482,15 @@ def _build_definition() -> ToolDefinition:
                 kind='write',
                 mutates='runtime_objects',
                 required_permission='artifact.update',
-                authority='artifact.buddy_scope',
+                authority='artifact.actor_scope',
                 visibility='owner-scoped draft attachment metadata until later publication makes the artifact readable',
                 durability='durable',
                 result_content_level='attachment summary row',
-                success_effect='Promotes one active-buddy private buddybox file into artifact-owned attachment metadata and pinned storage without exposing filesystem paths.',
-                failure_state_guarantee='Rejected attachment writes do not mutate artifact metadata, pinned files, buddybox files, or track state.',
+                success_effect='Promotes one active actor private file into artifact-owned attachment metadata and pinned storage without exposing filesystem paths.',
+                failure_state_guarantee='Rejected attachment writes do not mutate artifact metadata, pinned files, active actor private files, or track state.',
                 reads=(
-                    'one active-buddy-owned draft artifact',
-                    'one source file under the active instance buddybox directory',
+                    'one active-actor-owned draft artifact',
+                    'one source file under the active actor private directory',
                 ),
                 writes=(
                     'artifact attachment metadata',
@@ -502,20 +502,20 @@ def _build_definition() -> ToolDefinition:
                     'request lifecycle',
                     'comments',
                     'messages',
-                    'buddybox files',
+                    'actor_private files',
                     'browser session',
                 ),
                 preconditions=(
-                    'artifact_id references an active-buddy-owned draft artifact',
-                    'source_path references one non-empty file inside the active instance buddybox directory',
+                    'artifact_id references an active-actor-owned draft artifact',
+                    'source_path references one non-empty file inside the active actor private directory',
                 ),
                 returns=('attachment',),
                 use_when=(
-                    'You need to promote one file from $BUDDYSWITCH_BUDDYBOX_DIR into draft artifact attachment metadata.',
+                    'You need to promote one file from $BUDDYSWITCH_ACTOR_PRIVATE_DIR into draft artifact attachment metadata.',
                 ),
                 do_not_use_when=(
                     'You need to create a new draft body first; use artifact.create_revision.',
-                    'You only need private file storage without artifact ownership; write the file directly under $BUDDYSWITCH_BUDDYBOX_DIR.',
+                    'You only need private file storage without artifact ownership; write the file directly under $BUDDYSWITCH_ACTOR_PRIVATE_DIR.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -558,7 +558,7 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                     'pinned attachment files',
                 ),
                 preconditions=('artifact_id references a readable artifact',),
@@ -615,7 +615,7 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                     'pinned attachment files',
                 ),
                 preconditions=(

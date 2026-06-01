@@ -55,20 +55,20 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(
         self,
         *,
-        instance_id: str = "inst-pm-example",
-        buddy: str = "pm",
+        actor_id: str = "act-pm-example",
+        role: str = "pm",
         status: str = "active",
     ) -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        instance_root = self._instance_root(instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_root = self._instance_root(actor_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": status,
                     "instance_root": str(instance_root),
                     "current_task_id": None,
@@ -91,14 +91,14 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         *,
         method: str,
         params: dict[str, object],
-        instance_id: str = "inst-pm-example",
-        buddy: str = "pm",
+        actor_id: str = "act-pm-example",
+        role: str = "pm",
         instance_json: Path,
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request_params = dict(params)
-        request_params.setdefault("instance_id", instance_id)
-        request_params.setdefault("active_buddy", buddy)
+        request_params.setdefault("actor_id", actor_id)
+        request_params.setdefault("active_role", role)
         request: dict[str, object] = {
             "protocol": BROKER_V2_PROTOCOL,
             "request_id": f"req-test-{uuid.uuid4().hex}",
@@ -189,9 +189,9 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response["error"]["code"], "E_ENV_TOOL", msg=response)
         self.assertEqual(response.get("permission_boundary"), "env.tool", msg=response)
 
-    def test_context_reports_direct_buddybox_writable_surface(self) -> None:
-        instance_id = self._runtime_instance_id(buddy="pm", label="inst-pm-alt-workspace")
-        instance_root = self._instance_root(instance_id)
+    def test_context_reports_direct_actor_private_writable_surface(self) -> None:
+        actor_id = self._runtime_actor_id(role="pm", label="act-pm-alt-workspace")
+        instance_root = self._instance_root(actor_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
@@ -199,8 +199,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": "pm",
+                    "actor_id": actor_id,
+                    "role": "pm",
                     "status": "active",
                     "instance_root": str(instance_root),
                     "current_task_id": None,
@@ -224,8 +224,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "action": "summarize",
                 "args": {},
             },
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             instance_json=instance_json,
         )
         self.assertTrue(summarized.get("ok"), msg=summarized)
@@ -235,21 +235,21 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         persistent = surfaces.get("persistent_files")
         self.assertIsInstance(persistent, dict, msg=summarized)
         assert isinstance(persistent, dict)
-        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
-        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_ACTOR_PRIVATE_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "private")
         self.assertFalse(persistent.get("mutates_product_state"))
 
-        target = workspace_dir / "buddybox" / "broker" / "out.txt"
+        target = workspace_dir / "private" / "broker" / "out.txt"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("broker\n", encoding="utf-8")
         self.assertTrue(target.exists(), msg=target)
         self.assertEqual(target.read_text(encoding="utf-8"), "broker\n")
-        self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt").exists())
-        self.assertFalse(self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/out.txt").exists())
+        self.assertFalse(self._runtime_path("buddyswitch/local/private/pm/broker/out.txt").exists())
+        self.assertFalse(self._runtime_path("state/buddyswitch/local/private/pm/broker/out.txt").exists())
 
-    def test_direct_buddybox_files_use_shared_state_root(self) -> None:
-        instance_id = self._runtime_instance_id(buddy="pm", label="inst-pm-alt-workspace-lifecycle")
-        instance_root = self._instance_root(instance_id)
+    def test_direct_actor_private_files_use_shared_state_root(self) -> None:
+        actor_id = self._runtime_actor_id(role="pm", label="act-pm-alt-workspace-lifecycle")
+        instance_root = self._instance_root(actor_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
@@ -257,8 +257,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": "pm",
+                    "actor_id": actor_id,
+                    "role": "pm",
                     "status": "active",
                     "instance_root": str(instance_root),
                     "current_task_id": None,
@@ -275,8 +275,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             encoding="utf-8",
         )
 
-        target = workspace_dir / "buddybox" / "broker" / "lifecycle.txt"
-        wrong_runtime_root = self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
+        target = workspace_dir / "private" / "broker" / "lifecycle.txt"
+        wrong_runtime_root = self._runtime_path("state/buddyswitch/local/private/pm/broker/lifecycle.txt")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("lifecycle\n", encoding="utf-8")
         self.assertTrue(target.exists(), msg=target)
@@ -317,34 +317,34 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             )
             self.assertTrue(created["ok"], msg=created)
 
-        expected_instance_id = json.loads(instance_json.read_text(encoding="utf-8"))["instance_id"]
-        self.assertEqual([session["instance_id"] for session in lock_sessions], [expected_instance_id, expected_instance_id])
+        expected_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
+        self.assertEqual([session["actor_id"] for session in lock_sessions], [expected_actor_id, expected_actor_id])
         self.assertTrue(all(session["instance_json"] == instance_json for session in lock_sessions))
 
-    def test_rejects_wrong_instance_id(self) -> None:
+    def test_rejects_wrong_actor_id(self) -> None:
         instance_json = self._instance_json()
         response = self._dispatch(
             method="prepare",
             params={"text": PM_REQUEST},
-            instance_id="inst-other",
+            actor_id="act-other",
             instance_json=instance_json,
         )
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_PERMISSION")
-        self.assertIn("instance_id mismatch", response["error"]["message"])
+        self.assertIn("actor_id mismatch", response["error"]["message"])
 
-    def test_rejects_wrong_active_buddy(self) -> None:
-        instance_json = self._instance_json(buddy="pm")
-        active_instance_id = json.loads(instance_json.read_text(encoding="utf-8"))["instance_id"]
+    def test_rejects_wrong_active_role(self) -> None:
+        instance_json = self._instance_json(role="pm")
+        active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
         response = self._dispatch(
             method="prepare",
-            params={"text": PM_REQUEST, "instance_id": active_instance_id},
-            buddy="market",
+            params={"text": PM_REQUEST, "actor_id": active_actor_id},
+            role="market",
             instance_json=instance_json,
         )
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_PERMISSION")
-        self.assertIn("active_buddy mismatch", response["error"]["message"])
+        self.assertIn("active_role mismatch", response["error"]["message"])
 
     def test_rejects_inactive_instance(self) -> None:
         instance_json = self._instance_json(status="inactive")
@@ -358,15 +358,15 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("instance is not active", response["error"]["message"])
 
     def test_env_tool_supports_active_instance_and_identity_checks(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-example", buddy="dev", status="active")
-        active_instance_id = json.loads(instance_json.read_text(encoding="utf-8"))["instance_id"]
+        instance_json = self._instance_json(actor_id="act-dev-example", role="dev", status="active")
+        active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
 
         supported = self._dispatch(
             method="env.tool",
             params={"tool": "task", "action": "current", "args": {}},
             instance_json=instance_json,
-            instance_id="inst-dev-example",
-            buddy="dev",
+            actor_id="act-dev-example",
+            role="dev",
         )
         self.assertTrue(supported["ok"], msg=supported)
 
@@ -383,8 +383,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 },
             },
             instance_json=instance_json,
-            instance_id="inst-dev-example",
-            buddy="dev",
+            actor_id="act-dev-example",
+            role="dev",
         )
         self.assertFalse(role_denied["ok"], msg=role_denied)
         self.assertEqual(role_denied["error"]["code"], "E_TOOL_ROLE_AUTH")
@@ -395,41 +395,41 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             method="env.tool",
             params={"tool": "task", "action": "current", "args": {}},
             instance_json=instance_json,
-            instance_id="inst-other",
-            buddy="dev",
+            actor_id="act-other",
+            role="dev",
         )
         self.assertFalse(wrong_instance["ok"])
         self.assertEqual(self._error_boundary(wrong_instance), "active-instance")
 
-        wrong_buddy = self._dispatch(
+        wrong_role = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "current", "args": {}, "instance_id": active_instance_id},
+            params={"tool": "task", "action": "current", "args": {}, "actor_id": active_actor_id},
             instance_json=instance_json,
-            buddy="pm",
+            role="pm",
         )
-        self.assertFalse(wrong_buddy["ok"])
-        self.assertEqual(self._error_boundary(wrong_buddy), "active-buddy")
+        self.assertFalse(wrong_role["ok"])
+        self.assertEqual(self._error_boundary(wrong_role), "active-role")
 
-        inactive_instance_json = self._instance_json(instance_id="inst-dev-inactive", buddy="dev", status="inactive")
+        inactive_instance_json = self._instance_json(actor_id="act-dev-inactive", role="dev", status="inactive")
         inactive = self._dispatch(
             method="env.tool",
             params={"tool": "task", "action": "current", "args": {}},
             instance_json=inactive_instance_json,
-            instance_id="inst-dev-inactive",
-            buddy="dev",
+            actor_id="act-dev-inactive",
+            role="dev",
         )
         self.assertFalse(inactive["ok"])
         self.assertEqual(self._error_boundary(inactive), "active-instance-status")
 
     def test_legacy_env_task_method_is_rejected(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-example", buddy="dev", status="active")
+        instance_json = self._instance_json(actor_id="act-dev-example", role="dev", status="active")
         legacy_method = "env" + ".task"
         rejected_legacy = self._dispatch(
             method=legacy_method,
             params={"action": "list", "args": {}},
             instance_json=instance_json,
-            instance_id="inst-dev-example",
-            buddy="dev",
+            actor_id="act-dev-example",
+            role="dev",
         )
         self.assertFalse(rejected_legacy["ok"])
         self.assertEqual(self._error_boundary(rejected_legacy), "broker-protocol")
@@ -438,8 +438,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "",
             },
             clear=False,
@@ -813,8 +813,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
             },
             clear=False,
@@ -839,9 +839,9 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
                 request["request_id"],
                 {
                     "code": "E_RUNTIME_BROKER_PERMISSION",
-                    "message": "active buddy mismatch",
+                    "message": "active role mismatch",
                     "retriable": False,
-                    "permission_boundary": "active-buddy",
+                    "permission_boundary": "active-role",
                 },
             )
 
@@ -849,8 +849,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "market",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "market",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
             },
             clear=False,
@@ -859,7 +859,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
                 client.request_runtime_broker("env.tool", {"tool": "task", "action": "current", "args": {}})
         thread.join(timeout=2.0)
         self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PERMISSION")
-        self.assertEqual(raised.exception.details.get("permission_boundary"), "active-buddy")
+        self.assertEqual(raised.exception.details.get("permission_boundary"), "active-role")
         self.assertIs(raised.exception.details.get("retriable"), False)
         self.assertRegex(raised.exception.details.get("request_id", ""), r"^req-[0-9a-f-]+")
 
@@ -893,8 +893,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
             },
             clear=False,
@@ -918,8 +918,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime-broker.sock",
             },
             clear=False,
@@ -933,8 +933,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/missing-runtime-broker.sock",
             },
             clear=False,
@@ -947,7 +947,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertEqual(raised.exception.details.get("socket_path"), "/tmp/missing-runtime-broker.sock")
         self.assertEqual(
             raised.exception.details.get("command_hint"),
-            "./buddyswitch-codex instance attach inst-pm-example",
+            "./buddyswitch-codex instance attach act-pm-example",
         )
 
     def test_client_retries_read_only_env_tool_once_without_ensure(self) -> None:
@@ -968,8 +968,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime-broker.sock",
             },
             clear=False,
@@ -1010,8 +1010,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
             },
             clear=False,
@@ -1031,8 +1031,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": "act-pm-example",
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime-broker.sock",
             },
             clear=False,
@@ -1082,12 +1082,12 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 shutil.copy2(source, target)
 
     @staticmethod
-    def _write_instance_json(path: Path, *, workspace_dir: Path, instance_id: str = "inst-pm-root", buddy: str = "pm") -> None:
+    def _write_instance_json(path: Path, *, workspace_dir: Path, actor_id: str = "act-pm-root", role: str = "pm") -> None:
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "current_task_id": None,
                     "current_track_id": None,
@@ -1228,7 +1228,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             paths = self._paths(Path(temp))
             paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
             paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
-            status = self.lifecycle.broker_status(paths, expected_instance_id="inst-pm-example", expected_active_buddy="pm")
+            status = self.lifecycle.broker_status(paths, expected_actor_id="act-pm-example", expected_active_role="pm")
         self.assertFalse(status["healthy"])
         self.assertEqual(status["error"]["code"], "E_RUNTIME_BROKER_STALE_SOCKET")
 
@@ -1238,7 +1238,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             paths = self._paths(root)
             paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
             paths.marker_file.write_text(str(root / "other.sock"), encoding="utf-8")
-            status = self.lifecycle.broker_status(paths, expected_instance_id="inst-pm-example", expected_active_buddy="pm")
+            status = self.lifecycle.broker_status(paths, expected_actor_id="act-pm-example", expected_active_role="pm")
         self.assertFalse(status["healthy"])
         self.assertEqual(status["socket_path"], str(paths.socket_path))
         self.assertEqual(status["marker_path"], str(paths.marker_file))
@@ -1257,8 +1257,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     "ok": True,
                     "result": {
                         "protocol": BROKER_V2_PROTOCOL,
-                        "instance_id": "inst-pm-example",
-                        "active_buddy": "pm",
+                        "actor_id": "act-pm-example",
+                        "active_role": "pm",
                         "pid": os.getpid(),
                         "socket_path": str(paths.socket_path),
                         "runtime_root": str(ROOT),
@@ -1270,8 +1270,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             ):
                 status = self.lifecycle.broker_status(
                     paths,
-                    expected_instance_id="inst-pm-example",
-                    expected_active_buddy="pm",
+                    expected_actor_id="act-pm-example",
+                    expected_active_role="pm",
                     expected_workspace_root=workspace_dir,
                 )
         self.assertFalse(status["healthy"])
@@ -1290,15 +1290,15 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     "ok": True,
                     "result": {
                         "protocol": BROKER_V2_PROTOCOL,
-                        "instance_id": "inst-pm-example",
-                        "active_buddy": "pm",
+                        "actor_id": "act-pm-example",
+                        "active_role": "pm",
                     },
                 },
             ):
                 status = self.lifecycle.broker_status(
                     paths,
-                    expected_instance_id="inst-pm-example",
-                    expected_active_buddy="pm",
+                    expected_actor_id="act-pm-example",
+                    expected_active_role="pm",
                 )
         self.assertFalse(status["healthy"])
         self.assertEqual(status["error"]["code"], "E_RUNTIME_BROKER_STALE_SOCKET")
@@ -1323,8 +1323,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             ):
                 status = self.lifecycle.broker_status(
                     paths,
-                    expected_instance_id="inst-pm-example",
-                    expected_active_buddy="pm",
+                    expected_actor_id="act-pm-example",
+                    expected_active_role="pm",
                 )
         self.assertFalse(status["healthy"])
         self.assertEqual(status["error"]["code"], "E_RUNTIME_BROKER_UNAVAILABLE")
@@ -1350,8 +1350,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     "ok": True,
                     "result": {
                         "protocol": BROKER_V2_PROTOCOL,
-                        "instance_id": "inst-pm-example",
-                        "active_buddy": "pm",
+                        "actor_id": "act-pm-example",
+                        "active_role": "pm",
                         "pid": os.getpid(),
                         "socket_path": str(paths.socket_path),
                         "runtime_root": str(ROOT),
@@ -1370,8 +1370,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     paths,
                     instance_json_path=Path("instance.json"),
                     manifest_path=MANIFEST,
-                    expected_instance_id="inst-pm-example",
-                    expected_active_buddy="pm",
+                    expected_actor_id="act-pm-example",
+                    expected_active_role="pm",
                 )
             self.assertTrue(result["ok"], msg=result)
             self.assertEqual(events, ["start", "ping", "ping"])
@@ -1393,8 +1393,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     "ok": True,
                     "result": {
                         "protocol": BROKER_V2_PROTOCOL,
-                        "instance_id": "inst-pm-example",
-                        "active_buddy": "pm",
+                        "actor_id": "act-pm-example",
+                        "active_role": "pm",
                         "socket_path": str(paths.socket_path),
                         "runtime_root": str(ROOT),
                         "cwd": str(ROOT),
@@ -1407,8 +1407,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     paths,
                     instance_json_path=Path("instance.json"),
                     manifest_path=MANIFEST,
-                    expected_instance_id="inst-pm-example",
-                    expected_active_buddy="pm",
+                    expected_actor_id="act-pm-example",
+                    expected_active_role="pm",
                     startup_timeout_seconds=0.05,
                 )
         self.assertFalse(result["ok"], msg=result)
@@ -1425,8 +1425,8 @@ class RuntimeBrokerPersistIdempotencyTests(RuntimeWorkspaceTestMixin, unittest.T
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-pm-example",
-                    "buddy": "pm",
+                    "actor_id": "act-pm-example",
+                    "role": "pm",
                     "status": "active",
                     "current_task_id": None,
                     "current_track_id": None,
@@ -1460,8 +1460,8 @@ class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-pm-example",
-                    "buddy": "pm",
+                    "actor_id": "act-pm-example",
+                    "role": "pm",
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                 },
@@ -1474,17 +1474,17 @@ class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCas
             "protocol": BROKER_V2_PROTOCOL,
             "request_id": "req-error-extensions",
             "method": "env.tool",
-            "params": {"instance_id": "inst-pm-example", "active_buddy": "pm"},
+            "params": {"actor_id": "act-pm-example", "active_role": "pm"},
             "deadline_ms": 35000,
         }
         dispatched_payload = {
             "ok": False,
             "error": {
-                "code": "E_BUDDYBOX_LOGICAL_NAME",
+                "code": "E_ACTOR_PRIVATE_LOGICAL_NAME",
                 "message": "logical_name must be relative",
                 "retriable": True,
                 "class": "invalid_input",
-                "boundary": "active_buddy_private_file_capability",
+                "boundary": "active_actor_private_file_capability",
             },
             "state_changed": False,
             "correctable_fields": ["logical_name"],
@@ -1500,9 +1500,9 @@ class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         error = envelope.get("error")
         self.assertIsInstance(error, dict, msg=envelope)
         assert isinstance(error, dict)
-        self.assertEqual(error.get("code"), "E_BUDDYBOX_LOGICAL_NAME")
+        self.assertEqual(error.get("code"), "E_ACTOR_PRIVATE_LOGICAL_NAME")
         self.assertEqual(error.get("class"), "invalid_input")
-        self.assertEqual(error.get("boundary"), "active_buddy_private_file_capability")
+        self.assertEqual(error.get("boundary"), "active_actor_private_file_capability")
         self.assertEqual(envelope.get("correctable_fields"), ["logical_name"])
 
     def test_active_identity_mismatch_errors_are_structured_non_retriable(self) -> None:
@@ -1511,8 +1511,8 @@ class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-pm-example",
-                    "buddy": "pm",
+                    "actor_id": "act-pm-example",
+                    "role": "pm",
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                 },
@@ -1526,14 +1526,14 @@ class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCas
                 "protocol": BROKER_V2_PROTOCOL,
                 "request_id": "req-wrong-instance",
                 "method": "prepare",
-                "params": {"text": PM_REQUEST, "instance_id": "inst-other", "active_buddy": "pm"},
+                "params": {"text": PM_REQUEST, "actor_id": "act-other", "active_role": "pm"},
                 "deadline_ms": 35000,
             },
             {
                 "protocol": BROKER_V2_PROTOCOL,
-                "request_id": "req-wrong-buddy",
+                "request_id": "req-wrong-role",
                 "method": "prepare",
-                "params": {"text": PM_REQUEST, "instance_id": "inst-pm-example", "active_buddy": "market"},
+                "params": {"text": PM_REQUEST, "actor_id": "act-pm-example", "active_role": "market"},
                 "deadline_ms": 35000,
             },
         ):
@@ -1543,7 +1543,7 @@ class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCas
                 self.assertIs(response["error"]["retriable"], False)
                 self.assertNotEqual(response["error"]["code"], "E_RUNTIME_BROKER_UNAVAILABLE")
                 boundary = response.get("permission_boundary") or response["error"].get("permission_boundary")
-                self.assertIn(boundary, {"active-instance", "active-buddy"})
+                self.assertIn(boundary, {"active-instance", "active-role"})
 
     def test_runtime_broker_v2_stays_local_unix_socket_gateway(self) -> None:
         server_module = _require_module("runtime_kernel.server")

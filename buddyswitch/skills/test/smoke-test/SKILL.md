@@ -47,7 +47,7 @@ description: Use when the task is running smoke checks, regression verification,
 
 - Runtime execution uses native BuddySwitch env MCP tools through env.tool; use runtime discovery when exact schemas matter.
 - Product-readable durable state is written explicitly as task or artifact objects.
-- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for active-buddy-private working files.
+- Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for active-role-private working files.
 - Return after required explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
@@ -72,7 +72,7 @@ Use optional `task_id` only as association metadata for an explicitly selected t
 - Do not perform broad refactors unless explicitly requested.
 - Do not make product decisions.
 - Do not provide unstructured "looks good" output.
-- Do not write runtime noise into `projects/app/` source folders; write temporary private files under `$BUDDYSWITCH_BUDDYBOX_DIR`.
+- Do not write runtime noise into `projects/app/` source folders; write temporary private files under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`.
 
 ## Examples
 - `Run smoke checks for the onboarding CTA regression`

@@ -19,20 +19,20 @@ from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
-_RETIRED_BUDDYBOX_FILE_ROWS_FIELD = "buddybox_" + "files"
+_RETIRED_ACTOR_PRIVATE_FILE_ROWS_FIELD = "actor_private_" + "files"
 
 
 class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
-        self.instance_id = self._runtime_instance_id(buddy="pm", label="inst-pm-runless")
+        self.actor_id = self._runtime_actor_id(role="pm", label="act-pm-runless")
         self.instance_json = self._runtime_path("instance.json")
         self.instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": self.instance_id,
-                    "buddy": "pm",
+                    "actor_id": self.actor_id,
+                    "role": "pm",
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                 },
@@ -43,15 +43,15 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _dispatch(self, *, tool: str, action: str, args: dict[str, object] | None = None, buddy: str = "pm") -> dict[str, object]:
+    def _dispatch(self, *, tool: str, action: str, args: dict[str, object] | None = None, role: str = "pm") -> dict[str, object]:
         payload = {"tool": tool, "action": action, "args": args or {}}
-        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-pm-runless")
+        actor_id = self._runtime_actor_id(role=role, label="act-pm-runless")
         return tool_router.dispatch_env_tool_request(
             payload=payload,
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=self.instance_json,
-            instance_payload={"instance_id": instance_id, "buddy": buddy, "workspace_dir": str(self.runtime_root)},
+            instance_payload={"actor_id": actor_id, "role": role, "workspace_dir": str(self.runtime_root)},
             manifest=self.manifest,
             manifest_path=ROOT / "buddyswitch" / "manifest.toml",
         )
@@ -62,7 +62,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("binding", tools)
         self.assertIn("context", tools)
         self.assertNotIn("memory", tools)
-        self.assertNotIn("buddybox", tools)
+        self.assertNotIn("actor_private", tools)
 
     def test_router_rejects_retired_run_tool(self) -> None:
         payload = self._dispatch(tool="run", action="commit")
@@ -71,10 +71,10 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("unsupported", str(payload["error"]["message"]).lower())
 
     def test_context_summarize_exposes_runless_decision_surface(self) -> None:
-        track = env_store.create_track("track-runless-router", "Runless Router", owner_buddy="pm")
+        track = env_store.create_track("track-runless-router", "Runless Router", owner_role="pm")
         self._write_taskbox_task(
-            instance_id="inst-pm-runless",
-            buddy="pm",
+            actor_id="act-pm-runless",
+            role="pm",
             task_id="task-pm-router",
             title="Prepare design intake",
             track_id=track["id"],
@@ -94,13 +94,13 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id=track["id"],
             artifact_id=artifact["id"],
             label="Router PRD",
-            from_buddy="pm",
+            from_role="pm",
             summary="router artifact",
         )
 
-        buddybox = self._runtime_path("buddybox")
-        buddybox.mkdir(parents=True, exist_ok=True)
-        (buddybox / "notes.md").write_text("# notes\n", encoding="utf-8")
+        actor_private = self._runtime_path("actor_private")
+        actor_private.mkdir(parents=True, exist_ok=True)
+        (actor_private / "notes.md").write_text("# notes\n", encoding="utf-8")
 
         payload = self._dispatch(tool="context", action="summarize", args={})
         self.assertTrue(payload["ok"], msg=payload)
@@ -113,11 +113,11 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         persistent = surfaces.get("persistent_files")
         self.assertIsInstance(persistent, dict, msg=payload)
         assert isinstance(persistent, dict)
-        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
-        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_ACTOR_PRIVATE_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "private")
         self.assertFalse(persistent.get("mutates_product_state"))
-        self.assertNotIn("buddybox_desc", payload)
-        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, payload)
+        self.assertNotIn("actor_private_desc", payload)
+        self.assertNotIn(_RETIRED_ACTOR_PRIVATE_FILE_ROWS_FIELD, payload)
 
 
 if __name__ == "__main__":

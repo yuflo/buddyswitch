@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Load and validate the BuddySwitch env manifest.
 
-Manifest skill entries define buddy membership and package paths.
-Buddy rows define routing skills and artifact templates.
+Manifest skill entries define role membership and package paths.
+Role rows define routing skills and artifact templates.
 Codex-native package acceptance is owned by Codex after materialization.
 Env tool role-action authority is owned by the runtime tool dispatch policy.
 """
@@ -291,32 +291,32 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         skill["path"] = skill_path
         skill_lookup[skill_id] = skill
 
-    buddies = manifest.get("buddies")
-    if not isinstance(buddies, list) or not buddies:
-        raise ManifestError("buddies must be a non-empty list")
+    roles = manifest.get("roles")
+    if not isinstance(roles, list) or not roles:
+        raise ManifestError("roles must be a non-empty list")
 
-    buddy_ids: set[str] = set()
-    for index, buddy in enumerate(buddies):
-        label = f"buddies[{index}]"
-        if not isinstance(buddy, dict):
+    role_ids: set[str] = set()
+    for index, role in enumerate(roles):
+        label = f"roles[{index}]"
+        if not isinstance(role, dict):
             raise ManifestError(f"{label} must be an object")
 
-        buddy_id = _require_string(buddy, "id", label)
-        if not _SAFE_ID_RE.match(buddy_id):
+        role_id = _require_string(role, "id", label)
+        if not _SAFE_ID_RE.match(role_id):
             raise ManifestError(f"{label}.id must match /^[a-z][a-z0-9-]*$/")
-        if buddy_id in buddy_ids:
-            raise ManifestError(f"duplicate buddy id: {buddy_id}")
-        buddy_ids.add(buddy_id)
+        if role_id in role_ids:
+            raise ManifestError(f"duplicate role id: {role_id}")
+        role_ids.add(role_id)
 
-        _require_string(buddy, "label", label)
-        _require_string(buddy, "scope", label)
-        if "permissions" in buddy:
+        _require_string(role, "label", label)
+        _require_string(role, "scope", label)
+        if "permissions" in role:
             raise ManifestError(f"{label}.permissions is retired; role-action authority is owned by env.tool runtime policy")
-        declared_skills = _require_string_list(buddy, "skills", label, allow_empty=True)
-        raw_templates = buddy.get("artifact_templates")
+        declared_skills = _require_string_list(role, "skills", label, allow_empty=True)
+        raw_templates = role.get("artifact_templates")
         normalized_artifact_templates: list[str] = []
         if raw_templates is None:
-            legacy_kinds = _require_string_list(buddy, _LEGACY_ARTIFACT_KINDS_KEY, label)
+            legacy_kinds = _require_string_list(role, _LEGACY_ARTIFACT_KINDS_KEY, label)
             seen_templates: set[str] = set()
             for artifact_kind in legacy_kinds:
                 if not _SAFE_ID_RE.match(artifact_kind):
@@ -329,7 +329,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
                 seen_templates.add(template)
                 normalized_artifact_templates.append(template)
         else:
-            artifact_templates = _require_string_list(buddy, "artifact_templates", label)
+            artifact_templates = _require_string_list(role, "artifact_templates", label)
             seen_artifact_templates: set[str] = set()
             for artifact_template in artifact_templates:
                 if artifact_template not in _VALID_ARTIFACT_TEMPLATES:
@@ -345,8 +345,8 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
                 normalized_artifact_templates.append(artifact_template)
         if not normalized_artifact_templates:
             raise ManifestError(f"{label}.artifact_templates must not be empty after normalization")
-        buddy["artifact_templates"] = normalized_artifact_templates
-        buddy.pop(_LEGACY_ARTIFACT_KINDS_KEY, None)
+        role["artifact_templates"] = normalized_artifact_templates
+        role.pop(_LEGACY_ARTIFACT_KINDS_KEY, None)
         for declared_skill in declared_skills:
             if declared_skill not in skill_lookup:
                 raise ManifestError(f"{label}.skills contains unknown skill '{declared_skill}'")
@@ -354,42 +354,42 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     return manifest
 
 
-def buddies_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {buddy["id"]: buddy for buddy in manifest.get("buddies", []) if isinstance(buddy, dict)}
+def roles_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {role["id"]: role for role in manifest.get("roles", []) if isinstance(role, dict)}
 
 
 def skills_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
 
 
-def get_buddy(manifest: dict[str, Any], buddy_id: str) -> dict[str, Any] | None:
-    return buddies_by_id(manifest).get(buddy_id)
+def get_role(manifest: dict[str, Any], role_id: str) -> dict[str, Any] | None:
+    return roles_by_id(manifest).get(role_id)
 
 
-def require_buddy(manifest: dict[str, Any], buddy_id: str) -> dict[str, Any]:
-    buddy = get_buddy(manifest, buddy_id)
-    if buddy is None:
-        valid = sorted(buddies_by_id(manifest))
-        raise ManifestError(f"Unknown buddy '{buddy_id}'. Valid: {', '.join(valid)}")
-    return buddy
+def require_role(manifest: dict[str, Any], role_id: str) -> dict[str, Any]:
+    role = get_role(manifest, role_id)
+    if role is None:
+        valid = sorted(roles_by_id(manifest))
+        raise ManifestError(f"Unknown role '{role_id}'. Valid: {', '.join(valid)}")
+    return role
 
 
-def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str, Any]:
-    buddy = require_buddy(manifest, buddy_id)
+def role_authority_profile(manifest: dict[str, Any], role_id: str) -> dict[str, Any]:
+    role = require_role(manifest, role_id)
     return {
-        "routing_skills": list(buddy.get("skills", [])),
+        "routing_skills": list(role.get("skills", [])),
         "runtime_note": (
-            "buddy->skills controls which runtime packages are materialized under .agents/skills, "
+            "role->skills controls which runtime packages are materialized under .agents/skills, "
             "while env.tool role-action authority is computed by the runtime tool dispatch policy."
         ),
     }
 
 
-def buddy_skill_docs(manifest: dict[str, Any], buddy_id: str) -> list[dict[str, Any]]:
-    buddy = require_buddy(manifest, buddy_id)
+def role_skill_docs(manifest: dict[str, Any], role_id: str) -> list[dict[str, Any]]:
+    role = require_role(manifest, role_id)
     lookup = skills_by_id(manifest)
     docs: list[dict[str, Any]] = []
-    for skill_id in buddy.get("skills", []):
+    for skill_id in role.get("skills", []):
         skill = lookup[skill_id]
         docs.append(
             {
@@ -406,30 +406,30 @@ def _cmd_print(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_list_buddies(args: argparse.Namespace) -> int:
+def _cmd_list_roles(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
-    buddies = [
+    roles = [
         {
-            "id": buddy["id"],
-            "label": buddy["label"],
-            "scope": buddy["scope"],
+            "id": role["id"],
+            "label": role["label"],
+            "scope": role["scope"],
         }
-        for buddy in manifest["buddies"]
+        for role in manifest["roles"]
     ]
     if args.json:
-        print(json.dumps({"buddies": buddies}, ensure_ascii=True))
+        print(json.dumps({"roles": roles}, ensure_ascii=True))
         return 0
-    for buddy in buddies:
-        print(f"{buddy['id']}\t{buddy['label']}\t{buddy['scope']}")
+    for role in roles:
+        print(f"{role['id']}\t{role['label']}\t{role['scope']}")
     return 0
 
 
-def _cmd_show_buddy(args: argparse.Namespace) -> int:
+def _cmd_show_role(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
-    buddy = require_buddy(manifest, args.buddy_id)
-    payload = dict(buddy)
-    payload["authority"] = buddy_authority_profile(manifest, args.buddy_id)
-    payload["resolved_skills"] = buddy_skill_docs(manifest, args.buddy_id)
+    role = require_role(manifest, args.role_id)
+    payload = dict(role)
+    payload["authority"] = role_authority_profile(manifest, args.role_id)
+    payload["resolved_skills"] = role_skill_docs(manifest, args.role_id)
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0
 
@@ -442,13 +442,13 @@ def build_parser() -> argparse.ArgumentParser:
     cmd_print = subparsers.add_parser("print", help="Print full manifest as JSON")
     cmd_print.set_defaults(func=_cmd_print)
 
-    cmd_list = subparsers.add_parser("list-buddies", help="List buddies")
+    cmd_list = subparsers.add_parser("list-roles", help="List roles")
     cmd_list.add_argument("--json", action="store_true")
-    cmd_list.set_defaults(func=_cmd_list_buddies)
+    cmd_list.set_defaults(func=_cmd_list_roles)
 
-    cmd_show = subparsers.add_parser("show-buddy", help="Show one buddy profile")
-    cmd_show.add_argument("buddy_id")
-    cmd_show.set_defaults(func=_cmd_show_buddy)
+    cmd_show = subparsers.add_parser("show-role", help="Show one role profile")
+    cmd_show.add_argument("role_id")
+    cmd_show.set_defaults(func=_cmd_show_role)
     return parser
 
 

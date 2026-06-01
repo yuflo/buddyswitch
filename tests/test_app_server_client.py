@@ -851,7 +851,7 @@ class AppServerClientTests(unittest.TestCase):
             root = Path(temp_root) / ("nested-" * 20)
             marker = root / "runtime" / "app-server.socket"
             socket_path = APP_SERVER.effective_socket_path(
-                "inst-pm-20260523-abc123",
+                "act-pm-20260523-abc123",
                 root,
                 marker,
             )

@@ -77,14 +77,14 @@ def _select_template_rows(
 
 def select_artifacts_for_run(
     *,
-    active_buddy: str,
+    active_role: str,
     demand: str,
     required_templates: list[str],
     track_artifact_index: dict[str, Any] | None,
     task_id_scope: str | None = None,
     max_default_items: int | None = None,
 ) -> dict[str, Any]:
-    del active_buddy
+    del active_role
     del demand
     del task_id_scope
 
@@ -145,7 +145,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Deterministic track artifact selection helper.")
-    parser.add_argument("--buddy", required=True, help="Current executing buddy id")
+    parser.add_argument("--role", required=True, help="Current executing role id")
     parser.add_argument("--demand", required=True, help="Turn request text")
     parser.add_argument("--index-file", type=Path, required=True, help="Path to track_artifact_index JSON")
     parser.add_argument(
@@ -164,7 +164,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     payload = select_artifacts_for_run(
-        active_buddy=args.buddy,
+        active_role=args.role,
         demand=args.demand,
         required_templates=args.required_templates,
         track_artifact_index=_load_json(args.index_file),

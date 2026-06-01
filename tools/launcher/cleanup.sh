@@ -7,7 +7,7 @@ BUDDYSWITCH_CLEANUP_ENV_CLEANUP="${BUDDYSWITCH_CLEANUP_REPO_ROOT}/scripts/env_cl
 BUDDYSWITCH_CLEANUP_MANIFEST="${BUDDYSWITCH_CLEANUP_REPO_ROOT}/buddyswitch/manifest.toml"
 
 buddyswitch_cleanup_usage_hint() {
-  echo "Use: buddyswitch-codex data cleanup --buddy <buddy>|--all-data [--yes] [--json]" >&2
+  echo "Use: buddyswitch-codex data cleanup --role <role>|--all-data [--yes] [--json]" >&2
 }
 
 buddyswitch_cleanup_requests_execute() {
@@ -21,30 +21,30 @@ buddyswitch_cleanup_requests_execute() {
 }
 
 BUDDYSWITCH_CLEANUP_SCOPE=""
-BUDDYSWITCH_CLEANUP_BUDDY=""
+BUDDYSWITCH_CLEANUP_ROLE=""
 BUDDYSWITCH_CLEANUP_COMMON_ARGS=()
 
 buddyswitch_cleanup_parse_args() {
   local target_seen=0
   BUDDYSWITCH_CLEANUP_SCOPE=""
-  BUDDYSWITCH_CLEANUP_BUDDY=""
+  BUDDYSWITCH_CLEANUP_ROLE=""
   BUDDYSWITCH_CLEANUP_COMMON_ARGS=()
 
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
-      --buddy)
+      --role)
         if [[ "${target_seen}" -eq 1 ]]; then
           echo "data cleanup target must be specified exactly once" >&2
           return 2
         fi
         target_seen=1
-        BUDDYSWITCH_CLEANUP_SCOPE="buddy"
+        BUDDYSWITCH_CLEANUP_SCOPE="role"
         shift
         if [[ "$#" -gt 0 && -n "${1:-}" && "${1:-}" != --* ]]; then
-          BUDDYSWITCH_CLEANUP_BUDDY="$1"
+          BUDDYSWITCH_CLEANUP_ROLE="$1"
           shift
         else
-          echo "Missing value for --buddy" >&2
+          echo "Missing value for --role" >&2
           return 2
         fi
         ;;
@@ -96,8 +96,8 @@ buddyswitch_cleanup_run_env_cleanup() {
   local -a target_args
 
   case "${scope}" in
-    buddy)
-      target_args=(--buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")
+    role)
+      target_args=(--role "${BUDDYSWITCH_CLEANUP_ROLE}")
       ;;
     all-data)
       target_args=(--all-data)
@@ -144,9 +144,9 @@ buddyswitch_count_active_browsers() {
   echo "0"
 }
 
-buddyswitch_count_active_browsers_for_buddy() {
-  local buddy="$1"
-  local instance_json instance_id instance_buddy
+buddyswitch_count_active_browsers_for_role() {
+  local role="$1"
+  local instance_json actor_id instance_role
 
   if buddyswitch_browser_pid_marker_is_active "$(buddyswitch_browser_pid_marker)"; then
     echo "1"
@@ -159,7 +159,7 @@ buddyswitch_count_active_browsers_for_buddy() {
 
   for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
     [[ -f "${instance_json}" ]] || continue
-    instance_buddy="$(
+    instance_role="$(
       python3 - "${instance_json}" <<'PY'
 import json
 import sys
@@ -169,18 +169,18 @@ try:
     payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 except Exception:
     raise SystemExit(0)
-buddy = payload.get("buddy")
-if isinstance(buddy, str):
-    print(buddy)
+role = payload.get("role")
+if isinstance(role, str):
+    print(role)
 PY
     )"
-    [[ "${instance_buddy}" == "${buddy}" ]] || continue
-    instance_id="$(basename "$(dirname "${instance_json}")")"
-    if buddyswitch_browser_instance_pid_marker_is_active "${instance_id}"; then
+    [[ "${instance_role}" == "${role}" ]] || continue
+    actor_id="$(basename "$(dirname "${instance_json}")")"
+    if buddyswitch_browser_instance_pid_marker_is_active "${actor_id}"; then
       echo "1"
       return 0
     fi
-    if buddyswitch_browser_instance_endpoint_is_active "${instance_id}"; then
+    if buddyswitch_browser_instance_endpoint_is_active "${actor_id}"; then
       echo "1"
       return 0
     fi
@@ -217,8 +217,8 @@ buddyswitch_cleanup_run_locked() {
   buddyswitch_cleanup_validate_shared_root || return $?
   buddyswitch_cleanup_parse_args "$@" || return $?
 
-  if [[ "${BUDDYSWITCH_CLEANUP_SCOPE}" == "buddy" ]]; then
-    active_count="$(buddyswitch_count_active_app_servers_for_buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")"
+  if [[ "${BUDDYSWITCH_CLEANUP_SCOPE}" == "role" ]]; then
+    active_count="$(buddyswitch_count_active_app_servers_for_role "${BUDDYSWITCH_CLEANUP_ROLE}")"
   else
     active_count="$(buddyswitch_count_active_app_servers)"
   fi
@@ -228,8 +228,8 @@ buddyswitch_cleanup_run_locked() {
     return 3
   fi
 
-  if [[ "${BUDDYSWITCH_CLEANUP_SCOPE}" == "buddy" ]]; then
-    active_browser_count="$(buddyswitch_count_active_browsers_for_buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")"
+  if [[ "${BUDDYSWITCH_CLEANUP_SCOPE}" == "role" ]]; then
+    active_browser_count="$(buddyswitch_count_active_browsers_for_role "${BUDDYSWITCH_CLEANUP_ROLE}")"
   else
     active_browser_count="$(buddyswitch_count_active_browsers)"
   fi

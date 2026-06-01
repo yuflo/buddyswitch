@@ -11,7 +11,8 @@ _SUCCESS_CANONICAL_FIELDS = {
     "ok",
     "tool",
     "action",
-    "active_buddy",
+    "active_actor",
+    "active_role",
     "effect_summary",
     "state_changed",
     "durability",
@@ -30,7 +31,8 @@ _REJECTION_CANONICAL_FIELDS = {
     "ok",
     "tool",
     "action",
-    "active_buddy",
+    "active_actor",
+    "active_role",
     "error",
     "permission_boundary",
     "human_summary",
@@ -65,6 +67,11 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _role_id_text(value: Any, field: str = "active_role") -> str:
+    role_id = getattr(value, "role_id", value)
+    return _require_non_empty_text(role_id, field)
+
+
 def _require_bool(value: Any, field: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{field} must be a bool")
@@ -75,6 +82,12 @@ def _require_list(value: Any, field: str) -> list[Any]:
     if not isinstance(value, list):
         raise ValueError(f"{field} must be a list")
     return value
+
+
+def _active_actor_payload(active_actor: dict[str, Any] | None, active_role: str) -> dict[str, Any]:
+    if isinstance(active_actor, dict):
+        return dict(active_actor)
+    return {"role_id": _role_id_text(active_role)}
 
 
 def _merge_extra(payload: dict[str, Any], extra: dict[str, Any], canonical_fields: set[str]) -> None:
@@ -209,10 +222,11 @@ def success(
     *,
     tool: str,
     action: str,
-    active_buddy: str,
+    active_role: str,
     effect_summary: str,
     state_changed: bool,
     durability: str,
+    active_actor: dict[str, Any] | None = None,
     allowed_next_actions: list[str] | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
     state_changes: list[dict[str, Any]] | None = None,
@@ -228,7 +242,8 @@ def success(
         "ok": True,
         "tool": tool,
         "action": action,
-        "active_buddy": active_buddy,
+        "active_actor": _active_actor_payload(active_actor, active_role),
+        "active_role": _role_id_text(active_role),
         "effect_summary": _require_non_empty_text(effect_summary, "effect_summary"),
         "state_changed": _require_bool(state_changed, "state_changed"),
         "durability": _require_non_empty_text(durability, "durability"),
@@ -259,7 +274,7 @@ def rejection(
     *,
     tool: str,
     action: str,
-    active_buddy: str,
+    active_role: str,
     code: str,
     message: str,
     permission_boundary: str,
@@ -270,6 +285,7 @@ def rejection(
     durability: str = "none",
     retryable: bool,
     retry_guidance: str,
+    active_actor: dict[str, Any] | None = None,
     allowed_next_actions: list[str] | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
     error_class: str | None = None,
@@ -284,7 +300,8 @@ def rejection(
         "ok": False,
         "tool": tool,
         "action": action,
-        "active_buddy": active_buddy,
+        "active_actor": _active_actor_payload(active_actor, active_role),
+        "active_role": _role_id_text(active_role),
         "error": {
             "code": code,
             "message": message,

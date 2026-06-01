@@ -120,14 +120,14 @@ def fallback_socket_dir() -> Path:
     return resolved_root / "buddyswitch-app-server"
 
 
-def effective_socket_path(instance_id: str, instance_root: Path, marker_path: Path) -> Path:
+def effective_socket_path(actor_id: str, instance_root: Path, marker_path: Path) -> Path:
     recorded = _read_text_file(marker_path)
     if recorded:
         return Path(recorded)
     default_path = default_socket_path(instance_root)
     if len(str(default_path).encode("utf-8")) < MAX_UNIX_SOCKET_BYTES:
         return default_path
-    digest = hashlib.sha1(instance_id.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()[:12]
     return fallback_socket_dir() / f"buddyswitch-app-server-{digest}.sock"
 
 
@@ -560,12 +560,12 @@ def app_server_status(socket_path: Path, pid_path: Path, marker_path: Path, log_
 
 
 def ensure_app_server(
-    instance_id: str,
+    actor_id: str,
     instance_root: Path,
     codex_bin: str = "codex",
     startup_timeout_seconds: float = 10.0,
 ) -> dict[str, Any]:
-    socket_path = effective_socket_path(instance_id, instance_root, marker_file(instance_root))
+    socket_path = effective_socket_path(actor_id, instance_root, marker_file(instance_root))
     pid_path = pid_file(instance_root)
     marker_path = marker_file(instance_root)
     log_path = log_file(instance_root)
@@ -594,7 +594,7 @@ def ensure_app_server(
         if process.poll() is not None:
             _cleanup_runtime_files(socket_path, pid_path, marker_path)
             raise AppServerUnavailableError(
-                f"codex app-server exited early for {instance_id}; see {log_path}"
+                f"codex app-server exited early for {actor_id}; see {log_path}"
             )
         status = app_server_status(socket_path, pid_path, marker_path, log_path)
         if status["healthy"]:
@@ -948,7 +948,7 @@ def _command_status(args: argparse.Namespace) -> int:
 
 def _command_ensure(args: argparse.Namespace) -> int:
     payload = ensure_app_server(
-        instance_id=args.instance_id,
+        actor_id=args.actor_id,
         instance_root=Path(args.instance_root),
         codex_bin=args.codex_bin,
         startup_timeout_seconds=args.startup_timeout_seconds,
@@ -1076,7 +1076,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(func=_command_status)
 
     ensure = subparsers.add_parser("ensure")
-    ensure.add_argument("--instance-id", required=True)
+    ensure.add_argument("--actor-id", required=True)
     ensure.add_argument("--instance-root", required=True)
     ensure.add_argument("--codex-bin", default="codex")
     ensure.add_argument("--startup-timeout-seconds", type=float, default=10.0)

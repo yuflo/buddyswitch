@@ -1,13 +1,13 @@
 {
-  "buddy_id": "design",
+  "role_id": "design",
   "contract_path": "framework/contracts/design.md",
   "project": {
     "visibility": "live",
     "access": "read-only",
     "path": "projects/app"
   },
-  "buddybox": {
-    "root": "buddybox"
+  "private_workspace": {
+    "root": "private"
   },
   "filesystem_capability": {
     "host_writable": [
@@ -58,6 +58,6 @@
   },
   "context_projection": {
     "agents_md": "from-profile-and-contract",
-    "skills": "active-buddy-only"
+    "skills": "active-role-only"
   }
 }

@@ -18,8 +18,8 @@ from env.tool_runtime import registry as tool_registry
 from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 _PRODUCT_MODE_ENV_KEYS = (
-    "BUDDYSWITCH_INSTANCE_ID",
-    "BUDDYSWITCH_ACTIVE_BUDDY",
+    "BUDDYSWITCH_ACTOR_ID",
+    "BUDDYSWITCH_ROLE_ID",
     "BUDDYSWITCH_RUNTIME_BROKER_SOCKET",
 )
 

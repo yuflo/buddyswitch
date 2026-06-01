@@ -26,15 +26,16 @@ _ACTION_DEFINITION_MAP = {
 }
 
 class EvidenceServiceContext(TypedDict):
-    active_buddy: str
-    instance_id: str
+    active_role: str
+    active_actor: dict[str, Any]
+    actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
     manifest_path: Path | None
 
 
-def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+def _reject_payload(*, action: str, active_role: str, message: str) -> dict[str, Any]:
     correctable_fields: list[str] | None = None
     for field in ("target_type", "target_id", "mode", "reason"):
         if field in message:
@@ -47,7 +48,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
     return tool_results.rejection(
         tool="evidence",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code="E_EVIDENCE_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
@@ -77,11 +78,11 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
     )
 
 
-def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str, code: str = "E_EVIDENCE_SCOPE") -> dict[str, Any]:
+def _reject_scope(*, action: str, active_role: str, boundary: str, message: str, code: str = "E_EVIDENCE_SCOPE") -> dict[str, Any]:
     return tool_results.rejection(
         tool="evidence",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         code=code,
         message=message,
         permission_boundary=boundary,
@@ -90,11 +91,11 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         impact="No evidence token state changed.",
         state_changed=False,
         retryable=False,
-        retry_guidance="Use readable owner-scoped artifact targets.",
+        retry_guidance="Use readable active-actor-authored artifact targets.",
         allowed_next_actions=[
             "Use track.open to inspect shared material/proof artifact ids.",
             "Use artifact.get to confirm one artifact target.",
-            "Retry with a target owned by active buddy.",
+            "Retry with a target authored by the active actor.",
         ],
         correctable_fields=["target_type", "target_id"],
         alternative_capabilities=[
@@ -107,7 +108,7 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
     )
 
 
-def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
+def _require_allowed_fields(action: str, args: dict[str, Any], active_role: str) -> dict[str, Any] | None:
     _, action_name = action.split(".", 1)
     allowed = set()
     for row in _ACTION_DEFINITION_MAP.get("actions", []):
@@ -116,7 +117,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
             break
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
+        return _reject_payload(action=action, active_role=active_role, message=f"unsupported payload fields: {', '.join(unknown)}")
     return None
 
 
@@ -124,28 +125,28 @@ def _resolve_target(
     *,
     target_type: str,
     target_id: str,
-    active_buddy: str,
+    active_role: str,
     action: str,
     context: EvidenceServiceContext,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if target_type == "artifact":
         artifact = context.repos.artifact.get_artifact(target_id)
         if artifact is None:
-            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {target_id}")
-        authors = artifact.get("authors") if isinstance(artifact.get("authors"), list) else []
-        author_set = {row for row in authors if isinstance(row, str) and row}
-        if active_buddy not in author_set:
+            return None, _reject_payload(action=action, active_role=active_role, message=f"artifact not found: {target_id}")
+        authors = artifact.get("author_actors") if isinstance(artifact.get("author_actors"), list) else []
+        active_actor = context["active_actor"]
+        if active_actor not in [row for row in authors if isinstance(row, dict)]:
             return None, _reject_scope(
                 action=action,
-                active_buddy=active_buddy,
-                boundary="artifact.authors",
+                active_role=active_role,
+                boundary="artifact.author_actors",
                 code="E_EVIDENCE_TARGET_SCOPE",
-                message=f"artifact '{target_id}' is not authored by '{active_buddy}'",
+                message=f"artifact '{target_id}' is not authored by the active actor",
             )
         return artifact, None
     return None, _reject_scope(
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         boundary="evidence.target_type",
         code="E_EVIDENCE_TARGET_TYPE",
         message="target_type must be: artifact",
@@ -158,14 +159,14 @@ def _issue_token(
     target_id: str,
     mode: str | None,
     kind: str,
-    active_buddy: str,
+    active_role: str,
     context: EvidenceServiceContext,
 ) -> dict[str, Any]:
     return {
         "token_id": f"evidence-{uuid.uuid4().hex[:16]}",
         "target_type": target_type,
         "target_id": target_id,
-        "active_buddy": active_buddy,
+        "active_role": active_role,
         "mode": mode or "default",
         "evidence_kind": kind,
         "issued_at": context.repos.runtime_files.now_iso(),
@@ -174,22 +175,22 @@ def _issue_token(
 
 def issue_browser_for_active_instance(*, args: dict[str, Any], context: EvidenceServiceContext) -> dict[str, Any]:
     action = "evidence.issue_browser"
-    active_buddy = context["active_buddy"]
-    payload_error = _require_allowed_fields(action, args, active_buddy)
+    active_role = context["active_role"]
+    payload_error = _require_allowed_fields(action, args, active_role)
     if payload_error is not None:
         return payload_error
 
     target_type = args.get("target_type")
     target_id = args.get("target_id")
     if not isinstance(target_type, str) or not target_type.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="target_type is required")
+        return _reject_payload(action=action, active_role=active_role, message="target_type is required")
     if not isinstance(target_id, str) or not target_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="target_id is required")
+        return _reject_payload(action=action, active_role=active_role, message="target_id is required")
 
     _, scope_error = _resolve_target(
         target_type=target_type.strip(),
         target_id=target_id.strip(),
-        active_buddy=active_buddy,
+        active_role=active_role,
         action=action,
         context=context,
     )
@@ -198,21 +199,21 @@ def issue_browser_for_active_instance(*, args: dict[str, Any], context: Evidence
 
     mode = args.get("mode")
     if mode is not None and (not isinstance(mode, str) or not mode.strip()):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="mode must be a non-empty string when provided")
+        return _reject_payload(action=action, active_role=active_role, message="mode must be a non-empty string when provided")
 
     token = _issue_token(
         target_type=target_type.strip(),
         target_id=target_id.strip(),
         mode=mode.strip() if isinstance(mode, str) and mode.strip() else None,
         kind="browser",
-        active_buddy=active_buddy,
+        active_role=active_role,
         context=context,
     )
 
     return tool_results.success(
         tool="evidence",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary=f"Issued transient target-scoped evidence token metadata for {target_type.strip()} '{target_id.strip()}'.",
         state_changed=True,
         durability="transient",
@@ -235,8 +236,8 @@ def issue_browser_for_active_instance(*, args: dict[str, Any], context: Evidence
 
 def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: EvidenceServiceContext) -> dict[str, Any]:
     action = "evidence.approve_downgrade"
-    active_buddy = context["active_buddy"]
-    payload_error = _require_allowed_fields(action, args, active_buddy)
+    active_role = context["active_role"]
+    payload_error = _require_allowed_fields(action, args, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -244,16 +245,16 @@ def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: Evid
     target_id = args.get("target_id")
     reason = args.get("reason")
     if not isinstance(target_type, str) or not target_type.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="target_type is required")
+        return _reject_payload(action=action, active_role=active_role, message="target_type is required")
     if not isinstance(target_id, str) or not target_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="target_id is required")
+        return _reject_payload(action=action, active_role=active_role, message="target_id is required")
     if not isinstance(reason, str) or not reason.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="reason is required")
+        return _reject_payload(action=action, active_role=active_role, message="reason is required")
 
     _, scope_error = _resolve_target(
         target_type=target_type.strip(),
         target_id=target_id.strip(),
-        active_buddy=active_buddy,
+        active_role=active_role,
         action=action,
         context=context,
     )
@@ -265,7 +266,7 @@ def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: Evid
         target_id=target_id.strip(),
         mode="downgrade-approved",
         kind="downgrade",
-        active_buddy=active_buddy,
+        active_role=active_role,
         context=context,
     )
     token["reason"] = reason.strip()
@@ -273,7 +274,7 @@ def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: Evid
     return tool_results.success(
         tool="evidence",
         action=action,
-        active_buddy=active_buddy,
+        active_role=active_role,
         effect_summary=f"Issued transient downgrade-approval token metadata for {target_type.strip()} '{target_id.strip()}'.",
         state_changed=True,
         durability="transient",

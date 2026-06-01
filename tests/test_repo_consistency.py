@@ -64,7 +64,7 @@ class RepoConsistencyTests(unittest.TestCase):
             "AGENTS.md",
             "scripts",
             "buddyswitch",
-            "tools/launcher/assets/buddies",
+            "tools/launcher/assets/roles",
             "framework/contracts",
             "framework/schemas",
             "tests",
@@ -88,14 +88,14 @@ class RepoConsistencyTests(unittest.TestCase):
         return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
 
     @staticmethod
-    def _retired_buddybox_host_path_tokens() -> tuple[str, ...]:
+    def _retired_actor_private_host_path_tokens() -> tuple[str, ...]:
         return (
-            " ".join(("buddybox", "write", "--payload")),
-            ".".join(("buddybox", "import_file")),
-            "_".join(("source", "buddybox", "logical", "name")),
+            " ".join(("actor_private", "write", "--payload")),
+            ".".join(("actor_private", "import_file")),
+            "_".join(("source", "actor_private", "logical", "name")),
             "_".join(("write", "private", "text")),
             "_".join(("write", "private", "binary")),
-            " ".join(("address", "them", "only", "through", "buddybox", "env", "tools")),
+            " ".join(("address", "them", "only", "through", "actor_private", "env", "tools")),
         )
 
     def test_active_runtime_modules_do_not_import_env_store(self) -> None:
@@ -220,11 +220,11 @@ class RepoConsistencyTests(unittest.TestCase):
         request_actions = set(tool_catalog.supported_actions("request"))
         self.assertEqual(request_actions, {"create", "list", "get", "accept", "block", "complete", "cancel"})
 
-    def test_buddybox_env_tool_package_is_removed(self) -> None:
-        self.assertFalse((ROOT / "scripts" / "env" / "tools" / "buddybox").exists())
-        self.assertNotIn("buddybox", tool_catalog.supported_tools())
+    def test_actor_private_env_tool_package_is_removed(self) -> None:
+        self.assertFalse((ROOT / "scripts" / "env" / "tools" / "actor_private").exists())
+        self.assertNotIn("actor_private", tool_catalog.supported_tools())
 
-    def test_live_guidance_uses_direct_buddybox_directory_not_env_tool_payloads(self) -> None:
+    def test_live_guidance_uses_direct_actor_private_directory_not_env_tool_payloads(self) -> None:
         paths = [
             ROOT / "AGENTS.md",
             ROOT / "README.md",
@@ -239,10 +239,10 @@ class RepoConsistencyTests(unittest.TestCase):
                     continue
                 chunks.append(path.read_text(encoding="utf-8").lower())
         text = "\n".join(chunks)
-        for forbidden in self._retired_buddybox_host_path_tokens():
+        for forbidden in self._retired_actor_private_host_path_tokens():
             self.assertNotIn(forbidden, text)
-        self.assertIn("buddyswitch_buddybox_dir", text)
-        self.assertIn("workspace/buddybox", text)
+        self.assertIn("buddyswitch_actor_private_dir", text)
+        self.assertIn("workspace/private", text)
 
     def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:
         desc = tool_catalog.env_tools_description()
@@ -317,7 +317,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertEqual(completed.stdout.strip(), "")
 
     def test_active_runtime_has_no_retired_manifest_acl_references(self) -> None:
-        retired_acl_pattern = "buddy_" + "permissions|object_" + "permissions|manual_debug_" + "apis"
+        retired_acl_pattern = "role_" + "permissions|object_" + "permissions|manual_debug_" + "apis"
         completed = subprocess.run(
             ["rg", "-n", retired_acl_pattern, "scripts", "tests", "buddyswitch"],
             cwd=ROOT,
@@ -381,12 +381,12 @@ class RepoConsistencyTests(unittest.TestCase):
                     self.assertIn("track.add_proof", text)
                     self.assertNotIn("published_to_track", text)
 
-    def test_runtime_buddy_agents_use_native_first_env_tool_guidance(self) -> None:
-        buddies = ("market", "pm", "design", "dev", "test")
-        for buddy in buddies:
-            path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
+    def test_runtime_role_agents_use_native_first_env_tool_guidance(self) -> None:
+        roles = ("market", "pm", "design", "dev", "test")
+        for role in roles:
+            path = ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(buddy=buddy):
+            with self.subTest(role=role):
                 self.assertIn("prefer native buddyswitch env mcp tools", text)
                 self.assertIn("start with the native buddyswitch env context summary tool", text)
                 self.assertIn("context.get.tool_catalog", text)
@@ -399,7 +399,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("artifact__get", text)
                 self.assertIn("request__get", text)
                 self.assertIn("search__open_browser", text)
-                if buddy == "pm":
+                if role == "pm":
                     self.assertIn("comment__resolve", text)
                 self.assertNotIn("python3 scripts/env/client.py", text)
                 self.assertNotIn("context summarize --payload", text)
@@ -415,7 +415,7 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_active_env_client_examples_match_runtime_registry(self) -> None:
         targets = [
-            ROOT / "tools" / "launcher" / "assets" / "buddies",
+            ROOT / "tools" / "launcher" / "assets" / "roles",
             ROOT / "buddyswitch" / "skills",
             ROOT / "framework" / "contracts",
             ROOT / "README.md",
@@ -483,7 +483,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 r"python3 scripts/env/client\.py\s+capture\b|context\.get\.tool_catalog\[['\"]capture['\"]|\"tool\"\s*:\s*\"capture\"",
                 "buddyswitch/skills",
                 "framework/contracts",
-                "tools/launcher/assets/buddies",
+                "tools/launcher/assets/roles",
             ],
             cwd=ROOT,
             text=True,
@@ -516,12 +516,12 @@ class RepoConsistencyTests(unittest.TestCase):
             )
         )
 
-    def test_runtime_buddy_agents_do_not_embed_project_source_facts(self) -> None:
-        buddies = ("market", "pm", "design", "dev", "test")
-        for buddy in buddies:
-            path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
+    def test_runtime_role_agents_do_not_embed_project_source_facts(self) -> None:
+        roles = ("market", "pm", "design", "dev", "test")
+        for role in roles:
+            path = ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(buddy=buddy):
+            with self.subTest(role=role):
                 self.assertIn("start with the native buddyswitch env context summary tool", text)
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("agents.md is guidance only and not the permission source", text)
@@ -533,7 +533,7 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_active_cli_guidance_has_no_old_env_client_flags(self) -> None:
         targets = [
             "buddyswitch/skills",
-            "tools/launcher/assets/buddies",
+            "tools/launcher/assets/roles",
             "scripts/env/client.py",
             "tests/test_runtime_skills.py",
             "tests/test_repo_consistency.py",
@@ -588,7 +588,7 @@ class RepoConsistencyTests(unittest.TestCase):
             "buddyswitch/skills/design/shape-prototype/SKILL.md",
             "buddyswitch/skills/test/smoke-test/SKILL.md",
             "framework/contracts",
-            "tools/launcher/assets/buddies",
+            "tools/launcher/assets/roles",
             "tools/launcher/message_available_handler.py",
         ]
         completed = subprocess.run(
@@ -657,7 +657,7 @@ class RepoConsistencyTests(unittest.TestCase):
             + "|attach" + "-task"
             + "|detach" + "-task"
             + "|track" + "_task"
-            + "|readable_by_current" + "_buddy"
+            + "|readable_by_current" + "_role"
         )
         pattern_2 = (
             "track\\." + "task_ids"
@@ -766,7 +766,7 @@ class RepoConsistencyTests(unittest.TestCase):
             "AGENTS.md",
             "buddyswitch/skills",
             "framework/contracts",
-            "tools/launcher/assets/buddies",
+            "tools/launcher/assets/roles",
             "scripts/env/client.py",
         ]
         completed = subprocess.run(
@@ -790,7 +790,7 @@ class RepoConsistencyTests(unittest.TestCase):
         targets = [
             "buddyswitch/skills",
             "framework/contracts",
-            "tools/launcher/assets/buddies",
+            "tools/launcher/assets/roles",
         ]
         legacy_runtime_tool_path = "scripts/env/tools/.*/"
         legacy_contract_file = "contract" + "\\.py"
@@ -876,7 +876,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn(legacy_handlers_path, text)
         self.assertNotIn(legacy_service_path, text)
 
-    def test_contracts_and_buddy_agents_point_to_runtime_discovery(self) -> None:
+    def test_contracts_and_role_agents_point_to_runtime_discovery(self) -> None:
         for name in ("pm", "design", "dev", "market", "test"):
             path = ROOT / "framework" / "contracts" / f"{name}.md"
             text = path.read_text(encoding="utf-8").lower()
@@ -886,22 +886,22 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("python3 scripts/turn_runtime.py status", text)
                 self.assertNotIn("python3 scripts/env/client.py", text)
 
-        for buddy in ("market", "pm", "design", "dev", "test"):
-            path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
+        for role in ("market", "pm", "design", "dev", "test"):
+            path = ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(buddy=buddy):
+            with self.subTest(role=role):
                 self.assertIn("start with the native buddyswitch env context summary tool", text)
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("python3 scripts/turn_runtime.py status", text)
                 self.assertNotIn("python3 scripts/env/client.py", text)
 
-    def test_instance_private_writable_surface_has_no_legacy_buddybox_roots(self) -> None:
+    def test_instance_private_writable_surface_has_no_legacy_actor_private_roots(self) -> None:
         forbidden = (
-            'BUDDYBOX_ROOT_TEMPLATE = "buddyswitch/local/buddybox/{buddy_id}"',
-            'BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"',
-            'workspace_buddybox_root="${workspace_dir}/buddyswitch/local/buddybox"',
-            "state/buddyswitch/local/buddybox",
-            "buddyswitch/content/buddybox",
+            'PRIVATE_WORKSPACE_ROOT_TEMPLATE = "buddyswitch/local/actor_private/{role_id}"',
+            'ACTOR_PRIVATE_DIR = LOCAL_ROOT / "actor_private"',
+            'workspace_actor_private_root="${workspace_dir}/buddyswitch/local/actor_private"',
+            "state/buddyswitch/local/actor_private",
+            "buddyswitch/content/actor_private",
         )
         scan_targets = ["scripts", "tools", "buddyswitch/env-profiles", "framework/contracts"]
         for token in forbidden:

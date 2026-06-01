@@ -48,14 +48,14 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for object_dir in ("tracks", "tasks", "artifacts", "comments", "messages"):
             self.assertEqual(before[object_dir], after[object_dir], msg=object_dir)
 
-    def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        path = self._runtime_path(f"instance-{instance_id}.json")
+    def _instance_json(self, *, actor_id: str, role: str, status: str = "active") -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        path = self._runtime_path(f"instance-{actor_id}.json")
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": status,
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -73,20 +73,20 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         tool: str,
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-request-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "actor_id": actor_id,
+                "active_role": role,
                 "tool": tool,
                 "action": action,
                 "args": args,
@@ -122,7 +122,7 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_track(self, track_id: str) -> dict[str, object]:
-        return env_store.create_track(track_id, f"{track_id} title", owner_buddy="pm")
+        return env_store.create_track(track_id, f"{track_id} title", owner_role="pm")
 
     def _seed_published_artifact(self, *, artifact_id: str, track_id: str) -> str:
         if env_store.get_track(track_id) is None:
@@ -142,7 +142,7 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id=track_id,
             artifact_id=str(artifact["id"]),
             label="Seed",
-            from_buddy="pm",
+            from_role="pm",
             summary="seed summary",
         )
         return str(artifact["id"])
@@ -157,17 +157,17 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         track_id: str,
-        to_buddy: str = "dev",
+        to_role: str = "dev",
         title: str = "request-title",
         summary: str = "request-summary",
         target_refs: list[dict[str, str]] | None = None,
     ) -> dict[str, object]:
         args: dict[str, object] = {
             "track_id": track_id,
-            "to_buddy": to_buddy,
+            "to_role": to_role,
             "title": title,
             "summary": summary,
         }
@@ -175,8 +175,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args["target_refs"] = target_refs
         return self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy=buddy,
+            actor_id=actor_id,
+            role=role,
             tool="request",
             action="create",
             args=args,
@@ -196,15 +196,15 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track_id = "track-req-main"
         self._seed_track(track_id)
         artifact_id = self._seed_published_artifact(artifact_id="art-design-r1", track_id=track_id)
-        instance_json = self._instance_json(instance_id="inst-pm-req-create", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-req-create", role="pm")
         before = self._objects_state()
 
         created = self._create_request(
             instance_json=instance_json,
-            instance_id="inst-pm-req-create",
-            buddy="pm",
+            actor_id="act-pm-req-create",
+            role="pm",
             track_id=track_id,
-            to_buddy="dev",
+            to_role="dev",
             title="Implement approved scope",
             summary="Build requested flow from design artifact.",
             target_refs=[{"type": "artifact", "id": artifact_id}],
@@ -223,9 +223,14 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotEqual(before["requests"], after["requests"])
         self.assertTrue(self._request_file(request_id).exists())
         payload = self._load_request(request_id)
+        expected_from_actor = {
+            "actor_id": self._runtime_actor_id(role="pm", label="act-pm-req-create"),
+            "role_id": "pm",
+        }
         self.assertEqual(payload.get("track_id"), track_id)
-        self.assertEqual(payload.get("from_buddy"), "pm")
-        self.assertEqual(payload.get("to_buddy"), "dev")
+        self.assertEqual(payload.get("from_actor"), expected_from_actor)
+        self.assertEqual(payload.get("to_role"), "dev")
+        self.assertNotIn("from_role", payload)
         self.assertEqual(payload.get("status"), "open")
         self.assertIsNone(payload.get("blocker"))
         self.assertEqual(payload.get("result_refs"), [])
@@ -236,14 +241,18 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNone(payload.get("blocked_at"))
         self.assertIsNone(payload.get("completed_at"))
         self.assertIsNone(payload.get("canceled_at"))
+        self.assertIsNone(payload.get("accepted_by_actor"))
+        self.assertIsNone(payload.get("blocked_by_actor"))
+        self.assertIsNone(payload.get("completed_by_actor"))
+        self.assertIsNone(payload.get("canceled_by_actor"))
 
     def test_create_rejects_unknown_field_before_required_fields(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-request-unknown", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-request-unknown", role="dev")
         before = self._objects_state()
         response = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-request-unknown",
-            buddy="dev",
+            actor_id="act-request-unknown",
+            role="dev",
             tool="request",
             action="create",
             args={"__unexpected_payload_field__": True},
@@ -262,44 +271,44 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._seed_track(archived_track_id)
         env_store.update_track(archived_track_id, {"archived_at": "2026-05-21T10:00:00+08:00"})
         self._seed_track("track-other")
-        instance_json = self._instance_json(instance_id="inst-pm-req-invalid", buddy="pm")
+        instance_json = self._instance_json(actor_id="act-pm-req-invalid", role="pm")
 
         cases: list[tuple[str, dict[str, object]]] = [
             (
-                "unknown-buddy",
-                {"track_id": track_id, "to_buddy": "ops", "title": "x", "summary": "x"},
+                "unknown-role",
+                {"track_id": track_id, "to_role": "ops", "title": "x", "summary": "x"},
             ),
             (
                 "self-request",
-                {"track_id": track_id, "to_buddy": "pm", "title": "x", "summary": "x"},
+                {"track_id": track_id, "to_role": "pm", "title": "x", "summary": "x"},
             ),
             (
                 "missing-track",
-                {"track_id": "track-missing", "to_buddy": "dev", "title": "x", "summary": "x"},
+                {"track_id": "track-missing", "to_role": "dev", "title": "x", "summary": "x"},
             ),
             (
                 "archived-track",
-                {"track_id": archived_track_id, "to_buddy": "dev", "title": "x", "summary": "x"},
+                {"track_id": archived_track_id, "to_role": "dev", "title": "x", "summary": "x"},
             ),
             (
                 "bad-target-refs-type",
-                {"track_id": track_id, "to_buddy": "dev", "title": "x", "summary": "x", "target_refs": "oops"},
+                {"track_id": track_id, "to_role": "dev", "title": "x", "summary": "x", "target_refs": "oops"},
             ),
             (
                 "bad-target-ref-shape",
-                {"track_id": track_id, "to_buddy": "dev", "title": "x", "summary": "x", "target_refs": [{"type": "artifact"}]},
+                {"track_id": track_id, "to_role": "dev", "title": "x", "summary": "x", "target_refs": [{"type": "artifact"}]},
             ),
             (
                 "bad-target-ref-type",
-                {"track_id": track_id, "to_buddy": "dev", "title": "x", "summary": "x", "target_refs": [{"type": "task", "id": "task-x"}]},
+                {"track_id": track_id, "to_role": "dev", "title": "x", "summary": "x", "target_refs": [{"type": "task", "id": "task-x"}]},
             ),
             (
                 "track-ref-mismatch",
-                {"track_id": track_id, "to_buddy": "dev", "title": "x", "summary": "x", "target_refs": [{"type": "track", "id": "track-other"}]},
+                {"track_id": track_id, "to_role": "dev", "title": "x", "summary": "x", "target_refs": [{"type": "track", "id": "track-other"}]},
             ),
             (
                 "unsupported-status-input",
-                {"track_id": track_id, "to_buddy": "dev", "title": "x", "summary": "x", "status": "done"},
+                {"track_id": track_id, "to_role": "dev", "title": "x", "summary": "x", "status": "done"},
             ),
         ]
 
@@ -307,8 +316,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             before = self._objects_state()
             rejected = self._dispatch(
                 instance_json=instance_json,
-                instance_id="inst-pm-req-invalid",
-                buddy="pm",
+                actor_id="act-pm-req-invalid",
+                role="pm",
                 tool="request",
                 action="create",
                 args=args,
@@ -326,35 +335,35 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._seed_track(track_visible)
         self._seed_track(track_other)
 
-        pm_instance = self._instance_json(instance_id="inst-pm-req-visible", buddy="pm")
-        design_instance = self._instance_json(instance_id="inst-design-req-visible", buddy="design")
-        dev_instance = self._instance_json(instance_id="inst-dev-req-visible", buddy="dev")
-        market_instance = self._instance_json(instance_id="inst-market-req-visible", buddy="market")
+        pm_instance = self._instance_json(actor_id="act-pm-req-visible", role="pm")
+        design_instance = self._instance_json(actor_id="act-design-req-visible", role="design")
+        dev_instance = self._instance_json(actor_id="act-dev-req-visible", role="dev")
+        market_instance = self._instance_json(actor_id="act-market-req-visible", role="market")
 
         req_a = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-visible",
-            buddy="pm",
+            actor_id="act-pm-req-visible",
+            role="pm",
             track_id=track_visible,
-            to_buddy="dev",
+            to_role="dev",
             title="A",
             summary="A summary",
         )
         req_b = self._create_request(
             instance_json=design_instance,
-            instance_id="inst-design-req-visible",
-            buddy="design",
+            actor_id="act-design-req-visible",
+            role="design",
             track_id=track_visible,
-            to_buddy="test",
+            to_role="test",
             title="B",
             summary="B summary",
         )
         req_c = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-visible",
-            buddy="pm",
+            actor_id="act-pm-req-visible",
+            role="pm",
             track_id=track_other,
-            to_buddy="market",
+            to_role="market",
             title="C",
             summary="C summary",
         )
@@ -367,8 +376,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         dev_inbox = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-visible",
-            buddy="dev",
+            actor_id="act-dev-req-visible",
+            role="dev",
             tool="request",
             action="list",
             args={"box": "inbox"},
@@ -378,8 +387,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         pm_visible_track = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-visible",
-            buddy="pm",
+            actor_id="act-pm-req-visible",
+            role="pm",
             tool="request",
             action="list",
             args={"track_id": track_visible},
@@ -389,8 +398,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         design_get_b = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-req-visible",
-            buddy="design",
+            actor_id="act-design-req-visible",
+            role="design",
             tool="request",
             action="get",
             args={"request_id": req_b_id},
@@ -400,8 +409,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         market_get_a = self._dispatch(
             instance_json=market_instance,
-            instance_id="inst-market-req-visible",
-            buddy="market",
+            actor_id="act-market-req-visible",
+            role="market",
             tool="request",
             action="get",
             args={"request_id": req_a_id},
@@ -411,8 +420,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         pm_outbox = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-visible",
-            buddy="pm",
+            actor_id="act-pm-req-visible",
+            role="pm",
             tool="request",
             action="list",
             args={"box": "outbox"},
@@ -420,30 +429,30 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(pm_outbox.get("ok"), msg=pm_outbox)
         self.assertEqual(self._request_ids(pm_outbox), {req_a_id, req_c_id})
 
-        pm_filter_buddy = self._dispatch(
+        pm_filter_role = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-visible",
-            buddy="pm",
+            actor_id="act-pm-req-visible",
+            role="pm",
             tool="request",
             action="list",
-            args={"buddy": "dev"},
+            args={"role": "dev"},
         )
-        self.assertTrue(pm_filter_buddy.get("ok"), msg=pm_filter_buddy)
-        self.assertEqual(self._request_ids(pm_filter_buddy), {req_a_id})
+        self.assertTrue(pm_filter_role.get("ok"), msg=pm_filter_role)
+        self.assertEqual(self._request_ids(pm_filter_role), {req_a_id})
 
     def test_request_lifecycle_permissions_and_transitions(self) -> None:
         track_id = "track-req-lifecycle"
         self._seed_track(track_id)
-        pm_instance = self._instance_json(instance_id="inst-pm-req-life", buddy="pm")
-        dev_instance = self._instance_json(instance_id="inst-dev-req-life", buddy="dev")
-        design_instance = self._instance_json(instance_id="inst-design-req-life", buddy="design")
+        pm_instance = self._instance_json(actor_id="act-pm-req-life", role="pm")
+        dev_instance = self._instance_json(actor_id="act-dev-req-life", role="dev")
+        design_instance = self._instance_json(actor_id="act-design-req-life", role="design")
 
         created = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             track_id=track_id,
-            to_buddy="dev",
+            to_role="dev",
             title="Lifecycle",
             summary="Lifecycle summary",
         )
@@ -452,8 +461,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         unauthorized_accept = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             tool="request",
             action="accept",
             args={"request_id": request_id},
@@ -463,8 +472,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         accepted = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": request_id},
@@ -474,8 +483,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         blocked_blank = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="block",
             args={"request_id": request_id, "blocker": "   "},
@@ -484,8 +493,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         blocked = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="block",
             args={"request_id": request_id, "blocker": "Need updated design artifact."},
@@ -495,8 +504,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         accepted_again = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": request_id},
@@ -507,8 +516,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         completed = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="complete",
             args={"request_id": request_id, "result_refs": [{"type": "track", "id": track_id}]},
@@ -519,8 +528,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before_done = self._load_request(request_id)
         done_to_blocked = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="block",
             args={"request_id": request_id, "blocker": "too late"},
@@ -531,18 +540,18 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         created_open = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             track_id=track_id,
-            to_buddy="dev",
+            to_role="dev",
             title="OpenCompleteReject",
             summary="OpenCompleteReject summary",
         )
         open_request_id = str((created_open.get("created_ids") or [None])[0])
         open_to_done = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="complete",
             args={"request_id": open_request_id, "result_refs": [{"type": "track", "id": track_id}]},
@@ -551,18 +560,18 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         canceled_open = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             track_id=track_id,
-            to_buddy="dev",
+            to_role="dev",
             title="CancelOpen",
             summary="CancelOpen summary",
         )
         canceled_open_id = str((canceled_open.get("created_ids") or [None])[0])
         canceled = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             tool="request",
             action="cancel",
             args={"request_id": canceled_open_id},
@@ -572,18 +581,18 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         cancel_by_recipient = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             track_id=track_id,
-            to_buddy="dev",
+            to_role="dev",
             title="CancelByRecipient",
             summary="CancelByRecipient summary",
         )
         cancel_by_recipient_id = str((cancel_by_recipient.get("created_ids") or [None])[0])
         rejected_cancel = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="cancel",
             args={"request_id": cancel_by_recipient_id},
@@ -592,18 +601,18 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         accepted_then_canceled = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             track_id=track_id,
-            to_buddy="dev",
+            to_role="dev",
             title="AcceptedCancel",
             summary="AcceptedCancel summary",
         )
         accepted_then_canceled_id = str((accepted_then_canceled.get("created_ids") or [None])[0])
         accepted_ok = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": accepted_then_canceled_id},
@@ -611,8 +620,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(accepted_ok.get("ok"), msg=accepted_ok)
         canceled_ok = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             tool="request",
             action="cancel",
             args={"request_id": accepted_then_canceled_id},
@@ -622,18 +631,18 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         blocked_then_canceled = self._create_request(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             track_id=track_id,
-            to_buddy="dev",
+            to_role="dev",
             title="BlockedCancel",
             summary="BlockedCancel summary",
         )
         blocked_then_canceled_id = str((blocked_then_canceled.get("created_ids") or [None])[0])
         accepted_before_block = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": blocked_then_canceled_id},
@@ -641,8 +650,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(accepted_before_block.get("ok"), msg=accepted_before_block)
         blocked_before_cancel = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="block",
             args={"request_id": blocked_then_canceled_id, "blocker": "waiting"},
@@ -650,8 +659,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(blocked_before_cancel.get("ok"), msg=blocked_before_cancel)
         canceled_from_blocked = self._dispatch(
             instance_json=pm_instance,
-            instance_id="inst-pm-req-life",
-            buddy="pm",
+            actor_id="act-pm-req-life",
+            role="pm",
             tool="request",
             action="cancel",
             args={"request_id": blocked_then_canceled_id},
@@ -661,8 +670,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         canceled_to_accept = self._dispatch(
             instance_json=dev_instance,
-            instance_id="inst-dev-req-life",
-            buddy="dev",
+            actor_id="act-dev-req-life",
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": blocked_then_canceled_id},
@@ -671,8 +680,8 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         third_party_mutation = self._dispatch(
             instance_json=design_instance,
-            instance_id="inst-design-req-life",
-            buddy="design",
+            actor_id="act-design-req-life",
+            role="design",
             tool="request",
             action="accept",
             args={"request_id": open_request_id},

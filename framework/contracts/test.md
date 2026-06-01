@@ -12,14 +12,14 @@ Validate behavior, report pass/fail/blocked outcomes, and persist test evidence 
 - Use `track.add_update` and `track.update_now` to capture verification state.
 - Use `request.list` / `request.get` to follow structured verification requests.
 - For requests assigned to Test, mutate lifecycle with `request.accept`, `request.block`, and `request.complete`.
-- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for private logs, raw evidence files, or local reports; use artifact for pass/fail reports the product workflow must read.
+- Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private logs, raw evidence files, or local reports; use artifact for pass/fail reports the product workflow must read.
 
 ## Runtime Boundary
 
 - Use native BuddySwitch env MCP tools for durable operations; the runtime broker still enforces `env.tool` authority and feedback.
 - No `prepare/persist` turn transaction.
-- Test buddy must not edit source code when profile is read-only.
-- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
+- Test role must not edit source code when profile is read-only.
+- Do not edit `buddyswitch/objects/**`, old private workspace runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -30,6 +30,6 @@ Validate behavior, report pass/fail/blocked outcomes, and persist test evidence 
 
 - `buddyswitch/objects/tracks/<track-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
-- `instances/<instance-id>/taskbox/<buddy>/history.md`
-- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).
+- `instances/<actor-id>/taskbox/<role>/tasks/<task-id>.json`
+- `instances/<actor-id>/taskbox/<role>/history.md`
+- Active-instance private host files under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` (`workspace/private`, not product-readable).

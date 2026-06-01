@@ -69,12 +69,12 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
         self.handler = self.task_checkout_handler.TaskCheckoutHandler()
 
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
+        instance_root = Path(temp_root) / "instances" / "act-dev-daed00000001"
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daed00000001",
-            "buddy": "dev",
+            "actor_id": "act-dev-daed00000001",
+            "role": "dev",
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(instance_root / "workspace"),
@@ -91,7 +91,7 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
     def _state(self, instance_root: Path) -> Any:
         return self.daemon_core.DaemonState.load(
             instance_root=instance_root,
-            instance_id="inst-dev-daed00000001",
+            actor_id="act-dev-daed00000001",
             main_thread_id="thr-main",
         )
 
@@ -256,6 +256,11 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.assertNotIn("[TASK CONTEXT]", prompt)
             self.assertNotIn("[USER INPUT]", prompt)
             self.assertEqual([name for name, _payload in calls], ["snapshot", "render"])
+            snapshot_payload = calls[0][1]
+            self.assertEqual(
+                snapshot_payload.get("active_actor"),
+                {"actor_id": "act-dev-daed00000001", "role_id": "dev"},
+            )
 
     def test_task_checkout_state_uses_standard_action_field(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

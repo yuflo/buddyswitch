@@ -33,7 +33,7 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 1. Restate the target prototype scope and main user journey.
 2. Shape the page map and primary flow before detailed polish.
 3. Decide the preview root and entry file for the first runnable artifact package.
-4. When visual evidence will reduce downstream ambiguity, capture it with `chrome-devtools-cockpit`, write or copy it under `$BUDDYSWITCH_BUDDYBOX_DIR`, attach it with `artifact.attach_file` using `source_path`, and cite the resulting `attachment_id` in the handoff artifact.
+4. When visual evidence will reduce downstream ambiguity, capture it with `chrome-devtools-cockpit`, write or copy it under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`, attach it with `artifact.attach_file` using `source_path`, and cite the resulting `attachment_id` in the handoff artifact.
 5. Capture PM, dev, and test artifact notes in separate lists.
 6. Record open questions that materially affect the next prototype pass, including why no screenshot was attached when visual evidence is unnecessary or unavailable.
 7. Package the result as the structured `template="design"` artifact.
@@ -41,13 +41,13 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 ## Verification
 - Confirm the prototype direction stays aligned with the active task and does not silently rewrite product scope.
 - Confirm the preview path points to a concrete `.sandbox/design/` location when a runnable artifact is produced.
-- Confirm PM, dev, and test artifact notes are actionable for the next buddy turn.
+- Confirm PM, dev, and test artifact notes are actionable for the next role turn.
 
 ## Shared Runtime Rules
 
 - Runtime execution uses native BuddySwitch env MCP tools through env.tool; use runtime discovery when exact schemas matter.
 - Product-readable durable state is written explicitly as task or artifact objects.
-- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for active-instance private working files and `artifact.attach_file` when a file must become product-readable.
+- Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for active-instance private working files and `artifact.attach_file` when a file must become product-readable.
 - Return after required explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
@@ -62,7 +62,7 @@ Use `artifact-tool` when this skill produces a durable artifact:
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
 - `body`: include `design_goal`, `flow_or_screen_summary`, `interaction_notes`, `assets_or_preview_refs`, `artifact_notes`, and `open_questions` as markdown
-- When screenshots or exports matter, keep the blob out of markdown body text. Store the file under `$BUDDYSWITCH_BUDDYBOX_DIR`, attach it explicitly with `artifact.attach_file` using `source_path`, cite the `attachment_id`, and tell downstream buddies to discover it from `track.open` or fetch exact bytes with `artifact.get_attachment`.
+- When screenshots or exports matter, keep the blob out of markdown body text. Store the file under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`, attach it explicitly with `artifact.attach_file` using `source_path`, cite the `attachment_id`, and tell downstream roles to discover it from `track.open` or fetch exact bytes with `artifact.get_attachment`.
 
 After `artifact.create_revision` returns `ok=true`, use `track.open` and `artifact.get` to verify shared visibility when needed.
 Use optional `working_notes` for concise reasoning or verification notes.

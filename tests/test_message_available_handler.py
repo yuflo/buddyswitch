@@ -54,13 +54,13 @@ class MessageAvailableHandlerTests(unittest.TestCase):
         self.handler = self.handler_module.MessageAvailableHandler()
 
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload = {
-            "instance_id": "inst-dev-daemon",
-            "buddy": "dev",
+            "actor_id": "act-dev-daemon",
+            "role": "dev",
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),
@@ -71,7 +71,7 @@ class MessageAvailableHandlerTests(unittest.TestCase):
         context = self.daemon_core.load_daemon_context(instance_json)
         state = self.daemon_core.DaemonState.load(
             instance_root=instance_root,
-            instance_id="inst-dev-daemon",
+            actor_id="act-dev-daemon",
             main_thread_id="thr-main",
         )
         return {"context": context, "state": state}
@@ -80,15 +80,15 @@ class MessageAvailableHandlerTests(unittest.TestCase):
         self,
         *,
         signal_type: str = "message.available",
-        to_buddy: str = "dev",
-        to_instance: str = "inst-dev-daemon",
+        to_role: str = "dev",
+        to_instance: str = "act-dev-daemon",
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "signal_id": "sig-readable",
             "type": signal_type,
-            "source_actor_address": {"buddy_id": "pm", "instance_id": "inst-pm-daemon"},
-            "target_actor_address": {"buddy_id": to_buddy, "instance_id": to_instance},
+            "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
+            "target_actor_address": {"role_id": to_role, "actor_id": to_instance},
             "payload": {"message_id": "msg-readable"} if payload is None else payload,
             "created_at": "2026-05-30T00:00:00Z",
         }
@@ -114,7 +114,7 @@ class MessageAvailableHandlerTests(unittest.TestCase):
                 instance["context"],
                 instance["state"],
                 actions,
-                self._signal(to_buddy="design", to_instance="inst-design-daemon"),
+                self._signal(to_role="design", to_instance="act-design-daemon"),
             )
 
             self.assertEqual(result.status, "failed")

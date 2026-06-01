@@ -19,16 +19,17 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 
 class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _make_instance_context(self, *, instance_id: str = "instance-task-context", buddy: str = "dev") -> dict[str, object]:
-        instance_root = self._runtime_path(f"instances/{instance_id}")
+    def _make_instance_context(self, *, actor_id: str = "instance-task-context", role: str = "dev") -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_root = self._runtime_path(f"instances/{actor_id}")
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
-        taskbox_root = instance_root / "taskbox" / buddy
+        taskbox_root = instance_root / "taskbox" / role
         (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
         (taskbox_root / "history.md").write_text("", encoding="utf-8")
         instance_payload: dict[str, object] = {
-            "instance_id": instance_id,
-            "buddy": buddy,
+            "actor_id": actor_id,
+            "role": role,
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),
@@ -38,23 +39,27 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json = instance_root / "instance.json"
         instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         return {
+            "actor_id": actor_id,
             "instance_root": instance_root,
             "instance_json": instance_json,
             "instance_payload": instance_payload,
-            "buddy": buddy,
+            "role": role,
         }
 
-    def _history_file(self, *, instance_root: Path, buddy: str) -> Path:
-        return instance_root / "taskbox" / buddy / "history.md"
+    def _actor_payload(self, *, instance_root: Path, role: str) -> dict[str, str]:
+        return {"actor_id": instance_root.name, "role_id": role}
 
-    def _task_file(self, *, instance_root: Path, buddy: str, task_id: str) -> Path:
-        return instance_root / "taskbox" / buddy / "tasks" / f"{task_id}.json"
+    def _history_file(self, *, instance_root: Path, role: str) -> Path:
+        return instance_root / "taskbox" / role / "history.md"
+
+    def _task_file(self, *, instance_root: Path, role: str, task_id: str) -> Path:
+        return instance_root / "taskbox" / role / "tasks" / f"{task_id}.json"
 
     def _write_task_doc(
         self,
         *,
         instance_root: Path,
-        buddy: str,
+        role: str,
         task_id: str,
         title: str,
         summary: str,
@@ -64,11 +69,11 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         refs: list[dict[str, object]] | None = None,
         updated_at: str = "2026-05-27T10:00:00+08:00",
     ) -> None:
-        self._task_file(instance_root=instance_root, buddy=buddy, task_id=task_id).write_text(
+        self._task_file(instance_root=instance_root, role=role, task_id=task_id).write_text(
             json.dumps(
                 {
                     "id": task_id,
-                    "owner_buddy": buddy,
+                    "owner_actor": self._actor_payload(instance_root=instance_root, role=role),
                     "title": title,
                     "summary": summary,
                     "body": body,
@@ -95,23 +100,24 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         suffix = f" {' '.join(parts)}" if parts else ""
         return f"- 2026-05-27T10:00:00+08:00 {event} {task_id}{suffix}"
 
-    def _write_history(self, *, instance_root: Path, buddy: str, lines: list[str]) -> None:
-        self._history_file(instance_root=instance_root, buddy=buddy).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    def _write_history(self, *, instance_root: Path, role: str, lines: list[str]) -> None:
+        self._history_file(instance_root=instance_root, role=role).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    def _task_files(self, *, instance_root: Path, buddy: str) -> dict[str, str]:
-        tasks_dir = instance_root / "taskbox" / buddy / "tasks"
+    def _task_files(self, *, instance_root: Path, role: str) -> dict[str, str]:
+        tasks_dir = instance_root / "taskbox" / role / "tasks"
         return {path.name: path.read_text(encoding="utf-8") for path in sorted(tasks_dir.glob("*.json"))}
 
     def test_current_snapshot_empty_state_is_read_only(self) -> None:
         instance = self._make_instance_context()
         instance_root = instance["instance_root"]
-        buddy = str(instance["buddy"])
+        role = str(instance["role"])
         assert isinstance(instance_root, Path)
-        before_history = self._history_file(instance_root=instance_root, buddy=buddy).read_text(encoding="utf-8")
-        before_tasks = self._task_files(instance_root=instance_root, buddy=buddy)
+        before_history = self._history_file(instance_root=instance_root, role=role).read_text(encoding="utf-8")
+        before_tasks = self._task_files(instance_root=instance_root, role=role)
 
         snapshot = task_management.current_snapshot(
-            active_buddy=buddy,
+            active_role=role,
+            active_actor={"actor_id": str(instance["actor_id"]), "role_id": role},
             instance_json=instance["instance_json"],
             instance_payload=instance["instance_payload"],
         )
@@ -122,12 +128,12 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(snapshot["recent_events"], [])
         self.assertIsNone(snapshot["last_event"])
         self.assertEqual(snapshot["progress_summary"], "")
-        self.assertEqual(self._history_file(instance_root=instance_root, buddy=buddy).read_text(encoding="utf-8"), before_history)
-        self.assertEqual(self._task_files(instance_root=instance_root, buddy=buddy), before_tasks)
+        self.assertEqual(self._history_file(instance_root=instance_root, role=role).read_text(encoding="utf-8"), before_history)
+        self.assertEqual(self._task_files(instance_root=instance_root, role=role), before_tasks)
 
     def test_task_tui_empty_state_rendering(self) -> None:
         snapshot = {
-            "owner_buddy": "dev",
+            "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
             "task_state": "none",
             "current_task": None,
             "pending_confirmation": None,
@@ -147,11 +153,11 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_current_snapshot_replays_history_before_loading_current_task(self) -> None:
         instance = self._make_instance_context()
         instance_root = instance["instance_root"]
-        buddy = str(instance["buddy"])
+        role = str(instance["role"])
         assert isinstance(instance_root, Path)
         self._write_task_doc(
             instance_root=instance_root,
-            buddy=buddy,
+            role=role,
             task_id="task-0001-alpha",
             title="Alpha",
             summary="Older task summary",
@@ -159,7 +165,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self._write_task_doc(
             instance_root=instance_root,
-            buddy=buddy,
+            role=role,
             task_id="task-0002-beta",
             title="Beta",
             summary="Refine task input context.",
@@ -169,7 +175,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self._write_task_doc(
             instance_root=instance_root,
-            buddy=buddy,
+            role=role,
             task_id="task-9999-directory-sentinel",
             title="Directory Sentinel",
             summary="This task should not be selected.",
@@ -177,7 +183,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self._write_history(
             instance_root=instance_root,
-            buddy=buddy,
+            role=role,
             lines=[
                 self._history_line(event="task.create", task_id="task-0001-alpha"),
                 self._history_line(event="task.create", task_id="task-0002-beta"),
@@ -185,7 +191,8 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         snapshot = task_management.current_snapshot(
-            active_buddy=buddy,
+            active_role=role,
+            active_actor={"actor_id": str(instance["actor_id"]), "role_id": role},
             instance_json=instance["instance_json"],
             instance_payload=instance["instance_payload"],
             history_limit=8,
@@ -210,7 +217,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_task_tui_current_task_and_pending_confirmation_rendering(self) -> None:
         snapshot = {
-            "owner_buddy": "dev",
+            "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
             "task_state": "active",
             "current_task": {
                 "id": "task-0001-clean-runtime-environment",
@@ -270,7 +277,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_stop_task_tui_current_task_rendering(self) -> None:
         snapshot = {
-            "owner_buddy": "dev",
+            "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
             "task_state": "active",
             "current_task": {
                 "id": "task-0003-clean-runtime-env",
@@ -307,7 +314,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_stop_task_tui_empty_state_rendering(self) -> None:
         snapshot = {
-            "owner_buddy": "dev",
+            "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
             "task_state": "none",
             "current_task": None,
             "pending_confirmation": None,

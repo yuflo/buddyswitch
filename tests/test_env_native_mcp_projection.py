@@ -151,7 +151,7 @@ print(json.dumps({
                                 mutates="none",
                                 required_permission="probe.inspect",
                                 authority="test-only",
-                                visibility="active-buddy",
+                                visibility="active-role",
                                 durability="none",
                                 result_content_level="summary",
                                 success_effect="Returns temporary probe details.",

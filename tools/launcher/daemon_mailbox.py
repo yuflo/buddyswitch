@@ -19,7 +19,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime.actor_profile import RuntimeActorAddress  # noqa: E402
+from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
 
@@ -35,10 +35,10 @@ SIGNAL_ALLOWED_KEYS = {
 
 
 def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
-    if isinstance(value, RuntimeActorAddress):
+    if isinstance(value, ActorAddress):
         return value.to_payload()
     try:
-        return RuntimeActorAddress.from_payload(value).to_payload()
+        return ActorAddress.from_payload(value).to_payload()
     except Exception as exc:
         raise ValueError(f"{field} must be a valid actor_address") from exc
 
@@ -53,8 +53,8 @@ def daemon_signal_envelope(
     *,
     signal_id: str,
     signal_type: str,
-    source_actor_address: RuntimeActorAddress | dict[str, Any],
-    target_actor_address: RuntimeActorAddress | dict[str, Any],
+    source_actor_address: ActorAddress | dict[str, Any],
+    target_actor_address: ActorAddress | dict[str, Any],
     payload: dict[str, Any],
     created_at: str,
 ) -> dict[str, Any]:
@@ -97,14 +97,14 @@ class DaemonMailboxServer:
         self,
         *,
         socket_path: Path,
-        local_actor_address: RuntimeActorAddress | dict[str, Any],
+        local_actor_address: ActorAddress | dict[str, Any],
         handlers: list[Any] | tuple[Any, ...],
         context: Any | None = None,
         state: Any | None = None,
         actions_factory: Any | None = None,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve(strict=False)
-        self.local_actor_address = RuntimeActorAddress.from_payload(
+        self.local_actor_address = ActorAddress.from_payload(
             _actor_address_payload(local_actor_address, "local_actor_address")
         )
         self.handlers = list(handlers or [])
@@ -202,7 +202,7 @@ class DaemonMailboxServer:
             signal = validate_daemon_signal(params.get("signal"))
         except Exception as exc:
             return self._response(request_id, code="invalid_signal", message=str(exc))
-        to_actor = RuntimeActorAddress.from_payload(signal["target_actor_address"])
+        to_actor = ActorAddress.from_payload(signal["target_actor_address"])
         if to_actor != self.local_actor_address:
             return self._response(request_id, code="wrong_target_actor", message="signal target does not match local actor")
 

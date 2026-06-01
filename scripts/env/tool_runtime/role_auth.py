@@ -54,9 +54,9 @@ class AuthDecision:
 
 def manifest_role_ids(manifest: dict[str, Any]) -> frozenset[str]:
     roles: set[str] = set()
-    for buddy in manifest.get("buddies", []):
-        if isinstance(buddy, dict) and isinstance(buddy.get("id"), str):
-            roles.add(buddy["id"])
+    for role in manifest.get("roles", []):
+        if isinstance(role, dict) and isinstance(role.get("id"), str):
+            roles.add(role["id"])
     return frozenset(roles)
 
 

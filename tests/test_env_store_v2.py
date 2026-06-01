@@ -49,8 +49,8 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "revision",
             "is_current",
             "supersedes_artifact_id",
-            "created_by",
-            "authors",
+            "created_by_actor",
+            "author_actors",
             "source_refs",
             "attachments",
             "created_at",
@@ -60,7 +60,8 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(artifact["template"], "brief")
         self.assertEqual(artifact["status"], "draft")
         self.assertIsNone(artifact["published_to_track"])
-        self.assertEqual(artifact["authors"], ["pm"])
+        self.assertEqual(artifact["created_by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
+        self.assertEqual(artifact["author_actors"], [{"actor_id": "act-pm-legacy", "role_id": "pm"}])
         self.assertEqual(artifact["attachments"], [])
         self.assertEqual(artifact["body"], "## Context\n\nSeed")
 
@@ -82,8 +83,8 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "revision": 1,
             "is_current": True,
             "supersedes_artifact_id": None,
-            "created_by": "pm",
-            "authors": ["pm"],
+            "created_by_actor": {"actor_id": "act-pm-reject", "role_id": "pm"},
+            "author_actors": [{"actor_id": "act-pm-reject", "role_id": "pm"}],
             "source_refs": [{"type": "note", "label": "seed"}],
             "created_at": "2026-05-18T10:00:00+08:00",
             "updated_at": "2026-05-18T10:00:00+08:00",
@@ -158,12 +159,12 @@ class RuntimeRootFoundationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
 
 class ArtifactCompatibilityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_legacy_kind_content_task_artifact_normalizes_to_v1_draft(self) -> None:
+    def test_legacy_kind_content_task_artifact_is_rejected_without_normalization(self) -> None:
         legacy_payload = {
             "id": "art-design-legacy-r1",
             "title": "Legacy artifact",
             "task_id": "task-design-old",
-            "buddy": "design",
+            "role": "design",
             "kind": "design-handoff",
             "summary": "legacy",
             "content": {"body": "legacy body"},
@@ -180,33 +181,21 @@ class ArtifactCompatibilityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             encoding="utf-8",
         )
 
-        normalized = env_store.get_artifact("art-design-legacy-r1")
-        self.assertIsNotNone(normalized)
-        assert isinstance(normalized, dict)
-        self.assertEqual(normalized["template"], "design")
-        self.assertEqual(normalized["body"], "legacy body")
-        self.assertEqual(normalized["status"], "draft")
-        self.assertIsNone(normalized["published_to_track"])
-        self.assertIn("design", normalized["authors"])
-
-        saved = env_store.save_artifact(normalized)
-        self.assertEqual(saved["template"], "design")
-        raw = json.loads(env_store.artifact_file("art-design-legacy-r1").read_text(encoding="utf-8"))
-        self.assertNotIn("kind", raw)
-        self.assertNotIn("content", raw)
-        self.assertNotIn("task_id", raw)
+        with self.assertRaisesRegex(ValueError, "retired"):
+            env_store.get_artifact("art-design-legacy-r1")
 
 
 class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_task_track_id_hint_does_not_mutate_track_state(self) -> None:
-        env_store.create_track("track-task-hint", "Task Hint", owner_buddy="pm")
+        env_store.create_track("track-task-hint", "Task Hint", owner_role="pm")
         before = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
 
-        instance_root = self._instance_root("inst-task-track-hint")
+        instance_root = self._instance_root("act-task-track-hint")
         task = task_repo.create_task(
             task_id="task-dev-track-hint",
             title="Task hint",
-            active_buddy="dev",
+            active_role="dev",
+            active_actor={"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
             instance_json=None,
             instance_payload={"instance_root": str(instance_root)},
             track_id="track-task-hint",
@@ -224,7 +213,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         stored = task_repo.get_task(
             "task-dev-track-hint",
-            active_buddy="dev",
+            active_role="dev",
             instance_json=None,
             instance_payload={"instance_root": str(instance_root)},
         )
@@ -236,7 +225,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_validate_task_rejects_legacy_artifact_linkage_fields(self) -> None:
         payload = {
             "id": "task-dev-legacy-drop",
-            "buddy": "dev",
+            "role": "dev",
             "title": "Legacy drop",
             "status": "active",
             "track_id": None,
@@ -261,7 +250,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "id": "track-pm-legacy",
             "title": "Legacy track",
             "status": "active",
-            "owner_buddy": "pm",
+            "owner_role": "pm",
             "task_ids": ["task-pm-old"],
             "summary": "",
             "updated_at": "2026-05-18T10:00:00+08:00",
@@ -271,12 +260,12 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
 
 class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_legacy_author_buddy_comment_normalizes_to_by_buddy(self) -> None:
+    def test_legacy_author_comment_normalizes_to_actor_author(self) -> None:
         raw = {
             "id": "comment-legacy-author",
             "target_type": "track",
             "target_id": "track-legacy-comments",
-            "author_buddy": "pm",
+            "author_role": "pm",
             "content": "legacy",
             "reply_to": None,
             "created_at": "2026-05-18T10:00:00+08:00",
@@ -290,15 +279,17 @@ class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         normalized = env_store.get_comment("comment-legacy-author")
         self.assertIsNotNone(normalized)
         assert isinstance(normalized, dict)
-        self.assertEqual(normalized["by_buddy"], "pm")
+        self.assertEqual(normalized["by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
+        self.assertNotIn("by_role", normalized)
         self.assertEqual(normalized["thread_id"], "comment-legacy-author")
         self.assertEqual(normalized["status"], "open")
-        self.assertEqual(normalized["mentions"], [])
+        self.assertEqual(normalized["mentioned_actors"], [])
 
         saved = env_store.save_comment(normalized)
-        self.assertEqual(saved["by_buddy"], "pm")
+        self.assertEqual(saved["by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
         persisted = json.loads(env_store.comment_file("comment-legacy-author").read_text(encoding="utf-8"))
-        self.assertNotIn("author_buddy", persisted)
+        self.assertNotIn("author_role", persisted)
+        self.assertNotIn("by_role", persisted)
 
 
 if __name__ == "__main__":

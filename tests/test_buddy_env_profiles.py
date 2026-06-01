@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for buddy env profile contract and profile matrix."""
+"""Tests for role env profile contract and profile matrix."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.buddy_ids = [buddy["id"] for buddy in self.manifest["buddies"]]
-        self.buddy_set = set(self.buddy_ids)
+        self.role_ids = [role["id"] for role in self.manifest["roles"]]
+        self.role_set = set(self.role_ids)
         self.profile_root = ROOT / "buddyswitch" / "env-profiles"
 
     def test_profile_files_match_manifest_buddies(self) -> None:
@@ -34,25 +34,25 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             for path in self.profile_root.glob("*.json")
             if path.is_file()
         }
-        self.assertEqual(files, self.buddy_set)
+        self.assertEqual(files, self.role_set)
 
     def test_profiles_validate_with_matrix_rules(self) -> None:
         track_effects_seen = []
-        for buddy_id in self.buddy_ids:
+        for role_id in self.role_ids:
             profile = env_profiles.require_env_profile(
-                buddy_id,
+                role_id,
                 manifest_path=self.manifest_path,
                 repo_root=ROOT,
             )
             self.assertEqual(list(profile.keys()), env_profiles.profile_contract(ROOT)["top_level_key_order"])
-            self.assertEqual(profile["buddy_id"], buddy_id)
-            self.assertEqual(profile["buddybox"]["root"], env_profiles.BUDDYBOX_ROOT)
+            self.assertEqual(profile["role_id"], role_id)
+            self.assertEqual(profile["private_workspace"]["root"], env_profiles.PRIVATE_WORKSPACE_ROOT)
             self.assertEqual(
-                env_profiles.resolve_buddybox_root(profile["buddybox"]["root"], buddy_id=buddy_id),
-                "buddybox",
+                env_profiles.resolve_private_workspace_root(profile["private_workspace"]["root"], role_id=role_id),
+                "private",
             )
             self.assertEqual(profile["filesystem_capability"]["raw_state"], "broker-only")
-            if buddy_id == "dev":
+            if role_id == "dev":
                 self.assertEqual(profile["project"]["access"], "write")
                 self.assertEqual(profile["filesystem_capability"]["source_root"], "write")
                 self.assertIn("source-root", profile["filesystem_capability"]["host_writable"])
@@ -66,7 +66,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 self.assertIn("runtime-temp", profile["filesystem_capability"]["host_writable"])
                 self.assertNotIn("temp", profile["filesystem_capability"]["host_writable"])
                 self.assertNotIn("project-workspace", profile["filesystem_capability"]["host_writable"])
-            if buddy_id == "market":
+            if role_id == "market":
                 self.assertEqual(profile["tool_capability"]["browser_cockpit"], "required")
                 self.assertEqual(profile["tool_capability"]["market_research_evidence"], "required")
                 self.assertEqual(profile["tool_capability"]["ordinary_web_fallback"], "user-approved-only")
@@ -83,7 +83,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 profile["state_capability"]["task_effects"],
                 ["create", "update", "priority", "status", "archive", "history"],
             )
-            if buddy_id == "market":
+            if role_id == "market":
                 self.assertEqual(search["browser_cockpit"], "required")
                 self.assertEqual(search["search_api"], "user-approved-only")
             else:
@@ -91,12 +91,12 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 self.assertEqual(search["search_api"], "available")
             effects = profile["state_capability"]["track_effects"]
             if effects:
-                track_effects_seen.append((buddy_id, effects))
+                track_effects_seen.append((role_id, effects))
             self.assertEqual(
                 profile["state_capability"]["request_effects"],
                 ["create", "accept", "block", "complete", "cancel"],
             )
-            expected_comment_effects = ["resolve"] if buddy_id == "pm" else []
+            expected_comment_effects = ["resolve"] if role_id == "pm" else []
             self.assertEqual(profile["state_capability"]["comment_effects"], expected_comment_effects)
 
         self.assertEqual(
@@ -138,7 +138,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             (temp_root / "buddyswitch" / "env-profiles").mkdir(parents=True)
             src = ROOT / "buddyswitch" / "env-profiles" / "market.json"
             bad = json.loads(src.read_text(encoding="utf-8"))
-            bad["buddy_id"] = "pm"
+            bad["role_id"] = "pm"
             dst = temp_root / "buddyswitch" / "env-profiles" / "market.json"
             dst.write_text(json.dumps(bad, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
             with self.assertRaises(env_profiles.EnvProfileError):
@@ -156,7 +156,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         with self.assertRaisesRegex(env_profiles.EnvProfileError, "project_workspace is retired"):
             env_profiles.validate_env_profile(
                 profile,
-                buddy_id="dev",
+                role_id="dev",
                 manifest=manifest,
                 repo_root=ROOT,
             )
@@ -174,7 +174,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         with self.assertRaisesRegex(env_profiles.EnvProfileError, "tool_capability.search"):
             env_profiles.validate_env_profile(
                 missing_search,
-                buddy_id="market",
+                role_id="market",
                 manifest=manifest,
                 repo_root=ROOT,
             )
@@ -184,7 +184,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         with self.assertRaisesRegex(env_profiles.EnvProfileError, "tool_capability.search.search_api"):
             env_profiles.validate_env_profile(
                 bad_api,
-                buddy_id="market",
+                role_id="market",
                 manifest=manifest,
                 repo_root=ROOT,
             )
@@ -199,7 +199,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         with self.assertRaisesRegex(env_profiles.EnvProfileError, "tool_capability.search.browser_cockpit"):
             env_profiles.validate_env_profile(
                 dev,
-                buddy_id="dev",
+                role_id="dev",
                 manifest=manifest,
                 repo_root=ROOT,
             )

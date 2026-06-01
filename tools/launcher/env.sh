@@ -56,12 +56,12 @@ buddyswitch_require_runtime_lock() {
 
 buddyswitch_patch_codex_config() {
   local config_path
-  local active_buddy
+  local active_role
   local local_default_tmp_root
   local -a patch_args=()
   local -a temp_root_args=()
   config_path="${BUDDYSWITCH_CODEX_HOME}/config.toml"
-  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  active_role="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
   local_default_tmp_root="/tmp"
 
   patch_args=(
@@ -71,11 +71,11 @@ buddyswitch_patch_codex_config() {
     --source-codex-home "${BUDDYSWITCH_SOURCE_CODEX_HOME}"
   )
 
-  if [[ -n "${active_buddy}" ]]; then
+  if [[ -n "${active_role}" ]]; then
     temp_root_args=(--temp-root "${BUDDYSWITCH_INSTANCE_TMP}")
     patch_args+=(
       --manifest "${BUDDYSWITCH_REPO_ROOT}/buddyswitch/manifest.toml"
-      --buddy "${active_buddy}"
+      --role "${active_role}"
       --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}"
       --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}"
       --project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
@@ -158,18 +158,18 @@ buddyswitch_env_mcp_has_server() {
 buddyswitch_env_mcp_matches_instance() {
   local server_name="$1"
   local config_path
-  local active_buddy
+  local active_role
 
   config_path="$(buddyswitch_codex_config_path)"
-  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  active_role="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
   if [[ ! -f "${config_path}" ]]; then
     return 1
   fi
-  if [[ -z "${BUDDYSWITCH_INSTANCE_ID:-}" || -z "${active_buddy}" || -z "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
+  if [[ -z "${BUDDYSWITCH_ACTOR_ID:-}" || -z "${active_role}" || -z "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
     return 1
   fi
 
-  python3 - "${config_path}" "${server_name}" "${BUDDYSWITCH_ENV_MCP_SERVER}" "${BUDDYSWITCH_REPO_ROOT}" "${BUDDYSWITCH_INSTANCE_ID}" "${active_buddy}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" <<'PY'
+  python3 - "${config_path}" "${server_name}" "${BUDDYSWITCH_ENV_MCP_SERVER}" "${BUDDYSWITCH_REPO_ROOT}" "${BUDDYSWITCH_ACTOR_ID}" "${active_role}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" <<'PY'
 import sys
 from pathlib import Path
 
@@ -182,8 +182,8 @@ config_path = Path(sys.argv[1])
 server_name = sys.argv[2]
 server_path = sys.argv[3]
 repo_root = sys.argv[4]
-instance_id = sys.argv[5]
-buddy = sys.argv[6]
+actor_id = sys.argv[5]
+role = sys.argv[6]
 broker_socket = sys.argv[7]
 
 try:
@@ -202,10 +202,10 @@ required = [
     server_path,
     "--repo-root",
     repo_root,
-    "--instance-id",
-    instance_id,
-    "--buddy",
-    buddy,
+    "--actor-id",
+    actor_id,
+    "--role",
+    role,
     "--broker-socket",
     broker_socket,
 ]
@@ -222,15 +222,15 @@ buddyswitch_env_mcp_remove_server() {
 
 buddyswitch_env_mcp_add_server() {
   local server_name="$1"
-  local active_buddy
-  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  local active_role
+  active_role="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
 
-  if [[ -z "${active_buddy}" ]]; then
-    echo "BuddySwitch env MCP registration requires an active buddy." >&2
+  if [[ -z "${active_role}" ]]; then
+    echo "BuddySwitch env MCP registration requires an active role." >&2
     return 2
   fi
-  if [[ -z "${BUDDYSWITCH_INSTANCE_ID:-}" ]]; then
-    echo "BuddySwitch env MCP registration requires BUDDYSWITCH_INSTANCE_ID." >&2
+  if [[ -z "${BUDDYSWITCH_ACTOR_ID:-}" ]]; then
+    echo "BuddySwitch env MCP registration requires BUDDYSWITCH_ACTOR_ID." >&2
     return 2
   fi
   if [[ -z "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
@@ -242,8 +242,8 @@ buddyswitch_env_mcp_add_server() {
     python3 \
     "${BUDDYSWITCH_ENV_MCP_SERVER}" \
     --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
-    --instance-id "${BUDDYSWITCH_INSTANCE_ID}" \
-    --buddy "${active_buddy}" \
+    --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
+    --role "${active_role}" \
     --broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" || return $?
   buddyswitch_patch_codex_config
 }
@@ -262,15 +262,15 @@ buddyswitch_env_mcp_ensure() {
   buddyswitch_env_mcp_add_server "${server_name}"
 }
 
-buddyswitch_validate_buddy_id() {
-  local buddy_id="$1"
+buddyswitch_validate_role_id() {
+  local role_id="$1"
   local manifest_helper manifest_path
 
   manifest_helper="${BUDDYSWITCH_REPO_ROOT}/scripts/env_manifest.py"
   manifest_path="${BUDDYSWITCH_REPO_ROOT}/buddyswitch/manifest.toml"
 
-  if [[ -z "${buddy_id}" ]]; then
-    echo "Buddy id must not be empty." >&2
+  if [[ -z "${role_id}" ]]; then
+    echo "Role id must not be empty." >&2
     return 2
   fi
   if [[ ! -f "${manifest_helper}" ]]; then
@@ -282,11 +282,11 @@ buddyswitch_validate_buddy_id() {
     return 1
   fi
 
-  python3 "${manifest_helper}" --manifest "${manifest_path}" show-buddy "${buddy_id}" >/dev/null
+  python3 "${manifest_helper}" --manifest "${manifest_path}" show-role "${role_id}" >/dev/null
 }
 
 buddyswitch_require_env_profile() {
-  local buddy_id="$1"
+  local role_id="$1"
   local helper manifest_path
 
   helper="${BUDDYSWITCH_REPO_ROOT}/${BUDDYSWITCH_ENV_PROFILES_HELPER_REL}"
@@ -296,60 +296,60 @@ buddyswitch_require_env_profile() {
     echo "Env profile helper missing: ${helper}" >&2
     return 1
   fi
-  python3 "${helper}" --manifest "${manifest_path}" validate --buddy "${buddy_id}" >/dev/null
+  python3 "${helper}" --manifest "${manifest_path}" validate --role "${role_id}" >/dev/null
 }
 
-buddyswitch_buddy_agents_template_path() {
-  local buddy_id="$1"
-  printf '%s/tools/launcher/assets/buddies/%s/AGENTS.md\n' "${BUDDYSWITCH_REPO_ROOT}" "${buddy_id}"
+buddyswitch_role_agents_template_path() {
+  local role_id="$1"
+  printf '%s/tools/launcher/assets/roles/%s/AGENTS.md\n' "${BUDDYSWITCH_REPO_ROOT}" "${role_id}"
 }
 
-buddyswitch_require_buddy_agents_template() {
-  local buddy_id="$1"
+buddyswitch_require_role_agents_template() {
+  local role_id="$1"
   local template_path
 
-  template_path="$(buddyswitch_buddy_agents_template_path "${buddy_id}")"
+  template_path="$(buddyswitch_role_agents_template_path "${role_id}")"
   if [[ ! -f "${template_path}" ]]; then
-    echo "Buddy AGENTS template not found: ${template_path}" >&2
+    echo "Role AGENTS template not found: ${template_path}" >&2
     return 1
   fi
   export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${template_path}"
 }
 
 buddyswitch_instance_json_path() {
-  local instance_id="$1"
-  printf '%s/instances/%s/instance.json\n' "${BUDDYSWITCH_SHARED_ROOT}" "${instance_id}"
+  local actor_id="$1"
+  printf '%s/instances/%s/instance.json\n' "${BUDDYSWITCH_SHARED_ROOT}" "${actor_id}"
 }
 
 buddyswitch_instance_root() {
-  local instance_id="$1"
-  printf '%s/instances/%s\n' "${BUDDYSWITCH_SHARED_ROOT}" "${instance_id}"
+  local actor_id="$1"
+  printf '%s/instances/%s\n' "${BUDDYSWITCH_SHARED_ROOT}" "${actor_id}"
 }
 
-buddyswitch_validate_instance_id() {
-  local instance_id="$1"
+buddyswitch_validate_actor_id() {
+  local actor_id="$1"
 
-  if [[ -z "${instance_id}" ]]; then
-    echo "Invalid instance id: must not be empty." >&2
+  if [[ -z "${actor_id}" ]]; then
+    echo "Invalid actor id: must not be empty." >&2
     return 2
   fi
-  if [[ ! "${instance_id}" =~ ^inst-[A-Za-z0-9._-]+$ ]]; then
-    echo "Invalid instance id: ${instance_id}" >&2
+  if [[ ! "${actor_id}" =~ ^act-[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid actor id: ${actor_id}" >&2
     return 2
   fi
 }
 
 buddyswitch_env_bind_instance() {
-  local instance_id="$1"
+  local actor_id="$1"
   local instance_root
 
-  buddyswitch_validate_instance_id "${instance_id}" || return $?
-  instance_root="$(buddyswitch_instance_root "${instance_id}")"
-  export BUDDYSWITCH_INSTANCE_ID="${instance_id}"
-  export BUDDYSWITCH_INSTANCE_JSON="$(buddyswitch_instance_json_path "${instance_id}")"
+  buddyswitch_validate_actor_id "${actor_id}" || return $?
+  instance_root="$(buddyswitch_instance_root "${actor_id}")"
+  export BUDDYSWITCH_ACTOR_ID="${actor_id}"
+  export BUDDYSWITCH_INSTANCE_JSON="$(buddyswitch_instance_json_path "${actor_id}")"
   export BUDDYSWITCH_INSTANCE_ROOT="${instance_root}"
   export BUDDYSWITCH_WORKSPACE_DIR="${instance_root}/workspace"
-  export BUDDYSWITCH_BUDDYBOX_DIR="${BUDDYSWITCH_WORKSPACE_DIR}/buddybox"
+  export BUDDYSWITCH_ACTOR_PRIVATE_DIR="${BUDDYSWITCH_WORKSPACE_DIR}/private"
   export BUDDYSWITCH_INSTANCE_TMP="${instance_root}/tmp"
   export BUDDYSWITCH_HOME="${instance_root}/home"
   export BUDDYSWITCH_CODEX_HOME="${instance_root}/codex-home"
@@ -357,11 +357,11 @@ buddyswitch_env_bind_instance() {
 }
 
 buddyswitch_instance_ensure_taskbox() {
-  local buddy="${1:-}"
+  local role="${1:-}"
   local taskbox_root
 
-  if [[ -z "${buddy}" ]]; then
-    echo "buddyswitch: buddy is required to create taskbox" >&2
+  if [[ -z "${role}" ]]; then
+    echo "buddyswitch: role is required to create taskbox" >&2
     return 2
   fi
   if [[ -z "${BUDDYSWITCH_INSTANCE_ROOT:-}" ]]; then
@@ -369,7 +369,7 @@ buddyswitch_instance_ensure_taskbox() {
     return 2
   fi
 
-  taskbox_root="${BUDDYSWITCH_INSTANCE_ROOT}/taskbox/${buddy}"
+  taskbox_root="${BUDDYSWITCH_INSTANCE_ROOT}/taskbox/${role}"
   mkdir -p "${taskbox_root}/tasks"
   if [[ ! -e "${taskbox_root}/history.md" ]]; then
     : > "${taskbox_root}/history.md"
@@ -377,45 +377,45 @@ buddyswitch_instance_ensure_taskbox() {
 }
 
 buddyswitch_instance_ensure_private_writable_surface() {
-  if [[ -z "${BUDDYSWITCH_BUDDYBOX_DIR:-}" || -z "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
-    echo "buddyswitch: instance buddybox and tmp must be bound" >&2
+  if [[ -z "${BUDDYSWITCH_ACTOR_PRIVATE_DIR:-}" || -z "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
+    echo "buddyswitch: actor private workspace and tmp must be bound" >&2
     return 2
   fi
-  mkdir -p "${BUDDYSWITCH_BUDDYBOX_DIR}"
+  mkdir -p "${BUDDYSWITCH_ACTOR_PRIVATE_DIR}"
   mkdir -p "${BUDDYSWITCH_INSTANCE_TMP}"
 }
 
-buddyswitch_generate_instance_id() {
-  local buddy="$1"
-  python3 -c 'import sys, uuid; print(f"inst-{sys.argv[1]}-{uuid.uuid4().hex[:12]}")' "${buddy}"
+buddyswitch_generate_actor_id() {
+  local role="$1"
+  python3 -c 'import sys, uuid; print(f"act-{sys.argv[1]}-{uuid.uuid4().hex[:12]}")' "${role}"
 }
 
 buddyswitch_instance_activate() {
-  local instance_id="$1"
-  local buddy="$2"
+  local actor_id="$1"
+  local role="$2"
   local status="${3:-active}"
   local instance_json instance_dir
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
   instance_dir="$(dirname "${instance_json}")"
   mkdir -p "${instance_dir}"
 
-  python3 - "${instance_json}" "${instance_id}" "${buddy}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_INSTANCE_ROOT}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" "${role}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_INSTANCE_ROOT}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
-buddy = sys.argv[3]
+actor_id = sys.argv[2]
+role = sys.argv[3]
 status = sys.argv[4]
 workspace_dir = sys.argv[5]
 instance_root = sys.argv[6]
 now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 payload = {
-    "instance_id": instance_id,
-    "buddy": buddy,
+    "actor_id": actor_id,
+    "role": role,
     "status": status,
     "instance_root": instance_root,
     "workspace_dir": workspace_dir,
@@ -431,26 +431,26 @@ PY
 }
 
 buddyswitch_instance_set_status() {
-  local instance_id="$1"
+  local actor_id="$1"
   local status="$2"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${instance_id}" "${status}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" "${status}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 status = sys.argv[3]
 if not instance_json.exists():
     raise SystemExit(f"Instance record missing: {instance_json}")
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 payload["status"] = status
 payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 temp_path = instance_json.with_suffix(".tmp")
@@ -460,20 +460,20 @@ PY
 }
 
 buddyswitch_instance_set_browser_port() {
-  local instance_id="$1"
+  local actor_id="$1"
   local browser_port="$2"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${instance_id}" "${browser_port}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" "${browser_port}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 try:
     browser_port = int(sys.argv[3])
 except ValueError as exc:
@@ -483,8 +483,8 @@ if browser_port < 1 or browser_port > 65535:
 if not instance_json.exists():
     raise SystemExit(f"Instance record missing: {instance_json}")
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 payload["browser_port"] = browser_port
 payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 temp_path = instance_json.with_suffix(".tmp")
@@ -494,7 +494,7 @@ PY
 }
 
 buddyswitch_instance_set_app_server() {
-  local instance_id="$1"
+  local actor_id="$1"
   local thread_id="$2"
   local app_server_pid="$3"
   local app_server_socket="$4"
@@ -502,16 +502,16 @@ buddyswitch_instance_set_app_server() {
   local status="${6:-active}"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${instance_id}" "${thread_id}" "${app_server_pid}" "${app_server_socket}" "${app_server_log}" "${status}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" "${thread_id}" "${app_server_pid}" "${app_server_socket}" "${app_server_log}" "${status}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 thread_id = sys.argv[3]
 app_server_pid_text = sys.argv[4]
 app_server_socket = sys.argv[5]
@@ -522,8 +522,8 @@ if not instance_json.exists():
     raise SystemExit(f"Instance record missing: {instance_json}")
 
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 
 try:
     app_server_pid = int(app_server_pid_text)
@@ -544,20 +544,20 @@ PY
 }
 
 buddyswitch_instance_set_thread_id() {
-  local instance_id="$1"
+  local actor_id="$1"
   local thread_id="$2"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${instance_id}" "${thread_id}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" "${thread_id}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 thread_id = sys.argv[3]
 
 if not instance_json.exists():
@@ -566,8 +566,8 @@ if not thread_id:
     raise SystemExit("Thread id is required")
 
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 
 payload["thread_id"] = thread_id
 payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -579,20 +579,20 @@ PY
 }
 
 buddyswitch_instance_register_side_thread() {
-  local instance_id="$1"
+  local actor_id="$1"
   local parent_thread_id="$2"
   local side_thread_id="$3"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
-  python3 - "${instance_json}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
+  python3 - "${instance_json}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 parent_thread_id = sys.argv[3]
 side_thread_id = sys.argv[4]
 
@@ -606,8 +606,8 @@ if side_thread_id == parent_thread_id:
     raise SystemExit("Side thread id must not equal main thread id")
 
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 
 now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 side_threads = payload.get("side_threads")
@@ -634,19 +634,19 @@ PY
 }
 
 buddyswitch_instance_require_side_thread() {
-  local instance_id="$1"
+  local actor_id="$1"
   local parent_thread_id="$2"
   local side_thread_id="$3"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
-  python3 - "${instance_json}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
+  python3 - "${instance_json}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 parent_thread_id = sys.argv[3]
 side_thread_id = sys.argv[4]
 
@@ -661,8 +661,8 @@ if side_thread_id == parent_thread_id:
     raise SystemExit(2)
 
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    print(f"Instance id mismatch in {instance_json}", file=sys.stderr)
+if payload.get("actor_id") != actor_id:
+    print(f"Actor id mismatch in {instance_json}", file=sys.stderr)
     raise SystemExit(2)
 
 side_threads = payload.get("side_threads")
@@ -681,28 +681,28 @@ PY
 }
 
 buddyswitch_instance_unregister_side_thread() {
-  local instance_id="$1"
+  local actor_id="$1"
   local parent_thread_id="$2"
   local side_thread_id="$3"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
-  python3 - "${instance_json}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
+  python3 - "${instance_json}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 parent_thread_id = sys.argv[3]
 side_thread_id = sys.argv[4]
 
 if not instance_json.exists():
     raise SystemExit(f"Instance record missing: {instance_json}")
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 
 side_threads = payload.get("side_threads")
 if not isinstance(side_threads, list):
@@ -723,28 +723,28 @@ PY
 }
 
 buddyswitch_instance_clear_app_server() {
-  local instance_id="$1"
+  local actor_id="$1"
   local status="${2:-inactive}"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${instance_id}" "${status}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" "${status}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 status = sys.argv[3]
 
 if not instance_json.exists():
     raise SystemExit(f"Instance record missing: {instance_json}")
 
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 
 payload["app_server_pid"] = None
 payload["app_server_socket"] = None
@@ -759,26 +759,26 @@ PY
 }
 
 buddyswitch_instance_clear_browser_port() {
-  local instance_id="$1"
+  local actor_id="$1"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${instance_id}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 
 if not instance_json.exists():
     raise SystemExit(f"Instance record missing: {instance_json}")
 
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 
 payload["browser_port"] = None
 payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -790,23 +790,23 @@ PY
 }
 
 buddyswitch_instance_record_failure() {
-  local instance_id="$1"
+  local actor_id="$1"
   local phase="$2"
   local message="$3"
   local thread_id="${4:-}"
   local browser_port="${5:-}"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${instance_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}" <<'PY'
+  python3 - "${instance_json}" "${actor_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 phase = sys.argv[3]
 message = sys.argv[4]
 thread_id = sys.argv[5]
@@ -816,8 +816,8 @@ if not instance_json.exists():
     raise SystemExit(f"Instance record missing: {instance_json}")
 
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    raise SystemExit(f"Instance id mismatch in {instance_json}")
+if payload.get("actor_id") != actor_id:
+    raise SystemExit(f"Actor id mismatch in {instance_json}")
 
 now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 failure = {
@@ -845,74 +845,74 @@ PY
 }
 
 buddyswitch_instance_app_server_is_active() {
-  local instance_id="$1"
-  if [[ -z "${instance_id}" ]]; then
+  local actor_id="$1"
+  if [[ -z "${actor_id}" ]]; then
     return 1
   fi
   (
-    buddyswitch_validate_instance_id "${instance_id}" || exit $?
-    if [[ ! -f "$(buddyswitch_instance_json_path "${instance_id}")" ]]; then
+    buddyswitch_validate_actor_id "${actor_id}" || exit $?
+    if [[ ! -f "$(buddyswitch_instance_json_path "${actor_id}")" ]]; then
       exit 1
     fi
-    buddyswitch_env_bind_instance "${instance_id}" || exit $?
+    buddyswitch_env_bind_instance "${actor_id}" || exit $?
     buddyswitch_app_server_is_active
   )
 }
 
-_buddyswitch_list_instance_ids_for_buddy() {
-  local target_buddy="${1:-}"
-  local instance_json instance_id
+_buddyswitch_list_actor_ids_for_role() {
+  local target_role="${1:-}"
+  local instance_json actor_id
 
   for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
     [[ -f "${instance_json}" ]] || continue
-    instance_id="$(
-      python3 - "${instance_json}" "${target_buddy}" <<'PY'
+    actor_id="$(
+      python3 - "${instance_json}" "${target_role}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-target_buddy = sys.argv[2]
+target_role = sys.argv[2]
 
 try:
     payload = json.loads(instance_json.read_text(encoding="utf-8"))
 except Exception:
     raise SystemExit(0)
 
-buddy = payload.get("buddy")
-if target_buddy and buddy != target_buddy:
+role = payload.get("role")
+if target_role and role != target_role:
     raise SystemExit(0)
 
-instance_id = payload.get("instance_id", instance_json.parent.name)
-if isinstance(instance_id, str) and instance_id:
-    print(instance_id)
+actor_id = payload.get("actor_id", instance_json.parent.name)
+if isinstance(actor_id, str) and actor_id:
+    print(actor_id)
 PY
     )"
-    [[ -n "${instance_id}" ]] || continue
-    printf '%s\n' "${instance_id}"
+    [[ -n "${actor_id}" ]] || continue
+    printf '%s\n' "${actor_id}"
   done
 }
 
 buddyswitch_count_active_app_servers() {
-  local count=0 instance_id
-  while IFS= read -r instance_id; do
-    [[ -n "${instance_id}" ]] || continue
-    if buddyswitch_instance_app_server_is_active "${instance_id}"; then
+  local count=0 actor_id
+  while IFS= read -r actor_id; do
+    [[ -n "${actor_id}" ]] || continue
+    if buddyswitch_instance_app_server_is_active "${actor_id}"; then
       count=$((count + 1))
     fi
-  done < <(_buddyswitch_list_instance_ids_for_buddy)
+  done < <(_buddyswitch_list_actor_ids_for_role)
   echo "${count}"
 }
 
-buddyswitch_count_active_app_servers_for_buddy() {
-  local buddy="$1"
-  local count=0 instance_id
-  while IFS= read -r instance_id; do
-    [[ -n "${instance_id}" ]] || continue
-    if buddyswitch_instance_app_server_is_active "${instance_id}"; then
+buddyswitch_count_active_app_servers_for_role() {
+  local role="$1"
+  local count=0 actor_id
+  while IFS= read -r actor_id; do
+    [[ -n "${actor_id}" ]] || continue
+    if buddyswitch_instance_app_server_is_active "${actor_id}"; then
       count=$((count + 1))
     fi
-  done < <(_buddyswitch_list_instance_ids_for_buddy "${buddy}")
+  done < <(_buddyswitch_list_actor_ids_for_role "${role}")
   echo "${count}"
 }
 
@@ -968,7 +968,7 @@ buddyswitch_reject_native_search_args() {
 }
 
 buddyswitch_run_codex() {
-  if [[ -n "${BUDDYSWITCH_ACTIVE_BUDDY:-}" || -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]; then
+  if [[ -n "${BUDDYSWITCH_ROLE_ID:-}" || -n "${BUDDYSWITCH_ACTOR_ID:-}" ]]; then
     buddyswitch_reject_native_search_args "$@" || return $?
   fi
   if [[ -n "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
@@ -977,7 +977,7 @@ buddyswitch_run_codex() {
     TMP="${BUDDYSWITCH_INSTANCE_TMP}" \
     TEMP="${BUDDYSWITCH_INSTANCE_TMP}" \
     TMPPREFIX="${BUDDYSWITCH_INSTANCE_TMP}/zsh" \
-    BUDDYSWITCH_BUDDYBOX_DIR="${BUDDYSWITCH_BUDDYBOX_DIR:-}" \
+    BUDDYSWITCH_ACTOR_PRIVATE_DIR="${BUDDYSWITCH_ACTOR_PRIVATE_DIR:-}" \
     HOME="${BUDDYSWITCH_HOME}" \
     CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
     XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \

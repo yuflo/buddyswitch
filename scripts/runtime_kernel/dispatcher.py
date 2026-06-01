@@ -91,12 +91,12 @@ def _load_instance_record(instance_json_path: Path) -> dict[str, Any]:
     payload = json.loads(instance_json_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"instance record must be an object: {instance_json_path}")
-    instance_id = payload.get("instance_id")
-    buddy = payload.get("buddy")
-    if not isinstance(instance_id, str) or not instance_id.strip():
-        raise ValueError(f"instance record missing instance_id: {instance_json_path}")
-    if not isinstance(buddy, str) or not buddy.strip():
-        raise ValueError(f"instance record missing buddy: {instance_json_path}")
+    actor_id = payload.get("actor_id")
+    role = payload.get("role")
+    if not isinstance(actor_id, str) or not actor_id.strip():
+        raise ValueError(f"instance record missing actor_id: {instance_json_path}")
+    if not isinstance(role, str) or not role.strip():
+        raise ValueError(f"instance record missing role: {instance_json_path}")
     return payload
 
 
@@ -110,16 +110,16 @@ def _instance_shared_root(instance_json_path: Path) -> Path:
 @contextlib.contextmanager
 def _runtime_server_env(
     *,
-    instance_id: str,
-    buddy_id: str,
+    actor_id: str,
+    role_id: str,
     instance_json_path: Path,
     instance_record: dict[str, Any],
 ) -> Iterator[None]:
     shared_root = _instance_shared_root(instance_json_path)
     updates = {
         "BUDDYSWITCH_RUNTIME_BROKER_MODE": "server",
-        "BUDDYSWITCH_INSTANCE_ID": instance_id,
-        "BUDDYSWITCH_ACTIVE_BUDDY": buddy_id,
+        "BUDDYSWITCH_ACTOR_ID": actor_id,
+        "BUDDYSWITCH_ROLE_ID": role_id,
         "BUDDYSWITCH_INSTANCE_JSON": str(instance_json_path),
         "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
         "BUDDYSWITCH_STATE_ROOT": str(shared_root / "state"),
@@ -158,13 +158,13 @@ def _env_tool_dispatch(
     instance_record: dict[str, Any],
 ) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
-    instance_id = str(instance_record["instance_id"]).strip()
-    active_buddy = str(instance_record["buddy"]).strip()
+    actor_id = str(instance_record["actor_id"]).strip()
+    active_role = str(instance_record["role"]).strip()
     payload = dict(params)
     return dispatch_env_tool_request(
         payload=payload,
-        active_buddy=active_buddy,
-        instance_id=instance_id,
+        active_role=active_role,
+        actor_id=actor_id,
         instance_json=instance_json_path,
         instance_payload=dict(instance_record),
         manifest=manifest,
@@ -173,15 +173,15 @@ def _env_tool_dispatch(
 
 
 def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, Any]) -> dict[str, Any]:
-    instance_id = str(instance_record["instance_id"]).strip()
-    active_buddy = str(instance_record["buddy"]).strip()
+    actor_id = str(instance_record["actor_id"]).strip()
+    active_role = str(instance_record["role"]).strip()
     runtime_workspace_root = runtime_files.runtime_workspace_root(instance_record).resolve(strict=False)
     runtime_state_root = runtime_files.STATE_ROOT.resolve(strict=False)
     return {
         "ok": True,
         "protocol": "buddyswitch-runtime-broker/v2",
-        "instance_id": instance_id,
-        "active_buddy": active_buddy,
+        "actor_id": actor_id,
+        "active_role": active_role,
         "pid": os.getpid(),
         "socket_path": str(session.socket_path) if session.socket_path is not None else None,
         "runtime_root": str(runtime_workspace_root),
@@ -220,25 +220,25 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
             )
 
         instance_record = _load_instance_record(session.instance_json_path)
-        instance_id = str(instance_record["instance_id"]).strip()
-        active_buddy = str(instance_record["buddy"]).strip()
+        actor_id = str(instance_record["actor_id"]).strip()
+        active_role = str(instance_record["role"]).strip()
 
-        request_instance_id = params.get("instance_id")
-        request_buddy = params.get("active_buddy")
+        request_actor_id = params.get("actor_id")
+        request_role = params.get("active_role")
 
-        if request_instance_id is not None and request_instance_id != instance_id:
+        if request_actor_id is not None and request_actor_id != actor_id:
             return _boundary_error(
                 "E_RUNTIME_BROKER_PERMISSION",
-                f"instance_id mismatch: expected '{instance_id}', got '{request_instance_id}'",
+                f"actor_id mismatch: expected '{actor_id}', got '{request_actor_id}'",
                 boundary="active-instance",
-                actions=_allowed("Use the active launcher-managed instance id."),
+                actions=_allowed("Use the active launcher-managed actor id."),
             )
-        if request_buddy is not None and request_buddy != active_buddy:
+        if request_role is not None and request_role != active_role:
             return _boundary_error(
                 "E_RUNTIME_BROKER_PERMISSION",
-                f"active_buddy mismatch: expected '{active_buddy}', got '{request_buddy}'",
-                boundary="active-buddy",
-                actions=_allowed("Use the active buddy locked by the launcher."),
+                f"active_role mismatch: expected '{active_role}', got '{request_role}'",
+                boundary="active-role",
+                actions=_allowed("Use the active role locked by the launcher."),
             )
 
         if method not in {"ping", "status"}:
@@ -252,8 +252,8 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
                 )
 
         with _runtime_server_env(
-            instance_id=instance_id,
-            buddy_id=active_buddy,
+            actor_id=actor_id,
+            role_id=active_role,
             instance_json_path=session.instance_json_path,
             instance_record=instance_record,
         ):

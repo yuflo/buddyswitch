@@ -192,7 +192,7 @@ path = "buddyswitch/skills/shared/comment-tool"
 id = "request-tool"
 path = "buddyswitch/skills/shared/request-tool"
 
-[[buddies]]
+[[roles]]
 id = "market"
 label = "Market"
 scope = "Research demand, users, and competition."
@@ -221,7 +221,7 @@ skills = [
 ]
 artifact_templates = ["brief"]
 
-[[buddies]]
+[[roles]]
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
@@ -245,14 +245,14 @@ skills = [
 ]
 artifact_templates = ["brief", "decision", "note"]
 
-[[buddies]]
+[[roles]]
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design artifact outcomes."
 skills = ["shape-prototype", "track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool", "request-tool"]
 artifact_templates = ["design", "brief"]
 
-[[buddies]]
+[[roles]]
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
@@ -280,7 +280,7 @@ skills = [
 ]
 artifact_templates = ["brief", "note"]
 
-[[buddies]]
+[[roles]]
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."

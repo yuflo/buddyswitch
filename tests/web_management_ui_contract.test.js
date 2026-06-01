@@ -34,7 +34,7 @@ test('production html keeps all real control ids used by the web UI', () => {
   [
     'server-status',
     'refresh-button',
-    'buddy-select',
+    'role-select',
     'create-button',
     'instances-body',
     'instance-detail',
@@ -88,7 +88,7 @@ test('production stylesheet supports the first-version control-room states', () 
 test('production javascript keeps the real api surface', () => {
   [
     '/api/health',
-    '/api/buddies',
+    '/api/roles',
     '/api/instances',
     '/status',
     '/input',

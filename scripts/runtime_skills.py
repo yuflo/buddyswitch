@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize active buddy skills into runtime `.agents/skills` directories."""
+"""Materialize active role skills into runtime `.agents/skills` directories."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require_buddy, skills_by_id
+from env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require_role, skills_by_id
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,13 +114,13 @@ def _validate_repo_relative_skill_path(raw_path: str) -> Path:
     return resolved
 
 
-def _build_install_plan(*, manifest_path: Path, buddy_id: str) -> list[InstallEntry]:
+def _build_install_plan(*, manifest_path: Path, role_id: str) -> list[InstallEntry]:
     manifest = load_manifest(manifest_path)
-    buddy = require_buddy(manifest, buddy_id)
+    role = require_role(manifest, role_id)
     lookup = skills_by_id(manifest)
 
     install_entries: list[InstallEntry] = []
-    for skill_id in buddy.get("skills", []):
+    for skill_id in role.get("skills", []):
         _validate_skill_id(skill_id)
         skill = lookup.get(skill_id)
         if not isinstance(skill, dict):
@@ -132,13 +132,13 @@ def _build_install_plan(*, manifest_path: Path, buddy_id: str) -> list[InstallEn
         install_entries.append(InstallEntry(skill_id=skill_id, source=source))
 
     if not install_entries:
-        raise RuntimeSkillsError(f"buddy '{buddy_id}' has no skills to materialize")
+        raise RuntimeSkillsError(f"role '{role_id}' has no skills to materialize")
     return install_entries
 
 
-def install_runtime_skills(*, manifest_path: Path, buddy_id: str, workspace: Path) -> list[str]:
+def install_runtime_skills(*, manifest_path: Path, role_id: str, workspace: Path) -> list[str]:
     agents_dir, skills_dir = _validate_runtime_target(workspace)
-    plan = _build_install_plan(manifest_path=manifest_path, buddy_id=buddy_id)
+    plan = _build_install_plan(manifest_path=manifest_path, role_id=role_id)
 
     if skills_dir.exists():
         shutil.rmtree(skills_dir)
@@ -157,7 +157,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
     workspace = _require_workspace(args.workspace)
     installed = install_runtime_skills(
         manifest_path=args.manifest,
-        buddy_id=args.buddy,
+        role_id=args.role,
         workspace=workspace,
     )
     for skill_id in installed:
@@ -166,12 +166,12 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Install runtime .agents/skills for the active buddy.")
+    parser = argparse.ArgumentParser(description="Install runtime .agents/skills for the active role.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     install = subparsers.add_parser("install", help="Install runtime skills into workspace/.agents/skills")
     install.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    install.add_argument("--buddy", required=True)
+    install.add_argument("--role", required=True)
     install.add_argument("--workspace", required=True)
     install.set_defaults(func=_cmd_install)
     return parser

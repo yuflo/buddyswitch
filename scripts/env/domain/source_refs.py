@@ -26,7 +26,7 @@ PROVENANCE_ONLY_NOTE = "source_refs are provenance-only metadata, not a required
 def normalize_source_refs(
     raw_refs: Any,
     *,
-    active_buddy: str,
+    active_role: str,
     read_claim: str | None = None,
 ) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
     if raw_refs is None:
@@ -82,7 +82,7 @@ def normalize_source_refs(
                         ),
                     }
                     break
-                decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
+                decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
                 if not bool(decision.get("allowed")):
                     scope_error = {
                         "permission_boundary": "source_refs.read_scope",

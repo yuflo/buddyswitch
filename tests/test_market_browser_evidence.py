@@ -20,6 +20,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.repos import artifacts as artifact_repo  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -145,15 +146,15 @@ def _make_cdp_handler(state: _CDPState) -> type[BaseHTTPRequestHandler]:
 
 
 class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, buddy: str = "market", instance_id: str = "inst-market") -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        path = self._runtime_path(f"instances/{instance_id}/instance.json")
+    def _instance_json(self, *, role: str = "market", actor_id: str = "act-market") -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        path = self._runtime_path(f"instances/{actor_id}/instance.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -167,16 +168,16 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+    def _dispatch(self, *, instance_json: Path, actor_id: str, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
                 "request_id": f"req-market-evidence-{uuid.uuid4().hex}",
                 "method": "env.tool",
                 "params": {
-                    "instance_id": instance_id,
-                    "active_buddy": buddy,
+                    "actor_id": actor_id,
+                    "active_role": role,
                     "tool": tool,
                     "action": action,
                     "args": args,
@@ -207,44 +208,40 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _seed_market_task_and_artifact(self, *, instance_id: str = "inst-market") -> tuple[str, str]:
-        track = env_store.create_track("track-market-evidence", "Market Evidence", owner_buddy="market")
+    def _seed_market_task_and_artifact(self, *, actor_id: str = "act-market") -> tuple[str, str]:
+        track = env_store.create_track("track-market-evidence", "Market Evidence", owner_role="market")
         task_id = "task-market-evidence"
+        actual_actor_id = self._runtime_actor_id(role="market", label=actor_id)
         self._write_taskbox_task(
-            instance_id=instance_id,
-            buddy="market",
+            actor_id=actual_actor_id,
+            role="market",
             task_id=task_id,
             title="Market evidence task",
             track_id=track["id"],
         )
-        artifact = env_store.create_artifact_revision(
+        actor = {"actor_id": actual_actor_id, "role_id": "market"}
+        artifact = artifact_repo.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
             title="Market Evidence Brief",
             summary="seed",
             body="market",
             template="brief",
             supersedes_artifact_id=None,
-            created_by="market",
-            authors=["market"],
+            created_by_actor=actor,
+            author_actors=[actor],
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        env_store.publish_track_material(
-            track_id=track["id"],
-            artifact_id=artifact["id"],
-            label="Market Evidence Brief",
-            from_buddy="market",
-            summary="seed",
-        )
+        artifact = artifact_repo.update_artifact(str(artifact["id"]), {"is_current": True})
         return task_id, artifact["id"]
 
     def test_market_evidence_requires_artifact_target(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-market-target")
-        _, artifact_id = self._seed_market_task_and_artifact(instance_id="inst-market-target")
+        instance_json = self._instance_json(actor_id="act-market-target")
+        _, artifact_id = self._seed_market_task_and_artifact(actor_id="act-market-target")
 
         missing_target = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-target",
-            buddy="market",
+            actor_id="act-market-target",
+            role="market",
             tool="evidence",
             action="issue_browser",
             args={"target_type": "artifact"},
@@ -254,8 +251,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         wrong_type = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-target",
-            buddy="market",
+            actor_id="act-market-target",
+            role="market",
             tool="evidence",
             action="issue_browser",
             args={"target_type": "run", "target_id": "run-old"},
@@ -265,8 +262,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         ok_issue = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-target",
-            buddy="market",
+            actor_id="act-market-target",
+            role="market",
             tool="evidence",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": artifact_id},
@@ -304,14 +301,14 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("invalid choice", rejected.stderr)
 
     def test_market_artifact_write_with_browser_evidence_is_runless(self) -> None:
-        instance_id = "inst-market-write"
-        instance_json = self._instance_json(instance_id=instance_id)
-        _, artifact_id = self._seed_market_task_and_artifact(instance_id=instance_id)
+        actor_id = "act-market-write"
+        instance_json = self._instance_json(actor_id=actor_id)
+        _, artifact_id = self._seed_market_task_and_artifact(actor_id=actor_id)
 
         issued = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="market",
+            actor_id=actor_id,
+            role="market",
             tool="evidence",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": artifact_id},
@@ -323,8 +320,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="market",
+            actor_id=actor_id,
+            role="market",
             tool="artifact",
             action="create_revision",
             args={
@@ -346,13 +343,13 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._runtime_path("runs/raw").exists())
 
     def test_approved_downgrade_records_reason_on_target_token(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-market-downgrade")
-        _, artifact_id = self._seed_market_task_and_artifact(instance_id="inst-market-downgrade")
+        instance_json = self._instance_json(actor_id="act-market-downgrade")
+        _, artifact_id = self._seed_market_task_and_artifact(actor_id="act-market-downgrade")
 
         approved = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-market-downgrade",
-            buddy="market",
+            actor_id="act-market-downgrade",
+            role="market",
             tool="evidence",
             action="approve_downgrade",
             args={

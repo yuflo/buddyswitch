@@ -33,16 +33,16 @@ class LauncherInputWrapperTests(unittest.TestCase):
         super().setUp()
         self.input_wrapper = load_module(INPUT_WRAPPER_PATH)
 
-    def _make_instance_context(self, temp_root: Path, *, instance_id: str = "instance-task-context", buddy: str = "dev") -> dict[str, object]:
-        instance_root = temp_root / "instances" / instance_id
+    def _make_instance_context(self, temp_root: Path, *, actor_id: str = "act-dev-task-context", role: str = "dev") -> dict[str, object]:
+        instance_root = temp_root / "instances" / actor_id
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
-        taskbox_root = instance_root / "taskbox" / buddy
+        taskbox_root = instance_root / "taskbox" / role
         (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
         (taskbox_root / "history.md").write_text("", encoding="utf-8")
         instance_payload: dict[str, object] = {
-            "instance_id": instance_id,
-            "buddy": buddy,
+            "actor_id": actor_id,
+            "role": role,
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),
@@ -55,24 +55,24 @@ class LauncherInputWrapperTests(unittest.TestCase):
             "instance_root": instance_root,
             "instance_json": instance_json,
             "instance_payload": instance_payload,
-            "buddy": buddy,
+            "role": role,
         }
 
     def _seed_current_task(
         self,
         *,
         instance_root: Path,
-        buddy: str,
+        role: str,
         task_id: str = "task-0001-launcher-context",
         title: str = "Launcher context task",
         summary: str = "Render task context before user input.",
     ) -> None:
-        taskbox_root = instance_root / "taskbox" / buddy
+        taskbox_root = instance_root / "taskbox" / role
         tasks_dir = taskbox_root / "tasks"
         tasks_dir.mkdir(parents=True, exist_ok=True)
         task_payload = {
             "id": task_id,
-            "owner_buddy": buddy,
+            "owner_actor": {"actor_id": instance_root.name, "role_id": role},
             "title": title,
             "summary": summary,
             "body": "Detailed launcher task body.",
@@ -111,9 +111,9 @@ class LauncherInputWrapperTests(unittest.TestCase):
         with TemporaryDirectory() as temp_root:
             instance = self._make_instance_context(Path(temp_root))
             instance_root = instance["instance_root"]
-            buddy = str(instance["buddy"])
+            role = str(instance["role"])
             assert isinstance(instance_root, Path)
-            self._seed_current_task(instance_root=instance_root, buddy=buddy)
+            self._seed_current_task(instance_root=instance_root, role=role)
 
             text = self.input_wrapper.compose_input_text(
                 wrapper_name="task-tui",

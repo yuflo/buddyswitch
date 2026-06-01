@@ -20,7 +20,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_mailbox  # noqa: E402
-from env.tool_runtime.actor_profile import BUDDY_ID_PATTERN, RuntimeActorAddress  # noqa: E402
+from env.tool_runtime.actor_profile import ROLE_ID_PATTERN, ActorAddress  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
 
@@ -57,16 +57,16 @@ def _require_object(value: Any, field: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _actor_address(value: Any) -> RuntimeActorAddress:
+def _actor_address(value: Any) -> ActorAddress:
     try:
-        return RuntimeActorAddress.from_payload(value)
+        return ActorAddress.from_payload(value)
     except Exception as exc:
         raise CentralDaemonError("invalid_actor_address", str(exc)) from exc
 
 
-def _require_buddy_id(value: Any) -> str:
-    if not isinstance(value, str) or BUDDY_ID_PATTERN.fullmatch(value.strip()) is None:
-        raise CentralDaemonError("invalid_buddy_id", "buddy_id must match /^[a-z][a-z0-9-]*$/")
+def _require_role_id(value: Any) -> str:
+    if not isinstance(value, str) or ROLE_ID_PATTERN.fullmatch(value.strip()) is None:
+        raise CentralDaemonError("invalid_role_id", "role_id must match /^[a-z][a-z0-9-]*$/")
     return value.strip()
 
 
@@ -81,7 +81,7 @@ def _normalize_row(row: Any) -> dict[str, Any] | None:
     if not isinstance(row, dict):
         return None
     try:
-        address = RuntimeActorAddress.from_payload(row.get("actor_address"))
+        address = ActorAddress.from_payload(row.get("actor_address"))
     except Exception:
         return None
     endpoint = row.get("endpoint")
@@ -142,17 +142,17 @@ class CentralDaemonService:
 
     def _upsert_actor(self, row: dict[str, Any]) -> dict[str, Any]:
         registry = self._load_registry()
-        instance_id = row["actor_address"]["instance_id"]
+        actor_id = row["actor_address"]["actor_id"]
         actors = [
             existing
             for existing in registry["actors"]
-            if existing.get("actor_address", {}).get("instance_id") != instance_id
+            if existing.get("actor_address", {}).get("actor_id") != actor_id
         ]
         actors.append(row)
         self._save_registry({"actors": actors})
         return row
 
-    def _record_for_address(self, address: RuntimeActorAddress) -> dict[str, Any] | None:
+    def _record_for_address(self, address: ActorAddress) -> dict[str, Any] | None:
         for row in self._load_registry()["actors"]:
             if row.get("actor_address") == address.to_payload():
                 return row
@@ -264,21 +264,21 @@ class CentralDaemonService:
         return {"record": self._upsert_actor(row)}
 
     def _contacts(self, params: dict[str, Any]) -> dict[str, Any]:
-        buddy_filter = params.get("buddy_id")
-        normalized_buddy = _require_buddy_id(buddy_filter) if isinstance(buddy_filter, str) and buddy_filter.strip() else None
+        role_filter = params.get("role_id")
+        normalized_role = _require_role_id(role_filter) if isinstance(role_filter, str) and role_filter.strip() else None
         contacts: list[dict[str, Any]] = []
         for row in self._load_registry()["actors"]:
             if row.get("status") != "online":
                 continue
-            address = RuntimeActorAddress.from_payload(row["actor_address"])
-            if normalized_buddy is not None and address.buddy_id != normalized_buddy:
+            address = ActorAddress.from_payload(row["actor_address"])
+            if normalized_role is not None and address.role_id != normalized_role:
                 continue
             contacts.append(dict(row))
         return {"contacts": contacts, "count": len(contacts)}
 
     def _reachability(self, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            address = RuntimeActorAddress.from_payload(params.get("target_actor_address"))
+            address = ActorAddress.from_payload(params.get("target_actor_address"))
         except Exception as exc:
             return {
                 "reachability_status": "invalid_actor_address",

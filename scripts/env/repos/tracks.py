@@ -8,12 +8,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
 VALID_TRACK_STATE = ("active", "blocked", "review", "done")
 VALID_TRACK_HEALTH = ("ok", "risk", "blocked", "stale")
 VALID_UPDATE_KIND = ("progress", "decision", "blocker", "proof")
-_LEGACY_TRACK_BUDDY_FIELDS = ("current" + "_buddy", "next" + "_buddy")
+_LEGACY_TRACK_ROLE_FIELDS = ("current" + "_role", "next" + "_role")
 _LEGACY_TRACK_FIELDS = {
     "status",
     "summary",
@@ -28,6 +29,13 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
+
+
+def _normalize_actor(value: Any, field: str) -> dict[str, str]:
+    try:
+        return ActorAddress.from_payload(value).to_payload()
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
 
 
 def _track_file(track_id: str) -> Path:
@@ -59,7 +67,7 @@ def _normalize_material_ref(row: Any) -> dict[str, Any]:
         "artifact_id": runtime_files.require_id(row.get("artifact_id"), "track.shared_materials[].artifact_id"),
         "label": _require_non_empty_text(row.get("label"), "track.shared_materials[].label"),
         "kind": _require_non_empty_text(row.get("kind"), "track.shared_materials[].kind"),
-        "from_buddy": _require_non_empty_text(row.get("from_buddy"), "track.shared_materials[].from_buddy"),
+        "from_actor": _normalize_actor(row.get("from_actor"), "track.shared_materials[].from_actor"),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
         "current": bool(row.get("current", False)),
         "published_at": published_at,
@@ -77,7 +85,7 @@ def _normalize_proof_ref(row: Any) -> dict[str, Any]:
         "artifact_id": runtime_files.require_id(row.get("artifact_id"), "track.close_proof[].artifact_id"),
         "label": _require_non_empty_text(row.get("label"), "track.close_proof[].label"),
         "kind": _require_non_empty_text(row.get("kind"), "track.close_proof[].kind"),
-        "from_buddy": _require_non_empty_text(row.get("from_buddy"), "track.close_proof[].from_buddy"),
+        "from_actor": _normalize_actor(row.get("from_actor"), "track.close_proof[].from_actor"),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
         "current": bool(row.get("current", True)),
         "published_at": published_at,
@@ -105,7 +113,7 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
     created_at = _require_non_empty_text(row.get("created_at"), "track.updates[].created_at")
     return {
         "id": _require_non_empty_text(row.get("id"), "track.updates[].id"),
-        "by_buddy": _require_non_empty_text(row.get("by_buddy"), "track.updates[].by_buddy"),
+        "by_actor": _normalize_actor(row.get("by_actor"), "track.updates[].by_actor"),
         "summary": _require_non_empty_text(row.get("summary"), "track.updates[].summary"),
         "kind": kind,
         "refs": [_normalize_update_ref(item) for item in refs],
@@ -163,7 +171,8 @@ def create_track(
     track_id: str,
     title: str,
     *,
-    owner_buddy: str = "pm",
+    owner_role: str = "pm",
+    created_by_actor: dict[str, Any] | None = None,
     outcome: str = "",
     appetite: str = "1 day",
     now: dict[str, Any] | None = None,
@@ -178,7 +187,10 @@ def create_track(
         "id": track_id,
         "title": title,
         "outcome": outcome or "unspecified outcome",
-        "owner_buddy": owner_buddy,
+        "owner_role": owner_role,
+        "created_by_actor": created_by_actor
+        if isinstance(created_by_actor, dict)
+        else {"actor_id": f"act-{owner_role}-system", "role_id": owner_role},
         "state": state,
         "health": health,
         "appetite": appetite,
@@ -209,7 +221,7 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
 def append_track_update(
     *,
     track_id: str,
-    by_buddy: str,
+    by_actor: dict[str, Any],
     kind: str,
     summary: str,
     refs: list[dict[str, Any]] | None = None,
@@ -223,7 +235,7 @@ def append_track_update(
 
     row = {
         "id": update_id or f"upd-{uuid.uuid4().hex[:8]}",
-        "by_buddy": by_buddy,
+        "by_actor": by_actor,
         "summary": summary,
         "kind": kind,
         "refs": refs or [],
@@ -238,9 +250,9 @@ def append_track_update(
 
 
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
-    for field in _LEGACY_TRACK_BUDDY_FIELDS:
+    for field in _LEGACY_TRACK_ROLE_FIELDS:
         if field in track:
-            raise ValueError("legacy track buddy-routing fields are retired; use immutable owner_buddy")
+            raise ValueError("legacy track role-routing fields are retired; use immutable owner_role")
     forbidden = sorted(field for field in track if field in _LEGACY_TRACK_FIELDS)
     if forbidden:
         raise ValueError(f"legacy track fields are retired: {', '.join(forbidden)}")
@@ -248,7 +260,8 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     track_id = runtime_files.require_id(track.get("id", ""), "track.id")
     title = _require_non_empty_text(track.get("title"), "track.title")
     outcome = _require_non_empty_text(track.get("outcome"), "track.outcome")
-    owner_buddy = _require_non_empty_text(track.get("owner_buddy"), "track.owner_buddy")
+    owner_role = _require_non_empty_text(track.get("owner_role"), "track.owner_role")
+    created_by_actor = _normalize_actor(track.get("created_by_actor"), "track.created_by_actor")
     state = track.get("state")
     health = track.get("health")
     if state not in VALID_TRACK_STATE:
@@ -279,7 +292,8 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "id": track_id,
         "title": title,
         "outcome": outcome,
-        "owner_buddy": owner_buddy,
+        "owner_role": owner_role,
+        "created_by_actor": created_by_actor,
         "state": state,
         "health": health,
         "appetite": appetite,

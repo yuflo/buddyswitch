@@ -6,7 +6,7 @@ description: Use when you need to capture small strange clues, language anomalie
 # weak-signal-scout
 
 ## Purpose
-- Teach Market Buddy to notice subtle clues instead of only summarizing obvious trends.
+- Teach Market Role to notice subtle clues instead of only summarizing obvious trends.
 - Preserve uncertainty while still proposing the next validation move.
 
 ## Use When

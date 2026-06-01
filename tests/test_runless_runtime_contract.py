@@ -34,20 +34,20 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(
         self,
         *,
-        instance_id: str = "inst-pm-runless",
-        buddy: str = "pm",
+        actor_id: str = "act-pm-runless",
+        role: str = "pm",
         status: str = "active",
     ) -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        instance_root = self._instance_root(instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_root = self._instance_root(actor_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         path = instance_root / "instance.json"
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": status,
                     "instance_root": str(instance_root),
                     "workspace_dir": str(workspace_dir),
@@ -69,17 +69,17 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         action: str,
         args: dict[str, object],
         instance_json: Path,
-        instance_id: str = "inst-pm-runless",
-        buddy: str = "pm",
+        actor_id: str = "act-pm-runless",
+        role: str = "pm",
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-runless-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "actor_id": actor_id,
+                "active_role": role,
                 "tool": tool,
                 "action": action,
                 "args": args,
@@ -118,8 +118,8 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _seed_pm_task(self, task_id: str) -> None:
         self._write_taskbox_task(
-            instance_id="inst-pm-runless",
-            buddy="pm",
+            actor_id="act-pm-runless",
+            role="pm",
             task_id=task_id,
             title="Runless Task",
             summary="runless contract seed",
@@ -133,8 +133,8 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "bash -lc '"
                 "source tools/launcher/env.sh; "
                 "buddyswitch_env_init; "
-                "buddyswitch_env_bind_instance inst-pm-runless; "
-                "buddyswitch_instance_activate inst-pm-runless pm active >/dev/null; "
+                "buddyswitch_env_bind_instance act-pm-runless; "
+                "buddyswitch_instance_activate act-pm-runless pm active >/dev/null; "
                 "cat \"$BUDDYSWITCH_INSTANCE_JSON\"'"
             )
             completed = subprocess.run(
@@ -149,8 +149,8 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(
             set(payload),
             {
-                "instance_id",
-                "buddy",
+                "actor_id",
+                "role",
                 "status",
                 "instance_root",
                 "workspace_dir",
@@ -185,7 +185,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_tool_registry_exposes_runless_tools_and_excludes_memory_run_and_binding(self) -> None:
         tools = tool_catalog.supported_tools()
         self.assertNotIn("memory", tools)
-        self.assertNotIn("buddybox", tools)
+        self.assertNotIn("actor_private", tools)
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
 
@@ -202,7 +202,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_tools = payload.get("env_tools")
         self.assertIsInstance(env_tools, dict, msg=payload)
         assert isinstance(env_tools, dict)
-        self.assertNotIn("buddybox", env_tools)
+        self.assertNotIn("actor_private", env_tools)
         self.assertIn("context", env_tools)
         context_catalog = env_tools["context"]
         self.assertIsInstance(context_catalog, dict, msg=payload)
@@ -247,7 +247,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             env_store.validate_task(
                 {
                     "id": "task-pm-runless",
-                    "buddy": "pm",
+                    "role": "pm",
                     "title": "Runless Task",
                     "summary": "seed",
                     "status": "active",
@@ -265,7 +265,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 {
                     "id": "art-pm-runless-r1",
                     "task_id": "task-pm-runless",
-                    "buddy": "pm",
+                    "role": "pm",
                     "kind": "prd",
                     "title": "Runless Artifact",
                     "summary": "seed",
@@ -348,15 +348,15 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         help_text = completed.stdout
         self.assertNotIn("memory", help_text)
-        self.assertNotIn("buddybox", help_text)
+        self.assertNotIn("actor_private", help_text)
         self.assertNotIn("binding", help_text)
         self.assertNotIn(" run ", f" {help_text} ")
         self.assertNotIn("get-current", help_text)
         self.assertNotIn("set-current", help_text)
 
-    def test_env_client_buddybox_is_not_registered(self) -> None:
+    def test_env_client_actor_private_is_not_registered(self) -> None:
         completed = subprocess.run(
-            ["python3", "scripts/env/client.py", "buddybox", "--help"],
+            ["python3", "scripts/env/client.py", "actor_private", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,

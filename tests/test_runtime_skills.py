@@ -110,12 +110,12 @@ class RuntimeSkillsTests(unittest.TestCase):
         "comment-tool",
         "request-tool",
     }
-    BUDDY_AGENT_FILES = (
-        ROOT / "tools/launcher/assets/buddies/pm/AGENTS.md",
-        ROOT / "tools/launcher/assets/buddies/dev/AGENTS.md",
-        ROOT / "tools/launcher/assets/buddies/design/AGENTS.md",
-        ROOT / "tools/launcher/assets/buddies/market/AGENTS.md",
-        ROOT / "tools/launcher/assets/buddies/test/AGENTS.md",
+    ROLE_AGENT_FILES = (
+        ROOT / "tools/launcher/assets/roles/pm/AGENTS.md",
+        ROOT / "tools/launcher/assets/roles/dev/AGENTS.md",
+        ROOT / "tools/launcher/assets/roles/design/AGENTS.md",
+        ROOT / "tools/launcher/assets/roles/market/AGENTS.md",
+        ROOT / "tools/launcher/assets/roles/test/AGENTS.md",
     )
     PM_SCENARIO_TERMS = (
         "wukong",
@@ -139,17 +139,17 @@ class RuntimeSkillsTests(unittest.TestCase):
     def _pm_skill_file(self, skill_id: str) -> Path:
         return ROOT / "buddyswitch" / "skills" / "pm" / skill_id / "SKILL.md"
 
-    def _pm_buddy(self) -> dict:
+    def _pm_role(self) -> dict:
         return next(
             row
-            for row in self.manifest.get("buddies", [])
+            for row in self.manifest.get("roles", [])
             if isinstance(row, dict) and row.get("id") == "pm"
         )
 
-    def _market_buddy(self) -> dict:
+    def _market_role(self) -> dict:
         return next(
             row
-            for row in self.manifest.get("buddies", [])
+            for row in self.manifest.get("roles", [])
             if isinstance(row, dict) and row.get("id") == "market"
         )
 
@@ -179,44 +179,44 @@ class RuntimeSkillsTests(unittest.TestCase):
         all_skill_ids = [row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)]
         self.assertNotIn("handoff-tool", all_skill_ids)
 
-    def test_each_buddy_keeps_shared_runtime_tools_without_handoff(self) -> None:
+    def test_each_role_keeps_shared_runtime_tools_without_handoff(self) -> None:
         required = {"track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool", "request-tool"}
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            skills = set(buddy.get("skills", []))
-            with self.subTest(buddy=buddy.get("id")):
+        for role in self.manifest.get("roles", []):
+            assert isinstance(role, dict)
+            skills = set(role.get("skills", []))
+            with self.subTest(role=role.get("id")):
                 self.assertTrue(required.issubset(skills))
                 self.assertNotIn("handoff-tool", skills)
 
-    def test_manifest_and_runtime_skill_materialization_exclude_buddybox_tool(self) -> None:
+    def test_manifest_and_runtime_skill_materialization_exclude_actor_private_tool(self) -> None:
         all_skill_ids = {row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)}
-        self.assertNotIn("buddybox-tool", all_skill_ids)
-        self.assertFalse((ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md").exists())
-        for buddy in ("pm", "design", "dev", "market", "test"):
-            buddy_row = next(
+        self.assertNotIn("actor_private-tool", all_skill_ids)
+        self.assertFalse((ROOT / "buddyswitch/skills/shared/actor_private-tool/SKILL.md").exists())
+        for role in ("pm", "design", "dev", "market", "test"):
+            role_row = next(
                 row
-                for row in self.manifest.get("buddies", [])
-                if isinstance(row, dict) and row.get("id") == buddy
+                for row in self.manifest.get("roles", [])
+                if isinstance(row, dict) and row.get("id") == role
             )
-            self.assertNotIn("buddybox-tool", set(buddy_row.get("skills", [])), msg=buddy)
+            self.assertNotIn("actor_private-tool", set(role_row.get("skills", [])), msg=role)
             with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-                workspace = Path(temp_dir) / f"{buddy}-workspace"
+                workspace = Path(temp_dir) / f"{role}-workspace"
                 workspace.mkdir()
                 installed = runtime_skills.install_runtime_skills(
                     manifest_path=ROOT / "buddyswitch" / "manifest.toml",
-                    buddy_id=buddy,
+                    role_id=role,
                     workspace=workspace,
                 )
-                self.assertNotIn("buddybox-tool", set(installed), msg=buddy)
-                self.assertFalse((workspace / ".agents" / "skills" / "buddybox-tool").exists(), msg=buddy)
+                self.assertNotIn("actor_private-tool", set(installed), msg=role)
+                self.assertFalse((workspace / ".agents" / "skills" / "actor_private-tool").exists(), msg=role)
 
-    def test_shared_tool_skills_do_not_teach_handoff_or_next_buddy(self) -> None:
+    def test_shared_tool_skills_do_not_teach_handoff_or_next_role(self) -> None:
         shared_skill_files = list(self.SHARED_TOOL_SKILLS.values())
         for path in shared_skill_files:
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("env.tool", text)
-                self.assertNotIn("next_buddy", text)
+                self.assertNotIn("next_role", text)
                 self.assertNotIn("track.advance", text)
                 # Allow 'handoff' only in explicit "do not" prohibition context
                 if "handoff" in text:
@@ -263,7 +263,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             for row in self.manifest.get("skills", [])
             if isinstance(row, dict)
         }
-        market_skills = set(self._market_buddy().get("skills", []))
+        market_skills = set(self._market_role().get("skills", []))
         expected = set(self.MARKET_P0_SKILLS)
 
         self.assertTrue(expected.issubset(market_skills), msg=sorted(expected - market_skills))
@@ -273,12 +273,12 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn(skill_id, lookup)
                 self.assertTrue(self._market_skill_file(skill_id).exists())
 
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            if buddy.get("id") == "market":
+        for role in self.manifest.get("roles", []):
+            assert isinstance(role, dict)
+            if role.get("id") == "market":
                 continue
-            with self.subTest(buddy=buddy.get("id")):
-                self.assertTrue(expected.isdisjoint(set(buddy.get("skills", []))))
+            with self.subTest(role=role.get("id")):
+                self.assertTrue(expected.isdisjoint(set(role.get("skills", []))))
 
     def test_old_broad_market_skills_are_removed(self) -> None:
         skill_ids = {
@@ -286,7 +286,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             for row in self.manifest.get("skills", [])
             if isinstance(row, dict)
         }
-        market_skills = set(self._market_buddy().get("skills", []))
+        market_skills = set(self._market_role().get("skills", []))
         for skill_id in self.OLD_MARKET_SKILLS:
             with self.subTest(skill=skill_id):
                 self.assertNotIn(skill_id, skill_ids)
@@ -587,7 +587,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             workspace.mkdir()
             installed = runtime_skills.install_runtime_skills(
                 manifest_path=ROOT / "buddyswitch" / "manifest.toml",
-                buddy_id="market",
+                role_id="market",
                 workspace=workspace,
             )
             installed_set = set(installed)
@@ -602,22 +602,22 @@ class RuntimeSkillsTests(unittest.TestCase):
             workspace.mkdir()
             installed = runtime_skills.install_runtime_skills(
                 manifest_path=ROOT / "buddyswitch" / "manifest.toml",
-                buddy_id="pm",
+                role_id="pm",
                 workspace=workspace,
             )
             self.assertTrue(set(self.MARKET_P0_SKILLS).isdisjoint(set(installed)))
 
-    def test_design_shape_prototype_guidance_uses_direct_buddybox_files_and_explicit_attachments(self) -> None:
+    def test_design_shape_prototype_guidance_uses_direct_actor_private_files_and_explicit_attachments(self) -> None:
         skill_text = (ROOT / "buddyswitch/skills/design/shape-prototype/SKILL.md").read_text(encoding="utf-8").lower()
         template_text = (
             ROOT / "buddyswitch/skills/design/shape-prototype/assets/design-handoff-template.md"
         ).read_text(encoding="utf-8").lower()
-        retired_import = ".".join(("buddybox", "import_file"))
+        retired_import = ".".join(("actor_private", "import_file"))
 
-        self.assertIn("buddyswitch_buddybox_dir", skill_text)
+        self.assertIn("buddyswitch_actor_private_dir", skill_text)
         self.assertIn("source_path", skill_text)
         self.assertNotIn(retired_import, skill_text)
-        self.assertIn("buddyswitch_buddybox_dir", template_text)
+        self.assertIn("buddyswitch_actor_private_dir", template_text)
         self.assertIn("attachment_id", template_text)
         self.assertIn("chrome-devtools-cockpit", template_text)
         self.assertIn("chrome-devtools-cockpit", skill_text)
@@ -641,8 +641,8 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("turn_runtime.py status", text)
 
-    def test_buddy_agents_do_not_present_authoritative_hardcoded_tool_lists(self) -> None:
-        for path in self.BUDDY_AGENT_FILES:
+    def test_role_agents_do_not_present_authoritative_hardcoded_tool_lists(self) -> None:
+        for path in self.ROLE_AGENT_FILES:
             text = path.read_text(encoding="utf-8")
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
@@ -745,21 +745,21 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("message send --payload", message_skill)
         self.assertNotIn("message conversation --payload", message_skill)
         self.assertNotIn("message list --payload", message_skill)
-        self.assertNotIn("to_buddy", message_skill)
-        self.assertNotIn("from_buddy", message_skill)
+        self.assertNotIn("to_role", message_skill)
+        self.assertNotIn("from_role", message_skill)
         self.assertNotIn('"actor_address":', message_skill)
         self.assertNotIn('"message":', message_skill)
         self.assertNotIn('message list --payload \'{"box":"inbox"}\'', message_skill)
         self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
 
-        for buddy in ("pm", "market"):
-            with self.subTest(materialized_for=buddy):
+        for role in ("pm", "market"):
+            with self.subTest(materialized_for=role):
                 with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-                    workspace = Path(temp_dir) / f"{buddy}-workspace"
+                    workspace = Path(temp_dir) / f"{role}-workspace"
                     workspace.mkdir()
                     runtime_skills.install_runtime_skills(
                         manifest_path=ROOT / "buddyswitch/manifest.toml",
-                        buddy_id=buddy,
+                        role_id=role,
                         workspace=workspace,
                     )
                     installed = (workspace / ".agents" / "skills" / "message-tool" / "SKILL.md").read_text(
@@ -767,8 +767,8 @@ class RuntimeSkillsTests(unittest.TestCase):
                     ).lower()
                     self.assertIn("target_actor_address", installed)
                     self.assertIn("message__conversation", installed)
-                    self.assertNotIn("to_buddy", installed)
-                    self.assertNotIn("from_buddy", installed)
+                    self.assertNotIn("to_role", installed)
+                    self.assertNotIn("from_role", installed)
 
     def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
@@ -800,12 +800,12 @@ class RuntimeSkillsTests(unittest.TestCase):
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertNotIn("use optional `handoff`", lowered)
-                self.assertNotIn("next_buddy", lowered)
+                self.assertNotIn("next_role", lowered)
                 self.assertNotIn("track.advance", lowered)
 
     def test_pm_product_skill_chain_is_registered(self) -> None:
         skills_by_id = {row["id"]: row for row in self.manifest.get("skills", []) if isinstance(row, dict)}
-        pm_skills = set(self._pm_buddy().get("skills", []))
+        pm_skills = set(self._pm_role().get("skills", []))
         expected_product = set(self.PM_PRODUCT_SKILLS)
 
         self.assertTrue(expected_product.issubset(pm_skills))
@@ -934,8 +934,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             "use a track as a shared product outcome thread",
             "reuse an active track when the work advances the same outcome, lifecycle, and proof path",
             "create a new track when the outcome, lifecycle, collaborators, or proof path should be tracked independently",
-            "use private tasks for active-buddy work management",
-            "use requests for durable cross-buddy asks",
+            "use private tasks for active-role work management",
+            "use requests for durable cross-role asks",
             "use comments/messages for discussion, not product lifecycle state",
             "context.get.tool_catalog",
             "python3 scripts/turn_runtime.py status",
@@ -954,7 +954,7 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_dev_product_engineering_skill_chain_is_registered(self) -> None:
         skills_by_id = {row["id"]: row for row in self.manifest.get("skills", []) if isinstance(row, dict)}
-        dev = next(row for row in self.manifest.get("buddies", []) if isinstance(row, dict) and row.get("id") == "dev")
+        dev = next(row for row in self.manifest.get("roles", []) if isinstance(row, dict) and row.get("id") == "dev")
         dev_skills = set(dev.get("skills", []))
         expected = set(self.DEV_PRODUCT_SKILLS)
         removed_importer = "-".join(("skill", "creator", "importer"))
@@ -967,14 +967,14 @@ class RuntimeSkillsTests(unittest.TestCase):
             self.assertIn(skill_id, skills_by_id, msg=skill_id)
             skill_file = ROOT / skills_by_id[skill_id]["path"] / "SKILL.md"
             self.assertTrue(skill_file.exists(), msg=skill_file)
-        for buddy_id in ("market", "pm", "design", "test"):
-            buddy = next(
+        for role_id in ("market", "pm", "design", "test"):
+            role = next(
                 row
-                for row in self.manifest.get("buddies", [])
-                if isinstance(row, dict) and row.get("id") == buddy_id
+                for row in self.manifest.get("roles", [])
+                if isinstance(row, dict) and row.get("id") == role_id
             )
-            with self.subTest(buddy=buddy_id):
-                self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(set(buddy.get("skills", []))))
+            with self.subTest(role=role_id):
+                self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(set(role.get("skills", []))))
 
     def test_dev_skills_have_valid_frontmatter_and_trigger_descriptions(self) -> None:
         forbidden_description_tokens = (
@@ -1156,7 +1156,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             workspace.mkdir()
             installed = runtime_skills.install_runtime_skills(
                 manifest_path=ROOT / "buddyswitch" / "manifest.toml",
-                buddy_id="dev",
+                role_id="dev",
                 workspace=workspace,
             )
             installed_set = set(installed)
@@ -1170,7 +1170,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             workspace.mkdir()
             installed = runtime_skills.install_runtime_skills(
                 manifest_path=ROOT / "buddyswitch" / "manifest.toml",
-                buddy_id="pm",
+                role_id="pm",
                 workspace=workspace,
             )
             self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(set(installed)))
@@ -1296,7 +1296,7 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_pm_contract_and_agents_align_with_generic_skill_surface(self) -> None:
         contract = (ROOT / "framework/contracts/pm.md").read_text(encoding="utf-8").lower()
-        agents = (ROOT / "tools/launcher/assets/buddies/pm/AGENTS.md").read_text(encoding="utf-8").lower()
+        agents = (ROOT / "tools/launcher/assets/roles/pm/AGENTS.md").read_text(encoding="utf-8").lower()
         combined = contract + "\n" + agents
 
         self.assertNotIn("write-prd", combined)

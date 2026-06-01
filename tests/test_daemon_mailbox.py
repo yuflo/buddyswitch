@@ -70,12 +70,12 @@ class DaemonMailboxTests(unittest.TestCase):
         self.central = load_module(CENTRAL_CORE_PATH)
         self.client = load_module(DAEMON_CLIENT_PATH)
 
-    def _signal(self, *, target_buddy: str = "dev", target_instance: str = "inst-dev-daemon") -> dict[str, Any]:
+    def _signal(self, *, target_role: str = "dev", target_instance: str = "act-dev-daemon") -> dict[str, Any]:
         return self.mailbox.daemon_signal_envelope(
             signal_id="sig-daemon-mailbox",
             signal_type="message.available",
-            source_actor_address={"buddy_id": "pm", "instance_id": "inst-pm-daemon"},
-            target_actor_address={"buddy_id": target_buddy, "instance_id": target_instance},
+            source_actor_address={"role_id": "pm", "actor_id": "act-pm-daemon"},
+            target_actor_address={"role_id": target_role, "actor_id": target_instance},
             payload={"message_id": "msg-daemon-mailbox"},
             created_at="2026-05-30T00:00:00Z",
         )
@@ -86,17 +86,17 @@ class DaemonMailboxTests(unittest.TestCase):
         self.assertEqual(signal["signal_id"], "sig-daemon-mailbox")
         self.assertEqual(signal["type"], "message.available")
         self.assertEqual(signal["payload"], {"message_id": "msg-daemon-mailbox"})
-        self.assertEqual(signal["source_actor_address"], {"buddy_id": "pm", "instance_id": "inst-pm-daemon"})
-        self.assertEqual(signal["target_actor_address"], {"buddy_id": "dev", "instance_id": "inst-dev-daemon"})
-        for forbidden in ("message_id", "from_actor_address", "to_actor_address", "from_buddy", "to_buddy", "content", "message"):
+        self.assertEqual(signal["source_actor_address"], {"role_id": "pm", "actor_id": "act-pm-daemon"})
+        self.assertEqual(signal["target_actor_address"], {"role_id": "dev", "actor_id": "act-dev-daemon"})
+        for forbidden in ("message_id", "from_actor_address", "to_actor_address", "from_role", "to_role", "content", "message"):
             self.assertNotIn(forbidden, signal)
 
     def test_validate_daemon_signal_rejects_legacy_message_event_shape(self) -> None:
         legacy_event = {
             "type": "message.available",
             "message_id": "msg-daemon-mailbox",
-            "from_actor_address": {"buddy_id": "pm", "instance_id": "inst-pm-daemon"},
-            "to_actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+            "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
+            "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
         }
 
         with self.assertRaisesRegex(ValueError, "DaemonSignalEnvelope"):
@@ -106,8 +106,8 @@ class DaemonMailboxTests(unittest.TestCase):
         signal = self.mailbox.daemon_signal_envelope(
             signal_id="sig-task-updated",
             signal_type="task.updated",
-            source_actor_address={"buddy_id": "pm", "instance_id": "inst-pm-daemon"},
-            target_actor_address={"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+            source_actor_address={"role_id": "pm", "actor_id": "act-pm-daemon"},
+            target_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
             payload={"task_id": "task-1", "state": "ready"},
             created_at="2026-05-30T00:00:00Z",
         )
@@ -120,7 +120,7 @@ class DaemonMailboxTests(unittest.TestCase):
             handler = RecordingSignalHandler()
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
                 handlers=[handler],
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -132,7 +132,7 @@ class DaemonMailboxTests(unittest.TestCase):
             service.handle(
                 "daemon.register",
                 {
-                    "actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                    "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
                     "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": str(socket_path)},
                 },
             )
@@ -153,7 +153,7 @@ class DaemonMailboxTests(unittest.TestCase):
             service.handle(
                 "daemon.register",
                 {
-                    "actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                    "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
                     "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": str(Path(temp_root) / "missing.sock")},
                 },
             )
@@ -171,11 +171,11 @@ class DaemonMailboxTests(unittest.TestCase):
             service.handle(
                 "daemon.register",
                 {
-                    "actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                    "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
                     "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": str(Path(temp_root) / "missing.sock")},
                 },
             )
-            service.handle("daemon.unregister", {"actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"}})
+            service.handle("daemon.unregister", {"actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"}})
 
             result = service.handle("signal.deliver", {"signal": self._signal()})
 
@@ -189,8 +189,8 @@ class DaemonMailboxTests(unittest.TestCase):
             legacy_event = {
                 "type": "message.available",
                 "message_id": "msg-daemon-mailbox",
-                "from_actor_address": {"buddy_id": "pm", "instance_id": "inst-pm-daemon"},
-                "to_actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
+                "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
             }
 
             result = service.handle("event.deliver", {"event": legacy_event})
@@ -203,7 +203,7 @@ class DaemonMailboxTests(unittest.TestCase):
             socket_path = Path(temp_root) / "mailbox.sock"
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"buddy_id": "design", "instance_id": "inst-design-daemon"},
+                local_actor_address={"role_id": "design", "actor_id": "act-design-daemon"},
                 handlers=[],
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -222,7 +222,7 @@ class DaemonMailboxTests(unittest.TestCase):
             socket_path = Path(temp_root) / "mailbox.sock"
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
                 handlers=[IgnoringSignalHandler()],
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -242,7 +242,7 @@ class DaemonMailboxTests(unittest.TestCase):
             socket_path = Path(temp_root) / "mailbox.sock"
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
                 handlers=[FailedSignalHandler()],
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)

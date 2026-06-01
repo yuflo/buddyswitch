@@ -67,24 +67,24 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instance_json = self._runtime_path("instance.json")
-        self.instance_id = self._runtime_instance_id(buddy="pm", label="inst-feedback-runless")
+        self.actor_id = self._runtime_actor_id(role="pm", label="act-feedback-runless")
         self.instance_payload = {
-            "instance_id": self.instance_id,
-            "buddy": "pm",
+            "actor_id": self.actor_id,
+            "role": "pm",
             "status": "active",
             "workspace_dir": str(self.runtime_root),
             "browser_port": 9444,
         }
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-feedback-runless")
+    def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label="act-feedback-runless")
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=self.instance_json,
-            instance_payload={**self.instance_payload, "instance_id": instance_id, "buddy": buddy},
+            instance_payload={**self.instance_payload, "actor_id": actor_id, "role": role},
             manifest=self.manifest,
             manifest_path=self.manifest_path,
         )
@@ -124,10 +124,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         has_next_options = isinstance(payload.get("allowed_next_action_options"), list) and len(payload["allowed_next_action_options"]) > 0
         self.assertTrue(has_next_actions or has_next_options, msg=payload)
 
-    def test_buddybox_tool_rejection_has_structured_feedback(self) -> None:
+    def test_actor_private_tool_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
-            buddy="pm",
-            tool="buddybox",
+            role="pm",
+            tool="actor_private",
             action="write",
             args={"logical_name": "../escape.txt", "content": "x"},
         )
@@ -155,17 +155,17 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             source_refs=[{"type": "note", "label": "seed"}],
         )
         payload = self._dispatch(
-            buddy="design",
+            role="design",
             tool="artifact",
             action="update_metadata",
             args={"artifact_id": "art-pm-owner-scope-r1", "summary": "rewrite"},
         )
         self._assert_rejection_contract(payload)
-        self.assertEqual(payload["permission_boundary"], "artifact.buddy_scope")
+        self.assertEqual(payload["permission_boundary"], "artifact.actor_scope")
 
     def test_artifact_direct_publish_rejection_has_structured_feedback(self) -> None:
         track = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -179,7 +179,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(track["ok"], msg=track)
 
         rejected = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -198,7 +198,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_evidence_target_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
-            buddy="market",
+            role="market",
             tool="evidence",
             action="issue_browser",
             args={"target_type": "artifact"},
@@ -208,7 +208,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_search_request_requires_explicit_backend(self) -> None:
         payload = self._dispatch(
-            buddy="market",
+            role="market",
             tool="search",
             action="request",
             args={"query": "onboarding competitors"},
@@ -219,7 +219,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_publish_rejections_have_actionable_feedback_and_no_state_change(self) -> None:
         track_a = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -231,7 +231,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         track_b = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -246,7 +246,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(track_b["ok"], msg=track_b)
 
         draft = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -259,7 +259,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(draft["ok"], msg=draft)
         published = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-feedback-a", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "a"},
@@ -271,7 +271,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before_artifact = deepcopy(env_store.get_artifact("art-feedback-r1"))
 
         duplicate = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-feedback-a", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "dup"},
@@ -280,7 +280,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("artifact_id", duplicate.get("correctable_fields", []))
 
         cross_track = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-feedback-b", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "cross"},
@@ -289,7 +289,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("track_id", cross_track.get("correctable_fields", []))
 
         wrong_owner = self._dispatch(
-            buddy="design",
+            role="design",
             tool="track",
             action="add_material",
             args={"track_id": "track-feedback-a", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "owner"},
@@ -303,7 +303,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_write_actions_report_state_change_durability_state_changes_and_next_steps(self) -> None:
         track = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -317,7 +317,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._assert_write_success_contract(track)
 
         artifact = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -331,7 +331,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._assert_write_success_contract(artifact)
 
         publish = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -346,25 +346,25 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_rejections_expose_impact_retry_and_recovery_fields_across_boundaries(self) -> None:
         payload_cases = [
             self._dispatch(
-                buddy="pm",
+                role="pm",
                 tool="task",
                 action="create",
                 args={"summary": "missing title"},
             ),
             self._dispatch(
-                buddy="design",
+                role="design",
                 tool="track",
                 action="create",
                 args={"track_id": "x", "title": "x"},
             ),
             self._dispatch(
-                buddy="pm",
+                role="pm",
                 tool="context",
                 action="get",
                 args={"unknown_filter": 1},
             ),
             self._dispatch(
-                buddy="pm",
+                role="pm",
                 tool="evidence",
                 action="issue_browser",
                 args={"target_type": "run", "target_id": "old"},
@@ -383,12 +383,12 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-feedback-foreign",
             "Foreign scope track",
-            owner_buddy="pm",
+            owner_role="pm",
             outcome="scope",
         )
         self._write_taskbox_task(
-            instance_id="inst-feedback-runless",
-            buddy="pm",
+            actor_id="act-feedback-runless",
+            role="pm",
             task_id="task-pm-feedback-foreign",
             title="PM foreign task",
             summary="scope",
@@ -396,7 +396,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         for action in ("join", "attach_task", "detach_task"):
             payload = self._dispatch(
-                buddy="dev",
+                role="dev",
                 tool="track",
                 action=action,
                 args={"track_id": "track-feedback-foreign", "task_id": "task-pm-feedback-foreign"},

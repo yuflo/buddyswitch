@@ -19,15 +19,15 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 - Read shared state from `track.open` before deciding publish/mutation order.
 - Create private PM draft/revision artifacts via `artifact.create_revision` using `template` and markdown `body`.
 - Publish product direction, briefs, decisions, and close proof via `track.add_material` / `track.add_proof` using existing `artifact_id` values.
-- Use `request.create` / `request.list` / `request.get` / `request.cancel` for durable cross-buddy request state on tracks.
+- Use `request.create` / `request.list` / `request.get` / `request.cancel` for durable cross-role request state on tracks.
 - Use `comment.resolve` (PM-only) to close reviewed comment threads with explicit resolution summary.
-- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
+- Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
 
 ## Runtime Boundary
 
 - Use native BuddySwitch env MCP tools for durable operations; the runtime broker still enforces `env.tool` authority and feedback.
 - No `prepare/persist` turn transaction.
-- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
+- Do not edit `buddyswitch/objects/**`, old private workspace runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -38,6 +38,6 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 - `buddyswitch/objects/tracks/<track-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
-- `instances/<instance-id>/taskbox/<buddy>/history.md`
-- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).
+- `instances/<actor-id>/taskbox/<role>/tasks/<task-id>.json`
+- `instances/<actor-id>/taskbox/<role>/history.md`
+- Active-instance private host files under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` (`workspace/private`, not product-readable).

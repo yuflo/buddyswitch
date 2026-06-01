@@ -31,7 +31,7 @@ description: Use when PM must record a durable product decision, tradeoff, rejec
 - Decision artifact or decision section with decision, evidence, tradeoff, rejected alternative, residual risk, and next owner.
 
 ## Quality Bar
-- Downstream buddies know what changed and what not to relitigate.
+- Downstream roles know what changed and what not to relitigate.
 - The decision can be found outside chat.
 
 ## Runtime Boundary

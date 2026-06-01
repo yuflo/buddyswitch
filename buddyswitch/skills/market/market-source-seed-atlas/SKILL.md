@@ -6,7 +6,7 @@ description: Use when you need a source-family map, named seed sites, and claim 
 # market-source-seed-atlas
 
 ## Purpose
-- Give Market Buddy a reusable source atlas before search starts.
+- Give Market Role a reusable source atlas before search starts.
 - Prevent overclaiming by pairing each source family with allowed claims and forbidden overclaims.
 
 ## Use When

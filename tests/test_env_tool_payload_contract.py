@@ -24,14 +24,14 @@ MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 
 
 class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, buddy: str = "dev") -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-payload-contract")
+    def _instance_json(self, *, role: str = "dev") -> Path:
+        actor_id = self._runtime_actor_id(role=role, label="act-payload-contract")
         path = self._runtime_path("instance-payload-contract.json")
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -46,14 +46,14 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch(self, *, tool: str, action: str, args: dict[str, object], buddy: str = "dev") -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-payload-contract")
-        instance_json = self._instance_json(buddy=buddy)
+    def _dispatch(self, *, tool: str, action: str, args: dict[str, object], role: str = "dev") -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label="act-payload-contract")
+        instance_json = self._instance_json(role=role)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
             manifest=env_manifest.load_manifest(MANIFEST),
@@ -96,7 +96,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         tool=tool,
                         action=action,
                         args={"__unexpected_payload_field__": True},
-                        buddy=active_role,
+                        role=active_role,
                     )
                     self.assertFalse(response.get("ok"), msg=response)
                     self.assertIs(response.get("state_changed"), False, msg=response)

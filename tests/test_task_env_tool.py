@@ -24,33 +24,33 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _taskbox_root(self, instance_root: Path, buddy: str) -> Path:
-        return instance_root / "taskbox" / buddy
+    def _taskbox_root(self, instance_root: Path, role: str) -> Path:
+        return instance_root / "taskbox" / role
 
-    def _taskbox_tasks_dir(self, instance_root: Path, buddy: str) -> Path:
-        return self._taskbox_root(instance_root, buddy) / "tasks"
+    def _taskbox_tasks_dir(self, instance_root: Path, role: str) -> Path:
+        return self._taskbox_root(instance_root, role) / "tasks"
 
-    def _history_file(self, instance_root: Path, buddy: str) -> Path:
-        return self._taskbox_root(instance_root, buddy) / "history.md"
+    def _history_file(self, instance_root: Path, role: str) -> Path:
+        return self._taskbox_root(instance_root, role) / "history.md"
 
-    def _task_file(self, instance_root: Path, buddy: str, task_id: str) -> Path:
-        return self._taskbox_tasks_dir(instance_root, buddy) / f"{task_id}.json"
+    def _task_file(self, instance_root: Path, role: str, task_id: str) -> Path:
+        return self._taskbox_tasks_dir(instance_root, role) / f"{task_id}.json"
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _make_instance_context(self, *, instance_id: str = "instance-a", buddy: str = "dev") -> dict[str, Any]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        instance_root = self._runtime_path(f"instances/{instance_id}")
+    def _make_instance_context(self, *, actor_id: str = "instance-a", role: str = "dev") -> dict[str, Any]:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_root = self._runtime_path(f"instances/{actor_id}")
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
-        taskbox_root = self._taskbox_root(instance_root, buddy)
+        taskbox_root = self._taskbox_root(instance_root, role)
         (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
-        self._history_file(instance_root, buddy).write_text("", encoding="utf-8")
+        self._history_file(instance_root, role).write_text("", encoding="utf-8")
         instance_payload = {
-            "instance_id": instance_id,
-            "buddy": buddy,
+            "actor_id": actor_id,
+            "role": role,
             "status": "active",
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),
@@ -60,30 +60,33 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json = instance_root / "instance.json"
         self._write_json(instance_json, instance_payload)
         return {
-            "instance_id": instance_id,
+            "actor_id": actor_id,
             "instance_root": instance_root,
             "instance_json": instance_json,
             "instance_payload": instance_payload,
-            "buddy": buddy,
+            "role": role,
         }
+
+    def _actor_payload(self, *, instance_root: Path, role: str) -> dict[str, str]:
+        return {"actor_id": instance_root.name, "role_id": role}
 
     def _dispatch(
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-task-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "actor_id": actor_id,
+                "active_role": role,
                 "tool": "task",
                 "action": action,
                 "args": args,
@@ -121,7 +124,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_root: Path,
-        buddy: str,
+        role: str,
         task_id: str,
         title: str,
         summary: str = "",
@@ -137,10 +140,10 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         if closed_at is None and status in {"done", "archived"}:
             closed_at = updated_at
         self._write_json(
-            self._task_file(instance_root, buddy, task_id),
+            self._task_file(instance_root, role, task_id),
             {
                 "id": task_id,
-                "owner_buddy": buddy,
+                "owner_actor": self._actor_payload(instance_root=instance_root, role=role),
                 "title": title,
                 "summary": summary,
                 "body": body,
@@ -162,16 +165,16 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         suffix = f" {' '.join(parts)}" if parts else ""
         return f"- 2026-05-27T10:00:00+08:00 {event} {task_id}{suffix}"
 
-    def _set_current_task(self, *, instance_root: Path, buddy: str, task_id: str) -> None:
-        self._history_file(instance_root, buddy).write_text(
+    def _set_current_task(self, *, instance_root: Path, role: str, task_id: str) -> None:
+        self._history_file(instance_root, role).write_text(
             self._history_line(event="task.create", task_id=task_id) + "\n",
             encoding="utf-8",
         )
 
-    def _taskbox_snapshot(self, instance_root: Path, buddy: str) -> dict[str, object]:
-        tasks_dir = self._taskbox_tasks_dir(instance_root, buddy)
+    def _taskbox_snapshot(self, instance_root: Path, role: str) -> dict[str, object]:
+        tasks_dir = self._taskbox_tasks_dir(instance_root, role)
         return {
-            "history": self._history_file(instance_root, buddy).read_text(encoding="utf-8"),
+            "history": self._history_file(instance_root, role).read_text(encoding="utf-8"),
             "tasks": {
                 path.name: path.read_text(encoding="utf-8")
                 for path in sorted(tasks_dir.glob("*.json"))
@@ -193,17 +196,17 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         }
 
     def test_task_current_returns_canonical_snapshot_without_history_mutation(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-current", buddy="dev")
+        instance = self._make_instance_context(actor_id="instance-current", role="dev")
         self._seed_taskbox_task(
             instance_root=instance["instance_root"],
-            buddy="dev",
+            role="dev",
             task_id="task-0001-alpha",
             title="Alpha",
             summary="Older task.",
         )
         self._seed_taskbox_task(
             instance_root=instance["instance_root"],
-            buddy="dev",
+            role="dev",
             task_id="task-0002-beta",
             title="Beta",
             summary="Current task.",
@@ -221,15 +224,16 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         before_history = self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8")
         expected = task_management.current_snapshot(
-            active_buddy="dev",
+            active_role="dev",
+            active_actor={"actor_id": instance["actor_id"], "role_id": "dev"},
             instance_json=instance["instance_json"],
             instance_payload=instance["instance_payload"],
         )
 
         payload = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-current",
-            buddy="dev",
+            actor_id="instance-current",
+            role="dev",
             action="current",
             args={},
         )
@@ -242,12 +246,12 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"), before_history)
 
     def test_task_propose_start_creates_current_task_with_body(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-start", buddy="dev")
+        instance = self._make_instance_context(actor_id="instance-start", role="dev")
 
         payload = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-start",
-            buddy="dev",
+            actor_id="instance-start",
+            role="dev",
             action="propose",
             args=self._start_task_args(),
         )
@@ -258,34 +262,35 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         task_id = str(payload["task"]["id"])
         self.assertEqual(task_id, "task-0001-clean-runtime-environment")
         stored = json.loads(self._task_file(instance["instance_root"], "dev", task_id).read_text(encoding="utf-8"))
+        self.assertEqual(stored["owner_actor"], {"actor_id": instance["actor_id"], "role_id": "dev"})
         self.assertEqual(stored["body"], "Detailed body for the task.")
         self.assertEqual(stored["status"], "active")
         self.assertIn(f"task.create {task_id}", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
         current = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-start",
-            buddy="dev",
+            actor_id="instance-start",
+            role="dev",
             action="current",
             args={},
         )
         self.assertEqual(current["snapshot"]["current_task"]["id"], task_id)
 
     def test_task_propose_start_rejects_when_active_task_exists_without_mutation(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-start-reject", buddy="dev")
+        instance = self._make_instance_context(actor_id="instance-start-reject", role="dev")
         self._seed_taskbox_task(
             instance_root=instance["instance_root"],
-            buddy="dev",
+            role="dev",
             task_id="task-0001-active",
             title="Active",
         )
-        self._set_current_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-active")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-active")
         before = self._taskbox_snapshot(instance["instance_root"], "dev")
 
         rejected = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-start-reject",
-            buddy="dev",
+            actor_id="instance-start-reject",
+            role="dev",
             action="propose",
             args=self._start_task_args("Replacement task"),
         )
@@ -296,15 +301,15 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(self._taskbox_snapshot(instance["instance_root"], "dev"), before)
 
     def test_task_propose_switch_creates_pending_confirmation_without_changing_current(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-switch", buddy="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0002-target", title="Target")
-        self._set_current_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        instance = self._make_instance_context(actor_id="instance-switch", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
 
         payload = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-switch",
-            buddy="dev",
+            actor_id="instance-switch",
+            role="dev",
             action="propose",
             args={
                 "type": "switch",
@@ -322,8 +327,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         current = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-switch",
-            buddy="dev",
+            actor_id="instance-switch",
+            role="dev",
             action="current",
             args={},
         )
@@ -331,14 +336,14 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(current["snapshot"]["pending_confirmation"]["confirmation_id"], "confirm-0001")
 
     def test_task_propose_switch_to_new_target_defers_task_creation_until_confirm(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-switch-new", buddy="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._set_current_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        instance = self._make_instance_context(actor_id="instance-switch-new", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
 
         payload = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-switch-new",
-            buddy="dev",
+            actor_id="instance-switch-new",
+            role="dev",
             action="propose",
             args={
                 "type": "switch",
@@ -362,14 +367,14 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._task_file(instance["instance_root"], "dev", "task-0002-next-task").exists())
 
     def test_task_confirm_accepts_existing_pending_switch(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-confirm-existing", buddy="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0002-target", title="Target")
-        self._set_current_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        instance = self._make_instance_context(actor_id="instance-confirm-existing", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
         proposed = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-confirm-existing",
-            buddy="dev",
+            actor_id="instance-confirm-existing",
+            role="dev",
             action="propose",
             args={
                 "type": "switch",
@@ -381,8 +386,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         accepted = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-confirm-existing",
-            buddy="dev",
+            actor_id="instance-confirm-existing",
+            role="dev",
             action="confirm",
             args={
                 "confirmation_id": proposed["snapshot"]["pending_confirmation"]["confirmation_id"],
@@ -397,13 +402,13 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("task.switch.confirmed task-0002-target", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
     def test_task_confirm_accepts_new_pending_switch_and_creates_target(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-confirm-new", buddy="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._set_current_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        instance = self._make_instance_context(actor_id="instance-confirm-new", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
         proposed = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-confirm-new",
-            buddy="dev",
+            actor_id="instance-confirm-new",
+            role="dev",
             action="propose",
             args={
                 "type": "switch",
@@ -424,8 +429,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         accepted = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-confirm-new",
-            buddy="dev",
+            actor_id="instance-confirm-new",
+            role="dev",
             action="confirm",
             args={
                 "confirmation_id": proposed["snapshot"]["pending_confirmation"]["confirmation_id"],
@@ -441,14 +446,14 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("task.switch.confirmed task-0002-next-task", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
     def test_task_confirm_rejects_pending_switch_without_changing_current(self) -> None:
-        instance = self._make_instance_context(instance_id="instance-confirm-reject", buddy="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0002-target", title="Target")
-        self._set_current_task(instance_root=instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        instance = self._make_instance_context(actor_id="instance-confirm-reject", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
         proposed = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-confirm-reject",
-            buddy="dev",
+            actor_id="instance-confirm-reject",
+            role="dev",
             action="propose",
             args={
                 "type": "switch",
@@ -460,8 +465,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected = self._dispatch(
             instance_json=instance["instance_json"],
-            instance_id="instance-confirm-reject",
-            buddy="dev",
+            actor_id="instance-confirm-reject",
+            role="dev",
             action="confirm",
             args={
                 "confirmation_id": proposed["snapshot"]["pending_confirmation"]["confirmation_id"],
@@ -476,14 +481,14 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("task.switch.rejected task-0001-current", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
     def test_task_propose_finish_and_block_update_current_task(self) -> None:
-        finish_instance = self._make_instance_context(instance_id="instance-finish", buddy="dev")
-        self._seed_taskbox_task(instance_root=finish_instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._set_current_task(instance_root=finish_instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        finish_instance = self._make_instance_context(actor_id="instance-finish", role="dev")
+        self._seed_taskbox_task(instance_root=finish_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._set_current_task(instance_root=finish_instance["instance_root"], role="dev", task_id="task-0001-current")
 
         finished = self._dispatch(
             instance_json=finish_instance["instance_json"],
-            instance_id="instance-finish",
-            buddy="dev",
+            actor_id="instance-finish",
+            role="dev",
             action="propose",
             args={
                 "type": "finish",
@@ -498,13 +503,13 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNotNone(stored_finished["closed_at"])
         self.assertIn("task.close task-0001-current", self._history_file(finish_instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
-        block_instance = self._make_instance_context(instance_id="instance-block", buddy="dev")
-        self._seed_taskbox_task(instance_root=block_instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._set_current_task(instance_root=block_instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        block_instance = self._make_instance_context(actor_id="instance-block", role="dev")
+        self._seed_taskbox_task(instance_root=block_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._set_current_task(instance_root=block_instance["instance_root"], role="dev", task_id="task-0001-current")
         blocked = self._dispatch(
             instance_json=block_instance["instance_json"],
-            instance_id="instance-block",
-            buddy="dev",
+            actor_id="instance-block",
+            role="dev",
             action="propose",
             args={
                 "type": "block",
@@ -522,8 +527,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before = self._taskbox_snapshot(block_instance["instance_root"], "dev")
         mismatch = self._dispatch(
             instance_json=block_instance["instance_json"],
-            instance_id="instance-block",
-            buddy="dev",
+            actor_id="instance-block",
+            role="dev",
             action="propose",
             args={
                 "type": "finish",
@@ -536,14 +541,14 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(self._taskbox_snapshot(block_instance["instance_root"], "dev"), before)
 
     def test_invalid_payloads_do_not_mutate_task_docs_or_history(self) -> None:
-        invalid_instance = self._make_instance_context(instance_id="instance-invalid", buddy="dev")
+        invalid_instance = self._make_instance_context(actor_id="instance-invalid", role="dev")
         self._seed_taskbox_task(
             instance_root=invalid_instance["instance_root"],
-            buddy="dev",
+            role="dev",
             task_id="task-0001-current",
             title="Current",
         )
-        self._set_current_task(instance_root=invalid_instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        self._set_current_task(instance_root=invalid_instance["instance_root"], role="dev", task_id="task-0001-current")
 
         cases = (
             ("propose", {"type": "unknown", "reason": "Bad.", "evidence": "Bad."}),
@@ -560,8 +565,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 before = self._taskbox_snapshot(invalid_instance["instance_root"], "dev")
                 rejected = self._dispatch(
                     instance_json=invalid_instance["instance_json"],
-                    instance_id="instance-invalid",
-                    buddy="dev",
+                    actor_id="instance-invalid",
+                    role="dev",
                     action=action,
                     args=args,
                 )
@@ -569,14 +574,14 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertIs(rejected.get("state_changed"), False, msg=rejected)
                 self.assertEqual(self._taskbox_snapshot(invalid_instance["instance_root"], "dev"), before)
 
-        mismatch_instance = self._make_instance_context(instance_id="instance-confirm-mismatch", buddy="dev")
-        self._seed_taskbox_task(instance_root=mismatch_instance["instance_root"], buddy="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=mismatch_instance["instance_root"], buddy="dev", task_id="task-0002-target", title="Target")
-        self._set_current_task(instance_root=mismatch_instance["instance_root"], buddy="dev", task_id="task-0001-current")
+        mismatch_instance = self._make_instance_context(actor_id="instance-confirm-mismatch", role="dev")
+        self._seed_taskbox_task(instance_root=mismatch_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._seed_taskbox_task(instance_root=mismatch_instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
+        self._set_current_task(instance_root=mismatch_instance["instance_root"], role="dev", task_id="task-0001-current")
         proposed = self._dispatch(
             instance_json=mismatch_instance["instance_json"],
-            instance_id="instance-confirm-mismatch",
-            buddy="dev",
+            actor_id="instance-confirm-mismatch",
+            role="dev",
             action="propose",
             args={
                 "type": "switch",
@@ -589,8 +594,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before = self._taskbox_snapshot(mismatch_instance["instance_root"], "dev")
         mismatch = self._dispatch(
             instance_json=mismatch_instance["instance_json"],
-            instance_id="instance-confirm-mismatch",
-            buddy="dev",
+            actor_id="instance-confirm-mismatch",
+            role="dev",
             action="confirm",
             args={"confirmation_id": "confirm-9999", "decision": "accept"},
         )

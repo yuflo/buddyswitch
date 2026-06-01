@@ -9,7 +9,7 @@ from typing import Any
 
 from env.repos import artifacts as artifact_repo
 from env.repos import runtime_files
-from env.tool_runtime.actor_profile import RuntimeActorAddress
+from env.tool_runtime.actor_profile import ActorAddress
 
 VALID_TRACK_STATE = ("active", "blocked", "review", "done")
 VALID_TRACK_HEALTH = ("ok", "risk", "blocked", "stale")
@@ -21,7 +21,7 @@ VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", 
 _LEGACY_TASK_RUN_IDS = "run" + "_ids"
 _LEGACY_TASK_LATEST_RUN = "latest" + "_run_id"
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
-_LEGACY_TRACK_BUDDY_FIELDS = ("current" + "_buddy", "next" + "_buddy")
+_LEGACY_TRACK_ROLE_FIELDS = ("current_role", "next_role")
 _LEGACY_TRACK_FIELDS = {
     "status",
     "summary",
@@ -32,7 +32,7 @@ _LEGACY_TRACK_FIELDS = {
 }
 _LEGACY_TASK_FIELDS = {"artifact_ids", "artifact" + "_slots"}
 _LEGACY_ARTIFACT_FIELDS = {"task_id", "kind", "content", "publication_role", "asset", "media", "material", "blocks", "figma_file"}
-_KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
+_KNOWN_ROLE_IDS = {"pm", "design", "dev", "market", "test"}
 
 
 def refresh_runtime_root_bindings() -> None:
@@ -49,7 +49,7 @@ def refresh_runtime_root_bindings() -> None:
     global REQUESTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
-    global BUDDYBOX_LOCAL_DIR
+    global ACTOR_PRIVATE_DIR
 
     ROOT = runtime_files.ROOT
     WORKSPACE_ROOT = runtime_files.WORKSPACE_ROOT
@@ -62,7 +62,7 @@ def refresh_runtime_root_bindings() -> None:
     REQUESTS_DIR = runtime_files.REQUESTS_DIR
     CONTENT_ROOT = runtime_files.CONTENT_ROOT
     LOCAL_ROOT = runtime_files.LOCAL_ROOT
-    BUDDYBOX_LOCAL_DIR = runtime_files.BUDDYBOX_LOCAL_DIR
+    ACTOR_PRIVATE_DIR = runtime_files.ACTOR_PRIVATE_DIR
 
 
 runtime_files.register_runtime_root_listener(refresh_runtime_root_bindings, call_immediately=True)
@@ -71,7 +71,7 @@ RUNTIME_WORKSPACE_AGENTS_HEADER = runtime_files.RUNTIME_WORKSPACE_AGENTS_HEADER
 
 now_iso = runtime_files.now_iso
 runtime_workspace_root = runtime_files.runtime_workspace_root
-buddybox_local_dir = runtime_files.buddybox_local_dir
+actor_private_dir = runtime_files.actor_private_dir
 refresh_runtime_roots_from_env = runtime_files.refresh_runtime_roots_from_env
 rel = runtime_files.rel
 runtime_workspace_agents_file = runtime_files.runtime_workspace_agents_file
@@ -115,29 +115,29 @@ def comment_file(comment_id: str) -> Path:
     return COMMENTS_DIR / f"{require_id(comment_id, 'comment id')}.json"
 
 
-def _validate_buddybox_ref_logical_name(logical_name: Any, *, active_buddy: str | None = None) -> str:
+def _validate_actor_private_ref_logical_name(logical_name: Any, *, active_role: str | None = None) -> str:
     if not isinstance(logical_name, str) or not logical_name.strip():
-        raise ValueError("source_refs.buddybox.logical_name must be a non-empty string")
+        raise ValueError("source_refs.actor_private.logical_name must be a non-empty string")
     normalized = logical_name.replace("\\", "/").strip()
     if normalized.startswith("/"):
-        raise ValueError("source_refs.buddybox.logical_name must be relative")
+        raise ValueError("source_refs.actor_private.logical_name must be relative")
     parts = [part for part in normalized.split("/") if part not in {"", "."}]
     if not parts:
-        raise ValueError("source_refs.buddybox.logical_name must be non-empty")
+        raise ValueError("source_refs.actor_private.logical_name must be non-empty")
     if any(part == ".." for part in parts):
-        raise ValueError("source_refs.buddybox.logical_name must not include '..' traversal")
-    blocked_prefixes = set(_KNOWN_BUDDY_IDS)
-    if isinstance(active_buddy, str) and active_buddy:
-        blocked_prefixes.add(active_buddy)
+        raise ValueError("source_refs.actor_private.logical_name must not include '..' traversal")
+    blocked_prefixes = set(_KNOWN_ROLE_IDS)
+    if isinstance(active_role, str) and active_role:
+        blocked_prefixes.add(active_role)
     if parts[0] in blocked_prefixes:
-        raise ValueError("source_refs.buddybox.logical_name must not include a buddy prefix")
+        raise ValueError("source_refs.actor_private.logical_name must not include a role prefix")
     return "/".join(parts)
 
 
 def _normalize_source_refs(
     raw_refs: Any,
     *,
-    active_buddy: str | None = None,
+    active_role: str | None = None,
 ) -> list[dict[str, Any]] | None:
     if raw_refs is None:
         return None
@@ -209,7 +209,7 @@ def _normalize_material_ref(row: Any) -> dict[str, Any]:
         "artifact_id": require_id(row.get("artifact_id"), "track.shared_materials[].artifact_id"),
         "label": _require_non_empty_text(row.get("label"), "track.shared_materials[].label"),
         "kind": _require_non_empty_text(row.get("kind"), "track.shared_materials[].kind"),
-        "from_buddy": _require_non_empty_text(row.get("from_buddy"), "track.shared_materials[].from_buddy"),
+        "from_actor": _message_actor_payload(row.get("from_actor"), "track.shared_materials[].from_actor"),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
         "current": bool(row.get("current", False)),
         "published_at": published_at,
@@ -228,7 +228,7 @@ def _normalize_proof_ref(row: Any) -> dict[str, Any]:
         "artifact_id": require_id(row.get("artifact_id"), "track.close_proof[].artifact_id"),
         "label": _require_non_empty_text(row.get("label"), "track.close_proof[].label"),
         "kind": _require_non_empty_text(row.get("kind"), "track.close_proof[].kind"),
-        "from_buddy": _require_non_empty_text(row.get("from_buddy"), "track.close_proof[].from_buddy"),
+        "from_actor": _message_actor_payload(row.get("from_actor"), "track.close_proof[].from_actor"),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
         "current": bool(row.get("current", True)),
         "published_at": published_at,
@@ -256,7 +256,7 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
     created_at = _require_non_empty_text(row.get("created_at"), "track.updates[].created_at")
     return {
         "id": _require_non_empty_text(row.get("id"), "track.updates[].id"),
-        "by_buddy": _require_non_empty_text(row.get("by_buddy"), "track.updates[].by_buddy"),
+        "by_actor": _message_actor_payload(row.get("by_actor"), "track.updates[].by_actor"),
         "summary": _require_non_empty_text(row.get("summary"), "track.updates[].summary"),
         "kind": kind,
         "refs": [_normalize_update_ref(item) for item in refs],
@@ -265,9 +265,9 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
 
 
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
-    for field in _LEGACY_TRACK_BUDDY_FIELDS:
+    for field in _LEGACY_TRACK_ROLE_FIELDS:
         if field in track:
-            raise ValueError("legacy track buddy-routing fields are retired; use immutable owner_buddy")
+            raise ValueError("legacy track role-routing fields are retired; use immutable owner_role")
     forbidden = sorted(field for field in track if field in _LEGACY_TRACK_FIELDS)
     if forbidden:
         raise ValueError(f"legacy track fields are retired: {', '.join(forbidden)}")
@@ -275,7 +275,8 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     track_id = require_id(track.get("id", ""), "track.id")
     title = _require_non_empty_text(track.get("title"), "track.title")
     outcome = _require_non_empty_text(track.get("outcome"), "track.outcome")
-    owner_buddy = _require_non_empty_text(track.get("owner_buddy"), "track.owner_buddy")
+    owner_role = _require_non_empty_text(track.get("owner_role"), "track.owner_role")
+    created_by_actor = _message_actor_payload(track.get("created_by_actor"), "track.created_by_actor")
     state = track.get("state")
     health = track.get("health")
     if state not in VALID_TRACK_STATE:
@@ -306,7 +307,8 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "id": track_id,
         "title": title,
         "outcome": outcome,
-        "owner_buddy": owner_buddy,
+        "owner_role": owner_role,
+        "created_by_actor": created_by_actor,
         "state": state,
         "health": health,
         "appetite": appetite,
@@ -328,7 +330,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"legacy task fields are retired: {', '.join(forbidden)}")
 
     task_id = require_id(task.get("id", ""), "task.id")
-    buddy = _require_non_empty_text(task.get("buddy"), "task.buddy")
+    role = _require_non_empty_text(task.get("role"), "task.role")
     title = _require_non_empty_text(task.get("title"), "task.title")
     status = task.get("status")
     if status not in VALID_TASK_STATUS:
@@ -346,7 +348,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "id": task_id,
-        "buddy": buddy,
+        "role": role,
         "title": title,
         "status": status,
         "track_id": track_id,
@@ -364,19 +366,19 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _legacy_actor_address_for_buddy(buddy_id: str) -> dict[str, str]:
-    normalized_buddy = _require_non_empty_text(buddy_id, "buddy_id")
-    return RuntimeActorAddress(
-        buddy_id=normalized_buddy,
-        instance_id=f"inst-{normalized_buddy}-legacy",
+def _actor_address_for_role(role_id: str) -> dict[str, str]:
+    normalized_role = _require_non_empty_text(role_id, "role_id")
+    return ActorAddress(
+        role_id=normalized_role,
+        actor_id=f"act-{normalized_role}-legacy",
     ).to_payload()
 
 
 def _message_actor_payload(value: Any, field: str) -> dict[str, str]:
     try:
-        return RuntimeActorAddress.from_payload(value).to_payload()
+        return ActorAddress.from_payload(value).to_payload()
     except Exception as exc:
-        raise ValueError(f"{field} must be a valid RuntimeActorAddress: {exc}") from exc
+        raise ValueError(f"{field} must be a valid ActorAddress: {exc}") from exc
 
 
 def validate_message(message: dict[str, Any]) -> dict[str, Any]:
@@ -390,8 +392,8 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
         from_actor_address = _message_actor_payload(message.get("from_actor_address"), "message.from_actor_address")
         to_actor_address = _message_actor_payload(message.get("to_actor_address"), "message.to_actor_address")
     else:
-        from_actor_address = _legacy_actor_address_for_buddy(_require_non_empty_text(message.get("from_buddy"), "message.from_buddy"))
-        to_actor_address = _legacy_actor_address_for_buddy(_require_non_empty_text(message.get("to_buddy"), "message.to_buddy"))
+        from_actor_address = _actor_address_for_role(_require_non_empty_text(message.get("from_role"), "message.from_role"))
+        to_actor_address = _actor_address_for_role(_require_non_empty_text(message.get("to_role"), "message.to_role"))
     content = _require_non_empty_text(message.get("content"), "message.content")
     reply_to = message.get("reply_to")
     if reply_to is not None:
@@ -419,7 +421,12 @@ def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if target_type not in {"track", "artifact", "artifact_section"}:
         raise ValueError("comment.target_type must be one of 'track'|'artifact'|'artifact_section'")
     target_id = require_id(comment.get("target_id"), "comment.target_id")
-    by_buddy = _require_non_empty_text(comment.get("by_buddy") or comment.get("author_buddy"), "comment.by_buddy")
+    if isinstance(comment.get("by_actor"), dict):
+        by_actor = _message_actor_payload(comment.get("by_actor"), "comment.by_actor")
+    else:
+        by_actor = _actor_address_for_role(
+            _require_non_empty_text(comment.get("by_role") or comment.get("author_role"), "comment.by_role")
+        )
     content = _require_non_empty_text(comment.get("content"), "comment.content")
 
     thread_id_raw = comment.get("thread_id")
@@ -432,32 +439,38 @@ def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if status not in {"open", "resolved"}:
         raise ValueError("comment.status must be one of open|resolved")
 
-    resolved_by = comment.get("resolved_by")
+    resolved_by_actor = comment.get("resolved_by_actor")
     resolved_at = comment.get("resolved_at")
     resolution_summary = comment.get("resolution_summary")
     if status == "resolved":
-        resolved_by = _require_non_empty_text(resolved_by, "comment.resolved_by")
+        if isinstance(resolved_by_actor, dict):
+            resolved_by_actor = _message_actor_payload(resolved_by_actor, "comment.resolved_by_actor")
+        else:
+            resolved_by_actor = _actor_address_for_role(
+                _require_non_empty_text(comment.get("resolved_by"), "comment.resolved_by")
+            )
         resolved_at = _require_non_empty_text(resolved_at, "comment.resolved_at")
         resolution_summary = _require_non_empty_text(resolution_summary, "comment.resolution_summary")
     else:
-        resolved_by = None
+        resolved_by_actor = None
         resolved_at = None
         resolution_summary = None
 
-    mentions_raw = comment.get("mentions", [])
+    mentions_raw = comment.get("mentioned_actors", [])
     if mentions_raw is None:
-        mentions: list[str] = []
+        mentions: list[dict[str, str]] = []
     else:
         if not isinstance(mentions_raw, list):
-            raise ValueError("comment.mentions must be a list when provided")
+            raise ValueError("comment.mentioned_actors must be a list when provided")
         mentions = []
         seen: set[str] = set()
         for idx, row in enumerate(mentions_raw):
-            buddy = _require_non_empty_text(row, f"comment.mentions[{idx}]")
-            if buddy in seen:
+            actor = _message_actor_payload(row, f"comment.mentioned_actors[{idx}]")
+            actor_id = actor["actor_id"]
+            if actor_id in seen:
                 continue
-            seen.add(buddy)
-            mentions.append(buddy)
+            seen.add(actor_id)
+            mentions.append(actor)
 
     anchor = comment.get("anchor")
     if anchor is not None:
@@ -479,16 +492,16 @@ def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
         "id": comment_id,
         "target_type": target_type,
         "target_id": target_id,
-        "by_buddy": by_buddy,
+        "by_actor": by_actor,
         "content": content,
         "thread_id": thread_id,
         "status": status,
-        "mentions": mentions,
+        "mentioned_actors": mentions,
         "anchor": anchor,
         "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": created_at,
-        "resolved_by": resolved_by,
+        "resolved_by_actor": resolved_by_actor,
         "resolved_at": resolved_at,
         "resolution_summary": resolution_summary,
     }
@@ -589,7 +602,7 @@ def create_track(
     track_id: str,
     title: str,
     *,
-    owner_buddy: str = "pm",
+    owner_role: str = "pm",
     outcome: str = "",
     appetite: str = "1 day",
     now: dict[str, Any] | None = None,
@@ -604,7 +617,8 @@ def create_track(
         "id": track_id,
         "title": title,
         "outcome": outcome or "unspecified outcome",
-        "owner_buddy": owner_buddy,
+        "owner_role": owner_role,
+        "created_by_actor": _actor_address_for_role(owner_role),
         "state": state,
         "health": health,
         "appetite": appetite,
@@ -653,15 +667,15 @@ def create_artifact_revision(
     if get_artifact(resolved_id):
         raise ValueError(f"artifact already exists: {resolved_id}")
 
-    if created_by not in _KNOWN_BUDDY_IDS:
-        raise ValueError("created_by must be one of known buddy ids")
+    if created_by not in _KNOWN_ROLE_IDS:
+        raise ValueError("created_by must be one of known role ids")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("body must be a non-empty string")
     if template not in VALID_ARTIFACT_TEMPLATES:
         raise ValueError(f"template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
     if not isinstance(summary, str):
         raise ValueError("summary must be a string")
-    normalized_refs = _normalize_source_refs(source_refs, active_buddy=created_by)
+    normalized_refs = _normalize_source_refs(source_refs, active_role=created_by)
 
     revision = 1
     supersedes_id: str | None = None
@@ -676,14 +690,14 @@ def create_artifact_revision(
             raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
 
         previous_status = previous.get("status")
-        previous_owner = previous.get("created_by")
+        previous_owner = previous.get("created_by_actor")
         previous_track_id = previous.get("published_to_track")
         revision = int(previous.get("revision", 1)) + 1
         supersedes_id = supersedes_artifact_id
 
         if previous_status == "draft":
-            if previous_owner != created_by:
-                raise ValueError("supersedes_artifact_id must reference an active-buddy-owned current draft")
+            if previous_owner != _actor_address_for_role(created_by):
+                raise ValueError("supersedes_artifact_id must reference an active-actor-owned current draft")
             new_is_current = True
             previous_patch = dict(previous)
             previous_patch["is_current"] = False
@@ -717,11 +731,14 @@ def create_artifact_revision(
         else:
             raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
 
-    author_rows = [created_by]
+    creator_actor = _actor_address_for_role(created_by)
+    author_rows = [creator_actor]
     if isinstance(authors, list):
         for row in authors:
-            if isinstance(row, str) and row in _KNOWN_BUDDY_IDS and row not in author_rows:
-                author_rows.append(row)
+            if isinstance(row, str) and row in _KNOWN_ROLE_IDS:
+                actor = _actor_address_for_role(row)
+                if actor not in author_rows:
+                    author_rows.append(actor)
 
     timestamp = now_iso()
     artifact = {
@@ -735,8 +752,8 @@ def create_artifact_revision(
         "revision": revision,
         "is_current": new_is_current,
         "supersedes_artifact_id": supersedes_id,
-        "created_by": created_by,
-        "authors": author_rows,
+        "created_by_actor": creator_actor,
+        "author_actors": author_rows,
         "source_refs": normalized_refs,
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -769,7 +786,7 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         "supersedes_artifact_id",
         "is_current",
         "revision",
-        "authors",
+        "author_actors",
     }
     for key, value in patch.items():
         if key not in allowed:
@@ -784,9 +801,10 @@ def publish_track_material(
     track_id: str,
     artifact_id: str,
     label: str,
-    from_buddy: str,
+    from_role: str,
     summary: str,
 ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    from_actor = _actor_address_for_role(from_role)
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
@@ -795,8 +813,8 @@ def publish_track_material(
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by") != from_buddy:
-        raise ValueError(f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'")
+    if artifact.get("created_by_actor") != from_actor:
+        raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
 
     kind = str(artifact.get("template") or "")
     if not kind:
@@ -837,7 +855,10 @@ def publish_track_material(
     for row in track.get("shared_materials", []):
         if not isinstance(row, dict):
             continue
-        same_slot = row.get("kind") == kind and row.get("label") == label and row.get("from_buddy") == from_buddy
+        row_actor_id = None
+        if isinstance(row.get("from_actor"), dict):
+            row_actor_id = _message_actor_payload(row.get("from_actor"), "track.shared_materials[].from_actor").get("actor_id")
+        same_slot = row.get("kind") == kind and row.get("label") == label and row_actor_id == from_actor.get("actor_id")
         if same_slot and bool(row.get("current")):
             replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
         next_row = dict(row)
@@ -901,7 +922,7 @@ def publish_track_material(
         "artifact_id": artifact_id,
         "label": label,
         "kind": kind,
-        "from_buddy": from_buddy,
+        "from_actor": from_actor,
         "summary": summary,
         "current": True,
         "published_at": now_iso(),
@@ -925,9 +946,10 @@ def publish_track_proof(
     track_id: str,
     artifact_id: str,
     label: str,
-    from_buddy: str,
+    from_role: str,
     summary: str,
 ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    from_actor = _actor_address_for_role(from_role)
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
@@ -936,8 +958,8 @@ def publish_track_proof(
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by") != from_buddy:
-        raise ValueError(f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'")
+    if artifact.get("created_by_actor") != from_actor:
+        raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
 
     kind = str(artifact.get("template") or "")
     if not kind:
@@ -977,7 +999,10 @@ def publish_track_proof(
     for row in track.get("close_proof", []):
         if not isinstance(row, dict):
             continue
-        same_slot = row.get("kind") == kind and row.get("label") == label and row.get("from_buddy") == from_buddy
+        row_actor_id = None
+        if isinstance(row.get("from_actor"), dict):
+            row_actor_id = _message_actor_payload(row.get("from_actor"), "track.close_proof[].from_actor").get("actor_id")
+        same_slot = row.get("kind") == kind and row.get("label") == label and row_actor_id == from_actor.get("actor_id")
         if same_slot and bool(row.get("current", True)):
             replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
         next_row = dict(row)
@@ -1033,7 +1058,7 @@ def publish_track_proof(
         "artifact_id": artifact_id,
         "label": label,
         "kind": kind,
-        "from_buddy": from_buddy,
+        "from_actor": from_actor,
         "summary": summary,
         "current": True,
         "published_at": now_iso(),
@@ -1054,7 +1079,7 @@ def publish_track_proof(
 def append_track_update(
     *,
     track_id: str,
-    by_buddy: str,
+    by_role: str,
     kind: str,
     summary: str,
     refs: list[dict[str, Any]] | None = None,
@@ -1068,7 +1093,7 @@ def append_track_update(
 
     row = {
         "id": update_id or f"upd-{uuid.uuid4().hex[:8]}",
-        "by_buddy": by_buddy,
+        "by_actor": _actor_address_for_role(by_role),
         "summary": summary,
         "kind": kind,
         "refs": refs or [],
@@ -1093,12 +1118,17 @@ def delete_artifact(artifact_id: str) -> dict[str, Any]:
     return artifact
 
 
-def delete_artifacts_by_buddy(
-    buddy_id: str,
+def delete_artifacts_by_role(
+    role_id: str,
     *,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
-    targets = [artifact for artifact in list_artifacts() if artifact.get("created_by") == buddy_id]
+    targets = [
+        artifact
+        for artifact in list_artifacts()
+        if isinstance(artifact.get("created_by_actor"), dict)
+        and artifact["created_by_actor"].get("role_id") == role_id
+    ]
     if dry_run:
         return targets
     for artifact in targets:
@@ -1145,23 +1175,23 @@ def save_message(message: dict[str, Any]) -> dict[str, Any]:
 
 def create_message(
     *,
-    from_actor_address: dict[str, Any] | RuntimeActorAddress | None = None,
-    to_actor_address: dict[str, Any] | RuntimeActorAddress | None = None,
-    from_buddy: str | None = None,
-    to_buddy: str | None = None,
+    from_actor_address: dict[str, Any] | ActorAddress | None = None,
+    to_actor_address: dict[str, Any] | ActorAddress | None = None,
+    from_role: str | None = None,
+    to_role: str | None = None,
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:
     if from_actor_address is None:
-        if not isinstance(from_buddy, str) or not from_buddy.strip():
-            raise ValueError("from_actor_address or from_buddy must be provided")
-        normalized_from = _legacy_actor_address_for_buddy(from_buddy)
+        if not isinstance(from_role, str) or not from_role.strip():
+            raise ValueError("from_actor_address or from_role must be provided")
+        normalized_from = _actor_address_for_role(from_role)
     else:
         normalized_from = _message_actor_payload(from_actor_address, "from_actor_address")
     if to_actor_address is None:
-        if not isinstance(to_buddy, str) or not to_buddy.strip():
-            raise ValueError("to_actor_address or to_buddy must be provided")
-        normalized_to = _legacy_actor_address_for_buddy(to_buddy)
+        if not isinstance(to_role, str) or not to_role.strip():
+            raise ValueError("to_actor_address or to_role must be provided")
+        normalized_to = _actor_address_for_role(to_role)
     else:
         normalized_to = _message_actor_payload(to_actor_address, "to_actor_address")
     if not isinstance(content, str) or not content.strip():
@@ -1214,11 +1244,12 @@ def create_comment(
     *,
     target_type: str,
     target_id: str,
-    by_buddy: str | None = None,
-    author_buddy: str | None = None,
+    by_role: str | None = None,
+    by_actor: dict[str, Any] | None = None,
+    author_role: str | None = None,
     content: str,
     reply_to: str | None = None,
-    mentions: list[str] | None = None,
+    mentioned_actors: list[dict[str, Any]] | None = None,
     thread_id: str | None = None,
     status: str = "open",
     anchor: str | None = None,
@@ -1227,9 +1258,13 @@ def create_comment(
     if target_type not in {"track", "artifact", "artifact_section"}:
         raise ValueError("target_type must be one of 'track'|'artifact'|'artifact_section'")
     require_id(target_id, "target_id")
-    author = by_buddy if isinstance(by_buddy, str) and by_buddy.strip() else author_buddy
-    if not isinstance(author, str) or not author.strip():
-        raise ValueError("by_buddy must be a non-empty string")
+    if isinstance(by_actor, dict):
+        author_actor = _message_actor_payload(by_actor, "by_actor")
+    else:
+        author = by_role if isinstance(by_role, str) and by_role.strip() else author_role
+        if not isinstance(author, str) or not author.strip():
+            raise ValueError("by_actor must be an ActorAddress payload")
+        author_actor = _actor_address_for_role(author)
     if not isinstance(content, str) or not content.strip():
         raise ValueError("content must be a non-empty string")
     if reply_to is not None:
@@ -1242,17 +1277,18 @@ def create_comment(
         raise ValueError("anchor must be a non-empty string when provided")
     if artifact_revision_id is not None:
         require_id(artifact_revision_id, "artifact_revision_id")
-    normalized_mentions: list[str] = []
-    if mentions is not None:
-        if not isinstance(mentions, list):
-            raise ValueError("mentions must be a list when provided")
+    normalized_mentions: list[dict[str, str]] = []
+    if mentioned_actors is not None:
+        if not isinstance(mentioned_actors, list):
+            raise ValueError("mentioned_actors must be a list when provided")
         seen_mentions: set[str] = set()
-        for idx, row in enumerate(mentions):
-            buddy = _require_non_empty_text(row, f"mentions[{idx}]")
-            if buddy in seen_mentions:
+        for idx, row in enumerate(mentioned_actors):
+            actor = _message_actor_payload(row, f"mentioned_actors[{idx}]")
+            actor_id = actor["actor_id"]
+            if actor_id in seen_mentions:
                 continue
-            seen_mentions.add(buddy)
-            normalized_mentions.append(buddy)
+            seen_mentions.add(actor_id)
+            normalized_mentions.append(actor)
 
     comment_id = f"comment-{uuid.uuid4().hex[:12]}"
     require_id(comment_id, "comment id")
@@ -1260,16 +1296,16 @@ def create_comment(
         "id": comment_id,
         "target_type": target_type,
         "target_id": target_id,
-        "by_buddy": author.strip(),
+        "by_actor": author_actor,
         "content": content.strip(),
         "thread_id": thread_id or comment_id,
         "status": status,
-        "mentions": normalized_mentions,
+        "mentioned_actors": normalized_mentions,
         "anchor": anchor.strip() if isinstance(anchor, str) else None,
         "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": now_iso(),
-        "resolved_by": None,
+        "resolved_by_actor": None,
         "resolved_at": None,
         "resolution_summary": None,
     }
@@ -1311,11 +1347,11 @@ def update_comment_thread_status(thread_id: str, status: str) -> list[dict[str, 
         patched = dict(row)
         patched["status"] = status
         if status == "resolved":
-            patched["resolved_by"] = str(row.get("by_buddy") or "")
+            patched["resolved_by_actor"] = row.get("by_actor")
             patched["resolved_at"] = now
             patched["resolution_summary"] = str(row.get("resolution_summary") or "resolved")
         else:
-            patched["resolved_by"] = None
+            patched["resolved_by_actor"] = None
             patched["resolved_at"] = None
             patched["resolution_summary"] = None
         patched = save_comment(patched)

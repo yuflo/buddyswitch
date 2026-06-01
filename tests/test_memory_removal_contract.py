@@ -28,15 +28,15 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, buddy: str, instance_id: str) -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        path = self._runtime_path(f"instances/{instance_id}/instance.json")
+    def _instance_json(self, *, role: str, actor_id: str) -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        path = self._runtime_path(f"instances/{actor_id}/instance.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -54,21 +54,21 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         tool: str,
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
                 "request_id": f"req-memory-removal-{uuid.uuid4().hex}",
                 "method": "env.tool",
                 "params": {
-                    "instance_id": instance_id,
-                    "active_buddy": buddy,
+                    "actor_id": actor_id,
+                    "active_role": role,
                     "tool": tool,
                     "action": action,
                     "args": args,
@@ -105,14 +105,14 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         shutil.copy2(MANIFEST, runtime_manifest)
         return runtime_manifest
 
-    def _write_old_memory_file(self, *, memory_id: str = "mem-old", buddy: str = "pm") -> None:
+    def _write_old_memory_file(self, *, memory_id: str = "mem-old", role: str = "pm") -> None:
         memory_path = self._runtime_path(f"buddyswitch/objects/memories/{memory_id}.json")
         memory_path.parent.mkdir(parents=True, exist_ok=True)
         memory_path.write_text(
             json.dumps(
                 {
                     "id": memory_id,
-                    "buddy": buddy,
+                    "role": role,
                     "kind": "decision",
                     "title": "Legacy memory",
                     "summary": "legacy summary",
@@ -148,14 +148,14 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("handoff", tools)
 
     def test_env_tool_memory_or_handoff_request_is_rejected(self) -> None:
-        instance_id = "inst-pm-surface-blocked"
-        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        actor_id = "act-pm-surface-blocked"
+        instance_json = self._instance_json(role="pm", actor_id=actor_id)
 
         for tool in ("memory", "handoff"):
             response = self._dispatch(
                 instance_json=instance_json,
-                instance_id=instance_id,
-                buddy="pm",
+                actor_id=actor_id,
+                role="pm",
                 tool=tool,
                 action="list",
                 args={},
@@ -170,16 +170,16 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unsupported source_ref type"):
                     source_refs.normalize_source_refs(
                         [{"type": ref_type, "id": "old"}],
-                        active_buddy="pm",
+                        active_role="pm",
                     )
 
     def test_cleanup_ignores_old_memory_files(self) -> None:
         runtime_manifest = self._copy_manifest_into_runtime()
-        self._write_old_memory_file(memory_id="mem-old-projection", buddy="pm")
+        self._write_old_memory_file(memory_id="mem-old-projection", role="pm")
 
         cleanup_plan = env_cleanup.build_cleanup_plan(
             scope="all-data",
-            buddy=None,
+            role=None,
             repo_root=self.runtime_root,
             manifest_path=runtime_manifest,
         )

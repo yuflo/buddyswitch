@@ -58,7 +58,7 @@ while True:
 
 class BuddySwitchLauncherTests(unittest.TestCase):
     _RELATIVE_SENTINELS = (
-        "cross-buddy-sentinel.txt",
+        "cross-role-sentinel.txt",
         "relative-path-sentinel.txt",
         "shared-product-sentinel.txt",
     )
@@ -194,9 +194,9 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             workspace_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/workspace")]
             self.assertEqual(len(workspace_keys), 1, msg=workspace_keys)
             self.assertEqual(filesystem[workspace_keys[0]], "read")
-            buddybox_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/workspace/buddybox")]
-            self.assertEqual(len(buddybox_keys), 1, msg=buddybox_keys)
-            self.assertEqual(filesystem[buddybox_keys[0]], "write")
+            actor_private_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/workspace/private")]
+            self.assertEqual(len(actor_private_keys), 1, msg=actor_private_keys)
+            self.assertEqual(filesystem[actor_private_keys[0]], "write")
             instance_tmp_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/tmp")]
             self.assertEqual(len(instance_tmp_keys), 1, msg=instance_tmp_keys)
             self.assertEqual(filesystem[instance_tmp_keys[0]], "write")
@@ -280,8 +280,8 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         self,
         argv: list[object],
         *,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         broker_socket: str,
     ) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "buddyswitch-env"])
@@ -291,10 +291,10 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         self.assertIn("tools/launcher/env_tool_mcp_server.py", str(argv[separator_index + 2]))
         self.assertIn("--repo-root", argv)
         self.assertIn(str(ROOT), argv)
-        self.assertIn("--instance-id", argv)
-        self.assertIn(instance_id, argv)
-        self.assertIn("--buddy", argv)
-        self.assertIn(buddy, argv)
+        self.assertIn("--actor-id", argv)
+        self.assertIn(actor_id, argv)
+        self.assertIn("--role", argv)
+        self.assertIn(role, argv)
         self.assertIn("--broker-socket", argv)
         self.assertIn(broker_socket, argv)
 
@@ -769,10 +769,10 @@ exec "$real_git" "$@"
     def _write_instance_record(
         self,
         shared_root: Path,
-        instance_id: str,
+        actor_id: str,
         *,
-        buddy: str = "pm",
-        payload_instance_id: str | None = None,
+        role: str = "pm",
+        payload_actor_id: str | None = None,
         workspace_dir: Path | None = None,
         browser_port: int | None = None,
         status: str = "inactive",
@@ -781,14 +781,14 @@ exec "$real_git" "$@"
         app_server_socket: str | None = None,
         app_server_log: str | None = None,
     ) -> tuple[Path, Path]:
-        instance_root = shared_root / "instances" / instance_id
+        instance_root = shared_root / "instances" / actor_id
         instance_root.mkdir(parents=True, exist_ok=True)
         workspace_path = workspace_dir or instance_root / "workspace"
         (instance_root / "instance.json").write_text(
             json.dumps(
                 {
-                    "instance_id": payload_instance_id or instance_id,
-                    "buddy": buddy,
+                    "actor_id": payload_actor_id or actor_id,
+                    "role": role,
                     "status": status,
                     "current_task_id": "task-existing",
                     "current_track_id": "track-existing",
@@ -857,7 +857,7 @@ exec "$real_git" "$@"
         temp_root_path: Path,
         source_home_path: Path,
         *,
-        buddy: str = "pm",
+        role: str = "pm",
         state_payload: dict[str, object] | None = None,
     ) -> dict[str, object]:
         source_codex_home = source_home_path / ".codex"
@@ -901,7 +901,7 @@ exec "$real_git" "$@"
         env["BUDDYSWITCH_TEST_APP_SERVER_STATE_FILE"] = str(state_file)
 
         completed = subprocess.run(
-            [str(LAUNCHER), "instance", "start", "--buddy", buddy],
+            [str(LAUNCHER), "instance", "start", "--role", role],
             cwd=ROOT,
             env=env,
             text=True,
@@ -910,8 +910,8 @@ exec "$real_git" "$@"
         )
         payload = json.loads(capture_path.read_text(encoding="utf-8"))
         shared_root = source_home_path / ".codex-buddyswitch"
-        instance_id = payload["instance_id"]
-        instance_root = shared_root / "instances" / instance_id
+        actor_id = payload["actor_id"]
+        instance_root = shared_root / "instances" / actor_id
         instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
         app_server_pid = instance_payload.get("app_server_pid")
         if isinstance(app_server_pid, int):
@@ -939,7 +939,7 @@ exec "$real_git" "$@"
             "state_file": state_file,
             "payload": payload,
             "shared_root": shared_root,
-            "instance_id": instance_id,
+            "actor_id": actor_id,
             "instance_root": instance_root,
             "instance_payload": instance_payload,
         }
@@ -1012,17 +1012,17 @@ exec "$real_git" "$@"
         self,
         *,
         instance_root: Path,
-        buddy: str,
+        role: str,
         task_id: str = "task-0001-launcher-context",
         title: str = "Launcher context task",
         summary: str = "Render task context before user input.",
     ) -> None:
-        taskbox_root = instance_root / "taskbox" / buddy
+        taskbox_root = instance_root / "taskbox" / role
         tasks_dir = taskbox_root / "tasks"
         tasks_dir.mkdir(parents=True, exist_ok=True)
         task_payload = {
             "id": task_id,
-            "owner_buddy": buddy,
+            "owner_actor": {"actor_id": instance_root.name, "role_id": role},
             "title": title,
             "summary": summary,
             "body": "Detailed launcher task body.",
@@ -1111,9 +1111,9 @@ exec "$real_git" "$@"
 
         self.assertFalse((workspace_dir / "buddyswitch" / "objects").exists())
         self.assertFalse((workspace_dir / "buddyswitch" / "objects").is_symlink())
-        self.assertTrue((workspace_dir / "buddybox").is_dir())
-        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").exists())
-        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_symlink())
+        self.assertTrue((workspace_dir / "private").is_dir())
+        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "private" / "pm").exists())
+        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "private" / "pm").is_symlink())
 
     def _assert_pm_runtime_skills(self, workspace_dir: Path) -> None:
         runtime_skills = workspace_dir / ".agents" / "skills"
@@ -1495,7 +1495,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1513,7 +1513,7 @@ exec "$real_git" "$@"
             self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
             agents_md = workspace_dir / "AGENTS.md"
             self.assertTrue(agents_md.exists(), "runtime workspace should include AGENTS.md")
-            expected_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md").read_text(
+            expected_agents = (ROOT / "tools" / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md").read_text(
                 encoding="utf-8"
             )
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
@@ -1563,7 +1563,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1574,7 +1574,7 @@ exec "$real_git" "$@"
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
-            workspace_dir = shared_root / "instances" / payload["instance_id"] / "workspace"
+            workspace_dir = shared_root / "instances" / payload["actor_id"] / "workspace"
             self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
             self.assertEqual(self._runtime_sparse_list(workspace_dir), list(self._RUNTIME_SPARSE_PATHS))
             self._assert_pm_runtime_shape(workspace_dir, shared_root)
@@ -1599,7 +1599,7 @@ exec "$real_git" "$@"
         self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
         self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
 
-    def test_instance_start_creates_private_taskbox_for_active_buddy(self) -> None:
+    def test_instance_start_creates_private_taskbox_for_active_role(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -1639,7 +1639,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "dev"],
+                [str(LAUNCHER), "instance", "start", "--role", "dev"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1650,7 +1650,7 @@ exec "$real_git" "$@"
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_root = shared_root / "instances" / payload["instance_id"]
+            instance_root = shared_root / "instances" / payload["actor_id"]
             workspace_dir = instance_root / "workspace"
             runtime_root = shared_root / "state"
 
@@ -1702,7 +1702,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "design"],
+                [str(LAUNCHER), "instance", "start", "--role", "design"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1715,7 +1715,7 @@ exec "$real_git" "$@"
             workspace_dir = Path(payload["cwd"])
             self.assertTrue((workspace_dir / ".agents" / "skills" / "shape-prototype" / "SKILL.md").exists())
             self.assertFalse((workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype").exists())
-            self.assertFalse((workspace_dir / "tools" / "launcher" / "assets" / "buddies" / "design").exists())
+            self.assertFalse((workspace_dir / "tools" / "launcher" / "assets" / "roles" / "design").exists())
 
     def test_runtime_local_excludes_cover_generated_runtime_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -1757,7 +1757,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1827,7 +1827,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_BROKER_STATUS"] = "1"
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1851,7 +1851,7 @@ exec "$real_git" "$@"
             self.assertTrue((workspace_dir / "scripts" / "runtime_kernel" / "broker.py").exists())
             self.assertTrue((workspace_dir / "buddyswitch" / "manifest.toml").exists())
 
-    def test_local_non_buddy_start_allows_codex_search_args(self) -> None:
+    def test_local_non_role_start_allows_codex_search_args(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
             fake_bin = temp_root_path / "bin"
@@ -1875,8 +1875,8 @@ exec "$real_git" "$@"
             env = os.environ.copy()
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
-            env.pop("BUDDYSWITCH_ACTIVE_BUDDY", None)
-            env.pop("BUDDYSWITCH_INSTANCE_ID", None)
+            env.pop("BUDDYSWITCH_ROLE_ID", None)
+            env.pop("BUDDYSWITCH_ACTOR_ID", None)
 
             completed = subprocess.run(
                 ["bash", "-lc", command, "buddyswitch-run-codex-test", str(home), str(codex_home), str(xdg_config_home)],
@@ -1890,8 +1890,8 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["argv"], ["--search"])
-            self.assertIsNone(payload["active_buddy"])
-            self.assertIsNone(payload["instance_id"])
+            self.assertIsNone(payload["active_role"])
+            self.assertIsNone(payload["actor_id"])
 
     def test_product_mode_run_codex_rejects_native_search_with_native_env_tool_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -1912,8 +1912,8 @@ exec "$real_git" "$@"
                 "BUDDYSWITCH_HOME=\"$1\"\n"
                 "BUDDYSWITCH_CODEX_HOME=\"$2\"\n"
                 "BUDDYSWITCH_XDG_CONFIG_HOME=\"$3\"\n"
-                "BUDDYSWITCH_ACTIVE_BUDDY=pm\n"
-                "BUDDYSWITCH_INSTANCE_ID=inst-pm-test\n"
+                "BUDDYSWITCH_ROLE_ID=pm\n"
+                "BUDDYSWITCH_ACTOR_ID=act-pm-test\n"
                 "buddyswitch_run_codex --search\n"
             )
             env = os.environ.copy()
@@ -1939,7 +1939,7 @@ exec "$real_git" "$@"
             self.assertNotIn("search open-browser --payload", completed.stderr)
             self.assertFalse(capture_path.exists(), "rejected native search must not invoke codex")
 
-    def test_start_execution_worktree_uses_design_buddy_prompt_contract(self) -> None:
+    def test_start_execution_worktree_uses_design_role_prompt_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -1980,7 +1980,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "design"],
+                [str(LAUNCHER), "instance", "start", "--role", "design"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1996,12 +1996,12 @@ exec "$real_git" "$@"
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             workspace_dir = Path(payload["cwd"])
             agents_md = workspace_dir / "AGENTS.md"
-            expected_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "design" / "AGENTS.md").read_text(
+            expected_agents = (ROOT / "tools" / "launcher" / "assets" / "roles" / "design" / "AGENTS.md").read_text(
                 encoding="utf-8"
             )
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
             prompt_text = agents_md.read_text(encoding="utf-8")
-            self.assertIn("locked to the `design` buddy", prompt_text)
+            self.assertIn("locked to the `design` role", prompt_text)
             for token in (
                 "## Runtime Boundary",
                 "Native Codex `web_search` is unavailable",
@@ -2022,7 +2022,7 @@ exec "$real_git" "$@"
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
 
-    def test_instance_start_materializes_runtime_skills_from_manifest_for_each_buddy(self) -> None:
+    def test_instance_start_materializes_runtime_skills_from_manifest_for_each_role(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -2052,14 +2052,14 @@ exec "$real_git" "$@"
 
             manifest_path = ROOT / "buddyswitch" / "manifest.toml"
             manifest = load_manifest(manifest_path)
-            buddies = [row for row in manifest.get("buddies", []) if isinstance(row, dict)]
-            self.assertTrue(buddies)
+            roles = [row for row in manifest.get("roles", []) if isinstance(row, dict)]
+            self.assertTrue(roles)
             skill_sources = {
                 row["id"]: row["path"]
                 for row in manifest.get("skills", [])
                 if isinstance(row, dict) and isinstance(row.get("id"), str) and isinstance(row.get("path"), str)
             }
-            market = next((row for row in buddies if row.get("id") == "market"), None)
+            market = next((row for row in roles if row.get("id") == "market"), None)
             self.assertIsInstance(market, dict)
             assert isinstance(market, dict)
             self.assertGreaterEqual(len([row for row in market.get("skills", []) if isinstance(row, str)]), 6)
@@ -2071,14 +2071,14 @@ exec "$real_git" "$@"
             base_env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             base_env["BUDDYSWITCH_BROWSER_PORT"] = "1"
 
-            for buddy in buddies:
-                buddy_id = buddy.get("id")
-                buddy_skills = buddy.get("skills", [])
-                if not isinstance(buddy_id, str) or not isinstance(buddy_skills, list):
+            for role in roles:
+                role_id = role.get("id")
+                role_skills = role.get("skills", [])
+                if not isinstance(role_id, str) or not isinstance(role_skills, list):
                     continue
 
-                capture_path = temp_root_path / f"capture-{buddy_id}.json"
-                ready_file = temp_root_path / f"browser-ready-{buddy_id}.flag"
+                capture_path = temp_root_path / f"capture-{role_id}.json"
+                ready_file = temp_root_path / f"browser-ready-{role_id}.flag"
                 capture_path.unlink(missing_ok=True)
                 ready_file.unlink(missing_ok=True)
 
@@ -2090,8 +2090,8 @@ exec "$real_git" "$@"
                         str(LAUNCHER),
                         "instance",
                         "start",
-                        "--buddy",
-                        buddy_id,
+                        "--role",
+                        role_id,
                     ],
                     cwd=ROOT,
                     env=env,
@@ -2099,25 +2099,25 @@ exec "$real_git" "$@"
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(completed.returncode, 0, msg=f"{buddy_id}\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+                self.assertEqual(completed.returncode, 0, msg=f"{role_id}\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
                 payload = json.loads(capture_path.read_text(encoding="utf-8"))
                 runtime_skills = Path(payload["cwd"]) / ".agents" / "skills"
                 installed_skill_ids = sorted(path.name for path in runtime_skills.iterdir() if path.is_dir())
-                expected_skill_ids = sorted(skill_id for skill_id in buddy_skills if isinstance(skill_id, str))
-                self.assertEqual(installed_skill_ids, expected_skill_ids, msg=f"buddy={buddy_id}")
-                self.assertIn("task-management", installed_skill_ids, msg=f"buddy={buddy_id}")
-                self.assertIn("track-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
-                self.assertIn("artifact-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
-                self.assertNotIn("buddybox-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
+                expected_skill_ids = sorted(skill_id for skill_id in role_skills if isinstance(skill_id, str))
+                self.assertEqual(installed_skill_ids, expected_skill_ids, msg=f"role={role_id}")
+                self.assertIn("task-management", installed_skill_ids, msg=f"role={role_id}")
+                self.assertIn("track-tool", installed_skill_ids, msg=f"role={role_id}")
+                self.assertIn("artifact-tool", installed_skill_ids, msg=f"role={role_id}")
+                self.assertNotIn("actor_private-tool", installed_skill_ids, msg=f"role={role_id}")
                 for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
-                    self.assertNotIn(removed, installed_skill_ids, msg=f"buddy={buddy_id}")
+                    self.assertNotIn(removed, installed_skill_ids, msg=f"role={role_id}")
 
                 for skill_id in expected_skill_ids:
                     source_dir = ROOT / skill_sources[skill_id]
                     target_dir = runtime_skills / skill_id
                     self._assert_directory_file_bytes_equal(source=source_dir, target=target_dir)
 
-                if buddy_id == "dev":
+                if role_id == "dev":
                     removed_importer = "-".join(("skill", "creator", "importer"))
                     for skill_id in (
                         "enter-dev-workspace",
@@ -2133,7 +2133,7 @@ exec "$real_git" "$@"
                     self.assertFalse((runtime_skills / "implement-task").exists())
                     self.assertFalse((runtime_skills / removed_importer).exists())
 
-    def test_start_with_buddy_wires_instance_env_and_lifecycle(self) -> None:
+    def test_start_with_role_wires_instance_env_and_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -2173,7 +2173,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2191,27 +2191,27 @@ exec "$real_git" "$@"
             instance_snapshot = payload["instance_json_payload"]
 
             self.assertIn("BuddySwitch instance:", completed.stdout)
-            self.assertIn(payload["instance_id"], completed.stdout)
+            self.assertIn(payload["actor_id"], completed.stdout)
             self.assertIn("Input:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance input {payload['instance_id']} --text", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance input {payload['actor_id']} --text", completed.stdout)
             self.assertIn("Attach:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance attach {payload['instance_id']}", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance attach {payload['actor_id']}", completed.stdout)
             self.assertIn("Stop:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance stop {payload['instance_id']}", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance stop {payload['actor_id']}", completed.stdout)
             self.assertIn("Delete instance:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance delete {payload['instance_id']} --yes", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance delete {payload['actor_id']} --yes", completed.stdout)
 
             self.assertGreaterEqual(len(payload["argv"]), 3, msg=payload["argv"])
             self.assertEqual(payload["argv"][:2], ["app-server", "--listen"])
             self.assertTrue(payload["argv"][2].startswith("unix://"))
-            self.assertEqual(payload["active_buddy"], "pm")
-            self.assertIsInstance(payload["instance_id"], str)
-            self.assertTrue(payload["instance_id"])
+            self.assertEqual(payload["active_role"], "pm")
+            self.assertIsInstance(payload["actor_id"], str)
+            self.assertTrue(payload["actor_id"])
             self.assertIsNotNone(payload["instance_json"])
             self.assertIsInstance(instance_snapshot, dict)
 
             instance_json_path = Path(payload["instance_json"])
-            instance_root = shared_root / "instances" / payload["instance_id"]
+            instance_root = shared_root / "instances" / payload["actor_id"]
             workspace_dir = instance_root / "workspace"
             self.assertTrue(instance_json_path.exists())
             self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
@@ -2223,12 +2223,12 @@ exec "$real_git" "$@"
             self.assertEqual(payload["temp"], str(instance_root / "tmp"))
             self.assertEqual(payload["instance_tmp"], str(instance_root / "tmp"))
             self.assertEqual(payload["tmpprefix"], str(instance_root / "tmp" / "zsh"))
-            self.assertEqual(payload["buddybox_dir"], str(workspace_dir / "buddybox"))
-            self.assertTrue((workspace_dir / "buddybox").is_dir())
+            self.assertEqual(payload["actor_private_dir"], str(workspace_dir / "private"))
+            self.assertTrue((workspace_dir / "private").is_dir())
             self.assertTrue(payload["runtime_broker_socket"], "runtime broker socket must be exported to codex")
-            buddy_agents = ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md"
-            self.assertTrue(buddy_agents.exists(), "pm buddy prompt asset must be checked in")
-            self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), buddy_agents.read_text(encoding="utf-8"))
+            role_agents = ROOT / "tools" / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md"
+            self.assertTrue(role_agents.exists(), "pm role prompt asset must be checked in")
+            self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), role_agents.read_text(encoding="utf-8"))
             self.assertTrue((workspace_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# BuddySwitch Runtime Workspace\n"))
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
             for token in (
@@ -2266,13 +2266,9 @@ exec "$real_git" "$@"
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
             runtime_turn_runtime = workspace_dir / "scripts" / "turn_runtime.py"
-            tracked_turn_runtime = subprocess.check_output(
-                ["git", "-C", str(ROOT), "show", "HEAD:scripts/turn_runtime.py"],
-                text=True,
-            )
             self.assertEqual(
                 runtime_turn_runtime.read_text(encoding="utf-8"),
-                tracked_turn_runtime,
+                (ROOT / "scripts" / "turn_runtime.py").read_text(encoding="utf-8"),
             )
             runtime_surface_candidates = (
                 "scripts/env_legacy_store.py",
@@ -2284,7 +2280,7 @@ exec "$real_git" "$@"
                 "scripts/env/services/tracks.py",
                 "scripts/env/services/artifacts.py",
                 "scripts/env/services/context.py",
-                "scripts/env/services/buddybox.py",
+                "scripts/env/services/private.py",
                 "scripts/env/services/evidence.py",
                 "scripts/env/tools/task/tool.py",
                 "scripts/env/tools/task/_impl.py",
@@ -2303,7 +2299,7 @@ exec "$real_git" "$@"
                 "scripts/env/tools/search/tool.py",
                 "scripts/env/tools/search/_impl.py",
                 "scripts/env/domain/source_refs.py",
-                "scripts/env/domain/buddybox_workspace.py",
+                "scripts/env/domain/private_workspace.py",
             )
             for relative in runtime_surface_candidates:
                 tracked = subprocess.run(
@@ -2335,7 +2331,7 @@ exec "$real_git" "$@"
             self.assertTrue((instance_root / "browser" / "profile").exists())
             self.assertTrue((instance_root / "browser" / "chrome.pid").exists())
             self.assertTrue((instance_root / "browser" / "chrome.log").exists())
-            self.assertTrue((workspace_dir / "buddybox").is_dir())
+            self.assertTrue((workspace_dir / "private").is_dir())
             self.assertTrue((instance_root / "tmp").is_dir())
             self.assertFalse((shared_root / "chrome" / "shared-browser").exists())
             self.assertFalse((shared_root / "run" / "browser-cockpit.pid").exists())
@@ -2361,8 +2357,8 @@ exec "$real_git" "$@"
             self.assertTrue(instance_auth.exists())
             self.assertFalse(instance_auth.is_file() and not instance_auth.is_symlink())
             self.assertEqual(instance_auth.resolve(), shared_auth.resolve())
-            self.assertEqual(instance_snapshot["instance_id"], payload["instance_id"])
-            self.assertEqual(instance_snapshot["buddy"], "pm")
+            self.assertEqual(instance_snapshot["actor_id"], payload["actor_id"])
+            self.assertEqual(instance_snapshot["role"], "pm")
             self.assertNotIn("current_task_id", instance_snapshot)
             self.assertNotIn("current_track_id", instance_snapshot)
             self.assertEqual(instance_snapshot["instance_root"], str(instance_root))
@@ -2373,8 +2369,8 @@ exec "$real_git" "$@"
 
             stored_instance = json.loads(instance_json_path.read_text(encoding="utf-8"))
             self.assertEqual(stored_instance["status"], "active")
-            self.assertEqual(stored_instance["instance_id"], payload["instance_id"])
-            self.assertEqual(stored_instance["buddy"], "pm")
+            self.assertEqual(stored_instance["actor_id"], payload["actor_id"])
+            self.assertEqual(stored_instance["role"], "pm")
             self.assertEqual(stored_instance["instance_root"], str(instance_root))
             self.assertEqual(stored_instance["workspace_dir"], str(workspace_dir))
             self.assertNotIn("current_task_id", stored_instance)
@@ -2385,7 +2381,7 @@ exec "$real_git" "$@"
             self.assertIn("app_server_socket", stored_instance)
             self.assertIn("app_server_log", stored_instance)
             self.assertTrue(stored_instance["updated_at"])
-            self.assertFalse((shared_root / "workspace").exists(), "buddy-locked start must not use legacy shared workspace")
+            self.assertFalse((shared_root / "workspace").exists(), "role-locked start must not use legacy shared workspace")
 
             call_entries = [
                 json.loads(line)
@@ -2400,8 +2396,8 @@ exec "$real_git" "$@"
             env_mcp_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "buddyswitch-env")
             self._assert_env_mcp_registration(
                 env_mcp_add["argv"],
-                instance_id=payload["instance_id"],
-                buddy="pm",
+                actor_id=payload["actor_id"],
+                role="pm",
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
             cockpit_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "chrome-devtools-cockpit")
@@ -2418,18 +2414,18 @@ exec "$real_git" "$@"
                     f"runtime workspace must not expose projected state path: {projected_path}",
                 )
 
-            buddybox_root = workspace_dir / "buddybox"
-            shared_buddybox_root = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm"
-            self.assertTrue(buddybox_root.is_dir(), "active buddybox root must exist in the instance workspace")
-            self.assertFalse(shared_buddybox_root.exists(), "shared state buddybox remains tool-backed until written")
+            actor_private_root = workspace_dir / "private"
+            shared_actor_private_root = shared_root / "state" / "buddyswitch" / "local" / "private" / "pm"
+            self.assertTrue(actor_private_root.is_dir(), "active actor_private root must exist in the instance workspace")
+            self.assertFalse(shared_actor_private_root.exists(), "shared state actor_private remains tool-backed until written")
 
-            self.assertFalse((workspace_dir / "buddyswitch/local/buddybox/dev").exists())
-            self.assertFalse((workspace_dir / "buddyswitch/content/" / "buddybox").exists())
+            self.assertFalse((workspace_dir / "buddyswitch/local/private/dev").exists())
+            self.assertFalse((workspace_dir / "buddyswitch/content/" / "private").exists())
 
             for retired_relative_path in ("runs/raw", "buddyswitch/content/runs"):
                 self.assertFalse((workspace_dir / retired_relative_path).exists())
 
-    def test_start_with_buddy_returns_json_metadata_when_requested(self) -> None:
+    def test_start_with_role_returns_json_metadata_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -2470,7 +2466,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--json"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm", "--json"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2487,18 +2483,18 @@ exec "$real_git" "$@"
             capture_payload = json.loads(capture_path.read_text(encoding="utf-8"))
             stored_instance = json.loads(Path(capture_payload["instance_json"]).read_text(encoding="utf-8"))
 
-            self.assertTrue(payload["instance_id"].startswith("inst-pm-"))
-            self.assertEqual(payload["buddy"], "pm")
+            self.assertTrue(payload["actor_id"].startswith("act-pm-"))
+            self.assertEqual(payload["role"], "pm")
             self.assertEqual(payload["workspace_dir"], stored_instance["workspace_dir"])
             self.assertEqual(payload["project_workspace_dir"], capture_payload["project_workspace_dir"])
             self.assertEqual(payload["instance_record"], capture_payload["instance_json"])
             self.assertNotIn("Input: ./buddyswitch-codex", completed.stdout)
-            self.assertEqual(stored_instance["instance_id"], payload["instance_id"])
+            self.assertEqual(stored_instance["actor_id"], payload["actor_id"])
             self.assertEqual(stored_instance["status"], "active")
             self.assertIn("thread_id", stored_instance)
             self.assertIn("app_server_pid", stored_instance)
 
-    def test_start_with_buddy_starts_app_server_service_and_returns(self) -> None:
+    def test_start_with_role_starts_app_server_service_and_returns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -2534,7 +2530,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2548,21 +2544,21 @@ exec "$real_git" "$@"
             )
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
-            instance_id = payload["instance_id"]
+            actor_id = payload["actor_id"]
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_root = shared_root / "instances" / instance_id
+            instance_root = shared_root / "instances" / actor_id
             instance_json_path = instance_root / "instance.json"
             instance_payload = json.loads(instance_json_path.read_text(encoding="utf-8"))
 
-            self.assertIn(f"./buddyswitch-codex instance input {instance_id} --text", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance attach {instance_id}", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance stop {instance_id}", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance delete {instance_id} --yes", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance input {actor_id} --text", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance attach {actor_id}", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance stop {actor_id}", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance delete {actor_id} --yes", completed.stdout)
             self.assertGreaterEqual(len(payload["argv"]), 3, msg=payload["argv"])
             self.assertEqual(payload["argv"][:2], ["app-server", "--listen"])
             self.assertTrue(payload["argv"][2].startswith("unix://"))
-            self.assertEqual(payload["active_buddy"], "pm")
-            self.assertEqual(payload["instance_id"], instance_id)
+            self.assertEqual(payload["active_role"], "pm")
+            self.assertEqual(payload["actor_id"], actor_id)
             self.assertEqual(instance_payload["status"], "active")
             self.assertIn("thread_id", instance_payload)
             self.assertIn("app_server_pid", instance_payload)
@@ -2581,9 +2577,9 @@ exec "$real_git" "$@"
             self.assertIn("runtimeWorkspaceRoots", thread_start["params"])
             self.assertNotIn("sandboxPolicy", thread_start["params"])
 
-    def test_start_with_buddy_starts_ready_daemon_for_main_thread(self) -> None:
+    def test_start_with_role_starts_ready_daemon_for_main_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -2596,14 +2592,14 @@ exec "$real_git" "$@"
 
             self.assertTrue((daemon_dir / "daemon.pid").exists())
             self.assertTrue((daemon_dir / "daemon.log").exists())
-            self.assertEqual(daemon_state["instance_id"], ctx["instance_id"])
+            self.assertEqual(daemon_state["actor_id"], ctx["actor_id"])
             self.assertEqual(daemon_state["main_thread_id"], instance_payload["thread_id"])
             self.assertEqual(daemon_state["daemon_origin_turn_ids"], [])
             self.assertEqual(daemon_state["ready"]["pid"], daemon_pid)
             self.assertEqual(daemon_state["ready"]["main_thread_id"], instance_payload["thread_id"])
 
             status_result = subprocess.run(
-                [str(LAUNCHER), "instance", "status", str(ctx["instance_id"]), "--json"],
+                [str(LAUNCHER), "instance", "status", str(ctx["actor_id"]), "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -2632,7 +2628,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(
                 Path(temp_root),
                 Path(source_home),
-                buddy="pm",
+                role="pm",
                 state_payload={
                     "errors": {
                         "thread/inject_items": {
@@ -2656,7 +2652,7 @@ exec "$real_git" "$@"
 
     def test_fake_codex_inject_items_materializes_target_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -2668,7 +2664,7 @@ exec "$real_git" "$@"
 
     def test_fake_codex_turn_start_still_materializes_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -2682,7 +2678,7 @@ exec "$real_git" "$@"
             )
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", ctx["instance_id"], "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", ctx["actor_id"], "--text", "materialize", "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -2696,7 +2692,7 @@ exec "$real_git" "$@"
 
     def test_start_bootstraps_main_thread_rollout_before_daemon_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -2724,7 +2720,7 @@ exec "$real_git" "$@"
 
     def test_start_bootstrap_uses_inject_items_not_turn_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -2760,7 +2756,7 @@ exec "$real_git" "$@"
 
     def test_thread_bootstrap_marker_is_minimal_assistant_output_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -2789,7 +2785,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(
                 Path(temp_root),
                 Path(source_home),
-                buddy="pm",
+                role="pm",
                 state_payload={
                     "errors": {
                         "thread/inject_items": {
@@ -2822,7 +2818,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(
                 Path(temp_root),
                 Path(source_home),
-                buddy="pm",
+                role="pm",
                 state_payload={
                     "error_on_attempts": {
                         "thread/inject_items": {
@@ -2861,7 +2857,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(
                 Path(temp_root),
                 Path(source_home),
-                buddy="pm",
+                role="pm",
                 state_payload={
                     "error_on_attempts": {
                         "thread/inject_items": {
@@ -2943,7 +2939,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--", "debug", "prompt-input", "x"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm", "--", "debug", "prompt-input", "x"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2954,7 +2950,7 @@ exec "$real_git" "$@"
             self.assertIn("start no longer accepts Codex args", completed.stderr)
             self.assertFalse((source_home_path / ".codex-buddyswitch" / "instances").exists())
 
-    def test_start_with_buddy_allocates_next_browser_port_when_default_is_busy(self) -> None:
+    def test_start_with_role_allocates_next_browser_port_when_default_is_busy(self) -> None:
         busy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         owns_busy_socket = False
         try:
@@ -3016,7 +3012,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -3053,7 +3049,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Draft brief",
                 ],
@@ -3095,7 +3091,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Draft brief",
                     "--json",
@@ -3108,7 +3104,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
             payload = json.loads(input_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["action"], "start")
             self.assertTrue(payload["turn_id"])
@@ -3149,7 +3145,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Steer current turn",
                 ],
@@ -3185,7 +3181,7 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             self._seed_instance_taskbox_current(
                 instance_root=Path(str(ctx["instance_root"])),
-                buddy=str(ctx["instance_payload"]["buddy"]),
+                role=str(ctx["instance_payload"]["role"]),
             )
 
             input_result = subprocess.run(
@@ -3193,7 +3189,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Draft brief",
                     "--input-wrapper",
@@ -3236,7 +3232,7 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             self._seed_instance_taskbox_current(
                 instance_root=Path(str(ctx["instance_root"])),
-                buddy=str(ctx["instance_payload"]["buddy"]),
+                role=str(ctx["instance_payload"]["role"]),
             )
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
@@ -3245,7 +3241,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Steer current turn",
                     "--input-wrapper",
@@ -3275,7 +3271,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Draft brief",
                     "--input-wrapper",
@@ -3322,7 +3318,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Steer current turn",
                     "--json",
@@ -3335,7 +3331,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
             payload = json.loads(input_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["action"], "steer")
             self.assertEqual(payload["turn_id"], "turn-123")
@@ -3359,7 +3355,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Explore the API shape",
                     "--json",
@@ -3373,7 +3369,7 @@ exec "$real_git" "$@"
 
             self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
             payload = json.loads(side_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["parent_thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["side_thread_id"], "thread-side-1")
             self.assertEqual(payload["action"], "start")
@@ -3434,7 +3430,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Explore the API shape",
                 ],
@@ -3487,7 +3483,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     "thread-side-1",
                     "--text",
@@ -3544,7 +3540,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     "thread-side-1",
                     "--text",
@@ -3581,7 +3577,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     "thread-unknown",
                     "--text",
@@ -3617,7 +3613,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     main_thread_id,
                     "--text",
@@ -3652,7 +3648,7 @@ exec "$real_git" "$@"
                     "instance",
                     "side",
                     "close",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     main_thread_id,
                 ],
@@ -3720,7 +3716,7 @@ exec "$real_git" "$@"
                     "instance",
                     "side",
                     "close",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     "thread-side-1",
                     "--json",
@@ -3778,7 +3774,7 @@ exec "$real_git" "$@"
                     "instance",
                     "side",
                     "close",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     "thread-side-1",
                     "--json",
@@ -3810,7 +3806,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             result = subprocess.run(
-                [str(LAUNCHER), "instance", "side", ctx["instance_id"]],
+                [str(LAUNCHER), "instance", "side", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -3835,7 +3831,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--side-thread-id",
                     "thread-side-1",
                 ],
@@ -3859,7 +3855,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             result = subprocess.run(
-                [str(LAUNCHER), "instance", "side", "close", ctx["instance_id"]],
+                [str(LAUNCHER), "instance", "side", "close", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -3893,7 +3889,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "side",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Explore",
                 ],
@@ -3925,7 +3921,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "goal",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "set",
                     "--objective",
                     "Ship launcher goal API",
@@ -3941,7 +3937,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(goal_result.returncode, 0, msg=goal_result.stderr)
             payload = json.loads(goal_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["goal"]["objective"], "Ship launcher goal API")
             self.assertEqual(payload["goal"]["tokenBudget"], 1234)
@@ -3963,7 +3959,7 @@ exec "$real_git" "$@"
                 Path(source_home),
                 state_payload={
                     "goal": {
-                        "threadId": "thread-inst-pm-test",
+                        "threadId": "thread-act-pm-test",
                         "objective": "Existing objective",
                         "status": "active",
                         "tokenBudget": None,
@@ -3984,7 +3980,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "goal",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "get",
                     "--json",
                 ],
@@ -4003,7 +3999,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "goal",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "clear",
                     "--json",
                 ],
@@ -4015,7 +4011,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
             clear_payload = json.loads(clear_result.stdout)
-            self.assertEqual(clear_payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(clear_payload["actor_id"], ctx["actor_id"])
             self.assertEqual(clear_payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(clear_payload["cleared"], True)
             calls = [
@@ -4040,7 +4036,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "compact",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--json",
                 ],
                 cwd=ROOT,
@@ -4051,7 +4047,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(compact_result.returncode, 0, msg=compact_result.stderr)
             payload = json.loads(compact_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             calls = [
                 json.loads(line)
@@ -4078,7 +4074,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "clear",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--json",
                 ],
                 cwd=ROOT,
@@ -4089,7 +4085,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
             payload = json.loads(clear_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["previous_thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["thread_id"], "thread-cleared")
             instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
@@ -4118,7 +4114,7 @@ exec "$real_git" "$@"
             )
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4150,7 +4146,7 @@ exec "$real_git" "$@"
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4194,7 +4190,7 @@ exec "$real_git" "$@"
             )
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4227,7 +4223,7 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4245,7 +4241,7 @@ exec "$real_git" "$@"
             )
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "resume", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4270,7 +4266,7 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4287,7 +4283,7 @@ exec "$real_git" "$@"
             self.assertIsNone(instance_payload["app_server_log"])
 
             status_result = subprocess.run(
-                [str(LAUNCHER), "instance", "status", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "status", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4315,7 +4311,7 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4330,7 +4326,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "resume", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4358,7 +4354,7 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4370,7 +4366,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             attach_result = subprocess.run(
-                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                [str(LAUNCHER), "instance", "attach", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4426,7 +4422,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--text",
                     "Steer current turn",
                 ],
@@ -4452,15 +4448,15 @@ exec "$real_git" "$@"
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-unhealthy"
+            actor_id = "act-pm-unhealthy"
             instance_root, _workspace_dir = self._write_instance_record(
                 shared_root,
-                instance_id,
+                actor_id,
                 status="active",
                 thread_id="thread-test",
                 app_server_pid=999999,
                 app_server_socket="/tmp/buddyswitch-app-server-missing.sock",
-                app_server_log=str(shared_root / "instances" / instance_id / "runtime" / "app-server.log"),
+                app_server_log=str(shared_root / "instances" / actor_id / "runtime" / "app-server.log"),
             )
 
             env = os.environ.copy()
@@ -4473,7 +4469,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    instance_id,
+                    actor_id,
                     "--text",
                     "Draft brief",
                 ],
@@ -4501,7 +4497,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "input",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -4515,17 +4511,17 @@ exec "$real_git" "$@"
 
     def test_instance_resume_json_restarts_stopped_instance_with_original_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", instance_id, "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize", "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4535,7 +4531,7 @@ exec "$real_git" "$@"
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4545,7 +4541,7 @@ exec "$real_git" "$@"
             self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4555,7 +4551,7 @@ exec "$real_git" "$@"
 
             self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
             payload = json.loads(resume_result.stdout)
-            self.assertEqual(payload["instance_id"], instance_id)
+            self.assertEqual(payload["actor_id"], actor_id)
             self.assertEqual(payload["thread_id"], thread_id)
             self.assertEqual(payload["status"], "active")
             record = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
@@ -4570,17 +4566,17 @@ exec "$real_git" "$@"
 
     def test_instance_resume_starts_ready_daemon_for_original_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4590,7 +4586,7 @@ exec "$real_git" "$@"
             self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4609,17 +4605,17 @@ exec "$real_git" "$@"
 
     def test_instance_resume_uses_thread_resume_for_original_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", instance_id, "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize", "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4629,7 +4625,7 @@ exec "$real_git" "$@"
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4640,7 +4636,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4661,15 +4657,15 @@ exec "$real_git" "$@"
 
     def test_instance_resume_does_not_bootstrap_existing_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             thread_id = str(ctx["instance_payload"]["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4680,7 +4676,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4698,15 +4694,15 @@ exec "$real_git" "$@"
 
     def test_instance_resume_reports_no_rollout_for_unmaterialized_legacy_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             thread_id = str(ctx["instance_payload"]["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4724,7 +4720,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4739,17 +4735,17 @@ exec "$real_git" "$@"
 
     def test_instance_resume_human_output_reports_instance_and_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", instance_id, "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize", "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4759,7 +4755,7 @@ exec "$real_git" "$@"
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4769,7 +4765,7 @@ exec "$real_git" "$@"
             self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4778,23 +4774,23 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
-            self.assertIn(f"Instance resumed: {instance_id}", resume_result.stdout)
+            self.assertIn(f"Instance resumed: {actor_id}", resume_result.stdout)
             self.assertIn(f"Thread: {thread_id}", resume_result.stdout)
 
     def test_instance_resume_active_instance_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             record_path = Path(str(ctx["instance_root"])) / "instance.json"
             before = json.loads(record_path.read_text(encoding="utf-8"))
             thread_id = str(before["thread_id"])
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4804,7 +4800,7 @@ exec "$real_git" "$@"
 
             self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
             payload = json.loads(resume_result.stdout)
-            self.assertEqual(payload["instance_id"], instance_id)
+            self.assertEqual(payload["actor_id"], actor_id)
             self.assertEqual(payload["thread_id"], thread_id)
             self.assertEqual(payload["status"], "active")
             after = json.loads(record_path.read_text(encoding="utf-8"))
@@ -4824,10 +4820,10 @@ exec "$real_git" "$@"
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-no-thread"
+            actor_id = "act-pm-no-thread"
             self._write_instance_record(
                 shared_root,
-                instance_id,
+                actor_id,
                 status="inactive",
                 thread_id=None,
             )
@@ -4836,7 +4832,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4849,17 +4845,17 @@ exec "$real_git" "$@"
 
     def test_instance_resume_keeps_inactive_when_thread_resume_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            instance_id = str(ctx["instance_id"])
+            actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4887,7 +4883,7 @@ exec "$real_git" "$@"
             )
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4914,7 +4910,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "attach",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -4982,7 +4978,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             attach_result = subprocess.run(
-                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                [str(LAUNCHER), "instance", "attach", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -5020,7 +5016,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "attach",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5035,15 +5031,15 @@ exec "$real_git" "$@"
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-attach-unhealthy"
+            actor_id = "act-pm-attach-unhealthy"
             self._write_instance_record(
                 shared_root,
-                instance_id,
+                actor_id,
                 status="active",
                 thread_id="thread-test",
                 app_server_pid=999999,
                 app_server_socket="/tmp/buddyswitch-app-server-missing.sock",
-                app_server_log=str(shared_root / "instances" / instance_id / "runtime" / "app-server.log"),
+                app_server_log=str(shared_root / "instances" / actor_id / "runtime" / "app-server.log"),
             )
 
             env = os.environ.copy()
@@ -5055,7 +5051,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "attach",
-                    instance_id,
+                    actor_id,
                 ],
                 cwd=ROOT,
                 env=env,
@@ -5078,7 +5074,7 @@ exec "$real_git" "$@"
             Path(str(ctx["state_file"])).write_text(json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
             Path(str(ctx["capture_path"])).unlink(missing_ok=True)
             attach_result = subprocess.run(
-                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                [str(LAUNCHER), "instance", "attach", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -5107,7 +5103,7 @@ exec "$real_git" "$@"
             Path(str(ctx["capture_path"])).unlink(missing_ok=True)
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             attach_result = subprocess.run(
-                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                [str(LAUNCHER), "instance", "attach", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -5140,7 +5136,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "stop",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5186,7 +5182,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "stop",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--json",
                 ],
                 cwd=ROOT,
@@ -5198,7 +5194,7 @@ exec "$real_git" "$@"
             self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
             self.assertEqual(
                 json.loads(stop_result.stdout),
-                {"instance_id": ctx["instance_id"], "status": "inactive"},
+                {"actor_id": ctx["actor_id"], "status": "inactive"},
             )
 
             stored = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
@@ -5219,15 +5215,15 @@ exec "$real_git" "$@"
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-stale-stop"
+            actor_id = "act-pm-stale-stop"
             instance_root, _workspace_dir = self._write_instance_record(
                 shared_root,
-                instance_id,
+                actor_id,
                 status="active",
                 thread_id="thread-test",
                 app_server_pid=999999,
                 app_server_socket="/tmp/buddyswitch-app-server-stale.sock",
-                app_server_log=str(shared_root / "instances" / instance_id / "runtime" / "app-server.log"),
+                app_server_log=str(shared_root / "instances" / actor_id / "runtime" / "app-server.log"),
             )
             runtime_dir = instance_root / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -5248,7 +5244,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "stop",
-                    instance_id,
+                    actor_id,
                 ],
                 cwd=ROOT,
                 env=env,
@@ -5284,7 +5280,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "status",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--json",
                 ],
                 cwd=ROOT,
@@ -5295,8 +5291,8 @@ exec "$real_git" "$@"
             )
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
             payload = json.loads(status_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
-            self.assertEqual(payload["buddy"], "pm")
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
+            self.assertEqual(payload["role"], "pm")
             self.assertEqual(payload["status"], "active")
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["app_server"]["healthy"], True)
@@ -5319,7 +5315,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "status",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5535,9 +5531,9 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(list_result.returncode, 0, msg=list_result.stderr)
-            self.assertIn("instance_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir", list_result.stdout)
+            self.assertIn("actor_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir", list_result.stdout)
             self.assertIn(
-                f"{ctx['instance_id']}\tpm\tactive\thealthy\t{ctx['instance_payload']['thread_id']}\t",
+                f"{ctx['actor_id']}\tpm\tactive\thealthy\t{ctx['instance_payload']['thread_id']}\t",
                 list_result.stdout,
             )
 
@@ -5572,7 +5568,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "interrupt",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5626,7 +5622,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "interrupt",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                     "--json",
                 ],
                 cwd=ROOT,
@@ -5637,7 +5633,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(interrupt_result.returncode, 0, msg=interrupt_result.stderr)
             payload = json.loads(interrupt_result.stdout)
-            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["turn_id"], "turn-123")
             self.assertNotIn("Interrupted turn:", interrupt_result.stdout)
@@ -5662,7 +5658,7 @@ exec "$real_git" "$@"
                     str(LAUNCHER),
                     "instance",
                     "interrupt",
-                    ctx["instance_id"],
+                    ctx["actor_id"],
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5698,7 +5694,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             result = subprocess.run(
-                [str(LAUNCHER), "instance", "open", "inst-pm-example"],
+                [str(LAUNCHER), "instance", "open", "act-pm-example"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5737,7 +5733,7 @@ exec "$real_git" "$@"
             self.assertIn("Unknown top-level command", result.stderr)
             self.assertFalse(capture_path.exists(), "removed locked open entrypoint must not invoke codex")
 
-    def test_start_with_buddy_creates_shared_project_workspace(self) -> None:
+    def test_start_with_role_creates_shared_project_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -5778,7 +5774,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5789,7 +5785,7 @@ exec "$real_git" "$@"
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_root = shared_root / "instances" / payload["instance_id"]
+            instance_root = shared_root / "instances" / payload["actor_id"]
             runtime_workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
 
@@ -5846,7 +5842,7 @@ exec "$real_git" "$@"
             self.assertEqual(self._repo_git_common_dir(project_workspace_dir), source_git_common_dir)
 
     def test_start_uses_shared_project_workspace_and_instance_workspace(self) -> None:
-        self.test_start_with_buddy_creates_shared_project_workspace()
+        self.test_start_with_role_creates_shared_project_workspace()
 
     def test_start_narrows_existing_full_project_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -5912,7 +5908,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5994,7 +5990,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6051,7 +6047,7 @@ exec "$real_git" "$@"
             first_env = base_env.copy()
             first_env["BUDDYSWITCH_TEST_CAPTURE"] = str(first_capture_path)
             first_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=first_env,
                 text=True,
@@ -6075,7 +6071,7 @@ exec "$real_git" "$@"
             second_env = base_env.copy()
             second_env["BUDDYSWITCH_TEST_CAPTURE"] = str(second_capture_path)
             second_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=second_env,
                 text=True,
@@ -6136,7 +6132,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-relative-write"
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6147,7 +6143,7 @@ exec "$real_git" "$@"
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
-            runtime_workspace_dir = shared_root / "instances" / payload["instance_id"] / "workspace"
+            runtime_workspace_dir = shared_root / "instances" / payload["actor_id"] / "workspace"
             shared_project_workspace = shared_root / "project" / "workspace"
             shared_project_app = shared_project_workspace / "projects" / "app"
 
@@ -6170,7 +6166,7 @@ exec "$real_git" "$@"
             self.assertEqual(write_probe["content"], "shared-relative-write")
             self.assertTrue((shared_project_app / "relative-path-sentinel.txt").exists())
 
-    def test_cross_buddy_relative_projects_app_is_shared(self) -> None:
+    def test_cross_role_relative_projects_app_is_shared(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6212,10 +6208,10 @@ exec "$real_git" "$@"
 
             pm_env = base_env.copy()
             pm_env["BUDDYSWITCH_TEST_CAPTURE"] = str(pm_capture_path)
-            pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "cross-buddy-sentinel.txt"
+            pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "cross-role-sentinel.txt"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-via-relative-path"
             pm_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=pm_env,
                 text=True,
@@ -6226,9 +6222,9 @@ exec "$real_git" "$@"
 
             dev_env = base_env.copy()
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
-            dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "cross-buddy-sentinel.txt"
+            dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "cross-role-sentinel.txt"
             dev_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "dev"],
+                [str(LAUNCHER), "instance", "start", "--role", "dev"],
                 cwd=ROOT,
                 env=dev_env,
                 text=True,
@@ -6259,7 +6255,7 @@ exec "$real_git" "$@"
             assert dev_relative_probe is not None
             self.assertEqual(
                 pm_relative_probe["write"]["resolved"],
-                str((shared_project_app / "cross-buddy-sentinel.txt").resolve()),
+                str((shared_project_app / "cross-role-sentinel.txt").resolve()),
             )
             read_probe = dev_relative_probe["read"]
             self.assertTrue(read_probe["exists"])
@@ -6310,7 +6306,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6323,7 +6319,7 @@ exec "$real_git" "$@"
                 (project_workspace_dir / "projects" / "app" / ".runtime" / "legacy.json").exists(),
             )
 
-    def test_project_workspace_is_shared_across_buddy_instances(self) -> None:
+    def test_project_workspace_is_shared_across_role_instances(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6368,7 +6364,7 @@ exec "$real_git" "$@"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "shared-product-sentinel.txt"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-pm-sentinel"
             pm_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=pm_env,
                 text=True,
@@ -6381,7 +6377,7 @@ exec "$real_git" "$@"
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
             dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "shared-product-sentinel.txt"
             dev_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "dev"],
+                [str(LAUNCHER), "instance", "start", "--role", "dev"],
                 cwd=ROOT,
                 env=dev_env,
                 text=True,
@@ -6405,11 +6401,11 @@ exec "$real_git" "$@"
             )
             self.assertEqual(
                 pm_payload["cwd"],
-                str((shared_root / "instances" / pm_payload["instance_id"] / "workspace").resolve()),
+                str((shared_root / "instances" / pm_payload["actor_id"] / "workspace").resolve()),
             )
             self.assertEqual(
                 dev_payload["cwd"],
-                str((shared_root / "instances" / dev_payload["instance_id"] / "workspace").resolve()),
+                str((shared_root / "instances" / dev_payload["actor_id"] / "workspace").resolve()),
             )
 
             shared_project_app = expected_project_workspace / "projects" / "app"
@@ -6469,7 +6465,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6485,9 +6481,9 @@ exec "$real_git" "$@"
                 for path in (source_home_path / ".codex-buddyswitch" / "instances").glob("*/instance.json")
             ]
             self.assertIn("active", statuses)
-            self.assertTrue((temp_root_path / "capture.json").exists(), "app-server should still launch for non-required browser buddies")
+            self.assertTrue((temp_root_path / "capture.json").exists(), "app-server should still launch for non-required browser roles")
 
-    def test_start_with_browser_available_buddy_endpoint_only_continues_without_ready_claim(self) -> None:
+    def test_start_with_browser_available_role_endpoint_only_continues_without_ready_claim(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6536,7 +6532,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6544,7 +6540,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self.assertTrue(capture_path.exists(), "optional-browser buddy should still launch Codex")
+            self.assertTrue(capture_path.exists(), "optional-browser role should still launch Codex")
             self.assertIn("continuing without cockpit endpoint", completed.stderr.lower())
             self.assertNotIn("Browser cockpit ready:", completed.stdout + completed.stderr)
             call_entries = [
@@ -6594,7 +6590,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "market"],
+                [str(LAUNCHER), "instance", "start", "--role", "market"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6616,7 +6612,7 @@ exec "$real_git" "$@"
             self.assertFalse((instance_root / "runtime" / "runtime-broker.socket").exists())
             self.assertFalse((temp_root_path / "capture.json").exists(), "Codex should not launch after required browser failure")
 
-    def test_start_with_required_buddy_ready_page_launches_codex(self) -> None:
+    def test_start_with_required_role_ready_page_launches_codex(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6663,7 +6659,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "market"],
+                [str(LAUNCHER), "instance", "start", "--role", "market"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6674,7 +6670,7 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             self.assertTrue(capture_path.exists(), "Codex should launch when a usable page already exists")
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["active_buddy"], "market")
+            self.assertEqual(payload["active_role"], "market")
             instance_payload = payload["instance_json_payload"]
             self.assertIsInstance(instance_payload, dict)
             assert isinstance(instance_payload, dict)
@@ -6689,7 +6685,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{browser_port}")
             self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", payload["config_toml"])
 
-    def test_start_with_required_buddy_blocks_codex_when_cockpit_mcp_setup_fails(self) -> None:
+    def test_start_with_required_role_blocks_codex_when_cockpit_mcp_setup_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6737,7 +6733,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_FAIL_MCP_ADD_NAME"] = "chrome-devtools-cockpit"
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "market"],
+                [str(LAUNCHER), "instance", "start", "--role", "market"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6755,7 +6751,7 @@ exec "$real_git" "$@"
             ]
             self.assertTrue(any(entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"] for entry in call_entries))
 
-    def test_start_with_required_buddy_blocks_codex_when_env_mcp_setup_fails(self) -> None:
+    def test_start_with_required_role_blocks_codex_when_env_mcp_setup_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6803,7 +6799,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_FAIL_MCP_ADD_NAME"] = "buddyswitch-env"
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "market"],
+                [str(LAUNCHER), "instance", "start", "--role", "market"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6825,7 +6821,7 @@ exec "$real_git" "$@"
                 "browser MCP setup must not run after required env MCP setup fails",
             )
 
-    def test_start_with_required_buddy_repairs_intro_only_browser_before_codex_launch(self) -> None:
+    def test_start_with_required_role_repairs_intro_only_browser_before_codex_launch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6876,7 +6872,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "market"],
+                [str(LAUNCHER), "instance", "start", "--role", "market"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6912,7 +6908,7 @@ exec "$real_git" "$@"
                 )
             )
 
-    def test_start_with_required_buddy_rejects_endpoint_only_browser_before_codex(self) -> None:
+    def test_start_with_required_role_rejects_endpoint_only_browser_before_codex(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6962,7 +6958,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "market"],
+                [str(LAUNCHER), "instance", "start", "--role", "market"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -6980,7 +6976,7 @@ exec "$real_git" "$@"
             self.assertTrue(any(call.get("path") == "Target.createTarget" for call in calls))
             self.assertFalse(any(call.get("path") == "/json/new" for call in calls))
 
-    def test_start_with_unknown_buddy_fails_before_shared_root_mutation(self) -> None:
+    def test_start_with_unknown_role_fails_before_shared_root_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -6998,7 +6994,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "unknown"],
+                [str(LAUNCHER), "instance", "start", "--role", "unknown"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7007,11 +7003,11 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("Unknown buddy 'unknown'", completed.stderr)
-            self.assertFalse(capture_path.exists(), "codex should not launch when buddy validation fails")
-            self.assertFalse(shared_root.exists(), "invalid buddy must fail before shared root mutation")
+            self.assertIn("Unknown role 'unknown'", completed.stderr)
+            self.assertFalse(capture_path.exists(), "codex should not launch when role validation fails")
+            self.assertFalse(shared_root.exists(), "invalid role must fail before shared root mutation")
 
-    def test_buddy_list_prints_manifest_buddies_without_runtime_mutation(self) -> None:
+    def test_role_list_prints_manifest_buddies_without_runtime_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -7020,7 +7016,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "buddies"],
+                [str(LAUNCHER), "instance", "roles"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7032,7 +7028,7 @@ exec "$real_git" "$@"
             self.assertIn("pm", completed.stdout)
             self.assertIn("dev", completed.stdout)
             self.assertIn("market", completed.stdout)
-            self.assertFalse(shared_root.exists(), "instance buddies must not create runtime state")
+            self.assertFalse(shared_root.exists(), "instance roles must not create runtime state")
 
     def test_instance_buddies_json_is_structured_and_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -7043,7 +7039,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "buddies", "--json"],
+                [str(LAUNCHER), "instance", "roles", "--json"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7053,17 +7049,17 @@ exec "$real_git" "$@"
 
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             payload = json.loads(completed.stdout)
-            buddy_ids = {row["id"] for row in payload["buddies"]}
-            self.assertIn("pm", buddy_ids)
-            self.assertIn("dev", buddy_ids)
-            self.assertIn("market", buddy_ids)
-            for row in payload["buddies"]:
+            role_ids = {row["id"] for row in payload["roles"]}
+            self.assertIn("pm", role_ids)
+            self.assertIn("dev", role_ids)
+            self.assertIn("market", role_ids)
+            for row in payload["roles"]:
                 self.assertIsInstance(row["id"], str)
                 self.assertIsInstance(row["label"], str)
                 self.assertIsInstance(row["scope"], str)
-            self.assertFalse(shared_root.exists(), "instance buddies --json must not create runtime state")
+            self.assertFalse(shared_root.exists(), "instance roles --json must not create runtime state")
 
-    def test_instance_list_empty_points_to_start_buddy(self) -> None:
+    def test_instance_list_empty_points_to_start_role(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             env = os.environ.copy()
             env["HOME"] = str(Path(source_home))
@@ -7080,7 +7076,7 @@ exec "$real_git" "$@"
 
             self.assertEqual(completed.returncode, 0)
             self.assertIn("No BuddySwitch instances found.", completed.stdout)
-            self.assertIn("./buddyswitch-codex instance start --buddy <buddy>", completed.stdout)
+            self.assertIn("./buddyswitch-codex instance start --role <role>", completed.stdout)
 
     def test_instance_list_json_empty_returns_empty_array(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -7101,21 +7097,21 @@ exec "$real_git" "$@"
             self.assertEqual(json.loads(completed.stdout), {"instances": []})
             self.assertNotIn("No BuddySwitch instances found.", completed.stdout)
 
-    def test_instance_list_prints_stored_instances_and_filters_by_buddy(self) -> None:
+    def test_instance_list_prints_stored_instances_and_filters_by_role(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            for instance_id, buddy in (
-                ("inst-pm-a", "pm"),
-                ("inst-dev-b", "dev"),
+            for actor_id, role in (
+                ("act-pm-a", "pm"),
+                ("act-dev-b", "dev"),
             ):
-                instance_root = shared_root / "instances" / instance_id
+                instance_root = shared_root / "instances" / actor_id
                 instance_root.mkdir(parents=True, exist_ok=True)
                 (instance_root / "instance.json").write_text(
                     json.dumps(
                         {
-                            "instance_id": instance_id,
-                            "buddy": buddy,
+                            "actor_id": actor_id,
+                            "role": role,
                             "status": "inactive",
                             "workspace_dir": str(instance_root / "workspace"),
                             "browser_port": None,
@@ -7134,7 +7130,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "list", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "list", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7143,25 +7139,25 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self.assertIn("inst-pm-a", completed.stdout)
+            self.assertIn("act-pm-a", completed.stdout)
             self.assertIn("pm", completed.stdout)
-            self.assertNotIn("inst-dev-b", completed.stdout)
+            self.assertNotIn("act-dev-b", completed.stdout)
 
-    def test_instance_list_json_filters_by_buddy(self) -> None:
+    def test_instance_list_json_filters_by_role(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            for instance_id, buddy in (
-                ("inst-pm-a", "pm"),
-                ("inst-dev-b", "dev"),
+            for actor_id, role in (
+                ("act-pm-a", "pm"),
+                ("act-dev-b", "dev"),
             ):
-                instance_root = shared_root / "instances" / instance_id
+                instance_root = shared_root / "instances" / actor_id
                 instance_root.mkdir(parents=True, exist_ok=True)
                 (instance_root / "instance.json").write_text(
                     json.dumps(
                         {
-                            "instance_id": instance_id,
-                            "buddy": buddy,
+                            "actor_id": actor_id,
+                            "role": role,
                             "status": "inactive",
                             "workspace_dir": str(instance_root / "workspace"),
                             "browser_port": None,
@@ -7180,7 +7176,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "list", "--json", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "list", "--json", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7192,8 +7188,8 @@ exec "$real_git" "$@"
             payload = json.loads(completed.stdout)
             self.assertEqual(len(payload["instances"]), 1)
             row = payload["instances"][0]
-            self.assertEqual(row["instance_id"], "inst-pm-a")
-            self.assertEqual(row["buddy"], "pm")
+            self.assertEqual(row["actor_id"], "act-pm-a")
+            self.assertEqual(row["role"], "pm")
             self.assertEqual(row["status"], "inactive")
             self.assertEqual(row["app_server_health"], "unhealthy")
             self.assertIsNone(row["thread_id"])
@@ -7203,8 +7199,8 @@ exec "$real_git" "$@"
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, target_workspace = self._write_instance_record(shared_root, "inst-pm-delete")
-            other_root, _ = self._write_instance_record(shared_root, "inst-dev-keep", buddy="dev")
+            target_root, target_workspace = self._write_instance_record(shared_root, "act-pm-delete")
+            other_root, _ = self._write_instance_record(shared_root, "act-dev-keep", role="dev")
             state_task = shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-keep.json"
             state_task.parent.mkdir(parents=True, exist_ok=True)
             state_task.write_text('{"id":"task-keep"}\n', encoding="utf-8")
@@ -7215,7 +7211,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-delete", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-delete", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7224,7 +7220,7 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
-            self.assertIn("Instance deleted: inst-pm-delete", delete_result.stdout)
+            self.assertIn("Instance deleted: act-pm-delete", delete_result.stdout)
             self.assertFalse(target_root.exists())
             self.assertTrue(other_root.exists())
             self.assertTrue(state_task.exists())
@@ -7241,8 +7237,8 @@ exec "$real_git" "$@"
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, target_workspace = self._write_instance_record(shared_root, "inst-pm-delete")
-            other_root, _ = self._write_instance_record(shared_root, "inst-dev-keep", buddy="dev")
+            target_root, target_workspace = self._write_instance_record(shared_root, "act-pm-delete")
+            other_root, _ = self._write_instance_record(shared_root, "act-dev-keep", role="dev")
             state_task = shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-keep.json"
             state_task.parent.mkdir(parents=True, exist_ok=True)
             state_task.write_text('{"id":"task-keep"}\n', encoding="utf-8")
@@ -7253,7 +7249,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-delete", "--yes", "--json"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-delete", "--yes", "--json"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7264,7 +7260,7 @@ exec "$real_git" "$@"
             self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
             self.assertEqual(
                 json.loads(delete_result.stdout),
-                {"instance_id": "inst-pm-delete", "deleted": True},
+                {"actor_id": "act-pm-delete", "deleted": True},
             )
             self.assertFalse(target_root.exists())
             self.assertTrue(other_root.exists())
@@ -7282,13 +7278,13 @@ exec "$real_git" "$@"
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, _ = self._write_instance_record(shared_root, "inst-pm-keep")
+            target_root, _ = self._write_instance_record(shared_root, "act-pm-keep")
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-keep"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-keep"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7343,7 +7339,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_PRODUCT_WRITE"] = "persist-after-delete"
 
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7355,7 +7351,7 @@ exec "$real_git" "$@"
             shared_root = source_home_path / ".codex-buddyswitch"
             project_workspace_dir = shared_root / "project" / "workspace"
             sentinel_path = project_workspace_dir / "projects" / "app" / "shared-product-sentinel.txt"
-            instance_root = shared_root / "instances" / payload["instance_id"]
+            instance_root = shared_root / "instances" / payload["actor_id"]
 
             self.assertTrue(project_workspace_dir.exists())
             self.assertTrue(sentinel_path.exists())
@@ -7370,7 +7366,7 @@ exec "$real_git" "$@"
             self.assertIn(str(project_workspace_dir), worktree_before)
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", payload["instance_id"]],
+                [str(LAUNCHER), "instance", "stop", payload["actor_id"]],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7381,7 +7377,7 @@ exec "$real_git" "$@"
             ready_file.unlink(missing_ok=True)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", payload["instance_id"], "--yes"],
+                [str(LAUNCHER), "instance", "delete", payload["actor_id"], "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7402,7 +7398,7 @@ exec "$real_git" "$@"
             ).stdout
             self.assertIn(str(project_workspace_dir), worktree_after)
 
-    def test_instance_delete_rejects_traversal_instance_id(self) -> None:
+    def test_instance_delete_rejects_traversal_actor_id(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             outside_path = source_home_path / "bad"
@@ -7420,7 +7416,7 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(delete_result.returncode, 2)
-            self.assertIn("Invalid instance id", delete_result.stderr)
+            self.assertIn("Invalid actor id", delete_result.stderr)
             self.assertFalse(outside_path.exists())
 
     def test_instance_delete_rejects_missing_target(self) -> None:
@@ -7430,7 +7426,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-missing", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-missing", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7451,7 +7447,7 @@ exec "$real_git" "$@"
             (Path(str(ctx["instance_root"])) / "browser" / "chrome.pid").unlink(missing_ok=True)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", ctx["instance_id"], "--yes"],
+                [str(LAUNCHER), "instance", "delete", ctx["actor_id"], "--yes"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -7460,14 +7456,14 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(delete_result.returncode, 3)
-            self.assertIn(f"Instance delete blocked: {ctx['instance_id']} is active.", delete_result.stderr)
+            self.assertIn(f"Instance delete blocked: {ctx['actor_id']} is active.", delete_result.stderr)
             self.assertTrue(Path(str(ctx["instance_root"])).exists())
 
     def test_instance_delete_blocks_active_target_browser_pid(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, _ = self._write_instance_record(shared_root, "inst-pm-live-browser-pid")
+            target_root, _ = self._write_instance_record(shared_root, "act-pm-live-browser-pid")
             browser_dir = target_root / "browser"
             browser_dir.mkdir(parents=True, exist_ok=True)
             (browser_dir / "chrome.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
@@ -7476,7 +7472,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-live-browser-pid", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-live-browser-pid", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7493,7 +7489,7 @@ exec "$real_git" "$@"
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, _ = self._write_instance_record(shared_root, "inst-pm-live-browser-endpoint", browser_port=9333)
+            target_root, _ = self._write_instance_record(shared_root, "act-pm-live-browser-endpoint", browser_port=9333)
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
             self._write_exec(
@@ -7525,7 +7521,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={targ
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-live-browser-endpoint", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-live-browser-endpoint", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7542,8 +7538,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={targ
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, _ = self._write_instance_record(shared_root, "inst-pm-stale-port", browser_port=9333)
-            market_root, _ = self._write_instance_record(shared_root, "inst-market-live-port", buddy="market", browser_port=9333)
+            target_root, _ = self._write_instance_record(shared_root, "act-pm-stale-port", browser_port=9333)
+            market_root, _ = self._write_instance_record(shared_root, "act-market-live-port", role="market", browser_port=9333)
             market_browser = market_root / "browser"
             market_browser.mkdir(parents=True, exist_ok=True)
             (market_browser / "chrome.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
@@ -7578,7 +7574,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-stale-port", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-stale-port", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7587,7 +7583,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
-            self.assertIn("Instance deleted: inst-pm-stale-port", delete_result.stdout)
+            self.assertIn("Instance deleted: act-pm-stale-port", delete_result.stdout)
             self.assertFalse(target_root.exists())
             self.assertTrue(market_root.exists())
             self.assertTrue((market_browser / "chrome.pid").exists())
@@ -7596,7 +7592,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, _ = self._write_instance_record(shared_root, "inst-pm-stale-legacy-delete")
+            target_root, _ = self._write_instance_record(shared_root, "act-pm-stale-legacy-delete")
             run_dir = shared_root / "run"
             run_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / ("launcher" + "-" + "current" + ".pid")).write_text(f"{os.getpid()}\n", encoding="utf-8")
@@ -7605,7 +7601,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-stale-legacy-delete", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-stale-legacy-delete", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7614,7 +7610,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
-            self.assertIn("Instance deleted: inst-pm-stale-legacy-delete", delete_result.stdout)
+            self.assertIn("Instance deleted: act-pm-stale-legacy-delete", delete_result.stdout)
             self.assertFalse(target_root.exists())
 
     def test_instance_delete_blocks_worktree_deregistration_failure(self) -> None:
@@ -7622,7 +7618,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, target_workspace = self._write_instance_record(shared_root, "inst-pm-remove-fail")
+            target_root, target_workspace = self._write_instance_record(shared_root, "act-pm-remove-fail")
             self._add_test_worktree(target_workspace)
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
@@ -7634,7 +7630,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_FAIL_WORKTREE_REMOVE"] = "1"
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-remove-fail", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-remove-fail", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7658,8 +7654,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             (external_instance_root / "instance.json").write_text(
                 json.dumps(
                     {
-                        "instance_id": "inst-pm-symlink",
-                        "buddy": "pm",
+                        "actor_id": "act-pm-symlink",
+                        "role": "pm",
                         "status": "inactive",
                         "current_task_id": "task-existing",
                         "current_track_id": "track-existing",
@@ -7677,14 +7673,14 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             sentinel = external_instance_root / "sentinel.txt"
             sentinel.write_text("keep\n", encoding="utf-8")
             self._add_test_worktree(external_workspace)
-            (instances_root / "inst-pm-symlink").symlink_to(external_instance_root, target_is_directory=True)
+            (instances_root / "act-pm-symlink").symlink_to(external_instance_root, target_is_directory=True)
 
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-symlink", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-symlink", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7694,7 +7690,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             self.assertEqual(delete_result.returncode, 3)
             self.assertIn("unsafe instance root", delete_result.stderr)
-            self.assertTrue((instances_root / "inst-pm-symlink").is_symlink())
+            self.assertTrue((instances_root / "act-pm-symlink").is_symlink())
             self.assertTrue(sentinel.exists())
             worktree_list = subprocess.run(
                 ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
@@ -7712,7 +7708,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             real_shared_root = external_root_path / ".codex-buddyswitch"
             instance_root, _ = self._write_instance_record(
                 real_shared_root,
-                "inst-pm-shared-root-symlink",
+                "act-pm-shared-root-symlink",
             )
             sentinel = instance_root / "sentinel.txt"
             sentinel.write_text("keep\n", encoding="utf-8")
@@ -7725,7 +7721,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "inst-pm-shared-root-symlink", "--yes"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-shared-root-symlink", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7744,7 +7740,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env = os.environ.copy()
             env["HOME"] = str(Path(source_home))
             env.pop("CODEX_HOME", None)
-            env["BUDDYSWITCH_DELETE_INSTANCE_ID"] = "inst-pm-direct"
+            env["BUDDYSWITCH_DELETE_ACTOR_ID"] = "act-pm-direct"
 
             completed = subprocess.run(
                 [str(LAUNCHER), "__locked-instance-delete"],
@@ -7758,7 +7754,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertEqual(completed.returncode, 2)
             self.assertIn("runtime lock required", completed.stderr)
 
-    def test_start_without_buddy_does_not_set_instance_env_vars(self) -> None:
+    def test_start_without_role_does_not_set_instance_env_vars(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -7799,8 +7795,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
-            env["BUDDYSWITCH_ACTIVE_BUDDY"] = "leaked-buddy"
-            env["BUDDYSWITCH_INSTANCE_ID"] = "leaked-instance-id"
+            env["BUDDYSWITCH_ROLE_ID"] = "leaked-role"
+            env["BUDDYSWITCH_ACTOR_ID"] = "leaked-actor-id"
             env["BUDDYSWITCH_INSTANCE_JSON"] = str(temp_root_path / "leaked-instance.json")
 
             completed = subprocess.run(
@@ -7813,11 +7809,11 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
             self.assertEqual(completed.returncode, 2)
             self.assertIn("Top-level command removed: start", completed.stderr)
-            self.assertIn("instance start --buddy <buddy>", completed.stderr)
+            self.assertIn("instance start --role <role>", completed.stderr)
             self.assertFalse(capture_path.exists(), "removed start command must not invoke codex")
             self.assertFalse((source_home_path / ".codex-buddyswitch").exists())
 
-    def test_start_with_buddy_requires_value(self) -> None:
+    def test_start_with_role_requires_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -7835,7 +7831,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy"],
+                [str(LAUNCHER), "instance", "start", "--role"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7844,9 +7840,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Missing value for --buddy", completed.stderr)
-            self.assertFalse(capture_path.exists(), "codex should not launch when --buddy is malformed")
-            self.assertFalse(shared_root.exists(), "malformed --buddy must fail before shared root mutation")
+            self.assertIn("Missing value for --role", completed.stderr)
+            self.assertFalse(capture_path.exists(), "codex should not launch when --role is malformed")
+            self.assertFalse(shared_root.exists(), "malformed --role must fail before shared root mutation")
 
     def test_instance_start_help_has_no_side_effects(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -7891,7 +7887,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--help"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm", "--help"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7900,13 +7896,13 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 0)
-            self.assertIn("buddyswitch-codex instance start --buddy <buddy>", completed.stdout)
+            self.assertIn("buddyswitch-codex instance start --role <role>", completed.stdout)
             self.assertFalse(capture_path.exists(), "help path must not launch Codex")
             self.assertFalse(calls_path.exists(), "help path must not call Codex binary")
             self.assertFalse(ready_file.exists(), "help path must not start browser")
             self.assertFalse(shared_root.exists(), "help path must not create shared instance state")
 
-    def test_locked_start_bootstrap_revalidates_buddy_before_instance_mutation(self) -> None:
+    def test_locked_start_bootstrap_revalidates_role_before_instance_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -7915,8 +7911,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_START_BUDDY"] = "unknown"
-            env["BUDDYSWITCH_START_INSTANCE_ID"] = "inst-unknown-demo"
+            env["BUDDYSWITCH_START_ROLE"] = "unknown"
+            env["BUDDYSWITCH_START_ACTOR_ID"] = "act-unknown-demo"
 
             direct_start = subprocess.run(
                 [
@@ -7934,10 +7930,10 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertNotEqual(direct_start.returncode, 0)
-            self.assertIn("Unknown buddy 'unknown'", direct_start.stderr)
-            self.assertFalse((shared_root / "instances").exists(), "invalid locked buddy must not create instances")
+            self.assertIn("Unknown role 'unknown'", direct_start.stderr)
+            self.assertFalse((shared_root / "instances").exists(), "invalid locked role must not create instances")
 
-    def test_locked_instance_inactive_rejects_traversal_instance_id(self) -> None:
+    def test_locked_instance_inactive_rejects_traversal_actor_id(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -7965,8 +7961,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(direct_inactive.returncode, 2)
-            self.assertIn("Invalid instance id", direct_inactive.stderr)
-            self.assertFalse(outside_path.exists(), "traversal instance id must not write outside instances root")
+            self.assertIn("Invalid actor id", direct_inactive.stderr)
+            self.assertFalse(outside_path.exists(), "traversal actor id must not write outside instances root")
 
     def test_locked_start_bootstrap_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -7990,7 +7986,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertIn("runtime lock required", direct_start.stderr)
             self.assertFalse(shared_root.exists(), "direct locked start bootstrap must not mutate shared root")
 
-    def test_locked_start_bootstrap_requires_buddy_env_before_workspace_setup(self) -> None:
+    def test_locked_start_bootstrap_requires_role_env_before_workspace_setup(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -8000,8 +7996,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env.pop("BUDDYSWITCH_START_BUDDY", None)
-            env.pop("BUDDYSWITCH_START_INSTANCE_ID", None)
+            env.pop("BUDDYSWITCH_START_ROLE", None)
+            env.pop("BUDDYSWITCH_START_ACTOR_ID", None)
 
             completed = subprocess.run(
                 [
@@ -8021,10 +8017,10 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("BUDDYSWITCH_START_BUDDY is required", completed.stderr)
-            self.assertFalse((shared_root / "workspace").exists(), "missing buddy env must fail before workspace prep")
+            self.assertIn("BUDDYSWITCH_START_ROLE is required", completed.stderr)
+            self.assertFalse((shared_root / "workspace").exists(), "missing role env must fail before workspace prep")
 
-    def test_locked_start_bootstrap_requires_instance_id_env(self) -> None:
+    def test_locked_start_bootstrap_requires_actor_id_env(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -8034,8 +8030,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_START_BUDDY"] = "pm"
-            env.pop("BUDDYSWITCH_START_INSTANCE_ID", None)
+            env["BUDDYSWITCH_START_ROLE"] = "pm"
+            env.pop("BUDDYSWITCH_START_ACTOR_ID", None)
 
             completed = subprocess.run(
                 [
@@ -8055,8 +8051,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("BUDDYSWITCH_START_INSTANCE_ID is required", completed.stderr)
-            self.assertFalse((shared_root / "workspace").exists(), "missing instance id must fail before workspace prep")
+            self.assertIn("BUDDYSWITCH_START_ACTOR_ID is required", completed.stderr)
+            self.assertFalse((shared_root / "workspace").exists(), "missing actor id must fail before workspace prep")
 
     def test_launcher_help_and_reset_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -8109,9 +8105,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
             self.assertEqual(help_result.returncode, 0)
             self.assertIn("Usage:", help_result.stdout)
-            self.assertIn("buddyswitch-codex instance buddies", help_result.stdout)
-            self.assertIn("buddyswitch-codex instance start --buddy <buddy>", help_result.stdout)
-            self.assertIn("buddyswitch-codex data cleanup --buddy <buddy>", help_result.stdout)
+            self.assertIn("buddyswitch-codex instance roles", help_result.stdout)
+            self.assertIn("buddyswitch-codex instance start --role <role>", help_result.stdout)
+            self.assertIn("buddyswitch-codex data cleanup --role <role>", help_result.stdout)
             self.assertIn("buddyswitch-codex env status", help_result.stdout)
             self.assertIn("buddyswitch-codex env reset [--yes]", help_result.stdout)
             self.assertIn("buddyswitch-codex help", help_result.stdout)
@@ -8121,7 +8117,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertIn("  help", help_result.stdout)
             self.assertNotIn("buddyswitch-codex [codex args...]", help_result.stdout)
             self.assertNotIn("buddyswitch-codex start", help_result.stdout)
-            self.assertNotIn("buddyswitch-codex buddy", help_result.stdout)
+            self.assertNotIn("buddyswitch-codex role", help_result.stdout)
             self.assertNotIn("buddyswitch-codex cleanup", help_result.stdout)
             self.assertNotIn("buddyswitch-codex reset", help_result.stdout)
             self.assertNotIn("buddyswitch-codex browser", help_result.stdout)
@@ -8167,8 +8163,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             command_hints = (
-                ("start", "instance start --buddy <buddy>"),
-                ("buddy", "instance buddies"),
+                ("start", "instance start --role <role>"),
+                ("role", "instance roles"),
                 ("cleanup", "data cleanup"),
                 ("reset", "env reset --yes"),
                 ("browser", "env browser status"),
@@ -8409,8 +8405,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-live-browser"
-            instance_root = shared_root / "instances" / instance_id
+            actor_id = "act-pm-live-browser"
+            instance_root = shared_root / "instances" / actor_id
             browser_dir = instance_root / "browser"
             browser_profile_dir = browser_dir / "profile"
             browser_profile_dir.mkdir(parents=True, exist_ok=True)
@@ -8418,8 +8414,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             (instance_root / "instance.json").write_text(
                 json.dumps(
                     {
-                        "instance_id": instance_id,
-                        "buddy": "pm",
+                        "actor_id": actor_id,
+                        "role": "pm",
                         "status": "inactive",
                         "workspace_dir": str(instance_root / "workspace"),
                         "browser_port": 9223,
@@ -8452,14 +8448,14 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-live-endpoint"
-            instance_root = shared_root / "instances" / instance_id
+            actor_id = "act-pm-live-endpoint"
+            instance_root = shared_root / "instances" / actor_id
             instance_root.mkdir(parents=True, exist_ok=True)
             (instance_root / "instance.json").write_text(
                 json.dumps(
                     {
-                        "instance_id": instance_id,
-                        "buddy": "pm",
+                        "actor_id": actor_id,
+                        "role": "pm",
                         "status": "inactive",
                         "workspace_dir": str(instance_root / "workspace"),
                         "browser_port": 9333,
@@ -9068,9 +9064,9 @@ exit 1
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_json = shared_root / "instances" / "inst-pm-existing" / "instance.json"
+            instance_json = shared_root / "instances" / "act-pm-existing" / "instance.json"
             instance_json.parent.mkdir(parents=True, exist_ok=True)
-            instance_json.write_text('{"instance_id":"inst-pm-existing","buddy":"pm"}\n', encoding="utf-8")
+            instance_json.write_text('{"actor_id":"act-pm-existing","role":"pm"}\n', encoding="utf-8")
 
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
@@ -9089,7 +9085,7 @@ exit 1
             self.assertIn("Top-level command removed: workspace", blocked_sync.stderr)
             self.assertFalse((shared_root / "workspace").exists(), "blocked sync must not create legacy workspace")
 
-    def test_start_with_buddy_does_not_migrate_legacy_durable_state_to_shared_state(self) -> None:
+    def test_start_with_role_does_not_migrate_legacy_durable_state_to_shared_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -9118,8 +9114,8 @@ exit 1
             legacy_reserved = legacy_workspace / "buddyswitch" / "content" / "runs" / "reserved" / "run-old.json"
             legacy_raw = legacy_workspace / "runs" / "raw" / "dump.json"
             for path, payload in (
-                (legacy_task, {"id": "task-demo", "buddy": "pm"}),
-                (legacy_run, {"run_id": "run-demo", "switch": {"buddy": "pm"}}),
+                (legacy_task, {"id": "task-demo", "role": "pm"}),
+                (legacy_run, {"run_id": "run-demo", "switch": {"role": "pm"}}),
                 (legacy_reserved, {"run_id": "run-old", "status": "reserved"}),
                 (legacy_raw, {"raw": True}),
             ):
@@ -9141,7 +9137,7 @@ exit 1
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -9172,8 +9168,8 @@ exit 1
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser-status"
-            instance_root, _ = self._write_instance_record(shared_root, instance_id, browser_port=9333)
+            actor_id = "act-pm-browser-status"
+            instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9333)
 
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
@@ -9188,7 +9184,7 @@ exit 1
             env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
 
             status_default = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "status", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "status", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -9207,7 +9203,7 @@ exit 1
                     "browser",
                     "status",
                     "--instance",
-                    instance_id,
+                    actor_id,
                     "--port",
                     "9444",
                     "--profile-dir",
@@ -9269,8 +9265,8 @@ exit 0
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser-invalid-port"
-            instance_root, _ = self._write_instance_record(shared_root, instance_id, browser_port=9333)
+            actor_id = "act-pm-browser-invalid-port"
+            instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9333)
 
             source_codex_home = source_home_path / ".codex"
             source_codex_home.mkdir(parents=True, exist_ok=True)
@@ -9316,7 +9312,7 @@ exit 0
             env["BUDDYSWITCH_TEST_CURL_CALLED_FILE"] = str(curl_called_path)
 
             ensure_invalid_port = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id, "--port", "70000"],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id, "--port", "70000"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -9339,8 +9335,8 @@ exit 0
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-lock-invalid-port"
-            instance_root, _ = self._write_instance_record(shared_root, instance_id, browser_port=9333)
+            actor_id = "act-pm-lock-invalid-port"
+            instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9333)
 
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
@@ -9366,7 +9362,7 @@ exit 0
             holder = self._spawn_lock_holder(lock_path)
             try:
                 ensure_invalid_port = subprocess.run(
-                    [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id, "--port", "70000"],
+                    [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id, "--port", "70000"],
                     cwd=ROOT,
                     env=env,
                     text=True,
@@ -9390,8 +9386,8 @@ exit 0
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser-ensure"
-            instance_root, _ = self._write_instance_record(shared_root, instance_id, browser_port=9333)
+            actor_id = "act-pm-browser-ensure"
+            instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9333)
 
             source_codex_home = source_home_path / ".codex"
             source_codex_home.mkdir(parents=True, exist_ok=True)
@@ -9436,7 +9432,7 @@ exit 0
                     "browser",
                     "ensure",
                     "--instance",
-                    instance_id,
+                    actor_id,
                     "--port",
                     "9444",
                     "--profile-dir",
@@ -9473,8 +9469,8 @@ exit 0
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser-stale-mcp"
-            instance_root, _ = self._write_instance_record(shared_root, instance_id, browser_port=9333)
+            actor_id = "act-pm-browser-stale-mcp"
+            instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9333)
 
             source_codex_home = source_home_path / ".codex"
             source_codex_home.mkdir(parents=True, exist_ok=True)
@@ -9530,7 +9526,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             ensure_result = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id, "--port", "9444"],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id, "--port", "9444"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -9565,7 +9561,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            self._write_instance_record(shared_root, "inst-pm-browser-lock")
+            self._write_instance_record(shared_root, "act-pm-browser-lock")
 
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
@@ -9576,7 +9572,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             holder = self._spawn_lock_holder(lock_path)
             try:
                 blocked_ensure = subprocess.run(
-                    [str(LAUNCHER), "env", "browser", "ensure", "--instance", "inst-pm-browser-lock"],
+                    [str(LAUNCHER), "env", "browser", "ensure", "--instance", "act-pm-browser-lock"],
                     cwd=ROOT,
                     env=env,
                     text=True,
@@ -9589,7 +9585,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             self.assertEqual(blocked_ensure.returncode, RUNTIME_LOCK_BUSY_EXIT_CODE)
             self.assertIn("runtime state busy", blocked_ensure.stderr)
             self.assertFalse(
-                (shared_root / "instances" / "inst-pm-browser-lock" / "browser").exists(),
+                (shared_root / "instances" / "act-pm-browser-lock" / "browser").exists(),
                 "blocked browser ensure must not create browser runtime state",
             )
 
@@ -9619,8 +9615,8 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_id = "inst-pm-browser-invalid-env-port"
-            instance_root, _ = self._write_instance_record(shared_root, instance_id)
+            actor_id = "act-pm-browser-invalid-env-port"
+            instance_root, _ = self._write_instance_record(shared_root, actor_id)
 
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
@@ -9629,7 +9625,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
 
             before_instance_tree = self._snapshot_tree(instance_root)
             ensure_result = subprocess.run(
-                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -10049,7 +10045,7 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "${tmp_root}"' EXIT
 export BUDDYSWITCH_SHARED_ROOT="${tmp_root}/shared"
 export BUDDYSWITCH_WORKSPACE_DIR="${tmp_root}/workspace"
-export BUDDYSWITCH_ACTIVE_BUDDY="pm"
+export BUDDYSWITCH_ROLE_ID="pm"
 export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${tmp_root}/AGENTS.md"
 mkdir -p "${BUDDYSWITCH_WORKSPACE_DIR}"
 printf '# Custom Runtime AGENTS\n\nFramework-owned prose can iterate freely.\n' >"${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
@@ -10065,16 +10061,16 @@ cmp "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}" "${BUDDYSWITCH_WORKSPACE_DIR}/AGENT
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-    def test_buddy_agents_template_requirement_checks_presence_only(self) -> None:
+    def test_role_agents_template_requirement_checks_presence_only(self) -> None:
         command = r'''
 set -euo pipefail
 source "tools/launcher/env.sh"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "${tmp_root}"' EXIT
 export BUDDYSWITCH_REPO_ROOT="${tmp_root}/repo"
-mkdir -p "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/assets/buddies/pm"
-printf '# Custom Runtime AGENTS\n\nNo required wording.\n' >"${BUDDYSWITCH_REPO_ROOT}/tools/launcher/assets/buddies/pm/AGENTS.md"
-buddyswitch_require_buddy_agents_template pm
+mkdir -p "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/assets/roles/pm"
+printf '# Custom Runtime AGENTS\n\nNo required wording.\n' >"${BUDDYSWITCH_REPO_ROOT}/tools/launcher/assets/roles/pm/AGENTS.md"
+buddyswitch_require_role_agents_template pm
 printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
 '''
         completed = subprocess.run(
@@ -10085,7 +10081,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             check=False,
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        self.assertTrue(completed.stdout.strip().endswith("/tools/launcher/assets/buddies/pm/AGENTS.md"))
+        self.assertTrue(completed.stdout.strip().endswith("/tools/launcher/assets/roles/pm/AGENTS.md"))
 
     def test_workspace_sync_restores_runtime_outputs_when_worktree_rebuild_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -10254,7 +10250,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -10265,12 +10261,12 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_root = shared_root / "instances" / payload["instance_id"]
+            instance_root = shared_root / "instances" / payload["actor_id"]
             workspace_dir = instance_root / "workspace"
             self.assertTrue(workspace_dir.exists())
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", payload["instance_id"]],
+                [str(LAUNCHER), "instance", "stop", payload["actor_id"]],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -10352,7 +10348,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -10363,7 +10359,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
-            instance_root = shared_root / "instances" / payload["instance_id"]
+            instance_root = shared_root / "instances" / payload["actor_id"]
             project_workspace_dir = shared_root / "project" / "workspace"
             self.assertTrue(project_workspace_dir.exists())
 
@@ -10376,7 +10372,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             self.assertIn(str(project_workspace_dir), worktrees_before)
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", payload["instance_id"]],
+                [str(LAUNCHER), "instance", "stop", payload["actor_id"]],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -10479,7 +10475,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
 
             try:
                 completed = subprocess.run(
-                    [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                    [str(LAUNCHER), "instance", "start", "--role", "pm"],
                     cwd=ROOT,
                     env=env,
                     text=True,
@@ -10548,7 +10544,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,

@@ -39,7 +39,7 @@ description: Use when Dev starts source exploration, implementation, bug fixing,
 
 ## Verification
 - Confirm `source_workspace.path` is non-empty and relative.
-- Confirm `source_workspace.access` aligns with buddy role before edits.
+- Confirm `source_workspace.access` aligns with role role before edits.
 
 ## Examples
 - `source_workspace.path=projects/app`, `access=write`, `state=has_source` -> proceed to implementation.

@@ -24,40 +24,40 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instance_json = self._runtime_path("instance.json")
-        self.instance_id = self._instance_id_for("pm")
+        self.actor_id = self._actor_id_for("pm")
         self.instance_payload = {
-            "instance_id": self.instance_id,
-            "buddy": "pm",
+            "actor_id": self.actor_id,
+            "role": "pm",
             "status": "active",
             "workspace_dir": str(self.runtime_root),
         }
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _instance_id_for(self, buddy: str) -> str:
+    def _actor_id_for(self, role: str) -> str:
         suffix = {
             "dev": "1de000000001",
             "pm": "1de000000002",
             "design": "1de000000003",
             "market": "1de000000004",
             "test": "1de000000005",
-        }[buddy]
-        return f"inst-{buddy}-{suffix}"
+        }[role]
+        return f"act-{role}-{suffix}"
 
-    def _dispatch(self, *, active_buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_id = self._instance_id_for(active_buddy)
+    def _dispatch(self, *, active_role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        actor_id = self._actor_id_for(active_role)
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy=active_buddy,
-            instance_id=instance_id,
+            active_role=active_role,
+            actor_id=actor_id,
             instance_json=self.instance_json,
-            instance_payload={**self.instance_payload, "instance_id": instance_id, "buddy": active_buddy},
+            instance_payload={**self.instance_payload, "actor_id": actor_id, "role": active_role},
             manifest=self.manifest,
             manifest_path=self.manifest_path,
         )
 
     def test_task_propose_rejects_payload_owner_fields(self) -> None:
         payload = self._dispatch(
-            active_buddy="pm",
+            active_role="pm",
             tool="task",
             action="propose",
             args={
@@ -67,8 +67,8 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "task": {
                     "title": "Identity",
                     "body": "runless",
-                    "buddy": "design",
-                    "active_buddy": "design",
+                    "role": "design",
+                    "active_role": "design",
                 },
             },
         )
@@ -79,7 +79,7 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_role_auth_uses_runtime_actor_not_payload_identity_hints(self) -> None:
         payload = self._dispatch(
-            active_buddy="dev",
+            active_role="dev",
             tool="track",
             action="create",
             args={
@@ -87,8 +87,8 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "title": "Identity spoof",
                 "outcome": "x",
                 "appetite": "1d",
-                "active_buddy": "pm",
-                "buddy": "pm",
+                "active_role": "pm",
+                "role": "pm",
             },
         )
 
@@ -102,7 +102,7 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_runtime_surface_has_no_run_or_binding_identity_tools(self) -> None:
         payload = self._dispatch(
-            active_buddy="pm",
+            active_role="pm",
             tool="context",
             action="list_sources",
             args={},
@@ -110,7 +110,7 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(payload["ok"], msg=payload)
         sources = payload["sources"]
         self.assertNotIn("memories", sources)
-        self.assertNotIn("buddybox", sources)
+        self.assertNotIn("actor_private", sources)
         self.assertIn("writable_surfaces", sources)
         writable = sources["writable_surfaces"] or {}
         self.assertFalse(writable.get("mutates_product_state"))

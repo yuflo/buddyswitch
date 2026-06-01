@@ -35,7 +35,7 @@ class CleanupSystemTests(unittest.TestCase):
                 "id": "track-demo",
                 "title": "Demo",
                 "outcome": "Cleanup fixture",
-                "owner_buddy": "pm",
+                "owner_role": "pm",
                 "state": "active",
                 "health": "ok",
                 "appetite": "1 day",
@@ -54,7 +54,7 @@ class CleanupSystemTests(unittest.TestCase):
                 "id": "art-pm-r1",
                 "kind": "prd",
                 "title": "PM PRD",
-                "created_by": "pm",
+                "created_by_actor": {"actor_id": "act-pm-clean", "role_id": "pm"},
                 "published_to_track": None,
                 "publication_role": None,
                 "summary": "",
@@ -73,7 +73,7 @@ class CleanupSystemTests(unittest.TestCase):
                 "id": "art-dev-r1",
                 "kind": "implementation-report",
                 "title": "DEV report",
-                "created_by": "dev",
+                "created_by_actor": {"actor_id": "act-dev-clean", "role_id": "dev"},
                 "published_to_track": None,
                 "publication_role": None,
                 "summary": "",
@@ -90,12 +90,12 @@ class CleanupSystemTests(unittest.TestCase):
             "buddyswitch/objects/handoffs/handoff-stale.json",
             {
                 "id": "handoff-stale",
-                "source_buddy": "pm",
-                "target_buddy": "dev",
+                "source_role": "pm",
+                "target_role": "dev",
             },
         )
-        self._write_taskbox_task(instance_id="inst-pm-clean", buddy="pm", task_id="task-pm")
-        self._write_taskbox_task(instance_id="inst-dev-clean", buddy="dev", task_id="task-dev")
+        self._write_taskbox_task(actor_id="act-pm-clean", role="pm", task_id="task-pm")
+        self._write_taskbox_task(actor_id="act-dev-clean", role="dev", task_id="task-dev")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -108,15 +108,15 @@ class CleanupSystemTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _instance_workspace(self, *, instance_id: str, buddy: str) -> Path:
-        instance_root = self.shared_root / "instances" / instance_id
+    def _instance_workspace(self, *, actor_id: str, role: str) -> Path:
+        instance_root = self.shared_root / "instances" / actor_id
         workspace = instance_root / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
         (instance_root / "instance.json").write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "instance_root": str(instance_root),
                     "workspace_dir": str(workspace),
@@ -131,16 +131,16 @@ class CleanupSystemTests(unittest.TestCase):
         )
         return workspace
 
-    def _write_taskbox_task(self, *, instance_id: str, buddy: str, task_id: str) -> None:
-        taskbox_root = self.shared_root / "instances" / instance_id / "taskbox" / buddy
+    def _write_taskbox_task(self, *, actor_id: str, role: str, task_id: str) -> None:
+        taskbox_root = self.shared_root / "instances" / actor_id / "taskbox" / role
         (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
         (taskbox_root / "history.md").write_text("", encoding="utf-8")
         self._write_json(
-            f"../instances/{instance_id}/taskbox/{buddy}/tasks/{task_id}.json",
+            f"../instances/{actor_id}/taskbox/{role}/tasks/{task_id}.json",
             {
                 "id": task_id,
-                "owner_buddy": buddy,
-                "title": f"{buddy} task",
+                "owner_actor": {"actor_id": actor_id, "role_id": role},
+                "title": f"{role} task",
                 "summary": "",
                 "status": "active",
                 "priority": "normal",
@@ -154,12 +154,12 @@ class CleanupSystemTests(unittest.TestCase):
 
     def test_cleanup_plan_excludes_handoff_indexing(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
-            scope="buddy",
-            buddy="pm",
+            scope="role",
+            role="pm",
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
         )
-        self.assertEqual(plan["scope"], "buddy")
+        self.assertEqual(plan["scope"], "role")
         self.assertIn("art-pm-r1", plan["artifact_object_ids"])
         self.assertNotIn("task_" + "object_ids", plan)
         self.assertNotIn("task_" + "records", plan)
@@ -171,7 +171,7 @@ class CleanupSystemTests(unittest.TestCase):
     def test_execute_all_data_cleanup_recreates_active_skeleton_only(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
             scope="all-data",
-            buddy=None,
+            role=None,
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
         )
@@ -191,15 +191,30 @@ class CleanupSystemTests(unittest.TestCase):
         """MCT-RUN-003: All-data cleanup plan discovers message and comment objects."""
         self._write_json(
             "buddyswitch/objects/messages/msg-test.json",
-            {"id": "msg-test", "from_buddy": "pm", "to_buddy": "dev", "content": "hello", "reply_to": None, "created_at": "2026-05-17T00:00:00+08:00"},
+            {
+                "id": "msg-test",
+                "from_actor_address": {"actor_id": "act-pm-clean", "role_id": "pm"},
+                "to_actor_address": {"actor_id": "act-dev-clean", "role_id": "dev"},
+                "content": "hello",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:00+08:00",
+            },
         )
         self._write_json(
             "buddyswitch/objects/comments/comment-test.json",
-            {"id": "comment-test", "target_type": "track", "target_id": "track-demo", "author_buddy": "design", "content": "looks good", "reply_to": None, "created_at": "2026-05-17T00:00:00+08:00"},
+            {
+                "id": "comment-test",
+                "target_type": "track",
+                "target_id": "track-demo",
+                "by_actor": {"actor_id": "act-design-clean", "role_id": "design"},
+                "content": "looks good",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:00+08:00",
+            },
         )
         plan = env_cleanup.build_cleanup_plan(
             scope="all-data",
-            buddy=None,
+            role=None,
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
         )
@@ -208,13 +223,13 @@ class CleanupSystemTests(unittest.TestCase):
         self.assertIn("comment_object_ids", plan)
         self.assertIn("comment-test", plan["comment_object_ids"])
 
-    def test_buddy_cleanup_deletes_authored_comments_without_mutating_surviving_targets(self) -> None:
+    def test_role_cleanup_deletes_authored_comments_without_mutating_surviving_targets(self) -> None:
         track_path = self._path("buddyswitch/objects/tracks/track-clean-comment.json")
         track_payload = {
             "id": "track-clean-comment",
             "title": "Clean Comment",
             "outcome": "clean comment",
-            "owner_buddy": "pm",
+            "owner_role": "pm",
             "state": "active",
             "health": "ok",
             "appetite": "1 day",
@@ -233,7 +248,7 @@ class CleanupSystemTests(unittest.TestCase):
                 "id": "comment-dev-clean",
                 "target_type": "track",
                 "target_id": "track-clean-comment",
-                "author_buddy": "dev",
+                "by_actor": {"actor_id": "act-dev-clean", "role_id": "dev"},
                 "content": "delete me",
                 "reply_to": None,
                 "created_at": "2026-05-17T00:00:00+08:00",
@@ -245,7 +260,7 @@ class CleanupSystemTests(unittest.TestCase):
                 "id": "comment-design-keep",
                 "target_type": "track",
                 "target_id": "track-clean-comment",
-                "author_buddy": "design",
+                "by_actor": {"actor_id": "act-design-clean", "role_id": "design"},
                 "content": "keep me",
                 "reply_to": None,
                 "created_at": "2026-05-17T00:00:01+08:00",
@@ -253,8 +268,8 @@ class CleanupSystemTests(unittest.TestCase):
         )
 
         plan = env_cleanup.build_cleanup_plan(
-            scope="buddy",
-            buddy="dev",
+            scope="role",
+            role="dev",
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
         )
@@ -274,7 +289,7 @@ class CleanupSystemTests(unittest.TestCase):
                 str(self.repo_root),
                 "--manifest",
                 str(self.manifest_path),
-                "--buddy",
+                "--role",
                 "pm",
                 "--json",
             ],
@@ -288,21 +303,21 @@ class CleanupSystemTests(unittest.TestCase):
         self.assertNotIn("handoff_object_ids", payload)
         self.assertNotIn("handoff_records", payload)
 
-    def test_buddy_cleanup_uses_instance_buddybox_owner_boundary(self) -> None:
-        pm_workspace = self._instance_workspace(instance_id="inst-pm-cleanup", buddy="pm")
-        dev_workspace = self._instance_workspace(instance_id="inst-dev-cleanup", buddy="dev")
+    def test_role_cleanup_uses_instance_actor_private_owner_boundary(self) -> None:
+        pm_workspace = self._instance_workspace(actor_id="act-pm-cleanup", role="pm")
+        dev_workspace = self._instance_workspace(actor_id="act-dev-cleanup", role="dev")
 
-        pm_owned = pm_workspace / "buddybox" / "notes" / "draft.md"
+        pm_owned = pm_workspace / "private" / "notes" / "draft.md"
         pm_owned.parent.mkdir(parents=True, exist_ok=True)
         pm_owned.write_text("pm-owned", encoding="utf-8")
 
-        dev_owned = dev_workspace / "buddybox" / "notes" / "keep.md"
+        dev_owned = dev_workspace / "private" / "notes" / "keep.md"
         dev_owned.parent.mkdir(parents=True, exist_ok=True)
         dev_owned.write_text("dev-owned", encoding="utf-8")
 
         plan = env_cleanup.build_cleanup_plan(
-            scope="buddy",
-            buddy="pm",
+            scope="role",
+            role="pm",
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
             shared_root=self.shared_root,
@@ -310,7 +325,7 @@ class CleanupSystemTests(unittest.TestCase):
         self.assertIn("path_categories", plan)
         self.assertTrue(
             any(
-                category == "buddybox_private_files"
+                category == "actor_private_files"
                 for category in plan["path_categories"].values()
             ),
             msg=plan,
@@ -322,7 +337,7 @@ class CleanupSystemTests(unittest.TestCase):
 
         all_data_plan = env_cleanup.build_cleanup_plan(
             scope="all-data",
-            buddy=None,
+            role=None,
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
             shared_root=self.shared_root,

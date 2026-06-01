@@ -174,15 +174,15 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         has_next_options = len(meaningful_next_options) > 0
         self.assertTrue(has_next_actions or has_next_options, msg=payload)
 
-    def _instance_json(self, *, buddy: str, instance_id: str) -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        path = self._runtime_path(f"instances/{instance_id}/instance.json")
+    def _instance_json(self, *, role: str, actor_id: str) -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        path = self._runtime_path(f"instances/{actor_id}/instance.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -200,21 +200,21 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self,
         *,
         instance_json: Path,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         tool: str,
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
                 "request_id": f"req-response-{uuid.uuid4().hex}",
                 "method": "env.tool",
                 "params": {
-                    "instance_id": instance_id,
-                    "active_buddy": buddy,
+                    "actor_id": actor_id,
+                    "active_role": role,
                     "tool": tool,
                     "action": action,
                     "args": args,
@@ -317,11 +317,11 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertNotIn("run", tools)
 
     def test_context_get_and_summarize_catalog_scope(self) -> None:
-        instance_id = "inst-pm-context-scope"
-        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        actor_id = "act-pm-context-scope"
+        instance_json = self._instance_json(role="pm", actor_id=actor_id)
 
-        full = self._dispatch(instance_json=instance_json, instance_id=instance_id, buddy="pm", tool="context", action="get", args={})
-        summary = self._dispatch(instance_json=instance_json, instance_id=instance_id, buddy="pm", tool="context", action="summarize", args={})
+        full = self._dispatch(instance_json=instance_json, actor_id=actor_id, role="pm", tool="context", action="get", args={})
+        summary = self._dispatch(instance_json=instance_json, actor_id=actor_id, role="pm", tool="context", action="summarize", args={})
 
         self._assert_success_contract(full)
         self._assert_success_contract(summary)
@@ -375,12 +375,12 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertNotIn("comment.reopen", full.get("operation_semantics", {}))
 
     def test_unknown_tool_rejection_contract(self) -> None:
-        instance_id = "inst-pm-reject"
-        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        actor_id = "act-pm-reject"
+        instance_json = self._instance_json(role="pm", actor_id=actor_id)
         payload = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="unknown",
             action="list",
             args={},
@@ -389,13 +389,13 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual((payload.get("error") or {}).get("code"), "E_ENV_TOOL")
 
     def test_track_and_artifact_success_contract(self) -> None:
-        instance_id = "inst-pm-success"
-        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        actor_id = "act-pm-success"
+        instance_json = self._instance_json(role="pm", actor_id=actor_id)
 
         track = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -410,8 +410,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         artifact = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -432,8 +432,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         published = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -450,12 +450,12 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("material_added", changes)
 
     def test_artifact_template_permission_rejection_uses_structured_contract(self) -> None:
-        instance_id = "inst-pm-template-contract"
-        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        actor_id = "act-pm-template-contract"
+        instance_json = self._instance_json(role="pm", actor_id=actor_id)
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -475,12 +475,12 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
 
     def test_artifact_attach_file_inline_blob_rejection_uses_structured_contract(self) -> None:
-        instance_id = "inst-design-attach-contract"
-        instance_json = self._instance_json(buddy="design", instance_id=instance_id)
+        actor_id = "act-design-attach-contract"
+        instance_json = self._instance_json(role="design", actor_id=actor_id)
         created = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="design",
+            actor_id=actor_id,
+            role="design",
             tool="artifact",
             action="create_revision",
             args={
@@ -495,14 +495,14 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         rejected = self._dispatch(
             instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="design",
+            actor_id=actor_id,
+            role="design",
             tool="artifact",
             action="attach_file",
             args={
                 "artifact_id": "art-design-attach-contract",
                 "filename": "desktop.png",
-                "source_path": str(self._runtime_path(f"instances/{instance_id}/workspace/buddybox/screenshots/desktop.png")),
+                "source_path": str(self._runtime_path(f"instances/{actor_id}/workspace/private/screenshots/desktop.png")),
                 "content_base64": "aGVsbG8=",
             },
         )
@@ -512,14 +512,14 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(rejected.get("permission_boundary"), "request-payload")
 
     def test_representative_responses_match_declared_effect_classes(self) -> None:
-        instance_id = "inst-declared-effects"
-        pm_instance = self._instance_json(buddy="pm", instance_id=instance_id)
-        dev_instance = self._instance_json(buddy="dev", instance_id=f"{instance_id}-dev")
+        actor_id = "act-declared-effects"
+        pm_instance = self._instance_json(role="pm", actor_id=actor_id)
+        dev_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev")
 
         context_read = self._dispatch(
             instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev",
+            role="dev",
             tool="context",
             action="get",
             args={},
@@ -528,8 +528,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         track = self._dispatch(
             instance_json=pm_instance,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -544,8 +544,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         draft = self._dispatch(
             instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev",
+            role="dev",
             tool="artifact",
             action="create_revision",
             args={
@@ -557,13 +557,13 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             },
         )
         self.assertTrue(draft.get("ok"), msg=draft)
-        source = self.runtime_root / "buddybox" / "notes" / "effects.txt"
+        source = self.runtime_root / "private" / "notes" / "effects.txt"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("private", encoding="utf-8")
         attached = self._dispatch(
             instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev",
+            role="dev",
             tool="artifact",
             action="attach_file",
             args={
@@ -578,8 +578,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         token = self._dispatch(
             instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev",
+            role="dev",
             tool="evidence",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": "art-declared-effects-r1"},
@@ -591,8 +591,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         dev_instance.write_text(json.dumps(dev_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         search_plan = self._dispatch(
             instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev",
+            role="dev",
             tool="search",
             action="request",
             args={"query": "BuddySwitch", "backend": "browser", "engine": "google"},
@@ -605,8 +605,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         dev_instance.write_text(json.dumps(dev_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         browser_open = self._dispatch(
             instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev",
+            role="dev",
             tool="search",
             action="open_browser",
             args={"query": "BuddySwitch", "engine": "google"},
@@ -615,11 +615,11 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertFalse(browser_open.get("mutates_product_state"), msg=browser_open)
         self.assertEqual(browser_open.get("page_opened"), True, msg=browser_open)
 
-        no_browser_instance = self._instance_json(buddy="dev", instance_id=f"{instance_id}-dev-no-browser")
+        no_browser_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev-no-browser")
         browser_rejection = self._dispatch(
             instance_json=no_browser_instance,
-            instance_id=f"{instance_id}-dev-no-browser",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev-no-browser",
+            role="dev",
             tool="search",
             action="open_browser",
             args={"query": "BuddySwitch", "engine": "google"},
@@ -628,12 +628,12 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("browser", str(browser_rejection.get("why_blocked", "")).lower())
 
     def test_publication_success_responses_describe_object_mutations(self) -> None:
-        instance_id = "inst-pm-mutation-response"
-        pm_instance = self._instance_json(buddy="pm", instance_id=instance_id)
+        actor_id = "act-pm-mutation-response"
+        pm_instance = self._instance_json(role="pm", actor_id=actor_id)
         track = self._dispatch(
             instance_json=pm_instance,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -646,11 +646,11 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         self.assertTrue(track.get("ok"), msg=track)
 
-        test_instance = self._instance_json(buddy="test", instance_id=instance_id)
+        test_instance = self._instance_json(role="test", actor_id=actor_id)
         proof_draft = self._dispatch(
             instance_json=test_instance,
-            instance_id=instance_id,
-            buddy="test",
+            actor_id=actor_id,
+            role="test",
             tool="artifact",
             action="create_revision",
             args={
@@ -665,8 +665,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         proof = self._dispatch(
             instance_json=test_instance,
-            instance_id=instance_id,
-            buddy="test",
+            actor_id=actor_id,
+            role="test",
             tool="track",
             action="add_proof",
             args={
@@ -684,14 +684,14 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("update_added", changes)
 
     def test_request_write_and_rejection_paths_follow_canonical_contract(self) -> None:
-        instance_id = "inst-request-response"
-        pm_instance = self._instance_json(buddy="pm", instance_id=instance_id)
-        dev_instance = self._instance_json(buddy="dev", instance_id=f"{instance_id}-dev")
+        actor_id = "act-request-response"
+        pm_instance = self._instance_json(role="pm", actor_id=actor_id)
+        dev_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev")
 
         track = self._dispatch(
             instance_json=pm_instance,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -706,13 +706,13 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         created = self._dispatch(
             instance_json=pm_instance,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": "track-request-response",
-                "to_buddy": "dev",
+                "to_role": "dev",
                 "title": "Implement",
                 "summary": "Implement request response coverage.",
                 "target_refs": [{"type": "track", "id": "track-request-response"}],
@@ -725,8 +725,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         unauthorized = self._dispatch(
             instance_json=pm_instance,
-            instance_id=instance_id,
-            buddy="pm",
+            actor_id=actor_id,
+            role="pm",
             tool="request",
             action="accept",
             args={"request_id": request_id},
@@ -735,8 +735,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         accepted = self._dispatch(
             instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
+            actor_id=f"{actor_id}-dev",
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": request_id},
@@ -747,7 +747,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = tool_results.rejection(
             tool="track",
             action="track.create",
-            active_buddy="pm",
+            active_role="pm",
             code="E_TRACK_PAYLOAD",
             message="now must be an object",
             permission_boundary="request-payload",
@@ -772,7 +772,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             tool_results.rejection(
                 tool="track",
                 action="track.create",
-                active_buddy="pm",
+                active_role="pm",
                 code="E_TRACK_PAYLOAD",
                 message="now must be an object",
                 permission_boundary="request-payload",
@@ -786,15 +786,15 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             )
 
     def test_high_friction_payload_rejections_include_field_errors(self) -> None:
-        pm_instance_id = "inst-pm-field-errors"
-        dev_instance_id = "inst-dev-field-errors"
-        pm_instance_json = self._instance_json(buddy="pm", instance_id=pm_instance_id)
-        dev_instance_json = self._instance_json(buddy="dev", instance_id=dev_instance_id)
+        pm_actor_id = "act-pm-field-errors"
+        dev_actor_id = "act-dev-field-errors"
+        pm_instance_json = self._instance_json(role="pm", actor_id=pm_actor_id)
+        dev_instance_json = self._instance_json(role="dev", actor_id=dev_actor_id)
 
         created = self._dispatch(
             instance_json=pm_instance_json,
-            instance_id=pm_instance_id,
-            buddy="pm",
+            actor_id=pm_actor_id,
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -808,8 +808,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertTrue(created.get("ok"), msg=created)
         draft = self._dispatch(
             instance_json=dev_instance_json,
-            instance_id=dev_instance_id,
-            buddy="dev",
+            actor_id=dev_actor_id,
+            role="dev",
             tool="artifact",
             action="create_revision",
             args={
@@ -827,8 +827,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "track.create.now",
                 self._dispatch(
                     instance_json=pm_instance_json,
-                    instance_id=pm_instance_id,
-                    buddy="pm",
+                    actor_id=pm_actor_id,
+                    role="pm",
                     tool="track",
                     action="create",
                     args={
@@ -845,8 +845,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "track.update_now.now",
                 self._dispatch(
                     instance_json=pm_instance_json,
-                    instance_id=pm_instance_id,
-                    buddy="pm",
+                    actor_id=pm_actor_id,
+                    role="pm",
                     tool="track",
                     action="update_now",
                     args={"track_id": "track-field-errors", "now": {"blocker": None}},
@@ -857,8 +857,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "track.add_update.refs",
                 self._dispatch(
                     instance_json=pm_instance_json,
-                    instance_id=pm_instance_id,
-                    buddy="pm",
+                    actor_id=pm_actor_id,
+                    role="pm",
                     tool="track",
                     action="add_update",
                     args={
@@ -874,8 +874,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "artifact.create_revision.source_refs",
                 self._dispatch(
                     instance_json=dev_instance_json,
-                    instance_id=dev_instance_id,
-                    buddy="dev",
+                    actor_id=dev_actor_id,
+                    role="dev",
                     tool="artifact",
                     action="create_revision",
                     args={
@@ -891,8 +891,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "artifact.attach_file.source_path",
                 self._dispatch(
                     instance_json=dev_instance_json,
-                    instance_id=dev_instance_id,
-                    buddy="dev",
+                    actor_id=dev_actor_id,
+                    role="dev",
                     tool="artifact",
                     action="attach_file",
                     args={
@@ -903,21 +903,21 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "source_path",
             ),
             (
-                "comment.add.mentions",
+                "comment.add.mentioned_actors",
                 self._dispatch(
                     instance_json=pm_instance_json,
-                    instance_id=pm_instance_id,
-                    buddy="pm",
+                    actor_id=pm_actor_id,
+                    role="pm",
                     tool="comment",
                     action="add",
                     args={
                         "target_type": "track",
                         "target_id": "track-field-errors",
                         "content": "check mentions",
-                        "mentions": "pm",
+                        "mentioned_actors": "pm",
                     },
                 ),
-                "mentions",
+                "mentioned_actors",
             ),
         ]
 

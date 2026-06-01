@@ -24,12 +24,12 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_id = self._runtime_instance_id(buddy="pm", label="inst-pm-task-arch")
-        self.instance_root = self._runtime_path(f"instances/{self.instance_id}")
+        self.actor_id = self._runtime_actor_id(role="pm", label="act-pm-task-arch")
+        self.instance_root = self._runtime_path(f"instances/{self.actor_id}")
         self.instance_json = self.instance_root / "instance.json"
         self.instance_payload = {
-            "instance_id": self.instance_id,
-            "buddy": "pm",
+            "actor_id": self.actor_id,
+            "role": "pm",
             "status": "active",
             "instance_root": str(self.instance_root),
             "workspace_dir": str(self.runtime_root),
@@ -38,23 +38,23 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         (self.instance_root / "taskbox" / "pm" / "history.md").write_text("", encoding="utf-8")
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-pm-task-arch")
+    def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label="act-pm-task-arch")
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=self.instance_json,
-            instance_payload={**self.instance_payload, "instance_id": instance_id, "buddy": buddy},
+            instance_payload={**self.instance_payload, "actor_id": actor_id, "role": role},
             manifest=self.manifest,
             manifest_path=self.manifest_path,
         )
 
-    def _task_file(self, task_id: str, *, buddy: str = "pm") -> Path:
-        return self.instance_root / "taskbox" / buddy / "tasks" / f"{task_id}.json"
+    def _task_file(self, task_id: str, *, role: str = "pm") -> Path:
+        return self.instance_root / "taskbox" / role / "tasks" / f"{task_id}.json"
 
-    def _history_file(self, *, buddy: str = "pm") -> Path:
-        return self.instance_root / "taskbox" / buddy / "history.md"
+    def _history_file(self, *, role: str = "pm") -> Path:
+        return self.instance_root / "taskbox" / role / "history.md"
 
     def _snapshot_json_dir(self, relative_dir: str) -> dict[str, str]:
         root = self._runtime_path(relative_dir)
@@ -88,10 +88,10 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         skill_ids = {row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)}
         self.assertIn("task-management", skill_ids)
         self.assertNotIn("task-tool", skill_ids)
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            skills = set(buddy.get("skills", []))
-            with self.subTest(buddy=buddy.get("id")):
+        for role in self.manifest.get("roles", []):
+            assert isinstance(role, dict)
+            skills = set(role.get("skills", []))
+            with self.subTest(role=role.get("id")):
                 self.assertIn("task-management", skills)
                 self.assertNotIn("task-tool", skills)
 
@@ -106,7 +106,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         env_store.create_track(
             "track-task-arch",
             "Task Arch",
-            owner_buddy="pm",
+            owner_role="pm",
             outcome="Validate private task-only object writes.",
             appetite="1 day",
             now={"next": "Create private tasks", "blocker": None},
@@ -123,7 +123,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         before_artifact = json.loads(env_store.artifact_file("art-pm-task-arch").read_text(encoding="utf-8"))
 
         payload = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="task",
             action="propose",
             args={
@@ -155,7 +155,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertNotIn("current_track_id", stored_instance)
 
     def test_context_decision_surface_names_new_task_actions(self) -> None:
-        payload = self._dispatch(buddy="pm", tool="context", action="get", args={})
+        payload = self._dispatch(role="pm", tool="context", action="get", args={})
         self.assertTrue(payload["ok"], msg=payload)
         operation_semantics = payload["operation_semantics"]
         self.assertIn("task.current", operation_semantics)
@@ -166,7 +166,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertEqual(payload["decision_surface"]["binding_state"]["state"], "runless")
 
     def test_task_propose_rejects_publication_payload_fields_without_shared_mutation(self) -> None:
-        env_store.create_track("track-task-arch-action-reject", "Task arch action reject", owner_buddy="pm")
+        env_store.create_track("track-task-arch-action-reject", "Task arch action reject", owner_role="pm")
         env_store.create_artifact_revision(
             artifact_id="art-pm-task-arch-action-reject",
             title="Task arch action reject artifact",
@@ -182,7 +182,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         for field, value in {"visibility": "public", "template": "note", "source_refs": []}.items():
             with self.subTest(field=field):
                 rejected = self._dispatch(
-                    buddy="pm",
+                    role="pm",
                     tool="task",
                     action="propose",
                     args={

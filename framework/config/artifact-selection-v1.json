@@ -1,6 +1,6 @@
 {
   "selection_mode": "deterministic-v1",
-  "default_buddy_upstream": {
+  "default_role_upstream": {
     "design": ["market", "pm"],
     "dev": ["pm", "design"],
     "test": ["dev", "pm", "design"],

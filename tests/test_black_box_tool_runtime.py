@@ -180,7 +180,7 @@ print(json.dumps({
             "workspace_dir",
             "BUDDYSWITCH_STATE_ROOT",
             "buddyswitch/objects",
-            "buddyswitch/local/buddybox",
+            "buddyswitch/local/actor_private",
         )
         for tool in sorted(SHIPPED_TOOLS):
             package_dir = self._tool_dir(tool)
@@ -410,7 +410,7 @@ print(json.dumps({
                         return results.success(
                             tool="probe",
                             action="probe.ping",
-                            active_buddy=context.active_buddy,
+                            active_role=context.active_role,
                             effect_summary="Probe echoed one payload message.",
                             state_changed=False,
                             durability="none",
@@ -447,11 +447,11 @@ supported_before = sorted(registry.supported_tools())
 description = registry.env_tools_description().get("probe", {{}})
 payload = registry.dispatch_env_tool_request(
     payload={{"tool": "probe", "action": "ping", "args": {{"message": "hello"}}}},
-    active_buddy="dev",
-    instance_id="inst-dev-000000000002",
+    active_role="dev",
+    actor_id="act-dev-000000000002",
     instance_json=Path("instance.json"),
-    instance_payload={{"instance_id": "inst-dev-000000000002", "buddy": "dev", "workspace_dir": str(root)}},
-    manifest={{"buddies": [{{"id": "dev"}}]}},
+    instance_payload={{"actor_id": "act-dev-000000000002", "role": "dev", "workspace_dir": str(root)}},
+    manifest={{"roles": [{{"id": "dev"}}]}},
     manifest_path=None,
 )
 
@@ -500,12 +500,12 @@ class BlockMessageImpl(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockMessageImpl())
 
 base = {
-    "active_buddy": "dev",
-    "instance_id": "inst-dev-000000000001",
+    "active_role": "dev",
+    "actor_id": "act-dev-000000000001",
     "instance_json": root / "tmp-instance.json",
     "instance_payload": {
-        "instance_id": "inst-dev-000000000001",
-        "buddy": "dev",
+        "actor_id": "act-dev-000000000001",
+        "role": "dev",
         "workspace_dir": str(root),
     },
     "manifest": manifest,

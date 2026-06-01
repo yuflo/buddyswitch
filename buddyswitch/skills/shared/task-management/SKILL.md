@@ -6,7 +6,7 @@ description: Use when current user input may continue, create, switch, confirm, 
 # task-management
 
 ## Principles
-- Task state is active-buddy private state stored in the instance-local taskbox.
+- Task state is active actor private state stored in the instance-local taskbox.
 - Primary: use native BuddySwitch env MCP tools such as `task__current`, `task__propose`, and `task__confirm`.
 - Exact payload schemas, allowed task proposal types, effects, and response meanings come from native tool schemas and `context.get.tool_catalog['task']`.
 - Diagnostic fallback: `python3 scripts/turn_runtime.py status`.

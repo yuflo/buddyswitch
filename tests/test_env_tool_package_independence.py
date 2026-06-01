@@ -185,7 +185,7 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
                         return results.success(
                             tool="probe",
                             action="probe.ping",
-                            active_buddy=context.active_buddy,
+                            active_role=context.active_role,
                             effect_summary="Probe ping success.",
                             state_changed=False,
                             durability="none",
@@ -217,11 +217,11 @@ registry.clear_cache()
 
 result = registry.dispatch_env_tool_request(
     payload={{"tool": "probe", "action": "ping", "args": {{"message": "hello"}}}},
-    active_buddy="dev",
-    instance_id="inst-dev-000000000003",
+    active_role="dev",
+    actor_id="act-dev-000000000003",
     instance_json=Path("instance.json"),
-    instance_payload={{"instance_id": "inst-dev-000000000003", "buddy": "dev", "workspace_dir": str(root)}},
-    manifest={{"buddies": [{{"id": "dev"}}]}},
+    instance_payload={{"actor_id": "act-dev-000000000003", "role": "dev", "workspace_dir": str(root)}},
+    manifest={{"roles": [{{"id": "dev"}}]}},
     manifest_path=None,
 )
 print(json.dumps({{

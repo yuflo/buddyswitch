@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load and validate BuddySwitch buddy environment profiles."""
+"""Load and validate BuddySwitch role environment profiles."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require_buddy
+from env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require_role
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONTRACT = ROOT / "framework" / "contracts" / "buddy-env-profile.json"
-_SAFE_BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-BUDDYBOX_ROOT = "buddybox"
+DEFAULT_CONTRACT = ROOT / "framework" / "contracts" / "role-env-profile.json"
+_SAFE_ROLE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+PRIVATE_WORKSPACE_ROOT = "private"
 
 
 class EnvProfileError(ValueError):
@@ -27,13 +27,13 @@ def env_profiles_root(root: Path | None = None) -> Path:
     return Path(base) / "buddyswitch" / "env-profiles"
 
 
-def env_profile_path(buddy_id: str, root: Path | None = None) -> Path:
-    if not isinstance(buddy_id, str) or not _SAFE_BUDDY_ID_RE.match(buddy_id):
+def env_profile_path(role_id: str, root: Path | None = None) -> Path:
+    if not isinstance(role_id, str) or not _SAFE_ROLE_ID_RE.match(role_id):
         raise EnvProfileError(
-            "buddy_id must match /^[a-z][a-z0-9-]*$/ for env profile lookup; "
-            f"got {buddy_id!r}"
+            "role_id must match /^[a-z][a-z0-9-]*$/ for env profile lookup; "
+            f"got {role_id!r}"
         )
-    return env_profiles_root(root) / f"{buddy_id}.json"
+    return env_profiles_root(root) / f"{role_id}.json"
 
 
 def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -52,14 +52,14 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
 
 def profile_contract(root: Path | None = None) -> dict[str, Any]:
     repo_root = Path(root) if root is not None else ROOT
-    path = repo_root / "framework" / "contracts" / "buddy-env-profile.json"
+    path = repo_root / "framework" / "contracts" / "role-env-profile.json"
     if path == DEFAULT_CONTRACT:
         path = DEFAULT_CONTRACT
     return _load_json_object(path, label="env profile contract")
 
 
-def load_env_profile(buddy_id: str, root: Path | None = None) -> dict[str, Any]:
-    path = env_profile_path(buddy_id, root)
+def load_env_profile(role_id: str, root: Path | None = None) -> dict[str, Any]:
+    path = env_profile_path(role_id, root)
     return _load_json_object(path, label="env profile")
 
 
@@ -102,11 +102,11 @@ def _require_enum(
     return text
 
 
-def _manifest_buddy_ids(manifest: dict[str, Any]) -> list[str]:
+def _manifest_role_ids(manifest: dict[str, Any]) -> list[str]:
     ids: list[str] = []
-    for buddy in manifest.get("buddies", []):
-        if isinstance(buddy, dict) and isinstance(buddy.get("id"), str):
-            ids.append(buddy["id"])
+    for role in manifest.get("roles", []):
+        if isinstance(role, dict) and isinstance(role.get("id"), str):
+            ids.append(role["id"])
     return ids
 
 
@@ -114,7 +114,7 @@ def _require_search_capability(
     *,
     tool_capability: dict[str, Any],
     enums: dict[str, Any],
-    buddy_id: str,
+    role_id: str,
     browser_cockpit: str,
 ) -> dict[str, str]:
     search = _require_dict(tool_capability.get("search"), "tool_capability.search")
@@ -142,10 +142,10 @@ def _require_search_capability(
         raise EnvProfileError(
             "tool_capability.search.browser_cockpit must match tool_capability.browser_cockpit"
         )
-    expected_search_api = "user-approved-only" if buddy_id == "market" else "available"
+    expected_search_api = "user-approved-only" if role_id == "market" else "available"
     if search_api != expected_search_api:
         raise EnvProfileError(
-            f"tool_capability.search.search_api mismatch for '{buddy_id}': "
+            f"tool_capability.search.search_api mismatch for '{role_id}': "
             f"expected {expected_search_api!r}, got {search_api!r}"
         )
     return {
@@ -155,10 +155,10 @@ def _require_search_capability(
     }
 
 
-def resolve_buddybox_root(root_value: str, *, buddy_id: str) -> str:
-    if root_value != BUDDYBOX_ROOT:
+def resolve_private_workspace_root(root_value: str, *, role_id: str) -> str:
+    if root_value != PRIVATE_WORKSPACE_ROOT:
         raise EnvProfileError(
-            f"buddybox.root must be {BUDDYBOX_ROOT!r}; got {root_value!r}"
+            f"private_workspace.root must be {PRIVATE_WORKSPACE_ROOT!r}; got {root_value!r}"
         )
     return root_value
 
@@ -166,13 +166,13 @@ def resolve_buddybox_root(root_value: str, *, buddy_id: str) -> str:
 def validate_env_profile(
     profile: dict[str, Any],
     *,
-    buddy_id: str,
+    role_id: str,
     manifest: dict[str, Any],
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
     repo = Path(repo_root) if repo_root is not None else ROOT
     contract = profile_contract(repo)
-    require_buddy(manifest, buddy_id)
+    require_role(manifest, role_id)
 
     top_level_order = contract.get("top_level_key_order")
     required_top_level = contract.get("required_top_level_keys")
@@ -193,19 +193,19 @@ def validate_env_profile(
     if list(profile.keys()) != top_level_order:
         raise EnvProfileError("profile top-level key order does not match contract")
 
-    actual_buddy_id = _require_string(profile.get("buddy_id"), "buddy_id")
-    if actual_buddy_id != buddy_id:
+    actual_role_id = _require_string(profile.get("role_id"), "role_id")
+    if actual_role_id != role_id:
         raise EnvProfileError(
-            f"profile buddy_id mismatch: expected {buddy_id!r}, got {actual_buddy_id!r}"
+            f"profile role_id mismatch: expected {role_id!r}, got {actual_role_id!r}"
         )
-    if not _SAFE_BUDDY_ID_RE.match(actual_buddy_id):
-        raise EnvProfileError(f"profile buddy_id is invalid: {actual_buddy_id!r}")
+    if not _SAFE_ROLE_ID_RE.match(actual_role_id):
+        raise EnvProfileError(f"profile role_id is invalid: {actual_role_id!r}")
 
     contract_path = _require_string(profile.get("contract_path"), "contract_path")
-    expected_contract_path = f"framework/contracts/{buddy_id}.md"
+    expected_contract_path = f"framework/contracts/{role_id}.md"
     if contract_path != expected_contract_path:
         raise EnvProfileError(
-            f"contract_path mismatch for '{buddy_id}': expected {expected_contract_path!r}, got {contract_path!r}"
+            f"contract_path mismatch for '{role_id}': expected {expected_contract_path!r}, got {contract_path!r}"
         )
     resolved_contract_path = repo / contract_path
     if not resolved_contract_path.exists():
@@ -228,9 +228,9 @@ def validate_env_profile(
     if project_path != "projects/app":
         raise EnvProfileError(f"project.path must be 'projects/app', got {project_path!r}")
 
-    buddybox = _require_dict(profile.get("buddybox"), "buddybox")
-    buddybox_root = _require_string(buddybox.get("root"), "buddybox.root")
-    resolve_buddybox_root(buddybox_root, buddy_id=buddy_id)
+    private_workspace = _require_dict(profile.get("private_workspace"), "private_workspace")
+    private_workspace_root = _require_string(private_workspace.get("root"), "private_workspace.root")
+    resolve_private_workspace_root(private_workspace_root, role_id=role_id)
 
     fs_capability = _require_dict(profile.get("filesystem_capability"), "filesystem_capability")
     host_writable = _require_string_list(fs_capability.get("host_writable"), "filesystem_capability.host_writable")
@@ -250,11 +250,11 @@ def validate_env_profile(
     )
 
     expected_host_writable = ["home", "codex-home", "xdg-config", "scratch", "runtime-temp"]
-    if buddy_id == "dev":
+    if role_id == "dev":
         expected_host_writable = [*expected_host_writable, "source-root"]
     if host_writable != expected_host_writable:
         raise EnvProfileError(
-            f"filesystem_capability.host_writable mismatch for '{buddy_id}': "
+            f"filesystem_capability.host_writable mismatch for '{role_id}': "
             f"expected {expected_host_writable}, got {host_writable}"
         )
 
@@ -273,11 +273,11 @@ def validate_env_profile(
         )
     track_effects = _require_string_list(state_capability.get("track_effects"), "state_capability.track_effects")
     expected_track_effects = ["update_now", "add_material", "add_update", "add_proof"]
-    if buddy_id == "pm":
+    if role_id == "pm":
         expected_track_effects = ["create", *expected_track_effects, "archive"]
     if track_effects != expected_track_effects:
         raise EnvProfileError(
-            f"state_capability.track_effects mismatch for '{buddy_id}': "
+            f"state_capability.track_effects mismatch for '{role_id}': "
             f"expected {expected_track_effects}, got {track_effects}"
         )
 
@@ -290,10 +290,10 @@ def validate_env_profile(
         )
 
     comment_effects = _require_string_list(state_capability.get("comment_effects"), "state_capability.comment_effects")
-    expected_comment_effects = ["resolve"] if buddy_id == "pm" else []
+    expected_comment_effects = ["resolve"] if role_id == "pm" else []
     if comment_effects != expected_comment_effects:
         raise EnvProfileError(
-            f"state_capability.comment_effects mismatch for '{buddy_id}': "
+            f"state_capability.comment_effects mismatch for '{role_id}': "
             f"expected {expected_comment_effects}, got {comment_effects}"
         )
 
@@ -319,7 +319,7 @@ def validate_env_profile(
     _require_search_capability(
         tool_capability=tool_capability,
         enums=enums,
-        buddy_id=buddy_id,
+        role_id=role_id,
         browser_cockpit=browser_cockpit,
     )
 
@@ -337,19 +337,19 @@ def validate_env_profile(
         label="context_projection.skills",
     )
 
-    expected_project_access = "write" if buddy_id == "dev" else "read-only"
-    expected_source_root_access = "write" if buddy_id == "dev" else "read-only"
+    expected_project_access = "write" if role_id == "dev" else "read-only"
+    expected_source_root_access = "write" if role_id == "dev" else "read-only"
     if project_access != expected_project_access:
         raise EnvProfileError(
-            f"project.access mismatch for '{buddy_id}': expected {expected_project_access!r}, got {project_access!r}"
+            f"project.access mismatch for '{role_id}': expected {expected_project_access!r}, got {project_access!r}"
         )
     if source_root_access != expected_source_root_access:
         raise EnvProfileError(
             "filesystem_capability.source_root mismatch for "
-            f"'{buddy_id}': expected {expected_source_root_access!r}, got {source_root_access!r}"
+            f"'{role_id}': expected {expected_source_root_access!r}, got {source_root_access!r}"
         )
 
-    if buddy_id == "market":
+    if role_id == "market":
         if browser_cockpit != "required":
             raise EnvProfileError("market profile must set tool_capability.browser_cockpit to 'required'")
         if market_evidence != "required":
@@ -358,38 +358,38 @@ def validate_env_profile(
             raise EnvProfileError("market profile ordinary_web_fallback must be 'user-approved-only'")
     else:
         if browser_cockpit != "available":
-            raise EnvProfileError(f"{buddy_id} profile browser_cockpit must be 'available'")
+            raise EnvProfileError(f"{role_id} profile browser_cockpit must be 'available'")
         if market_evidence != "not-required":
-            raise EnvProfileError(f"{buddy_id} profile market_research_evidence must be 'not-required'")
+            raise EnvProfileError(f"{role_id} profile market_research_evidence must be 'not-required'")
         if ordinary_web_fallback != "available":
-            raise EnvProfileError(f"{buddy_id} profile ordinary_web_fallback must be 'available'")
+            raise EnvProfileError(f"{role_id} profile ordinary_web_fallback must be 'available'")
 
     normalized: dict[str, Any] = {}
     for key in top_level_order:
         normalized[key] = profile[key]
 
-    manifest_buddies = _manifest_buddy_ids(manifest)
-    if buddy_id not in manifest_buddies:
-        raise EnvProfileError(f"buddy '{buddy_id}' is not in manifest")
+    manifest_roles = _manifest_role_ids(manifest)
+    if role_id not in manifest_roles:
+        raise EnvProfileError(f"role '{role_id}' is not in manifest")
     return normalized
 
 
 def require_env_profile(
-    buddy_id: str,
+    role_id: str,
     *,
     manifest_path: Path = DEFAULT_MANIFEST,
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
     try:
         manifest = load_manifest(manifest_path)
-        require_buddy(manifest, buddy_id)
+        require_role(manifest, role_id)
     except ManifestError as exc:
         raise EnvProfileError(str(exc)) from exc
 
-    profile = load_env_profile(buddy_id, repo_root)
+    profile = load_env_profile(role_id, repo_root)
     return validate_env_profile(
         profile,
-        buddy_id=buddy_id,
+        role_id=role_id,
         manifest=manifest,
         repo_root=repo_root,
     )
@@ -402,45 +402,45 @@ def _parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     validate = sub.add_parser("validate", help="Validate one profile")
-    validate.add_argument("--buddy", required=True, help="Buddy id")
+    validate.add_argument("--role", required=True, help="Role id")
 
-    sub.add_parser("validate-all", help="Validate profiles for all manifest buddies")
+    sub.add_parser("validate-all", help="Validate profiles for all manifest roles")
 
     show = sub.add_parser("show", help="Show one normalized profile")
-    show.add_argument("--buddy", required=True, help="Buddy id")
+    show.add_argument("--role", required=True, help="Role id")
     return parser.parse_args()
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
     profile = require_env_profile(
-        args.buddy,
+        args.role,
         manifest_path=args.manifest,
         repo_root=args.repo_root,
     )
-    print(f"{profile['buddy_id']}: ok")
+    print(f"{profile['role_id']}: ok")
     return 0
 
 
 def _cmd_validate_all(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
-    for buddy in manifest.get("buddies", []):
-        if not isinstance(buddy, dict):
+    for role in manifest.get("roles", []):
+        if not isinstance(role, dict):
             continue
-        buddy_id = buddy.get("id")
-        if not isinstance(buddy_id, str):
+        role_id = role.get("id")
+        if not isinstance(role_id, str):
             continue
         require_env_profile(
-            buddy_id,
+            role_id,
             manifest_path=args.manifest,
             repo_root=args.repo_root,
         )
-        print(f"{buddy_id}: ok")
+        print(f"{role_id}: ok")
     return 0
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
     profile = require_env_profile(
-        args.buddy,
+        args.role,
         manifest_path=args.manifest,
         repo_root=args.repo_root,
     )

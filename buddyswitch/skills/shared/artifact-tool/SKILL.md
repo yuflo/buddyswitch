@@ -17,9 +17,9 @@ description: Use when you need artifact summaries, full artifact reads by id, ar
 ## Workflow Notes
 - Use `artifact__list` for readable summary discovery. Summary rows do not contain full artifact bodies.
 - Use `artifact__get` before claiming full artifact content was read.
-- Use `artifact__create_revision` for active-buddy private draft or revision content.
+- Use `artifact__create_revision` for active actor private draft or revision content.
 - Shared publication starts only after `track__add_material` or `track__add_proof` succeeds. Historical CLI wording for that publication path was track.add-material / track.add-proof, but the product path is the native track tool.
-- Use `artifact__attach_file`, `artifact__list_attachments`, and `artifact__get_attachment` for explicit attachments; use `$BUDDYSWITCH_BUDDYBOX_DIR` for private local files that should not become product-readable.
+- Use `artifact__attach_file`, `artifact__list_attachments`, and `artifact__get_attachment` for explicit attachments; use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private local files that should not become product-readable.
 - For action details and recovery guidance, inspect `context.get.tool_catalog['artifact']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative.
 
 ## Verification

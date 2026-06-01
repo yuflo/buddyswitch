@@ -4,26 +4,26 @@ set -euo pipefail
 buddyswitch_instance_usage() {
   cat <<EOF
 Usage:
-  buddyswitch-codex instance buddies [--json]
-  buddyswitch-codex instance start --buddy <buddy> [--json]
-  buddyswitch-codex instance input <instance-id> --text <text> [--input-wrapper raw|task-tui] [--json]
-  buddyswitch-codex instance side <instance-id> --text <text> [--json]
-  buddyswitch-codex instance side <instance-id> --side-thread-id <side-thread-id> --text <text> [--json]
-  buddyswitch-codex instance side close <instance-id> --side-thread-id <side-thread-id> [--json]
-  buddyswitch-codex instance goal <instance-id> get|set|clear [--json]
-  buddyswitch-codex instance compact <instance-id> [--json]
-  buddyswitch-codex instance clear <instance-id> [--json]
-  buddyswitch-codex instance attach <instance-id>
-  buddyswitch-codex instance resume <instance-id> [--json]
-  buddyswitch-codex instance stop <instance-id> [--json]
-  buddyswitch-codex instance status <instance-id> [--json]
-  buddyswitch-codex instance interrupt <instance-id> [--json]
-  buddyswitch-codex instance list [--buddy <buddy>] [--json]
-  buddyswitch-codex instance delete <instance-id> [--yes] [--json]
+  buddyswitch-codex instance roles [--json]
+  buddyswitch-codex instance start --role <role> [--json]
+  buddyswitch-codex instance input <actor-id> --text <text> [--input-wrapper raw|task-tui] [--json]
+  buddyswitch-codex instance side <actor-id> --text <text> [--json]
+  buddyswitch-codex instance side <actor-id> --side-thread-id <side-thread-id> --text <text> [--json]
+  buddyswitch-codex instance side close <actor-id> --side-thread-id <side-thread-id> [--json]
+  buddyswitch-codex instance goal <actor-id> get|set|clear [--json]
+  buddyswitch-codex instance compact <actor-id> [--json]
+  buddyswitch-codex instance clear <actor-id> [--json]
+  buddyswitch-codex instance attach <actor-id>
+  buddyswitch-codex instance resume <actor-id> [--json]
+  buddyswitch-codex instance stop <actor-id> [--json]
+  buddyswitch-codex instance status <actor-id> [--json]
+  buddyswitch-codex instance interrupt <actor-id> [--json]
+  buddyswitch-codex instance list [--role <role>] [--json]
+  buddyswitch-codex instance delete <actor-id> [--yes] [--json]
   buddyswitch-codex instance help
 
 Commands:
-  buddies Print valid buddies from buddyswitch/manifest.toml.
+  roles Print valid roles from buddyswitch/manifest.toml.
   start   Start a fresh product-mode app-server service.
   input   Send text to a running product-mode instance.
   side    Create, continue, or close a side conversation child thread.
@@ -55,7 +55,7 @@ buddyswitch_instance_buddies() {
         return 0
         ;;
       *)
-        echo "Unknown instance buddies option: ${arg}" >&2
+        echo "Unknown instance roles option: ${arg}" >&2
         buddyswitch_instance_usage >&2
         return 2
         ;;
@@ -63,10 +63,10 @@ buddyswitch_instance_buddies() {
   done
 
   if [[ "${json}" -eq 1 ]]; then
-    python3 "${REPO_ROOT}/scripts/env_manifest.py" list-buddies --json
+    python3 "${REPO_ROOT}/scripts/env_manifest.py" list-roles --json
     return 0
   fi
-  python3 "${REPO_ROOT}/scripts/env_manifest.py" list-buddies
+  python3 "${REPO_ROOT}/scripts/env_manifest.py" list-roles
 }
 
 buddyswitch_instance_start() {
@@ -84,11 +84,11 @@ buddyswitch_instance_start() {
   done
 
   case "${1:-}" in
-    --buddy|--buddy=*)
+    --role|--role=*)
       start_codex "$@"
       ;;
     *)
-      echo "instance start requires --buddy <buddy>" >&2
+      echo "instance start requires --role <role>" >&2
       buddyswitch_instance_usage >&2
       return 2
       ;;
@@ -104,19 +104,19 @@ buddyswitch_instance_json_files() {
 }
 
 buddyswitch_instance_list() {
-  local buddy_filter="" json=0
-  local found=0 printed_header=0 instance_json meta kind instance_id status_json row_json
+  local role_filter="" json=0
+  local found=0 printed_header=0 instance_json meta kind actor_id status_json row_json
   local -a instance_rows=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --buddy)
+      --role)
         [[ $# -ge 2 && -n "${2:-}" && "${2:-}" != --* ]] || {
-          echo "Missing value for --buddy" >&2
+          echo "Missing value for --role" >&2
           buddyswitch_instance_usage >&2
           return 2
         }
-        buddy_filter="$2"
-        buddyswitch_validate_buddy_id "${buddy_filter}" || return $?
+        role_filter="$2"
+        buddyswitch_validate_role_id "${role_filter}" || return $?
         shift 2
         ;;
       --json)
@@ -133,13 +133,13 @@ buddyswitch_instance_list() {
 
   while IFS= read -r instance_json; do
     meta="$(
-      python3 - "${instance_json}" "${buddy_filter}" <<'PY'
+      python3 - "${instance_json}" "${role_filter}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-buddy_filter = sys.argv[2]
+role_filter = sys.argv[2]
 
 try:
     payload = json.loads(instance_json.read_text(encoding="utf-8"))
@@ -147,27 +147,27 @@ except Exception as exc:
     print(f"invalid\t{instance_json.parent.name}\tinvalid-json:{exc}")
     raise SystemExit(0)
 
-buddy = payload.get("buddy")
-if buddy_filter and buddy != buddy_filter:
+role = payload.get("role")
+if role_filter and role != role_filter:
     raise SystemExit(0)
 
-instance_id = payload.get("instance_id", instance_json.parent.name)
-print(f"ok\t{instance_id}")
+actor_id = payload.get("actor_id", instance_json.parent.name)
+print(f"ok\t{actor_id}")
 PY
     )"
     [[ -n "${meta}" ]] || continue
     kind="${meta%%$'\t'*}"
     if [[ "${kind}" == "invalid" ]]; then
-      instance_id="${meta#*$'\t'}"
+      actor_id="${meta#*$'\t'}"
       if [[ "${json}" -eq 1 ]]; then
         row_json="$(
-          python3 - "${instance_id%%$'\t'*}" "${instance_id#*$'\t'}" <<'PY'
+          python3 - "${actor_id%%$'\t'*}" "${actor_id#*$'\t'}" <<'PY'
 import json
 import sys
 
 payload = {
-    "instance_id": sys.argv[1],
-    "buddy": "invalid",
+    "actor_id": sys.argv[1],
+    "role": "invalid",
     "status": "invalid",
     "app_server_health": "invalid",
     "thread_id": None,
@@ -180,13 +180,13 @@ PY
         )"
         instance_rows+=("${row_json}")
       else
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${instance_id%%$'\t'*}" "invalid" "invalid" "invalid" "" "" "" "${instance_id#*$'\t'}"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${actor_id%%$'\t'*}" "invalid" "invalid" "invalid" "" "" "" "${actor_id#*$'\t'}"
       fi
       found=1
       continue
     fi
-    instance_id="${meta#*$'\t'}"
-    status_json="$(instance_status_json "${instance_id}")" || return $?
+    actor_id="${meta#*$'\t'}"
+    status_json="$(instance_status_json "${actor_id}")" || return $?
     if [[ "${json}" -eq 1 ]]; then
       row_json="$(
         python3 - "${status_json}" <<'PY'
@@ -201,8 +201,8 @@ if isinstance(app_server, dict):
 thread_id = payload.get("thread_id")
 browser_port = payload.get("browser_port")
 row = {
-    "instance_id": payload.get("instance_id", ""),
-    "buddy": payload.get("buddy", ""),
+    "actor_id": payload.get("actor_id", ""),
+    "role": payload.get("role", ""),
     "status": payload.get("status", ""),
     "app_server_health": "healthy" if healthy else "unhealthy",
     "thread_id": thread_id if isinstance(thread_id, str) else None,
@@ -216,7 +216,7 @@ PY
       instance_rows+=("${row_json}")
     else
       if [[ "${printed_header}" -eq 0 ]]; then
-        printf 'instance_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir\n'
+        printf 'actor_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir\n'
         printed_header=1
       fi
       python3 - "${status_json}" <<'PY'
@@ -230,8 +230,8 @@ if isinstance(app_server, dict):
     healthy = bool(app_server.get("healthy"))
 thread_id = payload.get("thread_id")
 row = (
-    payload.get("instance_id", ""),
-    payload.get("buddy", ""),
+    payload.get("actor_id", ""),
+    payload.get("role", ""),
     payload.get("status", ""),
     "healthy" if healthy else "unhealthy",
     thread_id if isinstance(thread_id, str) else "",
@@ -262,16 +262,16 @@ PY
 
   if [[ "${found}" -eq 0 ]]; then
     echo "No BuddySwitch instances found."
-    echo "Start one with: ./buddyswitch-codex instance start --buddy <buddy>"
+    echo "Start one with: ./buddyswitch-codex instance start --role <role>"
   fi
 }
 
 buddyswitch_instance_record_json() {
-  local instance_id="$1"
+  local actor_id="$1"
   local instance_json
 
-  buddyswitch_validate_instance_id "${instance_id}" || return $?
-  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  buddyswitch_validate_actor_id "${actor_id}" || return $?
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
   if [[ ! -f "${instance_json}" ]]; then
     echo "Instance record missing: ${instance_json}" >&2
     return 2
@@ -280,22 +280,22 @@ buddyswitch_instance_record_json() {
 }
 
 buddyswitch_instance_record_field() {
-  local instance_id="$1"
+  local actor_id="$1"
   local field_name="$2"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_record_json "${instance_id}")" || return $?
-  python3 - "${instance_json}" "${instance_id}" "${field_name}" <<'PY'
+  instance_json="$(buddyswitch_instance_record_json "${actor_id}")" || return $?
+  python3 - "${instance_json}" "${actor_id}" "${field_name}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 field_name = sys.argv[3]
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    print(f"Instance id mismatch in {instance_json}", file=sys.stderr)
+if payload.get("actor_id") != actor_id:
+    print(f"Actor id mismatch in {instance_json}", file=sys.stderr)
     raise SystemExit(2)
 value = payload.get(field_name)
 if value is None:
@@ -305,43 +305,43 @@ PY
 }
 
 buddyswitch_instance_validate_record() {
-  local instance_id="$1"
+  local actor_id="$1"
   local instance_json
 
-  instance_json="$(buddyswitch_instance_record_json "${instance_id}")" || return $?
-  python3 - "${instance_json}" "${instance_id}" <<'PY'
+  instance_json="$(buddyswitch_instance_record_json "${actor_id}")" || return $?
+  python3 - "${instance_json}" "${actor_id}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 instance_json = Path(sys.argv[1])
-instance_id = sys.argv[2]
+actor_id = sys.argv[2]
 payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("instance_id") != instance_id:
-    print(f"Instance id mismatch in {instance_json}", file=sys.stderr)
+if payload.get("actor_id") != actor_id:
+    print(f"Actor id mismatch in {instance_json}", file=sys.stderr)
     raise SystemExit(2)
-buddy = payload.get("buddy")
-if not isinstance(buddy, str) or not buddy:
-    print(f"Instance record missing buddy: {instance_json}", file=sys.stderr)
+role = payload.get("role")
+if not isinstance(role, str) or not role:
+    print(f"Instance record missing role: {instance_json}", file=sys.stderr)
     raise SystemExit(2)
-print(buddy)
+print(role)
 PY
 }
 
 buddyswitch_instance_require_safe_delete_root() {
-  local instance_id="$1"
+  local actor_id="$1"
   local instances_root="${BUDDYSWITCH_SHARED_ROOT}/instances"
   local instance_root
   local normalized_instances_root normalized_instance_root
 
   if [[ -L "${BUDDYSWITCH_SHARED_ROOT}" ]]; then
-    echo "Instance delete blocked: unsafe shared root for ${instance_id}." >&2
+    echo "Instance delete blocked: unsafe shared root for ${actor_id}." >&2
     return 3
   fi
 
-  instance_root="$(buddyswitch_instance_root "${instance_id}")"
+  instance_root="$(buddyswitch_instance_root "${actor_id}")"
   if [[ -L "${instances_root}" || -L "${instance_root}" ]]; then
-    echo "Instance delete blocked: unsafe instance root for ${instance_id}." >&2
+    echo "Instance delete blocked: unsafe instance root for ${actor_id}." >&2
     return 3
   fi
   if [[ -d "${instance_root}" ]]; then
@@ -351,7 +351,7 @@ buddyswitch_instance_require_safe_delete_root() {
       "${normalized_instances_root}/"*)
         ;;
       *)
-        echo "Instance delete blocked: unsafe instance root for ${instance_id}." >&2
+        echo "Instance delete blocked: unsafe instance root for ${actor_id}." >&2
         return 3
         ;;
     esac
@@ -363,7 +363,7 @@ buddyswitch_instance_require_safe_delete_root() {
 buddyswitch_instance_main() {
   local command="${1:-}"
   case "${command}" in
-    buddies)
+    roles)
       shift || true
       buddyswitch_instance_buddies "$@"
       ;;
@@ -378,7 +378,7 @@ buddyswitch_instance_main() {
     input)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -389,7 +389,7 @@ buddyswitch_instance_main() {
       if [[ "${1:-}" == "close" ]]; then
         shift || true
         if [[ $# -lt 1 ]]; then
-          echo "instance id is required" >&2
+          echo "actor id is required" >&2
           buddyswitch_instance_usage >&2
           return 2
         fi
@@ -397,7 +397,7 @@ buddyswitch_instance_main() {
         return $?
       fi
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -406,7 +406,7 @@ buddyswitch_instance_main() {
     goal)
       shift || true
       if [[ $# -lt 2 ]]; then
-        echo "instance id and goal action are required" >&2
+        echo "actor id and goal action are required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -415,7 +415,7 @@ buddyswitch_instance_main() {
     compact)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -424,7 +424,7 @@ buddyswitch_instance_main() {
     clear)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -433,7 +433,7 @@ buddyswitch_instance_main() {
     attach)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -442,7 +442,7 @@ buddyswitch_instance_main() {
     resume)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -451,7 +451,7 @@ buddyswitch_instance_main() {
     stop)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -460,7 +460,7 @@ buddyswitch_instance_main() {
     status)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -469,7 +469,7 @@ buddyswitch_instance_main() {
     interrupt)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
@@ -478,7 +478,7 @@ buddyswitch_instance_main() {
     delete)
       shift || true
       if [[ $# -lt 1 ]]; then
-        echo "instance id is required" >&2
+        echo "actor id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi

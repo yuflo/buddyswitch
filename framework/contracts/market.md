@@ -7,20 +7,20 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 ## Required Behavior
 
 - Start discovery from native `search__open_browser` and continue in `chrome-devtools-cockpit`.
-- Use `track.open` as the shared publication context before cross-buddy handoff decisions.
+- Use `track.open` as the shared publication context before cross-role handoff decisions.
 - Publish market-facing evidence outputs through `track.add_material` / `track.add_proof` when they should become shared track artifacts.
 - Write market deliverables via `artifact.create_revision` using `template` + markdown `body`; draft creation stays private until `track.add_material` / `track.add_proof` publishes it to a track.
 - Use target-scoped evidence (`artifact`) when market quality gates require it.
 - Use `request.list` / `request.get` to track incoming and outgoing structured requests.
 - For requests assigned to Market, mutate lifecycle with `request.accept`, `request.block`, and `request.complete`.
-- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.
+- Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.
 
 ## Runtime Boundary
 
 - Use native BuddySwitch env MCP tools for durable operations; the runtime broker still enforces `env.tool` authority and feedback.
 - No `prepare/persist` turn transaction.
 - Do not fabricate evidence tokens.
-- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
+- Do not edit `buddyswitch/objects/**`, old private workspace runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -29,7 +29,7 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 
 ## Durable Output Targets
 
-- `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
-- `instances/<instance-id>/taskbox/<buddy>/history.md`
+- `instances/<actor-id>/taskbox/<role>/tasks/<task-id>.json`
+- `instances/<actor-id>/taskbox/<role>/history.md`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).
+- Active-instance private host files under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` (`workspace/private`, not product-readable).

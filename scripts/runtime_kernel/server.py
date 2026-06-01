@@ -88,8 +88,8 @@ class RuntimeBrokerServer:
             {
                 "instance_json": self.config.instance_json_path,
                 "manifest_path": self.config.manifest_path,
-                "instance_id": None,
-                "active_buddy": None,
+                "actor_id": None,
+                "active_role": None,
                 "payload": {},
             },
             lambda req, _session: self._dispatch(req),

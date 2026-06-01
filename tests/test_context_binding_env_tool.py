@@ -28,8 +28,8 @@ _EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search",
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _taskbox_root(self, *, instance_id: str, buddy: str) -> Path:
-        return self._runtime_path(f"instances/{instance_id}/taskbox/{buddy}")
+    def _taskbox_root(self, *, actor_id: str, role: str) -> Path:
+        return self._runtime_path(f"instances/{actor_id}/taskbox/{role}")
 
     def _write_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,8 +38,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _seed_taskbox_task(
         self,
         *,
-        instance_id: str,
-        buddy: str,
+        actor_id: str,
+        role: str,
         task_id: str,
         title: str,
         summary: str = "",
@@ -52,7 +52,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     ) -> None:
         if closed_at is None and status in {"done", "archived"}:
             closed_at = updated_at
-        taskbox_root = self._taskbox_root(instance_id=instance_id, buddy=buddy)
+        taskbox_root = self._taskbox_root(actor_id=actor_id, role=role)
         (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
         history_file = taskbox_root / "history.md"
         if not history_file.exists():
@@ -61,7 +61,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             taskbox_root / "tasks" / f"{task_id}.json",
             {
                 "id": task_id,
-                "owner_buddy": buddy,
+                "owner_actor": {"actor_id": actor_id, "role_id": role},
                 "title": title,
                 "summary": summary,
                 "status": status,
@@ -79,7 +79,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self._runtime_path("buddyswitch/objects" + "/tasks/task-legacy-shared.json"),
             {
                 "id": "task-legacy-shared",
-                "buddy": "dev",
+                "role": "dev",
                 "title": "Legacy shared task",
                 "status": "active",
                 "track_id": "track-context-active",
@@ -92,25 +92,25 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(
         self,
         *,
-        instance_id: str = "inst-dev-context",
-        buddy: str = "dev",
+        actor_id: str = "act-dev-context",
+        role: str = "dev",
         status: str = "active",
         workspace_dir: Path | None = None,
         path: Path | None = None,
     ) -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
-        instance_root = self._runtime_path(f"instances/{instance_id}")
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
+        instance_root = self._runtime_path(f"instances/{actor_id}")
         instance_json_path = path if path is not None else instance_root / "instance.json"
         resolved_workspace_dir = workspace_dir if workspace_dir is not None else self.runtime_root
         resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
-        taskbox_root = self._taskbox_root(instance_id=instance_id, buddy=buddy)
+        taskbox_root = self._taskbox_root(actor_id=actor_id, role=role)
         (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
         history_file = taskbox_root / "history.md"
         if not history_file.exists():
             history_file.write_text("", encoding="utf-8")
         payload: dict[str, object] = {
-            "instance_id": instance_id,
-            "buddy": buddy,
+            "actor_id": actor_id,
+            "role": role,
             "status": status,
             "instance_root": str(instance_root),
             "workspace_dir": str(resolved_workspace_dir),
@@ -125,15 +125,15 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return instance_json_path
 
-    def _dispatch(self, *, instance_json: Path, tool: str, action: str, args: dict[str, object], instance_id: str = "inst-dev-context", buddy: str = "dev") -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+    def _dispatch(self, *, instance_json: Path, tool: str, action: str, args: dict[str, object], actor_id: str = "act-dev-context", role: str = "dev") -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-context-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "actor_id": actor_id,
+                "active_role": role,
                 "tool": tool,
                 "action": action,
                 "args": args,
@@ -169,11 +169,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_context_state(self) -> None:
-        instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
-        env_store.create_track("track-context-active", "Context Track", owner_buddy="pm")
+        actor_id = self._runtime_actor_id(role="dev", label="act-dev-context")
+        env_store.create_track("track-context-active", "Context Track", owner_role="pm")
         self._seed_taskbox_task(
-            instance_id=instance_id,
-            buddy="dev",
+            actor_id=actor_id,
+            role="dev",
             task_id="task-dev-context",
             title="Context Task",
             summary="seed",
@@ -196,7 +196,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id="track-context-active",
             artifact_id="art-task-dev-context-note-r1",
             label="Context",
-            from_buddy="dev",
+            from_role="dev",
             summary="artifact summary v1",
         )
         env_store.create_artifact_revision(
@@ -214,20 +214,20 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id="track-context-active",
             artifact_id="art-task-dev-context-note-r2",
             label="Context",
-            from_buddy="dev",
+            from_role="dev",
             summary="artifact summary v2",
         )
 
         env_store.create_track(
             "track-context-archived",
             "Archived Track",
-            owner_buddy="pm",
+            owner_role="pm",
             state="done",
             health="ok",
         )
         self._seed_taskbox_task(
-            instance_id=instance_id,
-            buddy="dev",
+            actor_id=actor_id,
+            role="dev",
             task_id="task-dev-archived",
             title="Archived task",
             status="archived",
@@ -250,7 +250,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id="track-context-archived",
             artifact_id=str(archived_artifact["id"]),
             label="Archived",
-            from_buddy="dev",
+            from_role="dev",
             summary="archived",
         )
         env_store.update_track(
@@ -269,7 +269,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(affordances, dict)
         self.assertEqual(
             affordances,
-            tool_registry.compact_tool_affordances(exclude_tools={"buddybox"}),
+            tool_registry.compact_tool_affordances(exclude_tools={"actor_private"}),
         )
         self.assertEqual(set(affordances), _EXPECTED_TOOLS)
         self.assertNotIn("handoff", affordances)
@@ -328,8 +328,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(mentioned_groups.issubset(set(key_expectations)), msg=payload)
 
     def test_context_summarize_includes_generated_capability_snapshot(self) -> None:
-        instance_json = self._instance_json(buddy="dev")
-        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+        instance_json = self._instance_json(role="dev")
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
         self.assertTrue(payload.get("ok"), msg=payload)
 
         snapshot = payload.get("capability_snapshot")
@@ -363,7 +363,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(details.get("track.create", {}).get("required_permission"), "track.create")
         self.assertEqual(details.get("track.create", {}).get("restricted_to_roles"), ["pm"])
         self.assertNotIn("object_" + "permissions", json.dumps(snapshot, ensure_ascii=True))
-        self.assertIn("active-buddy private", str(snapshot.get("task_visibility")))
+        self.assertIn("active actor private", str(snapshot.get("task_visibility")))
         artifact_create = tool_registry.operation_semantics()["artifact.create_revision"]
         self.assertEqual(
             snapshot.get("artifact_publication_path"),
@@ -379,7 +379,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("artifact_section", str(snapshot.get("comment_target_support")))
         self.assertIn("browser", str(snapshot.get("search_boundary")).lower())
 
-    def test_context_candidate_tracks_use_owner_buddy_only(self) -> None:
+    def test_context_candidate_tracks_use_owner_role_and_actor_creator(self) -> None:
         self._seed_context_state()
         instance_json = self._instance_json()
         payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
@@ -391,10 +391,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertIn("owner_buddy", row)
-            self.assertIn(row.get("active_buddy_role"), {"owner", "observer", "collaborator"})
-            self.assertNotIn("current_buddy", row)
-            self.assertNotIn("next_buddy", row)
+            self.assertIn("owner_role", row)
+            self.assertIn("created_by_actor", row)
+            self.assertIn(row.get("active_role_relation"), {"owner", "observer", "collaborator"})
+            self.assertNotIn("current_role", row)
+            self.assertNotIn("next_role", row)
             self.assertNotIn("participant", row)
 
     def test_context_omits_archived_tracks_from_active_context(self) -> None:
@@ -487,10 +488,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("art-context-owner-draft-untracked", ids)
 
     def test_context_summarize_includes_compact_active_inbox_message_cues(self) -> None:
-        dev = {"buddy_id": "dev", "instance_id": self._runtime_instance_id(buddy="dev", label="inst-dev-context")}
-        pm = {"buddy_id": "pm", "instance_id": self._runtime_instance_id(buddy="pm", label="inst-pm-context")}
-        design = {"buddy_id": "design", "instance_id": self._runtime_instance_id(buddy="design", label="inst-design-context")}
-        market = {"buddy_id": "market", "instance_id": self._runtime_instance_id(buddy="market", label="inst-market-context")}
+        dev = {"role_id": "dev", "actor_id": self._runtime_actor_id(role="dev", label="act-dev-context")}
+        pm = {"role_id": "pm", "actor_id": self._runtime_actor_id(role="pm", label="act-pm-context")}
+        design = {"role_id": "design", "actor_id": self._runtime_actor_id(role="design", label="act-design-context")}
+        market = {"role_id": "market", "actor_id": self._runtime_actor_id(role="market", label="act-market-context")}
         root = env_store.create_message(from_actor_address=pm, to_actor_address=dev, content="Need proof asset")
         reply = env_store.create_message(from_actor_address=design, to_actor_address=dev, content="Screenshot ready", reply_to=root["id"])
         env_store.create_message(from_actor_address=dev, to_actor_address=pm, content="Sent by dev only")
@@ -534,9 +535,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("tracks", sources)
         self.assertIn("artifacts", sources)
 
-    def test_context_outputs_writable_surfaces_without_buddybox_tool_methods(self) -> None:
-        instance_json = self._instance_json(buddy="pm")
-        listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={}, buddy="pm")
+    def test_context_outputs_writable_surfaces_without_actor_private_tool_methods(self) -> None:
+        instance_json = self._instance_json(role="pm")
+        listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={}, role="pm")
         self.assertTrue(listed.get("ok"), msg=listed)
         sources = listed.get("sources")
         self.assertIsInstance(sources, dict, msg=listed)
@@ -547,7 +548,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(writable_surfaces_source.get("mutates_product_state"))
         self.assertFalse(writable_surfaces_source.get("grants_write_authority"))
 
-        summarized = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="pm")
+        summarized = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="pm")
         self.assertTrue(summarized.get("ok"), msg=summarized)
         surfaces = summarized.get("writable_surfaces")
         self.assertIsInstance(surfaces, dict, msg=summarized)
@@ -555,17 +556,17 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         persistent = surfaces.get("persistent_files")
         self.assertIsInstance(persistent, dict, msg=surfaces)
         assert isinstance(persistent, dict)
-        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
-        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_ACTOR_PRIVATE_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "private")
         self.assertFalse(persistent.get("mutates_product_state"))
         temporary = surfaces.get("temporary_files")
         self.assertIsInstance(temporary, dict, msg=surfaces)
         assert isinstance(temporary, dict)
         self.assertEqual(temporary.get("env"), "BUDDYSWITCH_INSTANCE_TMP")
 
-        self.assertIn("buddybox", json.dumps(summarized, ensure_ascii=True))
+        self.assertIn("actor_private", json.dumps(summarized, ensure_ascii=True))
         retired_tokens = (
-            "buddybox_desc",
+            "actor_private_desc",
             "describe_capability",
             "_".join(("write", "private", "text")),
             "_".join(("write", "private", "binary")),
@@ -573,26 +574,26 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         for payload in (listed, summarized):
             packed = json.dumps(payload, ensure_ascii=True)
-            self.assertNotIn("buddyswitch/local/buddybox", packed)
-            self.assertNotIn("state/buddyswitch/local/buddybox", packed)
-            self.assertNotIn("buddyswitch/content/buddybox", packed)
+            self.assertNotIn("buddyswitch/local/actor_private", packed)
+            self.assertNotIn("state/buddyswitch/local/actor_private", packed)
+            self.assertNotIn("buddyswitch/content/actor_private", packed)
             self.assertNotIn("/private/tmp", packed)
             self.assertNotIn("/tmp/ai-calendar", packed)
             for retired in retired_tokens:
                 self.assertNotIn(retired, packed)
 
     def test_context_summarize_includes_source_workspace_facts_for_dev(self) -> None:
-        instance_json = self._instance_json(buddy="dev")
+        instance_json = self._instance_json(role="dev")
         source_root = self._runtime_path("projects/app")
         source_root.mkdir(parents=True, exist_ok=True)
         (source_root / "README.md").write_text("# App\n", encoding="utf-8")
 
-        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
         self.assertTrue(payload.get("ok"), msg=payload)
         source = payload.get("source_workspace")
         self.assertIsInstance(source, dict, msg=payload)
         assert isinstance(source, dict)
-        self.assertEqual(source.get("active_buddy"), "dev")
+        self.assertEqual(source.get("active_role"), "dev")
         self.assertEqual(source.get("path"), "projects/app")
         self.assertEqual(source.get("access"), "write")
         self.assertIs(source.get("can_write_source"), True)
@@ -606,17 +607,17 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("# App", json.dumps(source, ensure_ascii=True))
 
     def test_context_summarize_includes_source_workspace_facts_for_non_dev(self) -> None:
-        instance_json = self._instance_json(buddy="pm")
+        instance_json = self._instance_json(role="pm")
         source_root = self._runtime_path("projects/app")
         source_root.mkdir(parents=True, exist_ok=True)
         (source_root / "README.md").write_text("# App\n", encoding="utf-8")
 
-        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="pm")
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="pm")
         self.assertTrue(payload.get("ok"), msg=payload)
         source = payload.get("source_workspace")
         self.assertIsInstance(source, dict, msg=payload)
         assert isinstance(source, dict)
-        self.assertEqual(source.get("active_buddy"), "pm")
+        self.assertEqual(source.get("active_role"), "pm")
         self.assertEqual(source.get("access"), "read-only")
         self.assertIs(source.get("can_write_source"), False)
         self.assertEqual(source.get("state"), "readme_only")
@@ -625,8 +626,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_accepts_launcher_project_symlink_source_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared-root"
-            instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
-            runtime_workspace = shared_root / "instances" / instance_id / "workspace"
+            actor_id = self._runtime_actor_id(role="dev", label="act-dev-context")
+            runtime_workspace = shared_root / "instances" / actor_id / "workspace"
             runtime_workspace.mkdir(parents=True, exist_ok=True)
             project_workspace = shared_root / "project" / "workspace"
             shared_source_root = project_workspace / "projects" / "app"
@@ -637,12 +638,12 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             runtime_source_root.parent.mkdir(parents=True, exist_ok=True)
             runtime_source_root.symlink_to(shared_source_root, target_is_directory=True)
             instance_json = self._instance_json(
-                buddy="dev",
+                role="dev",
                 workspace_dir=runtime_workspace,
-                path=shared_root / "instances" / instance_id / "instance.json",
+                path=shared_root / "instances" / actor_id / "instance.json",
             )
 
-            payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+            payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
 
             self.assertTrue(payload.get("ok"), msg=payload)
             source = payload.get("source_workspace")
@@ -657,8 +658,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_rejects_source_symlink_outside_project_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared-root"
-            instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
-            runtime_workspace = shared_root / "instances" / instance_id / "workspace"
+            actor_id = self._runtime_actor_id(role="dev", label="act-dev-context")
+            runtime_workspace = shared_root / "instances" / actor_id / "workspace"
             runtime_workspace.mkdir(parents=True, exist_ok=True)
             project_workspace = shared_root / "project" / "workspace"
             (project_workspace / "projects" / "app").mkdir(parents=True, exist_ok=True)
@@ -671,19 +672,19 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             runtime_source_root.parent.mkdir(parents=True, exist_ok=True)
             runtime_source_root.symlink_to(outside_source_root, target_is_directory=True)
             instance_json = self._instance_json(
-                buddy="dev",
+                role="dev",
                 workspace_dir=runtime_workspace,
-                path=shared_root / "instances" / instance_id / "instance.json",
+                path=shared_root / "instances" / actor_id / "instance.json",
             )
 
-            payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+            payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
 
             self.assertFalse(payload.get("ok"), msg=payload)
             self.assertEqual((payload.get("error") or {}).get("code"), "E_CONTEXT_SOURCE_WORKSPACE")
             self.assertIn("project workspace", str((payload.get("error") or {}).get("message", "")).lower())
 
     def test_context_source_workspace_state_classification(self) -> None:
-        instance_json = self._instance_json(buddy="dev")
+        instance_json = self._instance_json(role="dev")
         source_root = self._runtime_path("projects/app")
         cases: list[tuple[str, list[str] | None, str]] = [
             ("missing", None, "missing"),
@@ -704,7 +705,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         entry_path.parent.mkdir(parents=True, exist_ok=True)
                         entry_path.write_text("// seed\n", encoding="utf-8")
 
-                payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+                payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
                 self.assertTrue(payload.get("ok"), msg=payload)
                 source = payload.get("source_workspace")
                 self.assertIsInstance(source, dict, msg=payload)
@@ -714,8 +715,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertNotIn("// seed", json.dumps(source, ensure_ascii=True))
 
     def test_context_list_sources_includes_source_workspace_descriptor(self) -> None:
-        instance_json = self._instance_json(buddy="dev")
-        listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={}, buddy="dev")
+        instance_json = self._instance_json(role="dev")
+        listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={}, role="dev")
         self.assertTrue(listed.get("ok"), msg=listed)
         sources = listed.get("sources")
         self.assertIsInstance(sources, dict, msg=listed)
@@ -730,12 +731,12 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(source_workspace.get("configures_source_root"))
 
     def test_context_get_metadata_and_source_workspace_semantics(self) -> None:
-        instance_json = self._instance_json(buddy="dev")
+        instance_json = self._instance_json(role="dev")
         source_root = self._runtime_path("projects/app")
         source_root.mkdir(parents=True, exist_ok=True)
         (source_root / "README.md").write_text("# App\n", encoding="utf-8")
 
-        payload = self._dispatch(instance_json=instance_json, tool="context", action="get", args={}, buddy="dev")
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="get", args={}, role="dev")
         self.assertTrue(payload.get("ok"), msg=payload)
         source = payload.get("source_workspace")
         self.assertIsInstance(source, dict, msg=payload)
@@ -772,8 +773,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("writable_surfaces", operation_semantics["context.get"]["returns"])
         self.assertIn("source_workspace", operation_semantics["context.summarize"]["returns"])
         self.assertIn("writable_surfaces", operation_semantics["context.summarize"]["returns"])
-        self.assertNotIn("buddybox.desc", operation_semantics)
-        self.assertNotIn("buddybox.write", operation_semantics)
+        self.assertNotIn("actor_private.desc", operation_semantics)
+        self.assertNotIn("actor_private.write", operation_semantics)
         for key in ("context.get", "context.summarize"):
             with self.subTest(operation=key):
                 self.assertIn("reads", operation_semantics[key])
@@ -788,7 +789,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context_catalog = payload.get("tool_catalog", {}).get("context", {})
         self.assertIsInstance(context_catalog, dict, msg=payload)
         assert isinstance(context_catalog, dict)
-        self.assertNotIn("buddybox", payload.get("tool_catalog", {}))
+        self.assertNotIn("actor_private", payload.get("tool_catalog", {}))
         action_semantics = context_catalog.get("action_semantics", {})
         self.assertIsInstance(action_semantics, dict, msg=context_catalog)
         assert isinstance(action_semantics, dict)
@@ -815,7 +816,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("artifact.get_attachment", operation_semantics)
 
     def test_context_source_workspace_uses_profile_not_agents_text_and_profile_failure_is_explicit(self) -> None:
-        instance_json = self._instance_json(buddy="dev")
+        instance_json = self._instance_json(role="dev")
         source_root = self._runtime_path("projects/app")
         source_root.mkdir(parents=True, exist_ok=True)
         (source_root / "README.md").write_text("# App\n", encoding="utf-8")
@@ -824,7 +825,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             encoding="utf-8",
         )
 
-        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
         self.assertTrue(payload.get("ok"), msg=payload)
         source = payload.get("source_workspace")
         self.assertIsInstance(source, dict, msg=payload)
@@ -834,7 +835,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIs(source.get("can_write_source"), True)
 
         with patch("env.tools.context._impl.env_profiles.require_env_profile", side_effect=RuntimeError("boom")):
-            rejected = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+            rejected = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_CONTEXT_SOURCE_WORKSPACE")
         self.assertNotEqual(((rejected.get("source_workspace") or {}).get("state")), "missing")

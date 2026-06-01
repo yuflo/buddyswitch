@@ -42,9 +42,9 @@ def _artifact_ref_matches(refs: Any, artifact_id: str) -> bool:
     return False
 
 
-def _request_is_visible(*, request: dict[str, Any], active_buddy: str) -> bool:
+def _request_is_visible(*, request: dict[str, Any], active_role: str, active_actor_address: dict[str, Any]) -> bool:
     try:
-        request_domain.ensure_visible(request, active_buddy)
+        request_domain.ensure_visible(request, active_role, active_actor_address)
     except request_domain.RequestScopeError:
         return False
     track_id = request.get("track_id")
@@ -52,13 +52,13 @@ def _request_is_visible(*, request: dict[str, Any], active_buddy: str) -> bool:
         return False
     track_readable = artifact_visibility_domain.assert_track_readable(
         track_id,
-        active_buddy=active_buddy,
+        active_role=active_role,
         action="artifact.get",
     )
     return bool(track_readable.get("ok"))
 
 
-def _source_ref_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict[str, Any]]:
+def _source_ref_backlinks(*, artifact_id: str, active_role: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for candidate in artifact_repo.list_artifacts():
         if not isinstance(candidate, dict):
@@ -66,7 +66,7 @@ def _source_ref_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict[s
         candidate_id = candidate.get("id")
         if not isinstance(candidate_id, str) or not candidate_id:
             continue
-        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_buddy)
+        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_role)
         if not bool(decision.get("allowed")):
             continue
         if not _artifact_ref_matches(candidate.get("source_refs"), artifact_id):
@@ -75,7 +75,7 @@ def _source_ref_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict[s
             {
                 "artifact_id": candidate_id,
                 "title": candidate.get("title"),
-                "created_by": candidate.get("created_by"),
+                "created_by_actor": candidate.get("created_by_actor"),
                 "_sort_updated_at": str(candidate.get("updated_at") or ""),
             }
         )
@@ -85,12 +85,18 @@ def _source_ref_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict[s
     return rows
 
 
-def _request_backlinks(*, artifact_id: str, active_buddy: str, ref_field: str) -> list[dict[str, Any]]:
+def _request_backlinks(
+    *,
+    artifact_id: str,
+    active_role: str,
+    active_actor_address: dict[str, Any],
+    ref_field: str,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for request in request_repo.list_requests():
         if not isinstance(request, dict):
             continue
-        if not _request_is_visible(request=request, active_buddy=active_buddy):
+        if not _request_is_visible(request=request, active_role=active_role, active_actor_address=active_actor_address):
             continue
         if not _artifact_ref_matches(request.get(ref_field), artifact_id):
             continue
@@ -101,8 +107,8 @@ def _request_backlinks(*, artifact_id: str, active_buddy: str, ref_field: str) -
             {
                 "request_id": request_id,
                 "track_id": request.get("track_id"),
-                "from_buddy": request.get("from_buddy"),
-                "to_buddy": request.get("to_buddy"),
+                "from_actor": request.get("from_actor"),
+                "to_role": request.get("to_role"),
                 "status": request.get("status"),
                 "title": request.get("title"),
                 "_sort_updated_at": str(request.get("updated_at") or ""),
@@ -114,7 +120,7 @@ def _request_backlinks(*, artifact_id: str, active_buddy: str, ref_field: str) -
     return rows
 
 
-def _track_update_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict[str, Any]]:
+def _track_update_backlinks(*, artifact_id: str, active_role: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for track in track_repo.list_tracks():
         track_id = track.get("id")
@@ -124,7 +130,7 @@ def _track_update_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict
             continue
         readable = artifact_visibility_domain.assert_track_readable(
             track_id,
-            active_buddy=active_buddy,
+            active_role=active_role,
             action="artifact.get",
         )
         if not bool(readable.get("ok")):
@@ -143,7 +149,7 @@ def _track_update_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict
                     "update_id": update_id,
                     "kind": update.get("kind"),
                     "summary": update.get("summary"),
-                    "by_buddy": update.get("by_buddy"),
+                    "by_actor": update.get("by_actor"),
                     "created_at": update.get("created_at"),
                     "_sort_created_at": str(update.get("created_at") or ""),
                 }
@@ -154,7 +160,7 @@ def _track_update_backlinks(*, artifact_id: str, active_buddy: str) -> list[dict
     return rows
 
 
-def _visible_superseded_by_ids(*, artifact_id: str, active_buddy: str) -> list[str]:
+def _visible_superseded_by_ids(*, artifact_id: str, active_role: str) -> list[str]:
     rows: list[tuple[str, str]] = []
     for candidate in artifact_repo.list_artifacts():
         if not isinstance(candidate, dict):
@@ -164,7 +170,7 @@ def _visible_superseded_by_ids(*, artifact_id: str, active_buddy: str) -> list[s
             continue
         if candidate.get("supersedes_artifact_id") != artifact_id:
             continue
-        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_buddy)
+        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_role)
         if not bool(decision.get("allowed")):
             continue
         rows.append((str(candidate.get("updated_at") or ""), candidate_id))
@@ -186,7 +192,12 @@ def comment_counts_for_artifact(artifact_id: str) -> dict[str, int]:
     }
 
 
-def relation_summary_for_artifact(*, artifact: dict[str, Any], active_buddy: str) -> dict[str, Any]:
+def relation_summary_for_artifact(
+    *,
+    artifact: dict[str, Any],
+    active_role: str,
+    active_actor_address: dict[str, Any],
+) -> dict[str, Any]:
     artifact_id = artifact.get("id")
     if not isinstance(artifact_id, str) or not artifact_id:
         return {
@@ -208,7 +219,7 @@ def relation_summary_for_artifact(*, artifact: dict[str, Any], active_buddy: str
             },
         }
 
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
     relation, currentness = _relation_and_currentness(artifact=artifact, decision=decision)
     comments = comment_repo.comments_for_target("artifact", artifact_id)
     comment_ids = [row.get("id") for row in comments if isinstance(row.get("id"), str)]
@@ -221,27 +232,29 @@ def relation_summary_for_artifact(*, artifact: dict[str, Any], active_buddy: str
         },
         "lineage": {
             "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
-            "superseded_by_artifact_ids": _visible_superseded_by_ids(artifact_id=artifact_id, active_buddy=active_buddy),
+            "superseded_by_artifact_ids": _visible_superseded_by_ids(artifact_id=artifact_id, active_role=active_role),
         },
         "incoming_refs": {
-            "source_ref_by_artifacts": _source_ref_backlinks(artifact_id=artifact_id, active_buddy=active_buddy),
+            "source_ref_by_artifacts": _source_ref_backlinks(artifact_id=artifact_id, active_role=active_role),
             "target_ref_by_requests": _request_backlinks(
                 artifact_id=artifact_id,
-                active_buddy=active_buddy,
+                active_role=active_role,
+                active_actor_address=active_actor_address,
                 ref_field="target_refs",
             ),
             "result_ref_by_requests": _request_backlinks(
                 artifact_id=artifact_id,
-                active_buddy=active_buddy,
+                active_role=active_role,
+                active_actor_address=active_actor_address,
                 ref_field="result_refs",
             ),
-            "track_update_refs": _track_update_backlinks(artifact_id=artifact_id, active_buddy=active_buddy),
+            "track_update_refs": _track_update_backlinks(artifact_id=artifact_id, active_role=active_role),
             "comment_ids": comment_ids,
         },
     }
 
 
-def relation_counts_for_artifact(*, artifact_id: str, active_buddy: str) -> dict[str, int]:
+def relation_counts_for_artifact(*, artifact_id: str, active_role: str, active_actor_address: dict[str, Any]) -> dict[str, int]:
     artifact = artifact_repo.get_artifact(artifact_id)
     if not isinstance(artifact, dict):
         return {
@@ -251,7 +264,7 @@ def relation_counts_for_artifact(*, artifact_id: str, active_buddy: str) -> dict
             "track_update_ref_count": 0,
             "comment_count": 0,
         }
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
     if not bool(decision.get("allowed")):
         return {
             "incoming_source_ref_count": 0,
@@ -260,7 +273,11 @@ def relation_counts_for_artifact(*, artifact_id: str, active_buddy: str) -> dict
             "track_update_ref_count": 0,
             "comment_count": 0,
         }
-    summary = relation_summary_for_artifact(artifact=artifact, active_buddy=active_buddy)
+    summary = relation_summary_for_artifact(
+        artifact=artifact,
+        active_role=active_role,
+        active_actor_address=active_actor_address,
+    )
     incoming = summary.get("incoming_refs", {})
     if not isinstance(incoming, dict):
         incoming = {}

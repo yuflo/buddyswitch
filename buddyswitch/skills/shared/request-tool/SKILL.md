@@ -1,13 +1,13 @@
 ---
 name: request-tool
-description: Use when creating and managing durable cross-buddy requests on readable tracks through runtime env tools.
+description: Use when creating and managing durable cross-role requests on readable tracks through runtime env tools.
 ---
 
 # Request Tool
 
 ## Purpose
 
-Create and manage durable cross-buddy request lifecycle state on readable tracks.
+Create and manage durable cross-role request lifecycle state on readable tracks.
 
 ## Runtime Route
 - Primary: use native BuddySwitch env MCP tools such as `request__list`, `request__get`, `request__create`, `request__accept`, `request__block`, `request__complete`, and `request__cancel`.

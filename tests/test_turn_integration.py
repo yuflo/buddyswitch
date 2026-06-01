@@ -23,13 +23,13 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_id = self._runtime_instance_id(buddy="pm", label="inst-runless-integration")
+        self.actor_id = self._runtime_actor_id(role="pm", label="act-runless-integration")
         self.instance_json = self._runtime_path("instance.json")
         self.instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": self.instance_id,
-                    "buddy": "pm",
+                    "actor_id": self.actor_id,
+                    "role": "pm",
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": 9222,
@@ -41,19 +41,19 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-runless-integration")
+    def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label="act-runless-integration")
         instance_payload = {
-            "instance_id": instance_id,
-            "buddy": buddy,
+            "actor_id": actor_id,
+            "role": role,
             "status": "active",
             "workspace_dir": str(self.runtime_root),
             "browser_port": 9222,
         }
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id=instance_id,
+            active_role=role,
+            actor_id=actor_id,
             instance_json=self.instance_json,
             instance_payload=instance_payload,
             manifest=self.manifest,
@@ -62,7 +62,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_pm_product_request_uses_track_artifact_publication_not_project_write(self) -> None:
         track = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -78,7 +78,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(track_id, "track-runless-flow")
 
         draft = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -93,7 +93,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((draft.get("artifact") or {}).get("status"), "draft")
 
         publish = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -113,7 +113,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("material_added", changes)
 
         context_summary = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="context",
             action="summarize",
             args={"track_id": "track-runless-flow", "limit": 5},
@@ -124,10 +124,10 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(affordances, dict)
         for tool_name in ("track", "artifact", "context"):
             self.assertIn(tool_name, affordances)
-        self.assertNotIn("buddybox", affordances)
+        self.assertNotIn("actor_private", affordances)
 
         opened = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="open",
             args={"track_id": "track-runless-flow"},
@@ -139,7 +139,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         design_read = self._dispatch(
-            buddy="design",
+            role="design",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-runless-prd-r1"},
@@ -155,7 +155,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(list(project_app.rglob("*")), [])
 
     def test_market_evidence_requires_target_model(self) -> None:
-        rejected = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={})
+        rejected = self._dispatch(role="market", tool="evidence", action="issue_browser", args={})
         self.assertFalse(rejected["ok"])
         self.assertEqual(rejected["permission_boundary"], "request-payload")
 

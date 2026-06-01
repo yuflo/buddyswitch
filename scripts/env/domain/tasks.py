@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task-domain validation and active-buddy ownership helpers."""
+"""Task-domain validation and active-role ownership helpers."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ PUBLICATION_STYLE_FIELDS = {
     "shared_materials",
     "source_refs",
     "supersedes_artifact_id",
-    "target_buddy",
+    "target_role",
     "template",
     "updates",
     "visibility",
@@ -35,7 +35,7 @@ class TaskPayloadError(ValueError):
 
 
 class TaskScopeError(PermissionError):
-    """Raised when task ownership does not match active buddy scope."""
+    """Raised when task ownership does not match active role scope."""
 
 
 def publication_style_fields(args: Mapping[str, Any]) -> list[str]:
@@ -174,10 +174,10 @@ def normalize_limit(value: Any, *, default: int = 100, maximum: int = 200) -> in
     return min(value, maximum)
 
 
-def ensure_active_buddy_ownership(*, task: Mapping[str, Any], task_id: str, active_buddy: str) -> None:
-    owner = task.get("owner_buddy")
-    if owner != active_buddy:
-        raise TaskScopeError(f"task '{task_id}' is owned by buddy '{owner}'")
+def ensure_active_role_ownership(*, task: Mapping[str, Any], task_id: str, active_role: str) -> None:
+    owner = task.get("owner_role")
+    if owner != active_role:
+        raise TaskScopeError(f"task '{task_id}' is owned by role '{owner}'")
 
 
 def create_payload(args: Mapping[str, Any]) -> dict[str, Any]:

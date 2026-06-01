@@ -12,7 +12,7 @@ import uuid
 
 from env.domain import artifact_relations as _artifact_relations_domain
 from env.domain import artifact_visibility as _artifact_visibility_domain
-from env.domain import buddybox_workspace as _buddybox_workspace_domain
+from env.domain import actor_private_workspace as _actor_private_workspace_domain
 from env.domain import comment_targets as _comment_target_domain
 from env.domain import messages as _message_domain
 from env.domain import publication as _publication_domain
@@ -22,16 +22,18 @@ from env.domain import tasks as _task_domain
 import env_profiles
 from env_manifest import DEFAULT_MANIFEST
 from env.repos import artifacts as _artifact_repo
-from env.repos import buddybox_files as _buddybox_repo
+from env.repos import actor_private_files as _actor_private_repo
 from env.repos import comments as _comment_repo
 from env.repos import messages as _message_repo
 from env.repos import requests as _request_repo
 from env.repos import runtime_files
 from env.repos import tasks as _task_repo
 from env.repos import tracks as _track_repo
+from env.tool_runtime.actor_profile import Actor
+from env.tool_runtime.actor_profile import ActorAddress
+from env.tool_runtime.actor_profile import ActorProfile
 from env.tool_runtime.actor_profile import AuthSubject
-from env.tool_runtime.actor_profile import RuntimeActorAddress
-from env.tool_runtime.actor_profile import RuntimeActorProfile
+from env.tool_runtime.actor_profile import Role
 from env.tool_runtime import daemon_client
 
 
@@ -74,14 +76,14 @@ class RuntimeObjectAccess:
             track_id=track_id,
             artifact_id=artifact_id,
             label=label,
-            from_buddy="",
+            from_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             summary=summary,
         )
 
     def add_track_update(self, track_id: str, summary: str, kind: str, refs: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
         return _track_repo.append_track_update(
             track_id=track_id,
-            by_buddy="",
+            by_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             kind=kind,
             summary=summary,
             refs=refs,
@@ -92,7 +94,7 @@ class RuntimeObjectAccess:
             track_id=track_id,
             artifact_id=artifact_id,
             label=label,
-            from_buddy="",
+            from_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             summary=summary,
         )
 
@@ -119,7 +121,7 @@ class RuntimeObjectAccess:
         return _artifact_repo.create_artifact_revision(
             artifact_id=artifact_id,
             title=title,
-            created_by="",
+            created_by_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             body=body,
             template=template,
             summary=summary,
@@ -158,17 +160,17 @@ class RuntimeObjectAccess:
         reply_to: str | None,
         artifact_revision_id: str | None,
         anchor: str | None,
-        mentions: list[str] | None,
+        mentioned_actors: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
         return _comment_repo.create_comment(
             target_type=target_type,
             target_id=target_id,
-            by_buddy="",
+            by_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             content=content,
             reply_to=reply_to,
             artifact_revision_id=artifact_revision_id,
             anchor=anchor,
-            mentions=mentions,
+            mentioned_actors=mentioned_actors,
         )
 
     def list_comments(self, target_type: str, target_id: str, status: str | None) -> list[dict[str, Any]]:
@@ -179,8 +181,8 @@ class RuntimeObjectAccess:
 
     def send_message(
         self,
-        from_actor_address: RuntimeActorAddress | dict[str, Any],
-        to_actor_address: RuntimeActorAddress | dict[str, Any],
+        from_actor_address: ActorAddress | dict[str, Any],
+        to_actor_address: ActorAddress | dict[str, Any],
         content: str,
         reply_to: str | None,
     ) -> dict[str, Any]:
@@ -191,14 +193,14 @@ class RuntimeObjectAccess:
             reply_to=reply_to,
         )
 
-    def list_messages(self, buddy: str | None) -> list[dict[str, Any]]:
+    def list_messages(self, role: str | None) -> list[dict[str, Any]]:
         rows = _message_repo.list_messages()
-        if isinstance(buddy, str) and buddy.strip():
+        if isinstance(role, str) and role.strip():
             rows = [
                 row
                 for row in rows
                 if isinstance(row.get("from_actor_address"), dict)
-                and row["from_actor_address"].get("buddy_id") == buddy
+                and row["from_actor_address"].get("role_id") == role
             ]
         return rows
 
@@ -214,53 +216,53 @@ class RuntimeObjectAccess:
         }
 
 
-class BuddyboxAccess:
-    """Active-buddy private buddybox operations."""
+class ActorPrivateAccess:
+    """Active actor actor_private operations."""
 
-    def __init__(self, *, active_buddy: str, manifest: dict[str, Any], instance_payload: dict[str, Any]) -> None:
-        self._active_buddy = active_buddy
+    def __init__(self, *, active_role: str, manifest: dict[str, Any], instance_payload: dict[str, Any]) -> None:
+        self._active_role = active_role
         self._manifest = manifest
         self._instance_payload = instance_payload
 
-    def _buddy_ids(self) -> set[str]:
-        ids = _message_domain.manifest_buddy_ids(self._manifest)
-        ids.add(self._active_buddy)
+    def _role_ids(self) -> set[str]:
+        ids = _message_domain.manifest_role_ids(self._manifest)
+        ids.add(self._active_role)
         return ids
 
     def _root(self) -> Path:
-        return _buddybox_repo.ensure_active_buddy_root(
-            active_buddy=self._active_buddy,
+        return _actor_private_repo.ensure_active_actor_private_root(
+            active_role=self._active_role,
             instance_payload=self._instance_payload,
         )
 
     def describe(self) -> dict[str, Any]:
-        return _buddybox_workspace_domain.build_buddybox_desc(
-            self._active_buddy,
+        return _actor_private_workspace_domain.build_actor_private_desc(
+            self._active_role,
             instance_payload=self._instance_payload,
         )
 
     def list_files(self, logical_name: str | None = None, recursive: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
-        prefix = _buddybox_repo.normalize_logical_prefix(
+        prefix = _actor_private_repo.normalize_logical_prefix(
             logical_name,
-            active_buddy=self._active_buddy,
-            buddy_ids=self._buddy_ids(),
+            active_role=self._active_role,
+            role_ids=self._role_ids(),
         )
         max_rows = int(limit) if isinstance(limit, int) and limit > 0 else 100
-        return _buddybox_repo.list_private_file_summaries(
+        return _actor_private_repo.list_private_file_summaries(
             root=self._root(),
-            active_buddy=self._active_buddy,
+            active_role=self._active_role,
             recursive=bool(recursive),
             limit=max_rows,
             logical_prefix=prefix,
         )
 
     def read_file(self, logical_name: str, encoding: str | None = None) -> dict[str, Any]:
-        normalized = _buddybox_repo.normalize_logical_name(
+        normalized = _actor_private_repo.normalize_logical_name(
             logical_name,
-            active_buddy=self._active_buddy,
-            buddy_ids=self._buddy_ids(),
+            active_role=self._active_role,
+            role_ids=self._role_ids(),
         )
-        raw, content_type = _buddybox_repo.read_private_file(root=self._root(), logical_name=normalized)
+        raw, content_type = _actor_private_repo.read_private_file(root=self._root(), logical_name=normalized)
         if isinstance(encoding, str) and encoding.strip().lower() == "base64":
             import base64
 
@@ -283,10 +285,10 @@ class BuddyboxAccess:
         content_type: str | None = None,
     ) -> dict[str, Any]:
         del content_type
-        normalized = _buddybox_repo.normalize_logical_name(
+        normalized = _actor_private_repo.normalize_logical_name(
             logical_name,
-            active_buddy=self._active_buddy,
-            buddy_ids=self._buddy_ids(),
+            active_role=self._active_role,
+            role_ids=self._role_ids(),
         )
         payload_bytes: bytes
         if isinstance(content, str) and content_base64 is None:
@@ -297,7 +299,7 @@ class BuddyboxAccess:
             payload_bytes = base64.b64decode(content_base64.encode("ascii"))
         else:
             raise ValueError("write_file requires exactly one of content or content_base64")
-        existed, guessed_content_type = _buddybox_repo.write_private_file(
+        existed, guessed_content_type = _actor_private_repo.write_private_file(
             root=self._root(),
             logical_name=normalized,
             content=payload_bytes,
@@ -310,25 +312,25 @@ class BuddyboxAccess:
         }
 
     def delete_file(self, logical_name: str) -> bool:
-        normalized = _buddybox_repo.normalize_logical_name(
+        normalized = _actor_private_repo.normalize_logical_name(
             logical_name,
-            active_buddy=self._active_buddy,
-            buddy_ids=self._buddy_ids(),
+            active_role=self._active_role,
+            role_ids=self._role_ids(),
         )
-        return _buddybox_repo.delete_private_file(root=self._root(), logical_name=normalized)
+        return _actor_private_repo.delete_private_file(root=self._root(), logical_name=normalized)
 
 
 class BrowserAccess:
     """Browser/evidence helper placeholders owned by host runtime."""
 
-    def __init__(self, *, active_buddy: str, instance_payload: dict[str, Any], manifest_path: Path | None) -> None:
-        self._active_buddy = active_buddy
+    def __init__(self, *, active_role: str, instance_payload: dict[str, Any], manifest_path: Path | None) -> None:
+        self._active_role = active_role
         self._instance_payload = instance_payload
         self._manifest_path = manifest_path or DEFAULT_MANIFEST
 
     def status(self) -> dict[str, Any]:
         port = self._instance_payload.get("browser_port")
-        return {"active_buddy": self._active_buddy, "browser_port": port}
+        return {"active_role": self._active_role, "browser_port": port}
 
     def request(self, query: str, backend: str | None = None, engine: str | None = None) -> dict[str, Any]:
         del backend, engine
@@ -371,22 +373,22 @@ class RegistryCatalogAccess:
         return _load_registry_module().tool_catalog_errors()
 
 
-def _actor_address_payload(value: RuntimeActorAddress | dict[str, Any]) -> dict[str, Any]:
-    if isinstance(value, RuntimeActorAddress):
+def _actor_address_payload(value: ActorAddress | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(value, ActorAddress):
         return value.to_payload()
-    return RuntimeActorAddress.from_payload(value).to_payload()
+    return ActorAddress.from_payload(value).to_payload()
 
 
 class DaemonAccess:
     """Explicit central daemon access for runtime tools."""
 
-    def __init__(self, *, actor_address: RuntimeActorAddress) -> None:
+    def __init__(self, *, actor_address: ActorAddress) -> None:
         self._actor_address = actor_address
 
-    def list_contacts(self, *, buddy_id: str | None = None) -> dict[str, Any]:
-        return daemon_client.list_contacts(buddy_id=buddy_id)
+    def list_contacts(self, *, role_id: str | None = None) -> dict[str, Any]:
+        return daemon_client.list_contacts(role_id=role_id)
 
-    def check_reachability(self, *, target_actor_address: RuntimeActorAddress | dict[str, Any]) -> dict[str, Any]:
+    def check_reachability(self, *, target_actor_address: ActorAddress | dict[str, Any]) -> dict[str, Any]:
         return daemon_client.check_reachability(
             target_actor_address=_actor_address_payload(target_actor_address),
         )
@@ -395,7 +397,7 @@ class DaemonAccess:
         self,
         *,
         signal_type: str,
-        target_actor_address: RuntimeActorAddress | dict[str, Any],
+        target_actor_address: ActorAddress | dict[str, Any],
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         signal = {
@@ -412,7 +414,7 @@ class DaemonAccess:
         self,
         *,
         message_id: str,
-        target_actor_address: RuntimeActorAddress | dict[str, Any],
+        target_actor_address: ActorAddress | dict[str, Any],
     ) -> dict[str, Any]:
         return self.deliver_signal(
             signal_type="message.available",
@@ -427,7 +429,7 @@ class DomainAccess:
 
     artifact_relations: Any = field(default_factory=lambda: _artifact_relations_domain)
     artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
-    buddybox_workspace: Any = field(default_factory=lambda: _buddybox_workspace_domain)
+    actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
     comment_target: Any = field(default_factory=lambda: _comment_target_domain)
     message: Any = field(default_factory=lambda: _message_domain)
     publication: Any = field(default_factory=lambda: _publication_domain)
@@ -441,7 +443,7 @@ class RepoAccess:
     """Host-owned repository and runtime-file access."""
 
     artifact: Any = field(default_factory=lambda: _artifact_repo)
-    buddybox: Any = field(default_factory=lambda: _buddybox_repo)
+    actor_private: Any = field(default_factory=lambda: _actor_private_repo)
     comment: Any = field(default_factory=lambda: _comment_repo)
     message: Any = field(default_factory=lambda: _message_repo)
     request: Any = field(default_factory=lambda: _request_repo)
@@ -454,9 +456,11 @@ class RepoAccess:
 class ToolContext(Mapping[str, Any]):
     """Host-owned runtime context object passed to each tool invoke."""
 
-    active_buddy: str
-    instance_id: str
-    actor_address: RuntimeActorAddress
+    active_actor: Actor
+    active_role: Role
+    actor_id: str
+    role_id: str
+    actor_address: ActorAddress
     auth_subject: AuthSubject
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -470,9 +474,9 @@ class ToolContext(Mapping[str, Any]):
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
-            "buddybox",
-            BuddyboxAccess(
-                active_buddy=self.active_buddy,
+            "actor_private",
+            ActorPrivateAccess(
+                active_role=self.role_id,
                 manifest=self.manifest,
                 instance_payload=self.instance_payload,
             ),
@@ -481,7 +485,7 @@ class ToolContext(Mapping[str, Any]):
             self,
             "browser",
             BrowserAccess(
-                active_buddy=self.active_buddy,
+                active_role=self.role_id,
                 instance_payload=self.instance_payload,
                 manifest_path=self.manifest_path,
             ),
@@ -492,15 +496,17 @@ class ToolContext(Mapping[str, Any]):
     def from_actor_profile(
         cls,
         *,
-        actor_profile: RuntimeActorProfile,
+        actor_profile: ActorProfile,
         instance_json: Path,
         instance_payload: dict[str, Any],
         manifest: dict[str, Any],
         manifest_path: Path | None = None,
     ) -> "ToolContext":
         return cls(
-            active_buddy=actor_profile.active_buddy,
-            instance_id=actor_profile.instance_id,
+            active_actor=actor_profile.active_actor,
+            active_role=actor_profile.active_role,
+            actor_id=actor_profile.actor_id,
+            role_id=actor_profile.role_id,
             actor_address=actor_profile.actor_address,
             auth_subject=actor_profile.auth_subject,
             instance_json=instance_json,
@@ -522,10 +528,14 @@ class ToolContext(Mapping[str, Any]):
         return f"{head}-{uuid.uuid4().hex[:10]}"
 
     def __getitem__(self, key: str) -> Any:
-        if key == "active_buddy":
-            return self.active_buddy
-        if key == "instance_id":
-            return self.instance_id
+        if key == "active_actor":
+            return self.active_actor.to_payload()
+        if key == "active_role":
+            return self.active_role.role_id
+        if key == "actor_id":
+            return self.actor_id
+        if key == "role_id":
+            return self.role_id
         if key == "instance_json":
             return self.instance_json
         if key == "instance_payload":
@@ -537,15 +547,17 @@ class ToolContext(Mapping[str, Any]):
         raise KeyError(key)
 
     def __iter__(self) -> Iterator[str]:
-        yield "active_buddy"
-        yield "instance_id"
+        yield "active_actor"
+        yield "active_role"
+        yield "actor_id"
+        yield "role_id"
         yield "instance_json"
         yield "instance_payload"
         yield "manifest"
         yield "manifest_path"
 
     def __len__(self) -> int:
-        return 6
+        return 8
 
     def get(self, key: str, default: Any = None) -> Any:
         try:

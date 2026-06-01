@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shared-root", required=True, help="BuddySwitch shared root")
     parser.add_argument("--source-codex-home", help="Source Codex home that must not be writable")
     parser.add_argument("--manifest", help="Path to env manifest TOML")
-    parser.add_argument("--buddy", help="Active buddy id for instance mode")
+    parser.add_argument("--role", help="Active role id for instance mode")
     parser.add_argument("--instance-root", help="Active instance root path")
     parser.add_argument("--workspace-dir", help="Active workspace path")
     parser.add_argument("--project-workspace-dir", help="Shared project workspace path")
@@ -332,7 +332,7 @@ def _import_env_profiles(repo_root: Path):
 
 
 def _profile_mode(args: argparse.Namespace) -> bool:
-    return isinstance(args.buddy, str) and bool(args.buddy.strip())
+    return isinstance(args.role, str) and bool(args.role.strip())
 
 
 def _require_profile_mode_args(args: argparse.Namespace) -> None:
@@ -387,11 +387,11 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
         else canonical(str(Path.home() / ".codex"))
     )
     manifest_path = canonical(args.manifest) if args.manifest else canonical_repo_root / "buddyswitch" / "manifest.toml"
-    buddy_id = str(args.buddy).strip()
+    role_id = str(args.role).strip()
 
     env_profiles = _import_env_profiles(canonical_repo_root)
     profile = env_profiles.require_env_profile(
-        buddy_id,
+        role_id,
         manifest_path=manifest_path,
         repo_root=canonical_repo_root,
     )
@@ -414,7 +414,7 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     home = canonical(str(args.home))
     codex_home = canonical(str(args.codex_home))
     xdg_config_home = canonical(str(args.xdg_config_home))
-    buddybox_root = workspace_dir / "buddybox"
+    actor_private_root = workspace_dir / "private"
     instance_tmp = instance_root / "tmp"
     filesystem_entries: dict[str, str] = {}
     filesystem_entries["/"] = "read"
@@ -428,7 +428,7 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
         if candidate != instance_tmp:
             raise ValueError(f"product-mode temp root must be the active instance tmp: {candidate}")
 
-    writable_roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root, instance_tmp]
+    writable_roots: list[Path] = [home, codex_home, xdg_config_home, actor_private_root, instance_tmp]
 
     blocked_roots = [
         canonical_shared_root,

@@ -28,23 +28,23 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instances: dict[str, dict[str, object]] = {}
-        for buddy in ("pm", "design", "dev", "test", "market"):
-            instance_id = self._runtime_instance_id(buddy=buddy, label="inst-e2e-runless")
-            instance_root = self._instance_root(instance_id)
+        for role in ("pm", "design", "dev", "test", "market"):
+            actor_id = self._runtime_actor_id(role=role, label="act-e2e-runless")
+            instance_root = self._instance_root(actor_id)
             workspace_dir = instance_root / "workspace"
             workspace_dir.mkdir(parents=True, exist_ok=True)
             instance_json = instance_root / "instance.json"
             payload = {
-                "instance_id": instance_id,
-                "buddy": buddy,
+                "actor_id": actor_id,
+                "role": role,
                 "status": "active",
                 "instance_root": str(instance_root),
                 "workspace_dir": str(workspace_dir),
                 "browser_port": 9333,
             }
             instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-            self.instances[buddy] = {
-                "instance_id": instance_id,
+            self.instances[role] = {
+                "actor_id": actor_id,
                 "instance_root": instance_root,
                 "instance_json": instance_json,
                 "workspace_dir": workspace_dir,
@@ -52,14 +52,14 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             }
         self.workspace_dir = self._workspace_dir("pm")
 
-    def _workspace_dir(self, buddy: str) -> Path:
-        workspace_dir = self.instances[buddy]["workspace_dir"]
+    def _workspace_dir(self, role: str) -> Path:
+        workspace_dir = self.instances[role]["workspace_dir"]
         self.assertIsInstance(workspace_dir, Path)
         assert isinstance(workspace_dir, Path)
         return workspace_dir
 
-    def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance = self.instances[buddy]
+    def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        instance = self.instances[role]
         instance_json = instance["instance_json"]
         instance_payload = instance["payload"]
         self.assertIsInstance(instance_json, Path)
@@ -68,8 +68,8 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(instance_payload, dict)
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id=str(instance["instance_id"]),
+            active_role=role,
+            actor_id=str(instance["actor_id"]),
             instance_json=instance_json,
             instance_payload=instance_payload,
             manifest=self.manifest,
@@ -78,7 +78,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _create_track(self, track_id: str) -> dict[str, object]:
         return self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="create",
             args={
@@ -93,7 +93,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _create_draft(
         self,
         *,
-        buddy: str,
+        role: str,
         artifact_id: str,
         template: str,
         body: str,
@@ -109,7 +109,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         }
         if supersedes_artifact_id:
             args["supersedes_artifact_id"] = supersedes_artifact_id
-        return self._dispatch(buddy=buddy, tool="artifact", action="create_revision", args=args)
+        return self._dispatch(role=role, tool="artifact", action="create_revision", args=args)
 
     def _instance_task_snapshot(self) -> dict[str, str]:
         instances_root = self.runtime_root / "instances"
@@ -126,7 +126,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created.get("ok"), msg=created)
 
         pm_r1 = self._create_draft(
-            buddy="pm",
+            role="pm",
             artifact_id="art-pm-brief-r1",
             template="brief",
             body="# PM Brief v1\n\nScope v1",
@@ -134,7 +134,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(pm_r1.get("ok"), msg=pm_r1)
         pm_pub_r1 = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -149,7 +149,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(pm_pub_r1.get("durability"), "durable")
 
         pm_r2 = self._create_draft(
-            buddy="pm",
+            role="pm",
             artifact_id="art-pm-brief-r2",
             template="brief",
             body="# PM Brief v2\n\nScope v2",
@@ -158,7 +158,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(pm_r2.get("ok"), msg=pm_r2)
         pm_pub_r2 = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -170,13 +170,13 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(pm_pub_r2.get("ok"), msg=pm_pub_r2)
 
-        design_open = self._dispatch(buddy="design", tool="track", action="open", args={"track_id": track_id})
+        design_open = self._dispatch(role="design", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(design_open.get("ok"), msg=design_open)
         current_material_ids = [row.get("artifact_id") for row in (design_open.get("track") or {}).get("shared_materials", [])]
         self.assertEqual(current_material_ids, ["art-pm-brief-r2"])
 
         design_read_pm = self._dispatch(
-            buddy="design",
+            role="design",
             tool="artifact",
             action="get",
             args={"artifact_id": "art-pm-brief-r2"},
@@ -185,7 +185,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("Scope v2", (design_read_pm.get("artifact") or {}).get("body", ""))
 
         design_draft = self._create_draft(
-            buddy="design",
+            role="design",
             artifact_id="art-design-r1",
             template="design",
             body="# Design Draft\n\nWireframe spec",
@@ -193,24 +193,24 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(design_draft.get("ok"), msg=design_draft)
         design_pub = self._dispatch(
-            buddy="design",
+            role="design",
             tool="track",
             action="add_material",
             args={"track_id": track_id, "artifact_id": "art-design-r1", "label": "Design", "summary": "handoff"},
         )
         self.assertTrue(design_pub.get("ok"), msg=design_pub)
 
-        dev_open = self._dispatch(buddy="dev", tool="track", action="open", args={"track_id": track_id})
+        dev_open = self._dispatch(role="dev", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(dev_open.get("ok"), msg=dev_open)
         current_material_ids = [row.get("artifact_id") for row in (dev_open.get("track") or {}).get("shared_materials", [])]
         self.assertEqual(current_material_ids, ["art-pm-brief-r2", "art-design-r1"])
-        dev_read_pm = self._dispatch(buddy="dev", tool="artifact", action="get", args={"artifact_id": "art-pm-brief-r2"})
-        dev_read_design = self._dispatch(buddy="dev", tool="artifact", action="get", args={"artifact_id": "art-design-r1"})
+        dev_read_pm = self._dispatch(role="dev", tool="artifact", action="get", args={"artifact_id": "art-pm-brief-r2"})
+        dev_read_design = self._dispatch(role="dev", tool="artifact", action="get", args={"artifact_id": "art-design-r1"})
         self.assertTrue(dev_read_pm.get("ok"), msg=dev_read_pm)
         self.assertTrue(dev_read_design.get("ok"), msg=dev_read_design)
 
         dev_draft = self._create_draft(
-            buddy="dev",
+            role="dev",
             artifact_id="art-dev-r1",
             template="note",
             body="# Implementation Plan\n\nStep list",
@@ -218,20 +218,20 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(dev_draft.get("ok"), msg=dev_draft)
         dev_pub = self._dispatch(
-            buddy="dev",
+            role="dev",
             tool="track",
             action="add_material",
             args={"track_id": track_id, "artifact_id": "art-dev-r1", "label": "Implementation", "summary": "plan"},
         )
         self.assertTrue(dev_pub.get("ok"), msg=dev_pub)
 
-        test_open = self._dispatch(buddy="test", tool="track", action="open", args={"track_id": track_id})
+        test_open = self._dispatch(role="test", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(test_open.get("ok"), msg=test_open)
         material_ids = [row.get("artifact_id") for row in (test_open.get("track") or {}).get("shared_materials", [])]
         self.assertEqual(material_ids, ["art-pm-brief-r2", "art-design-r1", "art-dev-r1"])
 
         test_proof_draft = self._create_draft(
-            buddy="test",
+            role="test",
             artifact_id="art-test-proof-r1",
             template="proof",
             body="# Test Proof\n\nSmoke passed",
@@ -239,7 +239,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(test_proof_draft.get("ok"), msg=test_proof_draft)
         test_proof_pub = self._dispatch(
-            buddy="test",
+            role="test",
             tool="track",
             action="add_proof",
             args={"track_id": track_id, "artifact_id": "art-test-proof-r1", "label": "Smoke", "summary": "pass"},
@@ -250,7 +250,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("proof_added", proof_changes)
         self.assertIn("update_added", proof_changes)
 
-        pm_open = self._dispatch(buddy="pm", tool="track", action="open", args={"track_id": track_id})
+        pm_open = self._dispatch(role="pm", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(pm_open.get("ok"), msg=pm_open)
         track_page = pm_open.get("track")
         self.assertIsInstance(track_page, dict, msg=pm_open)
@@ -259,7 +259,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual([row.get("artifact_id") for row in track_page.get("close_proof", [])], ["art-test-proof-r1"])
 
         pm_update = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="update_now",
             args={"track_id": track_id, "state": "done", "health": "ok", "now": {"next": "ship", "blocker": None}},
@@ -276,7 +276,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(current_map["art-pm-brief-r2"])
 
         context_full = self._dispatch(
-            buddy="dev",
+            role="dev",
             tool="context",
             action="get",
             args={"track_id": track_id, "limit": 5},
@@ -311,7 +311,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("artifact.get_attachment", op_semantics)
 
         for artifact_id in ("art-pm-brief-r1", "art-pm-brief-r2", "art-design-r1", "art-dev-r1", "art-test-proof-r1"):
-            read = self._dispatch(buddy="dev", tool="artifact", action="get", args={"artifact_id": artifact_id})
+            read = self._dispatch(role="dev", tool="artifact", action="get", args={"artifact_id": artifact_id})
             self.assertTrue(read.get("ok"), msg=read)
             self.assertIsInstance((read.get("artifact") or {}).get("body"), str, msg=read)
 
@@ -321,7 +321,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created.get("ok"), msg=created)
 
         design_draft = self._create_draft(
-            buddy="design",
+            role="design",
             artifact_id="art-design-attach-e2e-r1",
             template="design",
             body="# Design",
@@ -329,12 +329,12 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(design_draft.get("ok"), msg=design_draft)
 
-        source = self._workspace_dir("design") / "buddybox" / "screenshots" / "desktop.png"
+        source = self._workspace_dir("design") / "private" / "screenshots" / "desktop.png"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n")
 
         attached = self._dispatch(
-            buddy="design",
+            role="design",
             tool="artifact",
             action="attach_file",
             args={
@@ -351,7 +351,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         attachment_id = str(attachment.get("attachment_id"))
 
         published = self._dispatch(
-            buddy="design",
+            role="design",
             tool="track",
             action="add_material",
             args={
@@ -363,7 +363,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published.get("ok"), msg=published)
 
-        opened = self._dispatch(buddy="dev", tool="track", action="open", args={"track_id": track_id})
+        opened = self._dispatch(role="dev", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(opened.get("ok"), msg=opened)
         track = opened.get("track")
         self.assertIsInstance(track, dict, msg=opened)
@@ -382,7 +382,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("path", ref_attachments[0])
 
         fetched = self._dispatch(
-            buddy="dev",
+            role="dev",
             tool="artifact",
             action="get_attachment",
             args={"artifact_id": "art-design-attach-e2e-r1", "attachment_id": attachment_id},
@@ -390,7 +390,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(fetched.get("ok"), msg=fetched)
         self.assertEqual(fetched.get("content_base64"), "iVBORw0K")
 
-    def test_cross_buddy_identity_scope_follows_service_permissions(self) -> None:
+    def test_cross_role_identity_scope_follows_service_permissions(self) -> None:
         env_store.create_artifact_revision(
             artifact_id="art-pm-private-r1",
             title="Private artifact",
@@ -403,13 +403,13 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             source_refs=[{"type": "note", "label": "seed"}],
         )
         denied = self._dispatch(
-            buddy="design",
+            role="design",
             tool="artifact",
             action="update_metadata",
             args={"artifact_id": "art-pm-private-r1", "summary": "mutate"},
         )
         self.assertFalse(denied["ok"])
-        self.assertEqual(denied["permission_boundary"], "artifact.buddy_scope")
+        self.assertEqual(denied["permission_boundary"], "artifact.actor_scope")
         self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_SCOPE")
 
     def test_request_lifecycle_and_pm_comment_resolution_flow(self) -> None:
@@ -418,7 +418,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created.get("ok"), msg=created)
 
         pm_scope = self._create_draft(
-            buddy="pm",
+            role="pm",
             artifact_id="art-pm-scope-r1",
             template="brief",
             body="# Scope\n\nApproved baseline",
@@ -426,7 +426,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(pm_scope.get("ok"), msg=pm_scope)
         pm_scope_pub = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={
@@ -442,12 +442,12 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before_tasks = self._instance_task_snapshot()
 
         request_created = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="request",
             action="create",
             args={
                 "track_id": track_id,
-                "to_buddy": "dev",
+                "to_role": "dev",
                 "title": "Implement approved scope",
                 "summary": "Build implementation artifact from PM scope.",
                 "target_refs": [{"type": "artifact", "id": "art-pm-scope-r1"}],
@@ -458,7 +458,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(request_id.startswith("req-"))
 
         dev_inbox = self._dispatch(
-            buddy="dev",
+            role="dev",
             tool="request",
             action="list",
             args={"box": "inbox", "track_id": track_id},
@@ -468,7 +468,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn(request_id, inbox_ids)
 
         accepted = self._dispatch(
-            buddy="dev",
+            role="dev",
             tool="request",
             action="accept",
             args={"request_id": request_id},
@@ -477,7 +477,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((accepted.get("request") or {}).get("status"), "accepted")
 
         dev_result = self._create_draft(
-            buddy="dev",
+            role="dev",
             artifact_id="art-dev-req-r1",
             template="note",
             body="# Implementation\n\nDelivered",
@@ -485,7 +485,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(dev_result.get("ok"), msg=dev_result)
         dev_result_pub = self._dispatch(
-            buddy="dev",
+            role="dev",
             tool="track",
             action="add_material",
             args={
@@ -498,7 +498,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(dev_result_pub.get("ok"), msg=dev_result_pub)
 
         completed = self._dispatch(
-            buddy="dev",
+            role="dev",
             tool="request",
             action="complete",
             args={
@@ -510,7 +510,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((completed.get("request") or {}).get("status"), "done")
 
         test_comment = self._dispatch(
-            buddy="test",
+            role="test",
             tool="comment",
             action="add",
             args={
@@ -523,7 +523,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         comment_id = str((test_comment.get("comment") or {}).get("id"))
 
         resolved = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="comment",
             action="resolve",
             args={"comment_id": comment_id, "resolution_summary": "Reviewed and accepted."},
@@ -532,7 +532,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn(comment_id, resolved.get("updated_ids", []))
 
         resolved_list = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="comment",
             action="list",
             args={"target_type": "artifact", "target_id": "art-dev-req-r1", "status": "resolved"},
@@ -542,7 +542,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((resolved_list.get("comments", [{}])[0]).get("status"), "resolved")
 
         pm_context = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="context",
             action="get",
             args={"track_id": track_id, "limit": 10},
@@ -561,7 +561,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = self._create_track("track-e2e-planes")
         self.assertTrue(track["ok"], msg=track)
         artifact = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -577,7 +577,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(bool(artifact.get("state_changed")), msg=artifact)
 
         reject_direct_publish = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="artifact",
             action="create_revision",
             args={
@@ -593,14 +593,14 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(reject_direct_publish.get("durability"), "none")
         self.assertFalse(bool(reject_direct_publish.get("state_changed")), msg=reject_direct_publish)
 
-        private_file = self.workspace_dir / "buddybox" / "planes" / "private.txt"
+        private_file = self.workspace_dir / "private" / "planes" / "private.txt"
         private_file.parent.mkdir(parents=True, exist_ok=True)
         private_file.write_text("private", encoding="utf-8")
         self.assertEqual(private_file.read_text(encoding="utf-8"), "private")
-        self.assertFalse((self.runtime_root / "buddyswitch/local/buddybox/pm/planes/private.txt").exists())
+        self.assertFalse((self.runtime_root / "buddyswitch/local/actor_private/pm/planes/private.txt").exists())
 
         published = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="track",
             action="add_material",
             args={"track_id": "track-e2e-planes", "artifact_id": "art-e2e-planes-r1", "label": "Note", "summary": "planes"},
@@ -608,7 +608,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(published.get("ok"), msg=published)
 
         evidence = self._dispatch(
-            buddy="pm",
+            role="pm",
             tool="evidence",
             action="issue_browser",
             args={"target_type": "artifact", "target_id": "art-e2e-planes-r1"},
@@ -622,15 +622,15 @@ class EnvLayerProductRootSplitTests(unittest.TestCase):
     def test_object_writes_use_state_root_when_workspace_and_state_are_split(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared"
-            instance_id = "inst-pm-e2e000000001"
-            workspace_dir = shared_root / "instances" / instance_id / "workspace"
+            actor_id = "act-pm-e2e000000001"
+            workspace_dir = shared_root / "instances" / actor_id / "workspace"
             state_root = shared_root / "state"
             workspace_dir.mkdir(parents=True, exist_ok=True)
             (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
 
             updates = {
-                "BUDDYSWITCH_INSTANCE_ID": instance_id,
-                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_ACTOR_ID": actor_id,
+                "BUDDYSWITCH_ROLE_ID": "pm",
                 "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
                 "BUDDYSWITCH_WORKSPACE_DIR": str(workspace_dir),
                 "BUDDYSWITCH_STATE_ROOT": str(state_root),
@@ -642,7 +642,7 @@ class EnvLayerProductRootSplitTests(unittest.TestCase):
                     created = env_store.create_track(
                         track_id,
                         "State Root Split",
-                        owner_buddy="pm",
+                        owner_role="pm",
                         outcome="verify state split",
                         appetite="1 day",
                         now={"next": "verify", "blocker": None},

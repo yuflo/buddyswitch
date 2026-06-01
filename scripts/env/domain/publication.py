@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 from env.repos import artifacts as artifact_repo
 from env.repos import tracks as track_repo
+from env.tool_runtime.actor_profile import ActorAddress
 
 
 class MaterialPublicationResult(TypedDict):
@@ -22,6 +23,10 @@ class ProofPublicationResult(TypedDict):
     artifact: dict[str, Any]
     superseded_artifact_id: str | None
     update: dict[str, Any]
+
+
+def _actor_payload(value: dict[str, Any]) -> dict[str, str]:
+    return ActorAddress.from_payload(value).to_payload()
 
 
 def _commit_atomic_publication(
@@ -69,7 +74,7 @@ def publish_material(
     track_id: str,
     artifact_id: str,
     label: str,
-    from_buddy: str,
+    from_actor: dict[str, Any],
     summary: str,
 ) -> MaterialPublicationResult:
     track = track_repo.get_track(track_id)
@@ -80,8 +85,9 @@ def publish_material(
     artifact = artifact_repo.get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by") != from_buddy:
-        raise ValueError(f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'")
+    actor = ActorAddress.from_payload(_actor_payload(from_actor))
+    if artifact.get("created_by_actor") != actor.to_payload():
+        raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
 
     kind = str(artifact.get("template") or "")
     if not kind:
@@ -121,7 +127,13 @@ def publish_material(
     for row in track.get("shared_materials", []):
         if not isinstance(row, dict):
             continue
-        same_slot = row.get("kind") == kind and row.get("label") == label and row.get("from_buddy") == from_buddy
+        row_actor_id = None
+        if isinstance(row.get("from_actor"), dict):
+            try:
+                row_actor_id = ActorAddress.from_payload(row.get("from_actor")).actor_id
+            except ValueError:
+                row_actor_id = None
+        same_slot = row.get("kind") == kind and row.get("label") == label and row_actor_id == actor.actor_id
         if same_slot and bool(row.get("current")):
             replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
         next_row = dict(row)
@@ -191,7 +203,7 @@ def publish_material(
             "artifact_id": artifact_id,
             "label": label,
             "kind": kind,
-            "from_buddy": from_buddy,
+            "from_actor": actor.to_payload(),
             "summary": summary,
             "current": True,
             "published_at": track_repo.now_iso(),
@@ -224,7 +236,7 @@ def publish_proof(
     track_id: str,
     artifact_id: str,
     label: str,
-    from_buddy: str,
+    from_actor: dict[str, Any],
     summary: str,
     update_summary: str | None = None,
 ) -> ProofPublicationResult:
@@ -236,8 +248,9 @@ def publish_proof(
     artifact = artifact_repo.get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by") != from_buddy:
-        raise ValueError(f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'")
+    actor = ActorAddress.from_payload(_actor_payload(from_actor))
+    if artifact.get("created_by_actor") != actor.to_payload():
+        raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
 
     kind = str(artifact.get("template") or "")
     if not kind:
@@ -277,7 +290,13 @@ def publish_proof(
     for row in track.get("close_proof", []):
         if not isinstance(row, dict):
             continue
-        same_slot = row.get("kind") == kind and row.get("label") == label and row.get("from_buddy") == from_buddy
+        row_actor_id = None
+        if isinstance(row.get("from_actor"), dict):
+            try:
+                row_actor_id = ActorAddress.from_payload(row.get("from_actor")).actor_id
+            except ValueError:
+                row_actor_id = None
+        same_slot = row.get("kind") == kind and row.get("label") == label and row_actor_id == actor.actor_id
         if same_slot and bool(row.get("current", True)):
             replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
         next_row = dict(row)
@@ -337,7 +356,7 @@ def publish_proof(
             "artifact_id": artifact_id,
             "label": label,
             "kind": kind,
-            "from_buddy": from_buddy,
+            "from_actor": actor.to_payload(),
             "summary": summary,
             "current": True,
             "published_at": track_repo.now_iso(),
@@ -346,8 +365,8 @@ def publish_proof(
 
     update_row = {
         "id": f"upd-{uuid.uuid4().hex[:8]}",
-        "by_buddy": from_buddy,
-        "summary": update_summary if isinstance(update_summary, str) and update_summary.strip() else f"{from_buddy} published proof",
+        "by_actor": actor.to_payload(),
+        "summary": update_summary if isinstance(update_summary, str) and update_summary.strip() else f"{actor.role_id} published proof",
         "kind": "proof",
         "refs": [{"type": "artifact", "id": artifact_id}],
         "created_at": track_repo.now_iso(),

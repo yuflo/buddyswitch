@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATIC_ROOT = Path(__file__).resolve().parent / "assets" / "web-management"
-VALID_INSTANCE_ID_RE = re.compile(r"^inst-[A-Za-z0-9._-]+$")
+VALID_INSTANCE_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -106,10 +106,10 @@ def validate_bind_host(host: str) -> str:
     return host
 
 
-def validate_instance_id(instance_id: str) -> str:
-    if not VALID_INSTANCE_ID_RE.fullmatch(instance_id):
-        raise ValueError("Invalid instance id.")
-    return instance_id
+def validate_actor_id(actor_id: str) -> str:
+    if not VALID_INSTANCE_ID_RE.fullmatch(actor_id):
+        raise ValueError("Invalid actor id.")
+    return actor_id
 
 
 def load_command_json_object(stdout: str, *, message: str) -> dict[str, Any]:
@@ -242,8 +242,8 @@ class WebManagementService:
     ) -> tuple[int, dict[str, Any]]:
         if method == "GET" and path == "/api/health":
             return 200, {"ok": True}
-        if method == "GET" and path == "/api/buddies":
-            return 200, {"ok": True, "buddies": self._list_buddies()}
+        if method == "GET" and path == "/api/roles":
+            return 200, {"ok": True, "roles": self._list_buddies()}
         if method == "GET" and path == "/api/instances":
             return 200, {"ok": True, "instances": self._list_instances()}
         if method == "POST" and path == "/api/instances":
@@ -252,32 +252,32 @@ class WebManagementService:
         instance_action = self._parse_instance_action_path(path)
         if instance_action is None:
             raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
-        instance_id, action = instance_action
+        actor_id, action = instance_action
         try:
-            validate_instance_id(instance_id)
+            validate_actor_id(actor_id)
         except ValueError as exc:
             raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
 
         if method == "GET" and action == "status":
-            return 200, {"ok": True, "instance": self._get_instance_status(instance_id)}
+            return 200, {"ok": True, "instance": self._get_instance_status(actor_id)}
         if method == "POST" and action == "clear":
-            return 200, self._clear(instance_id)
+            return 200, self._clear(actor_id)
         if method == "POST" and action == "input":
-            return 200, self._send_input(instance_id, body)
+            return 200, self._send_input(actor_id, body)
         if method == "POST" and action == "side":
-            return 200, self._side(instance_id, body)
+            return 200, self._side(actor_id, body)
         if method == "POST" and action == "side-close":
-            return 200, self._side_close(instance_id, body)
+            return 200, self._side_close(actor_id, body)
         if method == "POST" and action == "interrupt":
-            return 200, self._interrupt(instance_id)
+            return 200, self._interrupt(actor_id)
         if method == "POST" and action == "resume":
-            return 200, self._resume(instance_id)
+            return 200, self._resume(actor_id)
         if method == "POST" and action == "stop":
-            return 200, self._stop(instance_id)
+            return 200, self._stop(actor_id)
         if method == "POST" and action == "open-tui":
-            return 200, self._open_tui(instance_id, body, headers)
+            return 200, self._open_tui(actor_id, body, headers)
         if method == "DELETE" and action == "delete":
-            return 200, self._delete(instance_id)
+            return 200, self._delete(actor_id)
         raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
 
     def _parse_instance_action_path(self, path: str) -> tuple[str, str] | None:
@@ -301,49 +301,49 @@ class WebManagementService:
         if path.startswith(status_prefix) and path.endswith("/open-tui"):
             return path[len(status_prefix) : -len("/open-tui")], "open-tui"
         if path.startswith(status_prefix):
-            instance_id = path[len(status_prefix) :]
-            if "/" in instance_id:
+            actor_id = path[len(status_prefix) :]
+            if "/" in actor_id:
                 return None
-            return instance_id, "delete"
+            return actor_id, "delete"
         return None
 
     def _create_instance(self, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
-        buddy = payload.get("buddy")
-        if not isinstance(buddy, str) or not buddy.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="buddy is required.")
-        valid_buddy_ids = {row["id"] for row in self._list_buddies()}
-        if buddy not in valid_buddy_ids:
-            raise HttpError(status=400, code="INVALID_REQUEST", message=f"Unknown buddy: {buddy}")
+        role = payload.get("role")
+        if not isinstance(role, str) or not role.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message="role is required.")
+        valid_role_ids = {row["id"] for row in self._list_buddies()}
+        if role not in valid_role_ids:
+            raise HttpError(status=400, code="INVALID_REQUEST", message=f"Unknown role: {role}")
         return self._run_busy(
             "start",
-            lambda: self._create_instance_under_lock(buddy),
+            lambda: self._create_instance_under_lock(role),
         )
 
-    def _create_instance_under_lock(self, buddy: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "start", "--buddy", buddy, "--json"], timeout_seconds=120)
+    def _create_instance_under_lock(self, role: str) -> dict[str, Any]:
+        result = self._run_command(["instance", "start", "--role", role, "--json"], timeout_seconds=120)
         payload = load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance start for buddy {buddy}.",
+            message=f"Invalid JSON from instance start for role {role}.",
         )
-        instance_id = payload.get("instance_id")
-        if not isinstance(instance_id, str) or not instance_id:
-            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for buddy {buddy}.")
-        return {"ok": True, "instance_id": instance_id, "instance": self._get_instance_status(instance_id)}
+        actor_id = payload.get("actor_id")
+        if not isinstance(actor_id, str) or not actor_id:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for role {role}.")
+        return {"ok": True, "actor_id": actor_id, "instance": self._get_instance_status(actor_id)}
 
-    def _send_input(self, instance_id: str, body: bytes) -> dict[str, Any]:
+    def _send_input(self, actor_id: str, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():
             raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._send_input_under_lock(instance_id, text),
+            f"instance:{actor_id}",
+            lambda: self._send_input_under_lock(actor_id, text),
         )
 
-    def _send_input_under_lock(self, instance_id: str, text: str) -> dict[str, Any]:
-        parsed = self._run_input_command(instance_id, text, timeout_seconds=60)
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
+    def _send_input_under_lock(self, actor_id: str, text: str) -> dict[str, Any]:
+        parsed = self._run_input_command(actor_id, text, timeout_seconds=60)
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         action = parsed.get("action")
         turn_id = parsed.get("turn_id")
         expected_turn_id = parsed.get("expected_turn_id")
@@ -355,19 +355,19 @@ class WebManagementService:
             payload["expected_turn_id"] = expected_turn_id
         return payload
 
-    def _clear(self, instance_id: str) -> dict[str, Any]:
+    def _clear(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._clear_under_lock(instance_id),
+            f"instance:{actor_id}",
+            lambda: self._clear_under_lock(actor_id),
         )
 
-    def _clear_under_lock(self, instance_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "clear", instance_id, "--json"], timeout_seconds=60)
+    def _clear_under_lock(self, actor_id: str) -> dict[str, Any]:
+        result = self._run_command(["instance", "clear", actor_id, "--json"], timeout_seconds=60)
         cleared = load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance clear for {instance_id}.",
+            message=f"Invalid JSON from instance clear for {actor_id}.",
         )
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         previous_thread_id = cleared.get("previous_thread_id")
         thread_id = cleared.get("thread_id")
         if isinstance(previous_thread_id, str):
@@ -376,45 +376,45 @@ class WebManagementService:
             payload["thread_id"] = thread_id
         return payload
 
-    def _run_input_command(self, instance_id: str, text: str, *, timeout_seconds: float) -> dict[str, Any]:
+    def _run_input_command(self, actor_id: str, text: str, *, timeout_seconds: float) -> dict[str, Any]:
         result = self._run_command(
-            ["instance", "input", instance_id, "--text", text, "--input-wrapper", "task-tui", "--json"],
+            ["instance", "input", actor_id, "--text", text, "--input-wrapper", "task-tui", "--json"],
             timeout_seconds=timeout_seconds,
         )
         return load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance input for {instance_id}.",
+            message=f"Invalid JSON from instance input for {actor_id}.",
         )
 
     def _run_side_command(
         self,
-        instance_id: str,
+        actor_id: str,
         *,
         text: str,
         side_thread_id: str | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        args = ["instance", "side", instance_id]
+        args = ["instance", "side", actor_id]
         if side_thread_id is not None:
             args.extend(["--side-thread-id", side_thread_id])
         args.extend(["--text", text, "--json"])
         result = self._run_command(args, timeout_seconds=timeout_seconds)
         return load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance side for {instance_id}.",
+            message=f"Invalid JSON from instance side for {actor_id}.",
         )
 
-    def _run_side_close_command(self, instance_id: str, side_thread_id: str, *, timeout_seconds: float) -> dict[str, Any]:
+    def _run_side_close_command(self, actor_id: str, side_thread_id: str, *, timeout_seconds: float) -> dict[str, Any]:
         result = self._run_command(
-            ["instance", "side", "close", instance_id, "--side-thread-id", side_thread_id, "--json"],
+            ["instance", "side", "close", actor_id, "--side-thread-id", side_thread_id, "--json"],
             timeout_seconds=timeout_seconds,
         )
         return load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance side close for {instance_id}.",
+            message=f"Invalid JSON from instance side close for {actor_id}.",
         )
 
-    def _side(self, instance_id: str, body: bytes) -> dict[str, Any]:
+    def _side(self, actor_id: str, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():
@@ -423,37 +423,37 @@ class WebManagementService:
         if side_thread_id is not None and (not isinstance(side_thread_id, str) or not side_thread_id.strip()):
             raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._side_under_lock(instance_id, text, side_thread_id if isinstance(side_thread_id, str) else None),
+            f"instance:{actor_id}",
+            lambda: self._side_under_lock(actor_id, text, side_thread_id if isinstance(side_thread_id, str) else None),
         )
 
-    def _side_under_lock(self, instance_id: str, text: str, side_thread_id: str | None) -> dict[str, Any]:
+    def _side_under_lock(self, actor_id: str, text: str, side_thread_id: str | None) -> dict[str, Any]:
         parsed = self._run_side_command(
-            instance_id,
+            actor_id,
             text=text,
             side_thread_id=side_thread_id,
             timeout_seconds=60,
         )
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         for key in ("action", "thread_action", "parent_thread_id", "side_thread_id", "turn_id", "expected_turn_id"):
             value = parsed.get(key)
             if isinstance(value, str):
                 payload[key] = value
         return payload
 
-    def _side_close(self, instance_id: str, body: bytes) -> dict[str, Any]:
+    def _side_close(self, actor_id: str, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
         side_thread_id = payload.get("side_thread_id")
         if not isinstance(side_thread_id, str) or not side_thread_id.strip():
             raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._side_close_under_lock(instance_id, side_thread_id),
+            f"instance:{actor_id}",
+            lambda: self._side_close_under_lock(actor_id, side_thread_id),
         )
 
-    def _side_close_under_lock(self, instance_id: str, side_thread_id: str) -> dict[str, Any]:
-        parsed = self._run_side_close_command(instance_id, side_thread_id, timeout_seconds=30)
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
+    def _side_close_under_lock(self, actor_id: str, side_thread_id: str) -> dict[str, Any]:
+        parsed = self._run_side_close_command(actor_id, side_thread_id, timeout_seconds=30)
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         for key in ("action", "parent_thread_id", "side_thread_id", "turn_id"):
             value = parsed.get(key)
             if isinstance(value, str):
@@ -463,76 +463,76 @@ class WebManagementService:
             payload["startup_interrupt"] = startup_interrupt
         return payload
 
-    def _interrupt(self, instance_id: str) -> dict[str, Any]:
+    def _interrupt(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._interrupt_under_lock(instance_id),
+            f"instance:{actor_id}",
+            lambda: self._interrupt_under_lock(actor_id),
         )
 
-    def _interrupt_under_lock(self, instance_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "interrupt", instance_id, "--json"], timeout_seconds=30)
+    def _interrupt_under_lock(self, actor_id: str) -> dict[str, Any]:
+        result = self._run_command(["instance", "interrupt", actor_id, "--json"], timeout_seconds=30)
         parsed = load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance interrupt for {instance_id}.",
+            message=f"Invalid JSON from instance interrupt for {actor_id}.",
         )
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         turn_id = parsed.get("turn_id")
         if isinstance(turn_id, str):
             payload["turn_id"] = turn_id
         return payload
 
-    def _stop(self, instance_id: str) -> dict[str, Any]:
+    def _stop(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._stop_under_lock(instance_id),
+            f"instance:{actor_id}",
+            lambda: self._stop_under_lock(actor_id),
         )
 
-    def _stop_under_lock(self, instance_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "stop", instance_id, "--json"], timeout_seconds=60)
+    def _stop_under_lock(self, actor_id: str) -> dict[str, Any]:
+        result = self._run_command(["instance", "stop", actor_id, "--json"], timeout_seconds=60)
         load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance stop for {instance_id}.",
+            message=f"Invalid JSON from instance stop for {actor_id}.",
         )
-        return {"ok": True, "instance": self._get_instance_status(instance_id)}
+        return {"ok": True, "instance": self._get_instance_status(actor_id)}
 
-    def _resume(self, instance_id: str) -> dict[str, Any]:
+    def _resume(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._resume_under_lock(instance_id),
+            f"instance:{actor_id}",
+            lambda: self._resume_under_lock(actor_id),
         )
 
-    def _resume_under_lock(self, instance_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "resume", instance_id, "--json"], timeout_seconds=60)
+    def _resume_under_lock(self, actor_id: str) -> dict[str, Any]:
+        result = self._run_command(["instance", "resume", actor_id, "--json"], timeout_seconds=60)
         load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance resume for {instance_id}.",
+            message=f"Invalid JSON from instance resume for {actor_id}.",
         )
-        return {"ok": True, "instance": self._get_instance_status(instance_id)}
+        return {"ok": True, "instance": self._get_instance_status(actor_id)}
 
-    def _delete(self, instance_id: str) -> dict[str, Any]:
+    def _delete(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._delete_under_lock(instance_id),
+            f"instance:{actor_id}",
+            lambda: self._delete_under_lock(actor_id),
         )
 
-    def _delete_under_lock(self, instance_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "delete", instance_id, "--yes", "--json"], timeout_seconds=60)
+    def _delete_under_lock(self, actor_id: str) -> dict[str, Any]:
+        result = self._run_command(["instance", "delete", actor_id, "--yes", "--json"], timeout_seconds=60)
         load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance delete for {instance_id}.",
+            message=f"Invalid JSON from instance delete for {actor_id}.",
         )
-        return {"ok": True, "instance_id": instance_id}
+        return {"ok": True, "actor_id": actor_id}
 
     def _open_tui(
         self,
-        instance_id: str,
+        actor_id: str,
         body: bytes,
         headers: Mapping[str, str] | None,
     ) -> dict[str, Any]:
         self._validate_open_tui_request(headers, body)
-        instance = self._get_instance_status(instance_id)
+        instance = self._get_instance_status(actor_id)
         self._validate_open_tui_instance(instance)
-        command = build_open_tui_attach_command(self._repo_root, instance_id)
+        command = build_open_tui_attach_command(self._repo_root, actor_id)
         if self._platform_name != "darwin":
             raise HttpError(
                 status=400,
@@ -558,7 +558,7 @@ class WebManagementService:
             ) from exc
         return {
             "ok": True,
-            "instance_id": instance_id,
+            "actor_id": actor_id,
             "command": command,
             "terminal": "Terminal.app",
         }
@@ -610,21 +610,21 @@ class WebManagementService:
             raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="No thread to attach.")
 
     def _list_buddies(self) -> list[dict[str, str]]:
-        result = self._run_command(["instance", "buddies", "--json"], timeout_seconds=10)
-        payload = load_command_json_object(result.stdout, message="Invalid JSON from instance buddies.")
-        buddies = payload.get("buddies")
-        if not isinstance(buddies, list):
-            raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid buddies payload from launcher.")
+        result = self._run_command(["instance", "roles", "--json"], timeout_seconds=10)
+        payload = load_command_json_object(result.stdout, message="Invalid JSON from instance roles.")
+        roles = payload.get("roles")
+        if not isinstance(roles, list):
+            raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid roles payload from launcher.")
         rows: list[dict[str, str]] = []
-        for row in buddies:
+        for row in roles:
             if not isinstance(row, dict):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid buddies payload from launcher.")
-            buddy_id = row.get("id")
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid roles payload from launcher.")
+            role_id = row.get("id")
             label = row.get("label")
             scope = row.get("scope")
-            if not isinstance(buddy_id, str) or not isinstance(label, str) or not isinstance(scope, str):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid buddies payload from launcher.")
-            rows.append({"id": buddy_id, "label": label, "scope": scope})
+            if not isinstance(role_id, str) or not isinstance(label, str) or not isinstance(scope, str):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid roles payload from launcher.")
+            rows.append({"id": role_id, "label": label, "scope": scope})
         return rows
 
     def _list_instances(self) -> list[dict[str, Any]]:
@@ -637,15 +637,15 @@ class WebManagementService:
         for row in instances:
             if not isinstance(row, dict):
                 raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-            instance_id = row.get("instance_id")
-            buddy = row.get("buddy")
+            actor_id = row.get("actor_id")
+            role = row.get("role")
             status = row.get("status")
             app_server_health = row.get("app_server_health")
             thread_id = row.get("thread_id")
             browser_port = row.get("browser_port")
             updated_at = row.get("updated_at")
             workspace_dir = row.get("workspace_dir")
-            if not isinstance(instance_id, str) or not isinstance(buddy, str) or not isinstance(status, str):
+            if not isinstance(actor_id, str) or not isinstance(role, str) or not isinstance(status, str):
                 raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
             if not isinstance(app_server_health, str):
                 raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
@@ -657,8 +657,8 @@ class WebManagementService:
                 raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
             rows.append(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": status,
                     "app_server_health": app_server_health,
                     "thread_id": thread_id,
@@ -669,11 +669,11 @@ class WebManagementService:
             )
         return rows
 
-    def _get_instance_status(self, instance_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "status", instance_id, "--json"], timeout_seconds=10)
+    def _get_instance_status(self, actor_id: str) -> dict[str, Any]:
+        result = self._run_command(["instance", "status", actor_id, "--json"], timeout_seconds=10)
         payload = load_command_json_object(
             result.stdout,
-            message=f"Invalid JSON from instance status for {instance_id}.",
+            message=f"Invalid JSON from instance status for {actor_id}.",
         )
         return payload
 
@@ -750,11 +750,11 @@ def _normalized_host_netloc(value: str | None) -> str | None:
     return value.strip().lower()
 
 
-def build_open_tui_attach_command(repo_root: Path, instance_id: str) -> str:
-    validate_instance_id(instance_id)
+def build_open_tui_attach_command(repo_root: Path, actor_id: str) -> str:
+    validate_actor_id(actor_id)
     return (
         f"cd {shlex.quote(str(repo_root))} "
-        f"&& ./buddyswitch-codex instance attach {shlex.quote(instance_id)}"
+        f"&& ./buddyswitch-codex instance attach {shlex.quote(actor_id)}"
     )
 
 

@@ -16,7 +16,7 @@ def _build_definition() -> ToolDefinition:
         title='Object Comments',
         description='Add, list, and PM-resolve comments on readable track and artifact targets.',
         scope='target-scoped plain-text comments on readable tracks and artifacts',
-        capability_boundary='Comment scope requires active-buddy readability on the target object.',
+        capability_boundary='Comment scope requires active-role readability on the target object.',
         object_model=(
             'Comments are target-scoped discussion rows on readable track, artifact, or artifact_section targets. Comments support discussion and PM thread resolution, but they do not become canonical track timeline progress or direct inbox messages.'
         ),
@@ -24,7 +24,7 @@ def _build_definition() -> ToolDefinition:
             'You need target-scoped discussion on tracks or artifacts.',
         ),
         do_not_use_when=(
-            'You need direct buddy inbox messages; use message tool.',
+            'You need direct role inbox messages; use message tool.',
         ),
         actions=(
             ActionDefinition(
@@ -61,12 +61,17 @@ def _build_definition() -> ToolDefinition:
                             'type': 'string',
                             'description': "Optional section anchor; required when target_type is artifact_section.",
                         },
-                        'mentions': {
+                        'mentioned_actors': {
                             'type': 'array',
-                            'description': 'Optional list of manifest buddy ids to mention.',
+                            'description': 'Optional list of concrete ActorAddress payloads to mention.',
                             'items': {
-                                'type': 'string',
-                                'description': 'Mentioned buddy id.',
+                                'type': 'object',
+                                'additionalProperties': False,
+                                'required': ['actor_id', 'role_id'],
+                                'properties': {
+                                    'actor_id': {'type': 'string', 'description': 'Mentioned actor id.'},
+                                    'role_id': {'type': 'string', 'description': 'Mentioned actor role id.'},
+                                },
                             },
                         },
                     },
@@ -78,7 +83,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='comment.add',
                 authority='target.read_boundary',
-                visibility='readable to buddies with target access',
+                visibility='readable to roles with target access',
                 durability='durable',
                 result_content_level='comment row and id',
                 success_effect='Adds one target-scoped discussion row to a track, artifact, or artifact_section thread.',
@@ -86,7 +91,7 @@ def _build_definition() -> ToolDefinition:
                 reads=(
                     'readable target thread',
                     'optional parent comment',
-                    'manifest buddy ids',
+                    'manifest role ids',
                 ),
                 writes=(
                     'comment row',
@@ -102,7 +107,7 @@ def _build_definition() -> ToolDefinition:
                 preconditions=(
                     'target_type is one of track, artifact, artifact_section',
                     'anchor is required when target_type is artifact_section',
-                    'active buddy has read access to target',
+                    'active role has read access to target',
                 ),
                 returns=(
                     'comment_id',
@@ -114,7 +119,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need canonical track timeline progress chronology entries; use track.add_update.',
-                    'You need direct buddy inbox communication outside object threads; use message.send.',
+                    'You need direct role inbox communication outside object threads; use message.send.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -157,7 +162,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='comment.list',
                 authority='target.read_boundary',
-                visibility='readable to buddies with target access',
+                visibility='readable to roles with target access',
                 durability='none',
                 result_content_level='comment rows',
                 success_effect='Lists comment rows for one readable target thread, optionally by status.',
@@ -177,7 +182,7 @@ def _build_definition() -> ToolDefinition:
                 preconditions=(
                     'target_type is one of track, artifact, artifact_section',
                     'anchor is required when target_type is artifact_section',
-                    'active buddy has read access to target',
+                    'active role has read access to target',
                 ),
                 returns=(
                     'comments',
@@ -188,7 +193,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need shared progress events or publication history; use track.open or track.add_update.',
-                    'You need direct buddy inbox history; use message.list.',
+                    'You need direct role inbox history; use message.list.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -225,7 +230,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='comment.resolve',
                 authority='pm.review_closure',
-                visibility='readable to buddies with target access',
+                visibility='readable to roles with target access',
                 durability='durable',
                 result_content_level='resolved comment rows',
                 success_effect='PM marks all open rows in one reviewed comment thread as resolved with a closure summary.',
@@ -245,7 +250,7 @@ def _build_definition() -> ToolDefinition:
                     'message inbox',
                 ),
                 preconditions=(
-                    'active buddy is pm',
+                    'active role is pm',
                     'comment_id references an existing thread comment on a readable non-archived target',
                     'thread has at least one open comment row',
                 ),

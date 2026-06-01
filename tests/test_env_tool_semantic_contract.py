@@ -129,7 +129,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("artifact", "get", ("full", "body", "draft")),
             ("artifact", "create_revision", ("draft", "publish", "update")),
             ("artifact", "update_metadata", ("patch", "publish", "revision")),
-            ("artifact", "attach_file", ("draft", "buddybox", "attachment")),
+            ("artifact", "attach_file", ("draft", "actor_private", "attachment")),
             ("artifact", "list_attachments", ("attachment", "summary", "get_attachment")),
             ("artifact", "get_attachment", ("attachment_id", "content_base64", "artifact_id")),
             ("task", "current", ("current", "snapshot", "history")),
@@ -144,7 +144,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "summarize", ("compact", "summary", "get")),
             ("context", "list_sources", ("source", "descriptor", "catalog")),
             ("message", "contacts", ("contact", "actor", "send")),
-            ("message", "send", ("inbox", "buddy", "comment")),
+            ("message", "send", ("inbox", "role", "comment")),
             ("message", "list", ("inbox", "read", "comment")),
             ("comment", "resolve", ("pm", "thread", "resolved")),
             ("request", "create", ("track", "request", "recipient")),
@@ -234,7 +234,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
     def test_operation_semantics_remain_role_neutral(self) -> None:
         forbidden_role_fields = {
             "active_role",
-            "active_buddy",
+            "active_role",
             "allowed_roles",
             "allowed_" + "actions",
             "denied_" + "actions",
@@ -256,7 +256,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         operation_text = json.dumps(catalog.operation_semantics(), ensure_ascii=True).lower()
         combined = f"{catalog_text}\n{operation_text}"
         forbidden = (
-            "active buddy owns",
+            "active role owns",
             "owns message.list permission",
             "owns task.read permission",
             "owns task.propose permission",
@@ -274,8 +274,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertEqual(current["kind"], "read")
         self.assertEqual(current["mutates"], "none")
         self.assertEqual(current["required_permission"], "task.read")
-        self.assertEqual(current["authority"], "task.buddy_scope")
-        self.assertEqual(current["visibility"], "active-buddy private")
+        self.assertEqual(current["authority"], "task.role_scope")
+        self.assertEqual(current["visibility"], "active actor private")
         self.assertEqual(current["durability"], "none")
         self.assertEqual(current["result_content_level"], "TaskSnapshot")
         self.assertIn("instance-local taskbox history", current["reads"])
@@ -293,7 +293,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertEqual(row["kind"], "write")
                 self.assertEqual(row["mutates"], "runtime_files")
                 self.assertIn(row["required_permission"], {"task.propose", "task.confirm"})
-                self.assertIn("instance-local active-buddy taskbox task", row["writes"])
+                self.assertIn("instance-local active-role taskbox task", row["writes"])
                 self.assertIn("instance-local taskbox history", row["writes"])
                 self.assertIn("track state", " ".join(row["does_not_write"]).lower())
                 self.assertIn("artifact visibility", " ".join(row["does_not_write"]).lower())
@@ -328,11 +328,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
     def test_broker_payload_action_ids_are_strict(self) -> None:
         hyphenated = catalog.dispatch_env_tool_request(
             payload={"tool": "search", "action": "open-browser", "args": {"query": "x"}},
-            active_buddy="market",
-            instance_id="inst-market-5e0000000001",
+            active_role="market",
+            actor_id="act-market-5e0000000001",
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={},
-            manifest={"buddies": [{"id": "market"}]},
+            manifest={"roles": [{"id": "market"}]},
             manifest_path=ROOT / "buddyswitch" / "manifest.toml",
         )
         self.assertFalse(hyphenated.get("ok"), msg=hyphenated)
@@ -341,11 +341,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
         canonical = catalog.dispatch_env_tool_request(
             payload={"tool": "search", "action": "open_browser", "args": {"query": "x"}},
-            active_buddy="market",
-            instance_id="inst-market-5e0000000001",
+            active_role="market",
+            actor_id="act-market-5e0000000001",
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={"browser_port": None},
-            manifest={"buddies": [{"id": "market"}]},
+            manifest={"roles": [{"id": "market"}]},
             manifest_path=ROOT / "buddyswitch" / "manifest.toml",
         )
         self.assertNotEqual((canonical.get("error") or {}).get("code"), "E_ENV_TOOL", msg=canonical)

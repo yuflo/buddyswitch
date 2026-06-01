@@ -52,8 +52,8 @@ class BrokerRetryDecision:
 
 
 def broker_unavailable_feedback(*, socket_path: Path | None = None) -> dict[str, Any]:
-    raw_instance_id = os.environ.get("BUDDYSWITCH_INSTANCE_ID")
-    instance_id = raw_instance_id.strip() if isinstance(raw_instance_id, str) and raw_instance_id.strip() else "<instance-id>"
+    raw_actor_id = os.environ.get("BUDDYSWITCH_ACTOR_ID")
+    actor_id = raw_actor_id.strip() if isinstance(raw_actor_id, str) and raw_actor_id.strip() else "<actor-id>"
     feedback: dict[str, Any] = {
         "permission_boundary": "product-mode-runtime-broker",
         "stop_condition": "stop_and_report_do_not_bypass_broker",
@@ -62,7 +62,7 @@ def broker_unavailable_feedback(*, socket_path: Path | None = None) -> dict[str,
             "Do not write raw BuddySwitch state directly.",
             "Do not bypass product-mode runtime safeguards via debug APIs.",
         ],
-        "command_hint": f"./buddyswitch-codex instance attach {instance_id}",
+        "command_hint": f"./buddyswitch-codex instance attach {actor_id}",
     }
     if socket_path is not None:
         feedback["socket_path"] = str(socket_path)

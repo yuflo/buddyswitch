@@ -31,8 +31,8 @@ description: Use when PM must cut product work to the smallest valuable iteratio
 - Use a track as a shared product outcome thread.
 - Reuse an active track when the work advances the same outcome, lifecycle, and proof path.
 - Create a new track when the outcome, lifecycle, collaborators, or proof path should be tracked independently.
-- Use private tasks for active-buddy work management under or outside a track.
-- Use requests for durable cross-buddy asks.
+- Use private tasks for active-role work management under or outside a track.
+- Use requests for durable cross-role asks.
 - Use comments/messages for discussion, not product lifecycle state.
 
 ## Outputs

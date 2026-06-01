@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
 _TARGET_TYPES = {"track", "artifact", "artifact_section"}
@@ -18,6 +19,13 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
+
+
+def _normalize_actor(value: Any, field: str) -> dict[str, str]:
+    try:
+        return ActorAddress.from_payload(value).to_payload()
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
 
 
 def _comment_file(comment_id: str) -> Path:
@@ -34,7 +42,7 @@ def _validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if target_type not in _TARGET_TYPES:
         raise ValueError("comment.target_type must be one of 'track'|'artifact'|'artifact_section'")
     target_id = runtime_files.require_id(comment.get("target_id"), "comment.target_id")
-    by_buddy = _require_non_empty_text(comment.get("by_buddy"), "comment.by_buddy")
+    by_actor = _normalize_actor(comment.get("by_actor"), "comment.by_actor")
     content = _require_non_empty_text(comment.get("content"), "comment.content")
 
     thread_id_raw = comment.get("thread_id")
@@ -47,32 +55,33 @@ def _validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if status not in _COMMENT_STATUSES:
         raise ValueError("comment.status must be one of open|resolved")
 
-    resolved_by = comment.get("resolved_by")
+    resolved_by_actor = comment.get("resolved_by_actor")
     resolved_at = comment.get("resolved_at")
     resolution_summary = comment.get("resolution_summary")
     if status == "resolved":
-        resolved_by = _require_non_empty_text(resolved_by, "comment.resolved_by")
+        resolved_by_actor = _normalize_actor(resolved_by_actor, "comment.resolved_by_actor")
         resolved_at = _require_non_empty_text(resolved_at, "comment.resolved_at")
         resolution_summary = _require_non_empty_text(resolution_summary, "comment.resolution_summary")
     else:
-        resolved_by = None
+        resolved_by_actor = None
         resolved_at = None
         resolution_summary = None
 
-    mentions_raw = comment.get("mentions", [])
-    if mentions_raw is None:
-        mentions: list[str] = []
+    mentioned_raw = comment.get("mentioned_actors", [])
+    if mentioned_raw is None:
+        mentioned_actors: list[dict[str, str]] = []
     else:
-        if not isinstance(mentions_raw, list):
-            raise ValueError("comment.mentions must be a list when provided")
-        mentions = []
+        if not isinstance(mentioned_raw, list):
+            raise ValueError("comment.mentioned_actors must be a list when provided")
+        mentioned_actors = []
         seen: set[str] = set()
-        for idx, row in enumerate(mentions_raw):
-            buddy = _require_non_empty_text(row, f"comment.mentions[{idx}]")
-            if buddy in seen:
+        for idx, row in enumerate(mentioned_raw):
+            actor = _normalize_actor(row, f"comment.mentioned_actors[{idx}]")
+            actor_id = actor["actor_id"]
+            if actor_id in seen:
                 continue
-            seen.add(buddy)
-            mentions.append(buddy)
+            seen.add(actor_id)
+            mentioned_actors.append(actor)
 
     anchor = comment.get("anchor")
     if anchor is not None:
@@ -95,16 +104,16 @@ def _validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
         "id": comment_id,
         "target_type": target_type,
         "target_id": target_id,
-        "by_buddy": by_buddy,
+        "by_actor": by_actor,
         "content": content,
         "thread_id": thread_id,
         "status": status,
-        "mentions": mentions,
+        "mentioned_actors": mentioned_actors,
         "anchor": anchor,
         "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": created_at,
-        "resolved_by": resolved_by,
+        "resolved_by_actor": resolved_by_actor,
         "resolved_at": resolved_at,
         "resolution_summary": resolution_summary,
     }
@@ -138,10 +147,10 @@ def create_comment(
     *,
     target_type: str,
     target_id: str,
-    by_buddy: str,
+    by_actor: dict[str, Any],
     content: str,
     reply_to: str | None = None,
-    mentions: list[str] | None = None,
+    mentioned_actors: list[dict[str, Any]] | None = None,
     thread_id: str | None = None,
     status: str = "open",
     anchor: str | None = None,
@@ -150,7 +159,7 @@ def create_comment(
     if target_type not in _TARGET_TYPES:
         raise ValueError("target_type must be one of 'track'|'artifact'|'artifact_section'")
     runtime_files.require_id(target_id, "target_id")
-    author = _require_non_empty_text(by_buddy, "by_buddy")
+    author = _normalize_actor(by_actor, "by_actor")
     content_text = _require_non_empty_text(content, "content")
     if reply_to is not None:
         runtime_files.require_id(reply_to, "reply_to")
@@ -162,17 +171,18 @@ def create_comment(
         raise ValueError("anchor must be a non-empty string when provided")
     if artifact_revision_id is not None:
         runtime_files.require_id(artifact_revision_id, "artifact_revision_id")
-    normalized_mentions: list[str] = []
-    if mentions is not None:
-        if not isinstance(mentions, list):
-            raise ValueError("mentions must be a list when provided")
+    normalized_mentions: list[dict[str, str]] = []
+    if mentioned_actors is not None:
+        if not isinstance(mentioned_actors, list):
+            raise ValueError("mentioned_actors must be a list when provided")
         seen_mentions: set[str] = set()
-        for idx, row in enumerate(mentions):
-            buddy = _require_non_empty_text(row, f"mentions[{idx}]")
-            if buddy in seen_mentions:
+        for idx, row in enumerate(mentioned_actors):
+            actor = _normalize_actor(row, f"mentioned_actors[{idx}]")
+            actor_id = actor["actor_id"]
+            if actor_id in seen_mentions:
                 continue
-            seen_mentions.add(buddy)
-            normalized_mentions.append(buddy)
+            seen_mentions.add(actor_id)
+            normalized_mentions.append(actor)
 
     comment_id = f"comment-{uuid.uuid4().hex[:12]}"
     runtime_files.require_id(comment_id, "comment id")
@@ -181,16 +191,16 @@ def create_comment(
             "id": comment_id,
             "target_type": target_type,
             "target_id": target_id,
-            "by_buddy": author,
+            "by_actor": author,
             "content": content_text,
             "thread_id": thread_id or comment_id,
             "status": status,
-            "mentions": normalized_mentions,
+            "mentioned_actors": normalized_mentions,
             "anchor": anchor.strip() if isinstance(anchor, str) else None,
             "artifact_revision_id": artifact_revision_id,
             "reply_to": reply_to,
             "created_at": runtime_files.now_iso(),
-            "resolved_by": None,
+            "resolved_by_actor": None,
             "resolved_at": None,
             "resolution_summary": None,
         }
@@ -217,9 +227,9 @@ def comments_for_target(target_type: str, target_id: str) -> list[dict[str, Any]
     return matched
 
 
-def resolve_thread(*, comment_id: str, resolved_by: str, resolution_summary: str) -> list[dict[str, Any]]:
+def resolve_thread(*, comment_id: str, resolved_by_actor: dict[str, Any], resolution_summary: str) -> list[dict[str, Any]]:
     normalized_comment_id = runtime_files.require_id(comment_id, "comment_id")
-    normalized_resolved_by = _require_non_empty_text(resolved_by, "resolved_by")
+    normalized_resolved_by_actor = _normalize_actor(resolved_by_actor, "resolved_by_actor")
     normalized_summary = _require_non_empty_text(resolution_summary, "resolution_summary")
 
     seed = get_comment(normalized_comment_id)
@@ -238,7 +248,7 @@ def resolve_thread(*, comment_id: str, resolved_by: str, resolution_summary: str
     for row in thread_rows:
         updated_row = dict(row)
         updated_row["status"] = "resolved"
-        updated_row["resolved_by"] = normalized_resolved_by
+        updated_row["resolved_by_actor"] = normalized_resolved_by_actor
         updated_row["resolved_at"] = now
         updated_row["resolution_summary"] = normalized_summary
         normalized_updates.append(_validate_comment(updated_row))

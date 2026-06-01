@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
@@ -22,6 +23,13 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
+
+
+def _normalize_actor(value: Any, field: str) -> dict[str, str]:
+    try:
+        return ActorAddress.from_payload(value).to_payload()
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
 
 
 def _normalize_refs(value: Any) -> list[dict[str, Any]]:
@@ -39,12 +47,12 @@ def _normalize_refs(value: Any) -> list[dict[str, Any]]:
 
 def _tasks_dir(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> Path:
     return runtime_files.taskbox_tasks_dir(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -53,13 +61,13 @@ def _tasks_dir(
 def _task_file(
     task_id: str,
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> Path:
     normalized_id = runtime_files.require_id(task_id, "task id")
     return _tasks_dir(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     ) / f"{normalized_id}.json"
@@ -71,11 +79,11 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
     forbidden = sorted(field for field in task if field in _LEGACY_TASK_FIELDS)
     if forbidden:
         raise ValueError(f"legacy task fields are retired: {', '.join(forbidden)}")
-    if "buddy" in task:
-        raise ValueError("task.buddy is retired; use task.owner_buddy")
+    if "role" in task:
+        raise ValueError("task.role is retired; use task.owner_actor")
 
     task_id = runtime_files.require_id(task.get("id", ""), "task.id")
-    owner_buddy = _require_non_empty_text(task.get("owner_buddy"), "task.owner_buddy")
+    owner_actor = _normalize_actor(task.get("owner_actor"), "task.owner_actor")
     title = _require_non_empty_text(task.get("title"), "task.title")
     summary = task.get("summary", "")
     if not isinstance(summary, str):
@@ -102,7 +110,7 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
 
     return {
         "id": task_id,
-        "owner_buddy": owner_buddy,
+        "owner_actor": owner_actor,
         "title": title,
         "summary": summary,
         "body": body,
@@ -130,12 +138,12 @@ def slugify(value: str) -> str:
 
 def _history_file(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> Path:
     return runtime_files.taskbox_history_file(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -143,14 +151,14 @@ def _history_file(
 
 def list_tasks(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     tasks_dir = _tasks_dir(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -170,13 +178,13 @@ def list_tasks(
 def get_task(
     task_id: str,
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> dict[str, Any] | None:
     path = _task_file(
         task_id,
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -188,7 +196,7 @@ def get_task(
 def save_task(
     task: Mapping[str, Any],
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> dict[str, Any]:
@@ -196,7 +204,7 @@ def save_task(
     runtime_files.require_runtime_workspace_write_root()
     task_path = _task_file(
         str(normalized["id"]),
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -207,7 +215,7 @@ def save_task(
 
 def append_history(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     event: str,
@@ -215,7 +223,7 @@ def append_history(
     fields: Mapping[str, object],
 ) -> None:
     history_file = _history_file(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -230,13 +238,13 @@ def append_history(
 
 def read_history(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     history_file = _history_file(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -293,13 +301,13 @@ def parse_history_line(line: str) -> dict[str, Any] | None:
 
 def read_history_events(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     history_file = _history_file(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -318,13 +326,13 @@ def read_history_events(
 def next_task_id(
     title: str,
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> str:
     slug = slugify(title)[:48].strip("-") or "task"
     tasks_dir = _tasks_dir(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
@@ -339,13 +347,13 @@ def next_task_id(
 
 def next_confirmation_id(
     *,
-    active_buddy: str,
+    active_role: str,
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
 ) -> str:
     highest = 0
     for event in read_history_events(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
         limit=0,
@@ -366,7 +374,8 @@ def create_task(
     *,
     task_id: str,
     title: str,
-    active_buddy: str,
+    active_role: str,
+    active_actor: dict[str, Any],
     instance_json: Path | str | None,
     instance_payload: Mapping[str, object] | None,
     track_id: str | None,
@@ -379,7 +388,7 @@ def create_task(
     runtime_files.require_id(task_id, "task id")
     if get_task(
         task_id,
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     ):
@@ -387,7 +396,7 @@ def create_task(
     now = runtime_files.now_iso()
     task = {
         "id": task_id,
-        "owner_buddy": active_buddy,
+        "owner_actor": active_actor,
         "title": title,
         "summary": summary,
         "body": body,
@@ -401,12 +410,12 @@ def create_task(
     }
     saved = save_task(
         task,
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
     append_history(
-        active_buddy=active_buddy,
+        active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
         event="task.create",

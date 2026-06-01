@@ -32,12 +32,12 @@ _REF_ITEM_SCHEMA = {
 def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id="request",
-        title="Cross-Buddy Requests",
-        description="Create and manage explicit cross-buddy collaboration requests on tracks.",
-        scope="durable cross-buddy collaboration request lifecycle on readable tracks",
+        title="Cross-Role Requests",
+        description="Create and manage explicit cross-role collaboration requests on tracks.",
+        scope="durable cross-role collaboration request lifecycle on readable tracks",
         capability_boundary="Request mutations are constrained by requester/recipient role and request state transitions.",
         object_model=(
-            'Requests are durable cross-buddy collaboration lifecycle rows bound to readable tracks. They model requester/recipient accepted-blocked-done-canceled state and are separate from private tasks and informal messages.'
+            'Requests are durable cross-role collaboration lifecycle rows bound to readable tracks. They model requester/recipient accepted-blocked-done-canceled state and are separate from private tasks and informal messages.'
         ),
         use_when=(
             "You need durable requester/recipient accepted-blocked-done-canceled state on a track.",
@@ -49,19 +49,19 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="create",
                 title="request.create",
-                description="Create one durable cross-buddy request bound to one readable track.",
+                description="Create one durable cross-role request bound to one readable track.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["track_id", "to_buddy", "title", "summary"],
+                    "required": ["track_id", "to_role", "title", "summary"],
                     "properties": {
                         "track_id": {
                             "type": "string",
                             "description": "Track id the request belongs to.",
                         },
-                        "to_buddy": {
+                        "to_role": {
                             "type": "string",
-                            "description": "Manifest buddy id receiving this request.",
+                            "description": "Manifest role id receiving this request.",
                         },
                         "title": {
                             "type": "string",
@@ -82,15 +82,15 @@ def _build_definition() -> ToolDefinition:
                 kind="write",
                 mutates="runtime_objects",
                 required_permission="request.create",
-                authority="request.cross_buddy_scope",
+                authority="request.cross_role_scope",
                 visibility='requester, recipient, and PM',
                 durability='durable',
                 result_content_level='request row and id',
-                success_effect='Creates one durable track-scoped cross-buddy request for a recipient buddy.',
+                success_effect='Creates one durable track-scoped cross-role request for a recipient role.',
                 failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
                 reads=(
                     'readable non-archived track',
-                    'manifest buddy ids',
+                    'manifest role ids',
                     'target refs',
                 ),
                 writes=(
@@ -102,15 +102,15 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'comment status',
                     'message inbox',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     "track_id references a readable non-archived track",
-                    "to_buddy is a manifest buddy and differs from active_buddy",
+                    "to_role is a manifest role and differs from active_role",
                 ),
                 returns=("request_id", "request"),
                 use_when=(
-                    "You need to ask a specific recipient buddy for track-scoped request work, review, or response with durable lifecycle state.",
+                    "You need to ask a specific recipient role for track-scoped request work, review, or response with durable lifecycle state.",
                 ),
                 do_not_use_when=(
                     "You need private task planning only; use task.current, task.propose, or task.confirm.",
@@ -127,7 +127,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="list",
                 title="request.list",
-                description="List visible requests for active buddy with optional filters.",
+                description="List visible requests for active role with optional filters.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -147,9 +147,9 @@ def _build_definition() -> ToolDefinition:
                             "type": "string",
                             "description": "Optional track id filter.",
                         },
-                        "buddy": {
+                        "role": {
                             "type": "string",
-                            "description": "Optional buddy filter across requester/recipient endpoints.",
+                            "description": "Optional role filter across requester/recipient endpoints.",
                         },
                     },
                 },
@@ -161,7 +161,7 @@ def _build_definition() -> ToolDefinition:
                 visibility='requester, recipient, and PM filtered visibility',
                 durability='none',
                 result_content_level='request summary rows',
-                success_effect='Lists requests visible to the active buddy for inbox/outbox/status scanning.',
+                success_effect='Lists requests visible to the active role for inbox/outbox/status scanning.',
                 failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
                 reads=(
                     'visible request rows',
@@ -173,10 +173,10 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'artifact body',
                     'message inbox',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    "active buddy is requester, recipient, or pm for each returned request",
+                    "active role is requester, recipient, or pm for each returned request",
                 ),
                 returns=("requests",),
                 use_when=(
@@ -229,7 +229,7 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'artifact body',
                     'message inbox',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     "request_id references a visible request",
@@ -287,10 +287,10 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'comment status',
                     'message inbox',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    "active buddy matches request.to_buddy",
+                    "active role matches request.to_role",
                     "status is open or blocked",
                 ),
                 returns=("request",),
@@ -350,10 +350,10 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'comment status',
                     'message inbox',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    "active buddy matches request.to_buddy",
+                    "active role matches request.to_role",
                     "status is accepted",
                 ),
                 returns=("request",),
@@ -415,10 +415,10 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'comment status',
                     'message inbox',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    "active buddy matches request.to_buddy",
+                    "active role matches request.to_role",
                     "status is accepted or blocked",
                     "result_refs is non-empty",
                 ),
@@ -475,10 +475,10 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'comment status',
                     'message inbox',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    "active buddy matches request.from_buddy",
+                    "active role matches request.from_actor",
                     "status is open, accepted, or blocked",
                 ),
                 returns=("request",),

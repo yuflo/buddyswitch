@@ -2,11 +2,11 @@
 set -euo pipefail
 
 buddyswitch_browser_instance_root() {
-  local instance_id="${BUDDYSWITCH_INSTANCE_ID:-}"
-  if [[ -z "${instance_id}" ]]; then
+  local actor_id="${BUDDYSWITCH_ACTOR_ID:-}"
+  if [[ -z "${actor_id}" ]]; then
     return 1
   fi
-  printf '%s\n' "${BUDDYSWITCH_INSTANCE_ROOT:-${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}}"
+  printf '%s\n' "${BUDDYSWITCH_INSTANCE_ROOT:-${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}}"
 }
 
 buddyswitch_browser_default_profile_dir() {
@@ -30,7 +30,7 @@ buddyswitch_browser_default_log_file() {
 }
 
 buddyswitch_browser_is_instance_mode() {
-  [[ -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]
+  [[ -n "${BUDDYSWITCH_ACTOR_ID:-}" ]]
 }
 
 buddyswitch_browser_init_defaults() {
@@ -73,8 +73,8 @@ buddyswitch_browser_init_defaults() {
 buddyswitch_browser_usage() {
   cat <<EOF
 Usage:
-  buddyswitch-codex env browser status [--instance <instance-id>] [--port <port>] [--profile-dir <dir>]
-  buddyswitch-codex env browser ensure --instance <instance-id> [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser status [--instance <actor-id>] [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser ensure --instance <actor-id> [--port <port>] [--profile-dir <dir>]
   buddyswitch-codex env browser help
 
 Commands:
@@ -388,14 +388,14 @@ buddyswitch_browser_any_instance_pid_marker_is_active() {
 }
 
 buddyswitch_browser_instance_pid_marker_is_active() {
-  local instance_id="$1"
-  local marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/browser/chrome.pid"
+  local actor_id="$1"
+  local marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/browser/chrome.pid"
   buddyswitch_browser_pid_marker_is_active "${marker_file}"
 }
 
 buddyswitch_browser_instance_endpoint_is_active() {
-  local instance_id="$1"
-  local instance_json="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/instance.json"
+  local actor_id="$1"
+  local instance_json="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/instance.json"
   local browser_port
 
   browser_port="$(
@@ -418,8 +418,8 @@ PY
 }
 
 _buddyswitch_browser_instance_recorded_port() {
-  local instance_id="$1"
-  local instance_json="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/instance.json"
+  local actor_id="$1"
+  local instance_json="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/instance.json"
 
   python3 - "${instance_json}" <<'PY'
 import json
@@ -451,10 +451,10 @@ _buddyswitch_browser_process_command_line() {
 }
 
 buddyswitch_browser_instance_endpoint_ownership_state() {
-  local instance_id="$1"
+  local actor_id="$1"
   local browser_port target_profile pid command_line found_listener=0 found_foreign=0
 
-  browser_port="$(_buddyswitch_browser_instance_recorded_port "${instance_id}")"
+  browser_port="$(_buddyswitch_browser_instance_recorded_port "${actor_id}")"
   if [[ -z "${browser_port}" ]]; then
     echo "inactive"
     return 0
@@ -463,12 +463,12 @@ buddyswitch_browser_instance_endpoint_ownership_state() {
     echo "inactive"
     return 0
   fi
-  if buddyswitch_browser_instance_pid_marker_is_active "${instance_id}"; then
+  if buddyswitch_browser_instance_pid_marker_is_active "${actor_id}"; then
     echo "owned"
     return 0
   fi
 
-  target_profile="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/browser/profile"
+  target_profile="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/browser/profile"
   while IFS= read -r pid; do
     [[ -n "${pid}" ]] || continue
     found_listener=1
@@ -490,8 +490,8 @@ buddyswitch_browser_instance_endpoint_ownership_state() {
 }
 
 buddyswitch_browser_instance_endpoint_is_owned_active() {
-  local instance_id="$1"
-  [[ "$(buddyswitch_browser_instance_endpoint_ownership_state "${instance_id}")" == "owned" ]]
+  local actor_id="$1"
+  [[ "$(buddyswitch_browser_instance_endpoint_ownership_state "${actor_id}")" == "owned" ]]
 }
 
 buddyswitch_browser_any_recorded_instance_endpoint_is_active() {
@@ -630,11 +630,11 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
   return 1
 }
 
-buddyswitch_browser_active_buddy() {
-  local buddy
-  buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
-  if [[ -n "${buddy}" ]]; then
-    printf '%s\n' "${buddy}"
+buddyswitch_browser_active_role() {
+  local role
+  role="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
+  if [[ -n "${role}" ]]; then
+    printf '%s\n' "${role}"
     return 0
   fi
   if [[ -n "${BUDDYSWITCH_INSTANCE_JSON:-}" && -f "${BUDDYSWITCH_INSTANCE_JSON}" ]]; then
@@ -644,9 +644,9 @@ import sys
 from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-buddy = payload.get("buddy")
-if isinstance(buddy, str) and buddy.strip():
-    print(buddy.strip())
+role = payload.get("role")
+if isinstance(role, str) and role.strip():
+    print(role.strip())
 PY
     return 0
   fi
@@ -654,21 +654,21 @@ PY
 }
 
 buddyswitch_browser_profile_capability() {
-  local buddy_id="${1:-}"
-  if [[ -z "${buddy_id}" ]]; then
+  local role_id="${1:-}"
+  if [[ -z "${role_id}" ]]; then
     return 1
   fi
-  python3 - "${BUDDYSWITCH_REPO_ROOT}" "${buddy_id}" <<'PY'
+  python3 - "${BUDDYSWITCH_REPO_ROOT}" "${role_id}" <<'PY'
 import sys
 from pathlib import Path
 
 repo_root = Path(sys.argv[1])
-buddy_id = sys.argv[2]
+role_id = sys.argv[2]
 sys.path.insert(0, str(repo_root / "scripts"))
 import env_profiles  # noqa: E402
 
 profile = env_profiles.require_env_profile(
-    buddy_id,
+    role_id,
     manifest_path=repo_root / "buddyswitch" / "manifest.toml",
     repo_root=repo_root,
 )
@@ -678,15 +678,15 @@ PY
 }
 
 buddyswitch_browser_bootstrap() {
-  local strict_mode active_buddy capability require_browser
+  local strict_mode active_role capability require_browser
   buddyswitch_browser_init_defaults
   buddyswitch_ensure_shared_env
   strict_mode="${BUDDYSWITCH_BROWSER_ENSURE_STRICT:-0}"
   require_browser=1
   if [[ "${strict_mode}" != "1" ]] && buddyswitch_browser_is_instance_mode; then
-    active_buddy="$(buddyswitch_browser_active_buddy || true)"
-    if [[ -n "${active_buddy}" ]]; then
-      capability="$(buddyswitch_browser_profile_capability "${active_buddy}" || true)"
+    active_role="$(buddyswitch_browser_active_role || true)"
+    if [[ -n "${active_role}" ]]; then
+      capability="$(buddyswitch_browser_profile_capability "${active_role}" || true)"
       if [[ "${capability}" == "available" ]]; then
         require_browser=0
       fi
@@ -704,7 +704,7 @@ buddyswitch_browser_bootstrap() {
       echo "Warning: browser cockpit MCP setup failed and stale cockpit MCP could not be removed; stopping optional-browser launch." >&2
       return 1
     fi
-    echo "Warning: browser cockpit MCP setup failed for non-required buddy; continuing without browser cockpit MCP." >&2
+    echo "Warning: browser cockpit MCP setup failed for non-required role; continuing without browser cockpit MCP." >&2
     return 0
   fi
 
@@ -715,20 +715,20 @@ buddyswitch_browser_bootstrap() {
     echo "Warning: browser cockpit unavailable and stale cockpit MCP could not be removed; stopping optional-browser launch." >&2
     return 1
   fi
-  echo "Warning: browser cockpit unavailable for non-required buddy; continuing without cockpit endpoint." >&2
+  echo "Warning: browser cockpit unavailable for non-required role; continuing without cockpit endpoint." >&2
   return 0
 }
 
 buddyswitch_browser_instance_stop() {
-  local instance_id="$1"
+  local actor_id="$1"
   local marker_file marker_pid
 
-  if [[ -z "${instance_id}" ]]; then
-    echo "instance id is required" >&2
+  if [[ -z "${actor_id}" ]]; then
+    echo "actor id is required" >&2
     return 2
   fi
 
-  marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/browser/chrome.pid"
+  marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/browser/chrome.pid"
   if [[ ! -f "${marker_file}" ]]; then
     return 0
   fi

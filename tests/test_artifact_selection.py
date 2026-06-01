@@ -43,7 +43,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_uses_required_templates_and_current_published_artifacts(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            active_buddy="dev",
+            active_role="dev",
             demand="Implement onboarding",
             required_templates=["brief", "proof"],
             track_artifact_index=self.track_artifact_index,
@@ -54,7 +54,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_dedupes_repeated_required_templates(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            active_buddy="dev",
+            active_role="dev",
             demand="Implement onboarding",
             required_templates=["brief", "brief"],
             track_artifact_index=self.track_artifact_index,
@@ -63,7 +63,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_ignores_unknown_required_templates(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            active_buddy="dev",
+            active_role="dev",
             demand="Implement onboarding",
             required_templates=["task", "track", "brief"],
             track_artifact_index=self.track_artifact_index,
@@ -72,7 +72,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_respects_max_default_items_trim(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            active_buddy="dev",
+            active_role="dev",
             demand="Implement onboarding",
             required_templates=["brief", "proof"],
             track_artifact_index=self.track_artifact_index,

@@ -29,11 +29,11 @@ class EnvManifestV2Tests(unittest.TestCase):
         skill_ids = [row["id"] for row in self.manifest.get("skills", []) if isinstance(row, dict)]
         self.assertNotIn("handoff-tool", skill_ids)
 
-    def test_buddies_do_not_carry_retired_permission_rows(self) -> None:
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            with self.subTest(buddy=buddy.get("id")):
-                self.assertNotIn("permissions", buddy)
+    def test_roles_do_not_carry_retired_permission_rows(self) -> None:
+        for role in self.manifest.get("roles", []):
+            assert isinstance(role, dict)
+            with self.subTest(role=role.get("id")):
+                self.assertNotIn("permissions", role)
 
     def test_legacy_role_acl_rows_are_rejected(self) -> None:
         manifest_text = self.manifest_path.read_text(encoding="utf-8")
@@ -55,46 +55,46 @@ class EnvManifestV2Tests(unittest.TestCase):
             assert isinstance(row, dict)
             self.assertEqual(set(row.keys()), {"id", "path"})
 
-    def test_buddies_do_not_receive_buddybox_tool(self) -> None:
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            buddy_id = buddy.get("id")
-            self.assertIsInstance(buddy_id, str)
-            assert isinstance(buddy_id, str)
-            skills = {row for row in buddy.get("skills", []) if isinstance(row, str)}
-            self.assertNotIn("buddybox-tool", skills, msg=buddy_id)
+    def test_roles_do_not_receive_private_workspace_tool(self) -> None:
+        for role in self.manifest.get("roles", []):
+            assert isinstance(role, dict)
+            role_id = role.get("id")
+            self.assertIsInstance(role_id, str)
+            assert isinstance(role_id, str)
+            skills = {row for row in role.get("skills", []) if isinstance(row, str)}
+            self.assertNotIn("actor_private-tool", skills, msg=role_id)
 
-    def test_manifest_has_no_buddybox_tool_skill_row(self) -> None:
+    def test_manifest_has_no_actor_private_tool_skill_row(self) -> None:
         rows = [
             row
             for row in self.manifest.get("skills", [])
-            if isinstance(row, dict) and row.get("id") == "buddybox-tool"
+            if isinstance(row, dict) and row.get("id") == "actor_private-tool"
         ]
         self.assertEqual(rows, [])
 
-    def test_all_buddies_have_message_comment_request_tools(self) -> None:
-        """MCT-MAN-002: Every buddy has message/comment/request tools."""
+    def test_all_roles_have_message_comment_request_tools(self) -> None:
+        """MCT-MAN-002: Every role has message/comment/request tools."""
         required_tools = {"message-tool", "comment-tool", "request-tool"}
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            buddy_id = str(buddy.get("id"))
-            skills = {row for row in buddy.get("skills", []) if isinstance(row, str)}
-            with self.subTest(buddy=buddy_id):
-                self.assertTrue(required_tools.issubset(skills), msg=f"{buddy_id} missing tools: {required_tools - skills}")
+        for role in self.manifest.get("roles", []):
+            assert isinstance(role, dict)
+            role_id = str(role.get("id"))
+            skills = {row for row in role.get("skills", []) if isinstance(row, str)}
+            with self.subTest(role=role_id):
+                self.assertTrue(required_tools.issubset(skills), msg=f"{role_id} missing tools: {required_tools - skills}")
 
-    def test_show_buddy_authority_excludes_retired_acl_fields(self) -> None:
-        profile = env_manifest.buddy_authority_profile(self.manifest, "pm")
+    def test_show_role_authority_excludes_retired_acl_fields(self) -> None:
+        profile = env_manifest.role_authority_profile(self.manifest, "pm")
         self.assertNotIn("object_" + "permissions", profile)
         self.assertNotIn("permission_scope", profile)
         self.assertNotIn("manual_debug_" + "apis", str(profile))
 
-    def test_buddies_use_artifact_templates_vocabulary(self) -> None:
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            with self.subTest(buddy=buddy.get("id")):
-                self.assertIn("artifact_templates", buddy)
-                self.assertNotIn("artifact_kinds", buddy)
-                templates = buddy.get("artifact_templates")
+    def test_roles_use_artifact_templates_vocabulary(self) -> None:
+        for role in self.manifest.get("roles", []):
+            assert isinstance(role, dict)
+            with self.subTest(role=role.get("id")):
+                self.assertIn("artifact_templates", role)
+                self.assertNotIn("artifact_kinds", role)
+                templates = role.get("artifact_templates")
                 self.assertIsInstance(templates, list)
                 assert isinstance(templates, list)
                 self.assertTrue(templates)

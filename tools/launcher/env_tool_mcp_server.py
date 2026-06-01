@@ -36,17 +36,17 @@ class McpToolDispatchError(RuntimeError):
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Expose BuddySwitch env actions as native MCP tools.")
     parser.add_argument("--repo-root", help="BuddySwitch repo root for diagnostics.")
-    parser.add_argument("--instance-id", help="Active BuddySwitch instance id.")
-    parser.add_argument("--buddy", help="Active BuddySwitch buddy id.")
+    parser.add_argument("--actor-id", help="Active BuddySwitch actor id.")
+    parser.add_argument("--role", help="Active BuddySwitch role id.")
     parser.add_argument("--broker-socket", help="Runtime broker Unix socket path.")
     return parser.parse_args(argv)
 
 
 def apply_runtime_env(args: argparse.Namespace) -> None:
-    if isinstance(args.instance_id, str) and args.instance_id.strip():
-        os.environ["BUDDYSWITCH_INSTANCE_ID"] = args.instance_id.strip()
-    if isinstance(args.buddy, str) and args.buddy.strip():
-        os.environ["BUDDYSWITCH_ACTIVE_BUDDY"] = args.buddy.strip()
+    if isinstance(args.actor_id, str) and args.actor_id.strip():
+        os.environ["BUDDYSWITCH_ACTOR_ID"] = args.actor_id.strip()
+    if isinstance(args.role, str) and args.role.strip():
+        os.environ["BUDDYSWITCH_ROLE_ID"] = args.role.strip()
     if isinstance(args.broker_socket, str) and args.broker_socket.strip():
         os.environ["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = args.broker_socket.strip()
     if isinstance(args.repo_root, str) and args.repo_root.strip():

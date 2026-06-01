@@ -4,13 +4,13 @@
   "description": "Runless context discovery payload for explicit durable output writes.",
   "response_key_order": [
     "ok",
-    "instance_id",
-    "active_buddy",
+    "actor_id",
+    "active_role",
     "runtime_context",
     "warnings"
   ],
   "runtime_context_required_sections": [
-    "active_buddy",
+    "active_role",
     "runtime_commands",
     "capability_boundary",
     "env_tools",

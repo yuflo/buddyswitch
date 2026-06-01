@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from env.tool_runtime.actor_profile import RuntimeActorAddress
+from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
 
@@ -30,13 +30,13 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def _actor_payload(value: RuntimeActorAddress | dict[str, Any], field: str) -> dict[str, str]:
+def _actor_payload(value: ActorAddress | dict[str, Any], field: str) -> dict[str, str]:
     try:
-        if isinstance(value, RuntimeActorAddress):
+        if isinstance(value, ActorAddress):
             return value.to_payload()
-        return RuntimeActorAddress.from_payload(value).to_payload()
+        return ActorAddress.from_payload(value).to_payload()
     except Exception as exc:
-        raise ValueError(f"{field} must be a valid RuntimeActorAddress: {exc}") from exc
+        raise ValueError(f"{field} must be a valid ActorAddress: {exc}") from exc
 
 
 def _message_file(message_id: str) -> Path:
@@ -108,8 +108,8 @@ def delete_message(message_id: str) -> bool:
 
 def create_message(
     *,
-    from_actor_address: RuntimeActorAddress | dict[str, Any],
-    to_actor_address: RuntimeActorAddress | dict[str, Any],
+    from_actor_address: ActorAddress | dict[str, Any],
+    to_actor_address: ActorAddress | dict[str, Any],
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:

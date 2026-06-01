@@ -12,13 +12,13 @@ Implement approved scope in source code and persist implementation evidence expl
 - Use `track.add_update` and `track.update_now` for progress and blockers.
 - Use `request.list` / `request.get` for durable inbound/outbound request state on tracks.
 - For requests assigned to Dev, use `request.accept`, `request.block`, and `request.complete` with result refs.
-- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for private logs, generated files, binary outputs, or local reports; use artifact for implementation reports and technical conclusions the product workflow must read.
+- Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private logs, generated files, binary outputs, or local reports; use artifact for implementation reports and technical conclusions the product workflow must read.
 
 ## Runtime Boundary
 
 - Use native BuddySwitch env MCP tools for durable runtime objects; the runtime broker still enforces `env.tool` authority and feedback.
 - No `prepare/persist` turn transaction.
-- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
+- Do not edit `buddyswitch/objects/**`, old private workspace runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -29,6 +29,6 @@ Implement approved scope in source code and persist implementation evidence expl
 
 - `buddyswitch/objects/tracks/<track-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
-- `instances/<instance-id>/taskbox/<buddy>/history.md`
-- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).
+- `instances/<actor-id>/taskbox/<role>/tasks/<task-id>.json`
+- `instances/<actor-id>/taskbox/<role>/history.md`
+- Active-instance private host files under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` (`workspace/private`, not product-readable).

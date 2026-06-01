@@ -11,13 +11,14 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
 VALID_ARTIFACT_STATUS = ("draft", "published", "archived")
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
 _LEGACY_ARTIFACT_FIELDS = {"task_id", "kind", "content", "publication_role", "asset", "media", "material", "blocks", "figma_file"}
-_KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
+_KNOWN_ROLE_IDS = {"pm", "design", "dev", "market", "test"}
 _SHA256_HEX_LENGTH = 64
 
 
@@ -42,10 +43,24 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _normalize_actor(value: Any, field: str) -> dict[str, str]:
+    try:
+        return ActorAddress.from_payload(value).to_payload()
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
+
+
+def _actor_role(value: dict[str, Any]) -> str:
+    role = value.get("role_id")
+    if not isinstance(role, str) or role not in _KNOWN_ROLE_IDS:
+        raise ValueError("actor role_id must be one of known role ids")
+    return role
+
+
 def _normalize_source_refs(
     raw_refs: Any,
     *,
-    active_buddy: str | None = None,
+    active_role: str | None = None,
 ) -> list[dict[str, Any]] | None:
     if raw_refs is None:
         return None
@@ -114,9 +129,8 @@ def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
         sha256 = _require_non_empty_text(raw.get("sha256"), "attachment.sha256")
         if len(sha256) != _SHA256_HEX_LENGTH or any(ch not in "0123456789abcdef" for ch in sha256):
             raise ValueError("attachment.sha256 must be 64 lowercase hex chars")
-        created_by = _require_non_empty_text(raw.get("created_by"), "attachment.created_by")
-        if created_by not in _KNOWN_BUDDY_IDS:
-            raise ValueError("attachment.created_by must be one of known buddy ids")
+        created_by_actor = _normalize_actor(raw.get("created_by_actor"), "attachment.created_by_actor")
+        _actor_role(created_by_actor)
         created_at = _require_non_empty_text(raw.get("created_at"), "attachment.created_at")
         rows.append(
             {
@@ -125,7 +139,7 @@ def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
                 "content_type": content_type,
                 "size_bytes": size_bytes,
                 "sha256": sha256,
-                "created_by": created_by,
+                "created_by_actor": created_by_actor,
                 "created_at": created_at,
             }
         )
@@ -192,13 +206,13 @@ def create_artifact_revision(
     *,
     artifact_id: str | None,
     title: str,
-    created_by: str,
+    created_by_actor: dict[str, Any],
     body: str,
     template: str,
     summary: str = "",
     source_refs: list[dict[str, Any]] | None = None,
     supersedes_artifact_id: str | None = None,
-    authors: list[str] | None = None,
+    author_actors: list[dict[str, Any]] | None = None,
     legacy_source_run: str | None = None,
 ) -> dict[str, Any]:
     if legacy_source_run is not None:
@@ -209,15 +223,15 @@ def create_artifact_revision(
     if get_artifact(resolved_id):
         raise ValueError(f"artifact already exists: {resolved_id}")
 
-    if created_by not in _KNOWN_BUDDY_IDS:
-        raise ValueError("created_by must be one of known buddy ids")
+    creator = _normalize_actor(created_by_actor, "created_by_actor")
+    creator_role = _actor_role(creator)
     if not isinstance(body, str) or not body.strip():
         raise ValueError("body must be a non-empty string")
     if template not in VALID_ARTIFACT_TEMPLATES:
         raise ValueError(f"template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
     if not isinstance(summary, str):
         raise ValueError("summary must be a string")
-    normalized_refs = _normalize_source_refs(source_refs, active_buddy=created_by)
+    normalized_refs = _normalize_source_refs(source_refs, active_role=creator_role)
 
     revision = 1
     supersedes_id: str | None = None
@@ -232,13 +246,13 @@ def create_artifact_revision(
             raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
 
         previous_status = previous.get("status")
-        previous_owner = previous.get("created_by")
+        previous_owner = previous.get("created_by_actor")
         revision = int(previous.get("revision", 1)) + 1
         supersedes_id = supersedes_artifact_id
 
         if previous_status == "draft":
-            if previous_owner != created_by:
-                raise ValueError("supersedes_artifact_id must reference an active-buddy-owned current draft")
+            if previous_owner != creator:
+                raise ValueError("supersedes_artifact_id must reference an active-actor-owned current draft")
             new_is_current = True
             previous_patch = dict(previous)
             previous_patch["is_current"] = False
@@ -250,11 +264,13 @@ def create_artifact_revision(
         else:
             raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
 
-    author_rows = [created_by]
-    if isinstance(authors, list):
-        for row in authors:
-            if isinstance(row, str) and row in _KNOWN_BUDDY_IDS and row not in author_rows:
-                author_rows.append(row)
+    author_rows = [creator]
+    if isinstance(author_actors, list):
+        for row in author_actors:
+            actor = _normalize_actor(row, "author_actors[]")
+            _actor_role(actor)
+            if actor not in author_rows:
+                author_rows.append(actor)
 
     timestamp = now_iso()
     artifact = {
@@ -268,8 +284,8 @@ def create_artifact_revision(
         "revision": revision,
         "is_current": new_is_current,
         "supersedes_artifact_id": supersedes_id,
-        "created_by": created_by,
-        "authors": author_rows,
+        "created_by_actor": creator,
+        "author_actors": author_rows,
         "source_refs": normalized_refs,
         "attachments": [],
         "created_at": timestamp,
@@ -303,7 +319,7 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         "supersedes_artifact_id",
         "is_current",
         "revision",
-        "authors",
+        "author_actors",
     }
     for key, value in patch.items():
         if key not in allowed:
@@ -316,7 +332,7 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
 def adopt_local_attachment(
     artifact_id: str,
     filename: str,
-    created_by: str,
+    created_by_actor: dict[str, Any],
     source_path: Path,
     content_type: str | None,
     context: Any,
@@ -325,13 +341,13 @@ def adopt_local_attachment(
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
 
-    root = context.repos.runtime_files.buddybox_local_dir(context.instance_payload).resolve(strict=False)
+    root = context.repos.runtime_files.actor_private_dir(context.instance_payload).resolve(strict=False)
     try:
         resolved_source = source_path.expanduser().resolve(strict=True)
     except FileNotFoundError as exc:
         raise FileNotFoundError(str(source_path)) from exc
     if not _path_is_within(resolved_source, root):
-        raise ValueError("source_path must resolve inside the active instance buddybox directory")
+        raise ValueError("source_path must resolve inside the active actor private directory")
     if resolved_source.is_dir():
         raise IsADirectoryError(str(source_path))
     if not resolved_source.is_file():
@@ -341,6 +357,8 @@ def adopt_local_attachment(
     if not raw:
         raise ValueError("source_path must reference a non-empty file")
 
+    creator = _normalize_actor(created_by_actor, "created_by_actor")
+    _actor_role(creator)
     attachment_id = f"att-{uuid.uuid4().hex[:10]}"
     inferred_content_type = mimetypes.guess_type(resolved_source.name)[0] or "application/octet-stream"
     content_type_value = content_type.strip() if isinstance(content_type, str) and content_type.strip() else inferred_content_type
@@ -351,7 +369,7 @@ def adopt_local_attachment(
         "content_type": content_type_value,
         "size_bytes": len(raw),
         "sha256": hashlib.sha256(raw).hexdigest(),
-        "created_by": created_by,
+        "created_by_actor": creator,
         "created_at": timestamp,
     }
 
@@ -390,9 +408,9 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if _LEGACY_SOURCE_RUN in artifact:
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
     forbidden = sorted(field for field in artifact if field in _LEGACY_ARTIFACT_FIELDS)
-    legacy_fields_present = any(field in artifact for field in ("task_id", "kind", "content", "buddy"))
+    legacy_fields_present = any(field in artifact for field in ("task_id", "kind", "content", "role"))
     canonical_fields_present = any(
-        field in artifact for field in ("body", "template", "status", "published_to_track", "authors")
+        field in artifact for field in ("body", "template", "status", "published_to_track", "author_actors")
     )
     allow_legacy = legacy_fields_present and not canonical_fields_present
     if forbidden:
@@ -406,12 +424,10 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     artifact_id = runtime_files.require_id(artifact.get("id", ""), "artifact.id")
     title = _require_non_empty_text(artifact.get("title"), "artifact.title")
 
-    created_by_raw = artifact.get("created_by")
-    if not isinstance(created_by_raw, str) or not created_by_raw.strip():
-        created_by_raw = artifact.get("buddy") if allow_legacy else created_by_raw
-    created_by = _require_non_empty_text(created_by_raw, "artifact.created_by")
-    if created_by not in _KNOWN_BUDDY_IDS:
-        raise ValueError("artifact.created_by must be one of known buddy ids")
+    if "created_by" in artifact or "authors" in artifact:
+        raise ValueError("artifact.created_by/artifact.authors are retired; use created_by_actor/author_actors")
+    created_by_actor = _normalize_actor(artifact.get("created_by_actor"), "artifact.created_by_actor")
+    created_by_role = _actor_role(created_by_actor)
 
     body = artifact.get("body")
     if not isinstance(body, str) or not body.strip():
@@ -452,7 +468,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(summary, str):
         raise ValueError("artifact.summary must be a string")
 
-    source_refs = _normalize_source_refs(artifact.get("source_refs"), active_buddy=created_by)
+    source_refs = _normalize_source_refs(artifact.get("source_refs"), active_role=created_by_role)
 
     revision = artifact.get("revision")
     if not isinstance(revision, int) or revision <= 0:
@@ -466,14 +482,16 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(is_current, bool):
         raise ValueError("artifact.is_current must be a boolean")
 
-    authors_raw = artifact.get("authors")
-    authors: list[str] = []
+    authors_raw = artifact.get("author_actors")
+    authors: list[dict[str, str]] = []
     if isinstance(authors_raw, list):
         for row in authors_raw:
-            if isinstance(row, str) and row in _KNOWN_BUDDY_IDS and row not in authors:
-                authors.append(row)
-    if created_by not in authors:
-        authors.insert(0, created_by)
+            actor = _normalize_actor(row, "artifact.author_actors[]")
+            _actor_role(actor)
+            if actor not in authors:
+                authors.append(actor)
+    if created_by_actor not in authors:
+        authors.insert(0, created_by_actor)
 
     attachments = _normalize_attachment_rows(artifact.get("attachments"))
     created_at = _require_non_empty_text(artifact.get("created_at"), "artifact.created_at")
@@ -490,8 +508,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "revision": revision,
         "is_current": is_current,
         "supersedes_artifact_id": supersedes_artifact_id,
-        "created_by": created_by,
-        "authors": authors,
+        "created_by_actor": created_by_actor,
+        "author_actors": authors,
         "source_refs": source_refs,
         "attachments": attachments,
         "created_at": created_at,

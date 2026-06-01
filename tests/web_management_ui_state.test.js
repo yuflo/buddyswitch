@@ -16,7 +16,7 @@ function test(name, fn) {
   }
 }
 
-test('create button requires selected buddy and no start busy state', () => {
+test('create button requires selected role and no start busy state', () => {
   assert.equal(app.computeCreateEnabled({ selectedBuddy: '', isCreating: false }), false);
   assert.equal(app.computeCreateEnabled({ selectedBuddy: 'pm', isCreating: true }), false);
   assert.equal(app.computeCreateEnabled({ selectedBuddy: 'pm', isCreating: false }), true);

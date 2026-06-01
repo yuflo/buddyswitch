@@ -108,7 +108,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.create',
                 authority='pm.lifecycle_authority',
-                visibility='shared to buddies with track read access',
+                visibility='shared to roles with track read access',
                 durability='durable',
                 result_content_level='track page',
                 success_effect='Creates one PM-owned shared product outcome thread with initial outcome, appetite, now focus, state, and health.',
@@ -124,10 +124,10 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    'active buddy is pm',
+                    'active role is pm',
                 ),
                 returns=(
                     'track',
@@ -177,7 +177,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='track.read',
                 authority='track.lookup',
-                visibility='active-buddy readable track summaries',
+                visibility='active-role readable track summaries',
                 durability='none',
                 result_content_level='summary rows',
                 success_effect='Returns non-archived track summaries for choosing whether to reuse, split, or open a track.',
@@ -191,7 +191,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact state',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'env.tool role-action policy allows this action for the active role',
@@ -238,7 +238,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='track.read',
                 authority='track.lookup',
-                visibility='active-buddy readable track page',
+                visibility='active-role readable track page',
                 durability='none',
                 result_content_level='track page with refs and summaries',
                 success_effect='Opens one shared track page with now-state, timeline, material refs, and proof refs; use artifact.get for full artifact bodies.',
@@ -252,7 +252,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'track_id references an existing non-archived track',
@@ -310,7 +310,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.update_now',
                 authority='track.shared_mutation',
-                visibility='shared to buddies with track read access',
+                visibility='shared to roles with track read access',
                 durability='durable',
                 result_content_level='track page',
                 success_effect='Updates shared track now/state/health and records the change on the track timeline.',
@@ -327,7 +327,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact publication slot',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'track_id references an existing non-archived track',
@@ -367,7 +367,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'artifact_id': {
                             'type': 'string',
-                            'description': 'Active-buddy-owned draft artifact id to publish.',
+                            'description': 'Active-role-owned draft artifact id to publish.',
                         },
                         'label': {
                             'type': 'string',
@@ -386,7 +386,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.add_material',
                 authority='track.shared_mutation',
-                visibility='shared to buddies with track read access',
+                visibility='shared to roles with track read access',
                 durability='durable',
                 result_content_level='track page plus artifact id',
                 success_effect='Publishes one draft artifact as current shared material on the track.',
@@ -402,12 +402,12 @@ def _build_definition() -> ToolDefinition:
                 does_not_write=(
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                     'comment threads',
                 ),
                 preconditions=(
                     'track_id references an existing non-archived track',
-                    'artifact_id references an active-buddy-owned draft artifact',
+                    'artifact_id references an active-actor-owned draft artifact',
                     'artifact is not already published to another track',
                 ),
                 returns=(
@@ -469,7 +469,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.add_update',
                 authority='track.shared_mutation',
-                visibility='shared to buddies with track read access',
+                visibility='shared to roles with track read access',
                 durability='durable',
                 result_content_level='timeline update row and track page',
                 success_effect='Appends one narrative progress, decision, blocker, or proof-note update to the track timeline.',
@@ -486,7 +486,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact publication slot',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
                     'track_id references an existing non-archived track',
@@ -527,7 +527,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'artifact_id': {
                             'type': 'string',
-                            'description': 'Active-buddy-owned draft artifact id to publish as proof.',
+                            'description': 'Active-role-owned draft artifact id to publish as proof.',
                         },
                         'label': {
                             'type': 'string',
@@ -546,7 +546,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.add_proof',
                 authority='track.shared_mutation',
-                visibility='shared to buddies with track read access',
+                visibility='shared to roles with track read access',
                 durability='durable',
                 result_content_level='track page plus artifact id and update id',
                 success_effect='Publishes one draft artifact as current close proof and records the proof event on the track timeline.',
@@ -563,12 +563,12 @@ def _build_definition() -> ToolDefinition:
                 does_not_write=(
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                     'comment threads',
                 ),
                 preconditions=(
                     'track_id references an existing non-archived track',
-                    'artifact_id references an active-buddy-owned draft artifact',
+                    'artifact_id references an active-actor-owned draft artifact',
                     'artifact is not already published to another track',
                 ),
                 returns=(
@@ -615,7 +615,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.archive',
                 authority='pm.lifecycle_authority',
-                visibility='shared to buddies with track read access until archived filters hide it',
+                visibility='shared to roles with track read access until archived filters hide it',
                 durability='durable',
                 result_content_level='track page',
                 success_effect='Archives one PM-owned track so it leaves active collaboration flows and rejects routine shared mutations.',
@@ -631,10 +631,10 @@ def _build_definition() -> ToolDefinition:
                     'artifact publication metadata',
                     'task state',
                     'request lifecycle',
-                    'buddybox files',
+                    'actor_private files',
                 ),
                 preconditions=(
-                    'active buddy is pm',
+                    'active role is pm',
                     'track_id references an existing track',
                 ),
                 returns=(

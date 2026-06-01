@@ -35,13 +35,13 @@ _buddyswitch_app_server_effective_socket() {
     printf '%s\n' "${default_socket}"
     return 0
   fi
-  fallback_socket="$(python3 - "${BUDDYSWITCH_INSTANCE_ID}" <<'PY'
+  fallback_socket="$(python3 - "${BUDDYSWITCH_ACTOR_ID}" <<'PY'
 import hashlib
 import os
 import sys
 
-instance_id = sys.argv[1]
-digest = hashlib.sha1(instance_id.encode("utf-8")).hexdigest()[:12]
+actor_id = sys.argv[1]
+digest = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()[:12]
 tmp_root = os.path.realpath("/tmp") if os.path.exists("/tmp") else os.path.realpath(os.getenv("TMPDIR", "/tmp"))
 print(os.path.join(tmp_root, "buddyswitch-app-server", f"buddyswitch-app-server-{digest}.sock"))
 PY
@@ -94,8 +94,8 @@ buddyswitch_app_server_is_active() {
 }
 
 buddyswitch_app_server_ensure() {
-  local output socket_path app_server_pid app_server_log active_buddy tmp_prefix
-  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  local output socket_path app_server_pid app_server_log active_role tmp_prefix
+  active_role="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
   if [[ -n "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
     tmp_prefix="${BUDDYSWITCH_INSTANCE_TMP}/zsh"
   else
@@ -109,15 +109,15 @@ buddyswitch_app_server_ensure() {
     HOME="${BUDDYSWITCH_HOME}" \
     CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
     XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \
-    BUDDYSWITCH_ACTIVE_BUDDY="${active_buddy}" \
-    BUDDYSWITCH_BUDDYBOX_DIR="${BUDDYSWITCH_BUDDYBOX_DIR:-${BUDDYSWITCH_WORKSPACE_DIR}/buddybox}" \
-    BUDDYSWITCH_INSTANCE_ID="${BUDDYSWITCH_INSTANCE_ID}" \
+    BUDDYSWITCH_ROLE_ID="${active_role}" \
+    BUDDYSWITCH_ACTOR_PRIVATE_DIR="${BUDDYSWITCH_ACTOR_PRIVATE_DIR:-${BUDDYSWITCH_WORKSPACE_DIR}/private}" \
+    BUDDYSWITCH_ACTOR_ID="${BUDDYSWITCH_ACTOR_ID}" \
     BUDDYSWITCH_INSTANCE_JSON="${BUDDYSWITCH_INSTANCE_JSON}" \
     BUDDYSWITCH_INSTANCE_TMP="${BUDDYSWITCH_INSTANCE_TMP:-}" \
     BUDDYSWITCH_PROJECT_WORKSPACE_DIR="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
     BUDDYSWITCH_RUNTIME_BROKER_SOCKET="${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" \
     python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" ensure \
-      --instance-id "${BUDDYSWITCH_INSTANCE_ID}" \
+      --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
       --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}"
   )" || {
     if [[ -n "${output:-}" ]]; then

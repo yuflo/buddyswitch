@@ -23,14 +23,14 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+    def _instance_json(self, *, actor_id: str, role: str, status: str = "active") -> Path:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         path = self._runtime_path("instance.json")
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
+                    "actor_id": actor_id,
+                    "role": role,
                     "status": status,
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -44,15 +44,15 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
+    def _dispatch(self, *, instance_json: Path, actor_id: str, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        actor_id = self._runtime_actor_id(role=role, label=actor_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-comment-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "actor_id": actor_id,
+                "active_role": role,
                 "tool": tool,
                 "action": action,
                 "args": args,
@@ -88,7 +88,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_track(self, track_id: str = "track-comment") -> dict[str, object]:
-        return env_store.create_track(track_id, "Comment Track", owner_buddy="pm")
+        return env_store.create_track(track_id, "Comment Track", owner_role="pm")
 
     def _seed_published_artifact(self, *, artifact_id: str, track_id: str = "track-comment") -> str:
         if env_store.get_track(track_id) is None:
@@ -108,7 +108,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id=track_id,
             artifact_id=str(artifact["id"]),
             label="Seed",
-            from_buddy="pm",
+            from_role="pm",
             summary="seed summary",
         )
         return str(artifact["id"])
@@ -129,11 +129,11 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = self._seed_track("track-cmt-thread")
         before = self._snapshot_track_json(str(track["id"]))
 
-        instance_json = self._instance_json(instance_id="inst-design-cmt", buddy="design")
+        instance_json = self._instance_json(actor_id="act-design-cmt", role="design")
         added = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-design-cmt",
-            buddy="design",
+            actor_id="act-design-cmt",
+            role="design",
             tool="comment",
             action="add",
             args={"target_type": "track", "target_id": track["id"], "content": "Nice track."},
@@ -142,15 +142,19 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         comment = added.get("comment")
         self.assertIsInstance(comment, dict, msg=added)
         assert isinstance(comment, dict)
-        self.assertEqual(comment.get("by_buddy"), "design")
+        self.assertEqual(
+            comment.get("by_actor"),
+            {"actor_id": self._runtime_actor_id(role="design", label="act-design-cmt"), "role_id": "design"},
+        )
+        self.assertNotIn("by_role", comment)
         self.assertEqual(comment.get("status"), "open")
         self.assertEqual(comment.get("thread_id"), comment.get("id"))
         self.assertEqual(self._snapshot_track_json(str(track["id"])), before)
 
         listed = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-design-cmt",
-            buddy="design",
+            actor_id="act-design-cmt",
+            role="design",
             tool="comment",
             action="list",
             args={"target_type": "track", "target_id": track["id"], "status": "all"},
@@ -163,12 +167,12 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_artifact_comment_is_separate_from_artifact_body(self) -> None:
         artifact_id = self._seed_published_artifact(artifact_id="art-cmt-body-separate")
         before = self._snapshot_artifact_json(artifact_id)
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
 
         added = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "artifact", "target_id": artifact_id, "content": "Please revise this."},
@@ -178,8 +182,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         listed = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="list",
             args={"target_type": "artifact", "target_id": artifact_id, "status": "all"},
@@ -196,12 +200,12 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = self._seed_track("track-cmt-unsupported-target")
         before_track = self._snapshot_track_json(str(track["id"]))
         before_comment_count = len(env_store.list_comments())
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
 
         add = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "task", "target_id": str(track["id"]), "content": "nope"},
@@ -213,8 +217,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         listed = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="list",
             args={"target_type": "task", "target_id": str(track["id"]), "status": "all"},
@@ -226,12 +230,12 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_artifact_section_comment_requires_anchor(self) -> None:
         artifact_id = self._seed_published_artifact(artifact_id="art-cmt-anchor")
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
 
         missing = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "artifact_section", "target_id": artifact_id, "content": "Missing anchor"},
@@ -241,8 +245,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         added = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={
@@ -274,7 +278,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id=track_id,
             artifact_id="art-cmt-chain-r1",
             label="R1",
-            from_buddy="pm",
+            from_role="pm",
             summary="r1",
         )
         env_store.create_artifact_revision(
@@ -292,18 +296,18 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             track_id=track_id,
             artifact_id="art-cmt-chain-r2",
             label="R2",
-            from_buddy="pm",
+            from_role="pm",
             summary="r2",
         )
         self._seed_published_artifact(artifact_id="art-cmt-other-r1", track_id=track_id)
         before_target = self._snapshot_artifact_json("art-cmt-chain-r2")
         before_other = self._snapshot_artifact_json("art-cmt-other-r1")
 
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
         valid = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={
@@ -321,8 +325,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         invalid = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={
@@ -342,20 +346,20 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_reply_to_must_stay_on_same_target_thread(self) -> None:
         track_a = self._seed_track("track-cmt-a")
         track_b = self._seed_track("track-cmt-b")
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
 
         root_a = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "track", "target_id": track_a["id"], "content": "root a"},
         )
         root_b = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "track", "target_id": track_b["id"], "content": "root b"},
@@ -365,8 +369,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         ok_reply = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={
@@ -381,8 +385,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         bad_reply = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={
@@ -397,23 +401,23 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_pm_resolve_updates_entire_thread_and_list_state(self) -> None:
         track = self._seed_track("track-cmt-resolve-pm")
-        pm_instance_id = "inst-cmt-resolve-pm"
-        dev_instance_id = "inst-cmt-resolve-dev"
-        design_instance_id = "inst-cmt-resolve-design"
+        pm_actor_id = "act-cmt-resolve-pm"
+        dev_actor_id = "act-cmt-resolve-dev"
+        design_actor_id = "act-cmt-resolve-design"
         before_track = self._snapshot_track_json(str(track["id"]))
 
         root = self._dispatch(
-            instance_json=self._instance_json(instance_id=dev_instance_id, buddy="dev"),
-            instance_id=dev_instance_id,
-            buddy="dev",
+            instance_json=self._instance_json(actor_id=dev_actor_id, role="dev"),
+            actor_id=dev_actor_id,
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "track", "target_id": track["id"], "content": "root"},
         )
         reply = self._dispatch(
-            instance_json=self._instance_json(instance_id=design_instance_id, buddy="design"),
-            instance_id=design_instance_id,
-            buddy="design",
+            instance_json=self._instance_json(actor_id=design_actor_id, role="design"),
+            actor_id=design_actor_id,
+            role="design",
             tool="comment",
             action="add",
             args={
@@ -429,9 +433,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         reply_id = str((reply.get("comment") or {}).get("id"))
 
         resolved = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="resolve",
             args={
@@ -446,9 +450,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(self._snapshot_track_json(str(track["id"])), before_track)
 
         listed = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="list",
             args={"target_type": "track", "target_id": track["id"], "status": "all"},
@@ -456,18 +460,23 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(listed.get("ok"), msg=listed)
         comments = listed.get("comments", [])
         self.assertEqual(len(comments), 2)
+        expected_resolver = {
+            "actor_id": self._runtime_actor_id(role="pm", label=pm_actor_id),
+            "role_id": "pm",
+        }
         for row in comments:
             self.assertEqual(row.get("status"), "resolved")
-            self.assertEqual(row.get("resolved_by"), "pm")
+            self.assertEqual(row.get("resolved_by_actor"), expected_resolver)
+            self.assertNotIn("resolved_by", row)
             self.assertIsInstance(row.get("resolved_at"), str)
             self.assertEqual(row.get("resolution_summary"), "Reviewed by PM; addressed in art-dev-r1.")
         self.assertEqual((listed.get("status_counts") or {}).get("open"), 0)
         self.assertEqual((listed.get("status_counts") or {}).get("resolved"), 2)
 
         open_only = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="list",
             args={"target_type": "track", "target_id": track["id"], "status": "open"},
@@ -477,14 +486,14 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_comment_resolve_pm_boundary_payload_boundary_and_target_boundary(self) -> None:
         track = self._seed_track("track-cmt-resolve-boundary")
-        pm_instance_id = "inst-cmt-boundary-pm"
-        dev_instance_id = "inst-cmt-boundary-dev"
-        dev_instance_json = self._instance_json(instance_id=dev_instance_id, buddy="dev")
+        pm_actor_id = "act-cmt-boundary-pm"
+        dev_actor_id = "act-cmt-boundary-dev"
+        dev_instance_json = self._instance_json(actor_id=dev_actor_id, role="dev")
 
         root = self._dispatch(
             instance_json=dev_instance_json,
-            instance_id=dev_instance_id,
-            buddy="dev",
+            actor_id=dev_actor_id,
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "track", "target_id": track["id"], "content": "root"},
@@ -494,8 +503,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         non_pm = self._dispatch(
             instance_json=dev_instance_json,
-            instance_id=dev_instance_id,
-            buddy="dev",
+            actor_id=dev_actor_id,
+            role="dev",
             tool="comment",
             action="resolve",
             args={"comment_id": root_id, "resolution_summary": "should fail"},
@@ -513,9 +522,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(stored_root.get("status"), "open")
 
         blank_summary = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="resolve",
             args={"comment_id": root_id, "resolution_summary": "   "},
@@ -524,9 +533,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(blank_summary.get("permission_boundary"), "request-payload")
 
         missing_id_field = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="resolve",
             args={"resolution_summary": "x"},
@@ -536,9 +545,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         before_comment_count = len(env_store.list_comments())
         missing_comment = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="resolve",
             args={"comment_id": "comment-missing", "resolution_summary": "x"},
@@ -548,9 +557,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         env_store.update_track(str(track["id"]), {"archived_at": "2026-05-21T10:00:00+08:00"})
         archived_target = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="resolve",
             args={"comment_id": root_id, "resolution_summary": "x"},
@@ -560,22 +569,22 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_comment_resolve_rejects_already_resolved_and_reopen_is_unsupported(self) -> None:
         track = self._seed_track("track-cmt-resolve-state")
-        pm_instance_id = "inst-cmt-state-pm"
-        dev_instance_id = "inst-cmt-state-dev"
-        dev_instance_json = self._instance_json(instance_id=dev_instance_id, buddy="dev")
+        pm_actor_id = "act-cmt-state-pm"
+        dev_actor_id = "act-cmt-state-dev"
+        dev_instance_json = self._instance_json(actor_id=dev_actor_id, role="dev")
 
         root = self._dispatch(
             instance_json=dev_instance_json,
-            instance_id=dev_instance_id,
-            buddy="dev",
+            actor_id=dev_actor_id,
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "track", "target_id": track["id"], "content": "root"},
         )
         reply = self._dispatch(
             instance_json=dev_instance_json,
-            instance_id=dev_instance_id,
-            buddy="dev",
+            actor_id=dev_actor_id,
+            role="dev",
             tool="comment",
             action="add",
             args={
@@ -590,9 +599,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         root_id = str((root.get("comment") or {}).get("id"))
 
         first_resolve = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="resolve",
             args={"comment_id": root_id, "resolution_summary": "done"},
@@ -600,9 +609,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(first_resolve.get("ok"), msg=first_resolve)
 
         second_resolve = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="resolve",
             args={"comment_id": root_id, "resolution_summary": "done again"},
@@ -611,9 +620,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(second_resolve.get("permission_boundary"), "comment.state")
 
         reopened = self._dispatch(
-            instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),
-            instance_id=pm_instance_id,
-            buddy="pm",
+            instance_json=self._instance_json(actor_id=pm_actor_id, role="pm"),
+            actor_id=pm_actor_id,
+            role="pm",
             tool="comment",
             action="reopen",
             args={"comment_id": root_id},
@@ -621,36 +630,45 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(reopened.get("ok"), msg=reopened)
         self.assertEqual((reopened.get("error") or {}).get("code"), "E_ENV_TOOL")
 
-    def test_mentions_must_reference_manifest_buddies(self) -> None:
+    def test_mentioned_actors_must_reference_manifest_roles(self) -> None:
         track = self._seed_track("track-cmt-mentions")
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
         ok = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={
                 "target_type": "track",
                 "target_id": track["id"],
                 "content": "with mentions",
-                "mentions": ["pm", "design"],
+                "mentioned_actors": [
+                    {"actor_id": "act-pm-mentioned", "role_id": "pm"},
+                    {"actor_id": "act-design-mentioned", "role_id": "design"},
+                ],
             },
         )
         self.assertTrue(ok.get("ok"), msg=ok)
-        self.assertEqual((ok.get("comment") or {}).get("mentions"), ["pm", "design"])
+        self.assertEqual(
+            (ok.get("comment") or {}).get("mentioned_actors"),
+            [
+                {"actor_id": "act-pm-mentioned", "role_id": "pm"},
+                {"actor_id": "act-design-mentioned", "role_id": "design"},
+            ],
+        )
 
         bad = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={
                 "target_type": "track",
                 "target_id": track["id"],
                 "content": "bad mention",
-                "mentions": ["ops"],
+                "mentioned_actors": [{"actor_id": "act-ops-mentioned", "role_id": "ops"}],
             },
         )
         self.assertFalse(bad.get("ok"), msg=bad)
@@ -669,11 +687,11 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             source_refs=[{"type": "note", "label": "seed"}],
         )
         before = self._snapshot_artifact_json("art-cmt-draft-private")
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
         add = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "artifact", "target_id": "art-cmt-draft-private", "content": "no access"},
@@ -684,8 +702,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         listed = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="list",
             args={"target_type": "artifact", "target_id": "art-cmt-draft-private", "status": "all"},
@@ -699,12 +717,12 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.update_track("track-comment", {"archived_at": "2026-05-18T10:00:00+08:00"})
         before_artifact = self._snapshot_artifact_json(artifact_id)
         before_track = self._snapshot_track_json("track-comment")
-        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        instance_json = self._instance_json(actor_id="act-dev-cmt", role="dev")
 
         add = self._dispatch(
             instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
+            actor_id="act-dev-cmt",
+            role="dev",
             tool="comment",
             action="add",
             args={"target_type": "artifact", "target_id": artifact_id, "content": "no archived comments"},
