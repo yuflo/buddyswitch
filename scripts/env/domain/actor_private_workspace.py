@@ -14,11 +14,17 @@ ACTOR_PRIVATE_PRIVACY_MESSAGE = (
 )
 
 
-def build_actor_private_desc(active_role: str, *, instance_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_actor_private_desc(
+    active_role: str,
+    *,
+    active_actor: dict[str, Any],
+    instance_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     root = actor_private_repo.ensure_active_actor_private_root(active_role=active_role, instance_payload=instance_payload)
     return {
         "capability": "private_file_workspace",
         "owner_scope": "active_actor",
+        "owner_actor": dict(active_actor),
         "lifetime_scope": "active_instance_workspace",
         "visibility": "active_actor_private",
         "product_readable": False,

@@ -233,13 +233,14 @@ def _require_track_id(action: str, args: dict[str, Any], active_actor: dict[str,
 def _attachment_projection_for_ref(
     *,
     artifact_id: str,
+    active_actor: dict[str, Any],
     active_role: str,
     context: TrackServiceContext,
 ) -> tuple[int, list[dict[str, Any]]]:
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if not isinstance(artifact, dict):
         return 0, []
-    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_role)
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
     if not bool(decision.get("allowed")):
         return 0, []
     attachments = context.rules.artifact_visibility.attachment_summary_rows(artifact)
@@ -249,6 +250,7 @@ def _attachment_projection_for_ref(
 def _project_track_artifact_ref(
     *,
     ref: dict[str, Any],
+    active_actor: dict[str, Any],
     active_role: str,
     context: TrackServiceContext,
 ) -> dict[str, Any]:
@@ -260,6 +262,7 @@ def _project_track_artifact_ref(
         return projected
     attachment_count, attachments = _attachment_projection_for_ref(
         artifact_id=artifact_id,
+        active_actor=active_actor,
         active_role=active_role,
         context=context,
     )
@@ -275,14 +278,15 @@ def _track_page(
     context: TrackServiceContext,
 ) -> dict[str, Any]:
     page = dict(track)
+    active_actor = context["active_actor"]
     page["shared_materials"] = [
-        _project_track_artifact_ref(ref=row, active_role=active_role, context=context)
+        _project_track_artifact_ref(ref=row, active_actor=active_actor, active_role=active_role, context=context)
         for row in track.get("shared_materials", [])
         if isinstance(row, dict) and bool(row.get("current"))
     ]
     page["updates"] = [row for row in track.get("updates", []) if isinstance(row, dict)]
     page["close_proof"] = [
-        _project_track_artifact_ref(ref=row, active_role=active_role, context=context)
+        _project_track_artifact_ref(ref=row, active_actor=active_actor, active_role=active_role, context=context)
         for row in track.get("close_proof", [])
         if isinstance(row, dict) and bool(row.get("current", True))
     ]
@@ -356,7 +360,6 @@ def open_track_for_active_role(*, args: dict[str, Any], context: TrackServiceCon
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"track not found: {track_id}")
     if track.get("archived_at") is not None:
         return _reject_archived(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id)
-    active_actor=active_actor,
 
     page = _track_page(track, active_role=active_role, context=context)
     return tool_results.success(
@@ -748,7 +751,7 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
         normalized_ref_id = ref_id.strip()
         decision = context.rules.artifact_visibility.artifact_ref_decision_for_track_update(
             artifact_id=normalized_ref_id,
-            active_role=active_role,
+            active_actor=active_actor,
             track_id=track_id,
         )
         if not bool(decision.get("ok")):

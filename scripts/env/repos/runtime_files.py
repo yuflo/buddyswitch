@@ -62,7 +62,7 @@ def _recompute_runtime_roots() -> None:
     REQUESTS_DIR = OBJECTS_ROOT / "requests"
     CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
     LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
-    ACTOR_PRIVATE_DIR = LOCAL_ROOT / "actor-private"
+    ACTOR_PRIVATE_DIR = runtime_workspace_root(None) / "private"
     for listener in _RUNTIME_ROOT_LISTENERS:
         listener()
 

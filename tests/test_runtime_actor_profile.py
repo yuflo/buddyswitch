@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -199,6 +200,36 @@ class ActorProfileTests(unittest.TestCase):
         self.assertEqual(preview.get("active_role"), "dev")
         self.assertIn("track.list", preview.get("available_actions", []))
         self.assertIn("track.create", preview.get("restricted_actions", []))
+
+    def test_actor_private_file_summaries_are_actor_owned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace_dir = Path(temp)
+            instance_json = workspace_dir / "instance.json"
+            actor = {"actor_id": "act-dev-private-summary", "role_id": "dev"}
+            profile = resolve_actor_profile(
+                RuntimeActorRecord(
+                    actor_id=actor["actor_id"],
+                    role_id=actor["role_id"],
+                    instance_json=instance_json,
+                    payload={"actor_id": actor["actor_id"], "role": actor["role_id"], "workspace_dir": str(workspace_dir)},
+                )
+            )
+            context = ToolContext.from_actor_profile(
+                actor_profile=profile,
+                instance_json=instance_json,
+                instance_payload=dict(profile.actor_record.payload),
+                manifest={"roles": [{"id": "dev"}, {"id": "pm"}]},
+                manifest_path=None,
+            )
+
+            context.actor_private.write_file("notes/private.txt", content="private")
+            rows = context.actor_private.list_files(recursive=True)
+
+            self.assertEqual(len(rows), 1, msg=rows)
+            self.assertEqual(rows[0].get("owner_actor"), actor)
+            self.assertEqual(rows[0].get("visibility"), "active_actor_private")
+            retired_field = "private" + "_to_role"
+            self.assertNotIn(retired_field, rows[0])
 
     def test_tool_context_daemon_access_uses_explicit_central_daemon_client(self) -> None:
         instance_json = ROOT / "tmp" / "act-design-daemon" / "actor.json"

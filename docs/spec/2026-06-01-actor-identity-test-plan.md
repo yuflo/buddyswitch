@@ -2,7 +2,7 @@
 
 Date: 2026-06-01
 Worktree: `fea-daemon`
-Source memo: `docs/memo/2026-06-01-actor-identity-role-actor-upgrade-task.md`
+Source memo: `docs/memo/2026-06-01-actor-identity-final-rebuild-task.md`
 
 ## Goal
 
@@ -29,6 +29,12 @@ The tests must prove behavior from product requirements, not mirror the current 
 9. Launcher starts with `--role`, not `--buddy`.
 10. Object authors, owners, mentions, request lifecycle actors, messages, taskboxes, and private workspace ownership use Actor/Role fields according to their semantics.
 11. No compatibility alias, adapter, or dual path remains in live runtime code.
+12. Private draft artifacts are readable only by the exact creating Actor, not by same-role different Actors.
+13. `context.get` and `context.summarize` show private draft candidates only for the creating Actor and never through retired `created_by` fields.
+14. `ToolResult` success and rejection helpers require full `active_actor={actor_id, role_id}` and never synthesize a role-only actor payload.
+15. Evidence tokens record `issued_by_actor={actor_id, role_id}`; `active_role` is not the token issuer field.
+16. Actor private file summaries use actor ownership wording such as `owner_actor`; `private_to_role` is retired.
+17. `buddybox`, `$BUDDYSWITCH_BUDDYBOX_DIR`, and role-private wording are absent from live code, tools, launcher templates, and skills.
 
 ## Resource-Safe Test Rule
 
@@ -199,6 +205,8 @@ Files:
 Required behaviors:
 
 - Artifact fields are `created_by_actor` and `author_actors`.
+- Draft artifact read scope is exact actor ownership: same-role different actors cannot `artifact.get`, `artifact.list`, `artifact.list_attachments`, `artifact.get_attachment`, `comment.create`, source-ref full-read claim, `supersedes_artifact_id`, or track update refs against another actor's draft.
+- The creating actor can still read, list, update metadata, attach, list/get attachments, and supersede its own draft.
 - Artifact template authorization uses current role.
 - Track field is `owner_role`; track material/proof fields use `from_actor`; updates use `by_actor`.
 - Request role-queue fields are `from_actor`, `to_role`, `accepted_by_actor`, `blocked_by_actor`, `completed_by_actor`, and `canceled_by_actor`.
@@ -235,8 +243,10 @@ Required behaviors:
 
 - Private workspace is actor-owned and surfaced as `private_workspace`.
 - `buddybox` is not a live tool or public runtime concept.
+- Private file summary rows contain `owner_actor` and do not contain `private_to_role`.
 - Attachments can only be adopted from the active Actor private workspace.
-- Evidence and search responses use `active_actor` and `active_role`.
+- Evidence issue and downgrade tokens contain `issued_by_actor`; no token uses `active_role` as the issuer field.
+- Evidence and search responses use full `active_actor` and `active_role`.
 
 Focused command:
 
@@ -247,6 +257,42 @@ python3 -m pytest \
   tests/test_search_env_tool.py \
   tests/test_evidence_env_tool.py \
   tests/test_market_browser_evidence.py \
+  -q
+```
+
+### 7A. Final Draft Isolation, Context, ToolResult, And Evidence Gates
+
+Files:
+
+- `tests/test_artifact_env_tool.py`
+- `tests/test_comment_env_tool.py`
+- `tests/test_context_binding_env_tool.py`
+- `tests/test_env_tool_response_contract.py`
+- `tests/test_evidence_env_tool.py`
+- `tests/test_runtime_actor_profile.py`
+
+Required behaviors:
+
+- Same-role different Actor cannot read or list another Actor's draft.
+- Same-role different Actor cannot list or get another Actor draft attachments.
+- Same-role different Actor cannot comment on another Actor's draft.
+- Same-role different Actor cannot claim summarized full-content source refs to another Actor's draft.
+- Same-role different Actor cannot supersede another Actor's draft.
+- Own Actor draft remains visible in `context.summarize` / `context.get`; same-role other Actor draft does not.
+- `tool_results.success(...)` and `tool_results.rejection(...)` raise `ValueError` when `active_actor` is missing or does not contain both `actor_id` and `role_id`.
+- Evidence issue/downgrade token metadata records `issued_by_actor` equal to the active Actor.
+- Actor private file summaries use `owner_actor` and omit `private_to_role`.
+
+Focused command:
+
+```bash
+python3 -m pytest \
+  tests/test_artifact_env_tool.py \
+  tests/test_comment_env_tool.py \
+  tests/test_context_binding_env_tool.py \
+  tests/test_env_tool_response_contract.py \
+  tests/test_evidence_env_tool.py \
+  tests/test_runtime_actor_profile.py \
   -q
 ```
 
@@ -341,7 +387,7 @@ ps -axo pid,ppid,command | rg 'buddyswitch|runtime_broker|app_server|central_dae
 Run codebase residual scans for live paths:
 
 ```bash
-rg -n 'buddy_id|active_buddy|--buddy|\\bbuddy\\b|instance_id' \
+rg -n 'buddy_id|active_buddy|--buddy|\\bbuddy\\b|instance_id|BUDDYSWITCH_BUDDYBOX_DIR|\\bbuddybox\\b|\\bBuddybox\\b|private_to_role' \
   scripts tools framework buddyswitch tests \
   -g '!docs/**' \
   -g '!**/__pycache__/**'
@@ -352,6 +398,7 @@ Expected residuals:
 - `BuddySwitch` product name may remain.
 - Historical docs under `docs/memo` and `docs/bitter` may retain old terms.
 - `runtime_instance_id` may remain only if it is internal process bookkeeping and never appears in message/object/tool identity payloads.
+- `instance` may remain only as launcher/runtime/process/path terminology, not as identity, ownership, auth, message, or private scope.
 
 ## Self Review
 

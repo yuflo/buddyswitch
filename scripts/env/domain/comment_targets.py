@@ -56,6 +56,7 @@ def assert_target_readable(
     target_type: str,
     target_id: str,
     active_role: str,
+    active_actor: dict[str, Any],
     action: str,
 ) -> dict[str, Any]:
     if target_type == "track":
@@ -79,7 +80,7 @@ def assert_target_readable(
     if artifact is None:
         raise CommentTargetPayloadError(f"artifact not found: {target_id}", correctable_fields=["target_id"])
 
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_actor)
     if not bool(decision.get("allowed")):
         raise CommentTargetScopeError(
             message=str(decision.get("why", "artifact read denied")),

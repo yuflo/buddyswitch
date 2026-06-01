@@ -27,6 +27,7 @@ def normalize_source_refs(
     raw_refs: Any,
     *,
     active_role: str,
+    active_actor: dict[str, Any],
     read_claim: str | None = None,
 ) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
     if raw_refs is None:
@@ -82,7 +83,7 @@ def normalize_source_refs(
                         ),
                     }
                     break
-                decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
+                decision = artifact_visibility_domain.artifact_read_decision(artifact, active_actor)
                 if not bool(decision.get("allowed")):
                     scope_error = {
                         "permission_boundary": "source_refs.read_scope",

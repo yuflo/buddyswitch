@@ -487,6 +487,77 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("art-task-dev-context-note-r1", ids)
         self.assertNotIn("art-context-owner-draft-untracked", ids)
 
+    def test_context_candidates_show_only_active_actor_private_drafts(self) -> None:
+        owner_actor = "act-dev-context-draft-owner"
+        other_actor = "act-dev-context-draft-other"
+        owner_instance = self._instance_json(actor_id=owner_actor, role="dev")
+        other_instance = self._instance_json(actor_id=other_actor, role="dev")
+
+        own_draft = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-context-own-private-draft",
+                "title": "Own private draft",
+                "summary": "active actor draft",
+                "template": "note",
+                "body": "private body",
+            },
+        )
+        self.assertTrue(own_draft.get("ok"), msg=own_draft)
+        other_draft = self._dispatch(
+            instance_json=other_instance,
+            actor_id=other_actor,
+            role="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-context-other-private-draft",
+                "title": "Other private draft",
+                "summary": "same role other actor draft",
+                "template": "note",
+                "body": "other private body",
+            },
+        )
+        self.assertTrue(other_draft.get("ok"), msg=other_draft)
+
+        owner_summary = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="dev",
+            tool="context",
+            action="summarize",
+            args={},
+        )
+        self.assertTrue(owner_summary.get("ok"), msg=owner_summary)
+        owner_ids = {
+            row.get("artifact_id")
+            for row in owner_summary.get("candidate_artifacts", [])
+            if isinstance(row, dict)
+        }
+        self.assertIn("art-context-own-private-draft", owner_ids)
+        self.assertNotIn("art-context-other-private-draft", owner_ids)
+
+        owner_full = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="dev",
+            tool="context",
+            action="get",
+            args={},
+        )
+        self.assertTrue(owner_full.get("ok"), msg=owner_full)
+        full_ids = {
+            row.get("artifact_id")
+            for row in owner_full.get("candidate_artifacts", [])
+            if isinstance(row, dict)
+        }
+        self.assertIn("art-context-own-private-draft", full_ids)
+        self.assertNotIn("art-context-other-private-draft", full_ids)
+
     def test_context_summarize_includes_compact_active_inbox_message_cues(self) -> None:
         dev = {"role_id": "dev", "actor_id": self._runtime_actor_id(role="dev", label="act-dev-context")}
         pm = {"role_id": "pm", "actor_id": self._runtime_actor_id(role="pm", label="act-pm-context")}

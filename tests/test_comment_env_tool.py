@@ -712,6 +712,38 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(listed.get("permission_boundary"), "artifact.status")
         self.assertEqual(self._snapshot_artifact_json("art-cmt-draft-private"), before)
 
+    def test_same_role_different_actor_cannot_comment_on_private_draft(self) -> None:
+        owner_instance = self._instance_json(actor_id="act-pm-cmt-owner", role="pm")
+        created = self._dispatch(
+            instance_json=owner_instance,
+            actor_id="act-pm-cmt-owner",
+            role="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-cmt-same-role-private",
+                "title": "PM private draft",
+                "summary": "private",
+                "template": "brief",
+                "body": "draft body",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        before = self._snapshot_artifact_json("art-cmt-same-role-private")
+
+        other_instance = self._instance_json(actor_id="act-pm-cmt-other", role="pm")
+        added = self._dispatch(
+            instance_json=other_instance,
+            actor_id="act-pm-cmt-other",
+            role="pm",
+            tool="comment",
+            action="add",
+            args={"target_type": "artifact", "target_id": "art-cmt-same-role-private", "content": "same role should not see this"},
+        )
+        self.assertFalse(added.get("ok"), msg=added)
+        self.assertEqual((added.get("error") or {}).get("code"), "E_COMMENT_TARGET_SCOPE")
+        self.assertEqual(self._snapshot_artifact_json("art-cmt-same-role-private"), before)
+
     def test_archived_artifact_rejects_comment_add(self) -> None:
         artifact_id = self._seed_published_artifact(artifact_id="art-cmt-archived")
         env_store.update_track("track-comment", {"archived_at": "2026-05-18T10:00:00+08:00"})

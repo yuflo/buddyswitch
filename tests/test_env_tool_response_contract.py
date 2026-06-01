@@ -747,6 +747,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = tool_results.rejection(
             tool="track",
             action="track.create",
+            active_actor={"actor_id": "act-pm-response-contract", "role_id": "pm"},
             active_role="pm",
             code="E_TRACK_PAYLOAD",
             message="now must be an object",
@@ -772,6 +773,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             tool_results.rejection(
                 tool="track",
                 action="track.create",
+                active_actor={"actor_id": "act-pm-response-contract", "role_id": "pm"},
                 active_role="pm",
                 code="E_TRACK_PAYLOAD",
                 message="now must be an object",
@@ -783,6 +785,73 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 retryable=True,
                 retry_guidance="Fix now and retry.",
                 extra={"field_errors": []},
+            )
+
+    def test_tool_result_helpers_require_full_active_actor(self) -> None:
+        actor = {"actor_id": "act-pm-result-helper", "role_id": "pm"}
+        ok = tool_results.success(
+            tool="context",
+            action="context.summarize",
+            active_actor=actor,
+            active_role="pm",
+            effect_summary="Returned context.",
+            state_changed=False,
+            durability="none",
+        )
+        self.assertEqual(ok.get("active_actor"), actor)
+        self.assertEqual(ok.get("active_role"), "pm")
+
+        rejection = tool_results.rejection(
+            tool="context",
+            action="context.summarize",
+            active_actor=actor,
+            active_role="pm",
+            code="E_CONTEXT_PAYLOAD",
+            message="limit must be a positive integer",
+            permission_boundary="context.filter",
+            human_summary="Context filter payload is invalid.",
+            why_blocked="limit must be a positive integer",
+            impact="Context stayed read-only.",
+            state_changed=False,
+            retryable=True,
+            retry_guidance="Fix limit and retry.",
+        )
+        self.assertEqual(rejection.get("active_actor"), actor)
+        self.assertEqual(rejection.get("active_role"), "pm")
+
+        with self.assertRaises((TypeError, ValueError)):
+            tool_results.success(
+                tool="context",
+                action="context.summarize",
+                active_role="pm",
+                effect_summary="Returned context.",
+                state_changed=False,
+                durability="none",
+            )
+        with self.assertRaises((TypeError, ValueError)):
+            tool_results.rejection(
+                tool="context",
+                action="context.summarize",
+                active_role="pm",
+                code="E_CONTEXT_PAYLOAD",
+                message="limit must be a positive integer",
+                permission_boundary="context.filter",
+                human_summary="Context filter payload is invalid.",
+                why_blocked="limit must be a positive integer",
+                impact="Context stayed read-only.",
+                state_changed=False,
+                retryable=True,
+                retry_guidance="Fix limit and retry.",
+            )
+        with self.assertRaises(ValueError):
+            tool_results.success(
+                tool="context",
+                action="context.summarize",
+                active_actor={"role_id": "pm"},
+                active_role="pm",
+                effect_summary="Returned context.",
+                state_changed=False,
+                durability="none",
             )
 
     def test_high_friction_payload_rejections_include_field_errors(self) -> None:

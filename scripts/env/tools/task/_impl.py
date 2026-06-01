@@ -32,7 +32,7 @@ def _task_management() -> Any:
     return importlib.import_module("env.domain.task_management")
 
 
-def _reject_payload(*, action: str, active_role: str, result: dict[str, Any]) -> dict[str, Any]:
+def _reject_payload(*, action: str, active_actor: dict[str, Any], active_role: str, result: dict[str, Any]) -> dict[str, Any]:
     message = str(result.get("message") or "Task request payload is invalid.")
     correctable_fields = result.get("correctable_fields")
     if not isinstance(correctable_fields, list):
@@ -40,6 +40,7 @@ def _reject_payload(*, action: str, active_role: str, result: dict[str, Any]) ->
     return tool_results.rejection(
         tool="task",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code="E_TASK_PAYLOAD",
         message=message,
@@ -69,6 +70,7 @@ def _reject_payload(*, action: str, active_role: str, result: dict[str, Any]) ->
 def _success(
     *,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     result: dict[str, Any],
     durability: str,
@@ -80,6 +82,7 @@ def _success(
     return tool_results.success(
         tool="task",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=str(result.get("effect_summary") or f"{action} completed."),
         state_changed=bool(result.get("state_changed")),
@@ -95,10 +98,12 @@ def _success(
 def current_for_active_actor(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
     action = "task.current"
     active_role = context["active_role"]
+    active_actor = context["active_actor"]
     unknown = sorted(key for key in args if key != "history_limit")
     if unknown:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             result={"message": f"unsupported payload fields: {', '.join(unknown)}", "correctable_fields": unknown},
         )
@@ -108,6 +113,7 @@ def current_for_active_actor(*, args: dict[str, Any], context: TaskServiceContex
     if not isinstance(history_limit, int) or history_limit < 1:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             result={"message": "history_limit must be a positive integer", "correctable_fields": ["history_limit"]},
         )
@@ -118,6 +124,7 @@ def current_for_active_actor(*, args: dict[str, Any], context: TaskServiceContex
     return tool_results.success(
         tool="task",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary="Read the canonical active-actor TaskSnapshot.",
         state_changed=False,
@@ -134,25 +141,27 @@ def current_for_active_actor(*, args: dict[str, Any], context: TaskServiceContex
 def propose_for_active_actor(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
     action = "task.propose"
     active_role = context["active_role"]
+    active_actor = context["active_actor"]
     result = _task_management().propose_task(
         **_repo_context(context),
         args=args,
     )
     if not result.get("ok"):
-        return _reject_payload(action=action, active_role=active_role, result=result)
-    return _success(action=action, active_role=active_role, result=result, durability="durable")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, result=result)
+    return _success(action=action, active_actor=active_actor, active_role=active_role, result=result, durability="durable")
 
 
 def confirm_for_active_actor(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
     action = "task.confirm"
     active_role = context["active_role"]
+    active_actor = context["active_actor"]
     result = _task_management().confirm_task(
         **_repo_context(context),
         args=args,
     )
     if not result.get("ok"):
-        return _reject_payload(action=action, active_role=active_role, result=result)
-    return _success(action=action, active_role=active_role, result=result, durability="durable")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, result=result)
+    return _success(action=action, active_actor=active_actor, active_role=active_role, result=result, durability="durable")
 
 
 _ACTION_HANDLERS = {

@@ -83,10 +83,10 @@ def _build_definition() -> ToolDefinition:
         title="Task Management",
         description="Read, propose, and confirm active actor private task state inside the instance-local taskbox.",
         scope="instance-local active actor private taskbox",
-        capability_boundary="Only the active role's taskbox inside the active instance is readable and writable.",
+        capability_boundary="Only the active actor taskbox inside the active instance is readable and writable.",
         object_model=(
-            "Tasks live in the active instance taskbox under taskbox/<role>. "
-            "Each task is a private work item for the active role, not shared product state. "
+            "Tasks live in the active instance taskbox under taskbox/<actor>. "
+            "Each task is a private work item for the active actor, not shared product state. "
             "task.current reads the canonical TaskSnapshot. task.propose and task.confirm are the only public taskbox mutation actions. "
             "Task refs and track_id are private context links; they do not publish or share those objects."
         ),
@@ -191,10 +191,10 @@ def _build_definition() -> ToolDefinition:
                 visibility="active actor private",
                 durability="durable",
                 result_content_level="TaskSnapshot plus changed task or confirmation",
-                success_effect="Writes only active-role taskbox task docs and history for accepted task proposals.",
+                success_effect="Writes only active actor taskbox task docs and history for accepted task proposals.",
                 failure_state_guarantee="Rejected proposals do not mutate taskbox files, history, or shared runtime objects.",
                 reads=("canonical TaskSnapshot", "instance-local taskbox task docs"),
-                writes=("instance-local active-role taskbox task", "instance-local taskbox history"),
+                writes=("instance-local active-actor taskbox task", "instance-local taskbox history"),
                 does_not_write=(
                     "shared runtime task objects",
                     "track state",
@@ -253,7 +253,7 @@ def _build_definition() -> ToolDefinition:
                 success_effect="Accepts or rejects a pending task switch and appends taskbox history.",
                 failure_state_guarantee="Rejected confirmations do not mutate taskbox files, history, or shared runtime objects.",
                 reads=("canonical TaskSnapshot", "instance-local taskbox task docs"),
-                writes=("instance-local active-role taskbox task", "instance-local taskbox history"),
+                writes=("instance-local active-actor taskbox task", "instance-local taskbox history"),
                 does_not_write=(
                     "shared runtime task objects",
                     "track state",

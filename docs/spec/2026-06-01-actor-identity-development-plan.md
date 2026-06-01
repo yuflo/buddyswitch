@@ -32,7 +32,7 @@ The current system can discover multiple online PM runtime participants but bloc
 - `scripts/env/repos/{artifacts,tracks,comments,requests,tasks}.py`: runtime object field contracts.
 - `scripts/env/tools/*/{tool.py,_impl.py}`: public env tool schemas, payload validation, response fields.
 - `tools/launcher/{env.sh,instance.sh,codex_config.py,web_management.py}`: CLI, env vars, MCP server registration, web API.
-- `buddyswitch/manifest.toml`, `buddyswitch/env-profiles/*.json`, `framework/contracts/*.md`, `buddyswitch/skills/**/SKILL.md`, `tools/launcher/assets/buddies/*/AGENTS.md`: role-facing configuration and agent guidance.
+- `buddyswitch/manifest.toml`, `buddyswitch/env-profiles/*.json`, `framework/contracts/*.md`, `buddyswitch/skills/**/SKILL.md`, `tools/launcher/assets/roles/*/AGENTS.md`: role-facing configuration and agent guidance.
 - `tests/**`: behavior gates.
 
 ## Execution Rules
@@ -40,6 +40,7 @@ The current system can discover multiple online PM runtime participants but bloc
 - Work only in `fea-daemon`.
 - Start each behavior change with a failing focused test.
 - Do not keep `buddy_id`, `active_buddy`, `--buddy`, or old buddy object fields as aliases.
+- Follow `docs/memo/2026-06-01-actor-identity-final-rebuild-task.md` as the authoritative scope.
 - Do not make a compatibility adapter.
 - Do not edit runtime state under `buddyswitch/objects/**` directly.
 - Avoid broad launcher/service tests until focused cleanup tests pass.
@@ -379,6 +380,181 @@ python3 -m pytest \
   -q
 ```
 
+## Task 7A: Final Rebuild Behavior Hardening
+
+**Files:**
+
+- Modify: `scripts/env/domain/artifact_visibility.py`
+- Modify: `scripts/env/domain/source_refs.py`
+- Modify: `scripts/env/domain/comment_targets.py`
+- Modify: `scripts/env/domain/artifact_relations.py`
+- Modify: `scripts/env/tools/artifact/_impl.py`
+- Modify: `scripts/env/tools/comment/_impl.py`
+- Modify: `scripts/env/tools/context/_impl.py`
+- Modify: `scripts/env/tools/track/_impl.py`
+- Modify: `scripts/env/tool_runtime/results.py`
+- Modify: `scripts/env/tools/evidence/_impl.py`
+- Modify: `scripts/env/repos/actor_private_files.py`
+- Modify: `scripts/env/domain/actor_private_workspace.py`
+- Modify: focused tests listed below
+
+- [ ] Step 1: Add draft isolation red tests.
+
+Required test behaviors:
+
+```text
+Same-role different Actor cannot artifact.get/list another Actor draft.
+Same-role different Actor cannot list/get another Actor draft attachments.
+Same-role different Actor cannot comment on another Actor draft.
+Same-role different Actor cannot use another Actor draft in summarized-full-content source_refs.
+Same-role different Actor cannot supersede another Actor draft.
+Creating Actor can still read/list/update/attach/list attachments/get attachment/supersede own draft.
+```
+
+Run:
+
+```bash
+python3 -m pytest tests/test_artifact_env_tool.py tests/test_comment_env_tool.py -q
+```
+
+Expected before implementation: fail because artifact visibility uses `created_by_actor.role_id == active_role`.
+
+- [ ] Step 2: Replace draft readability with exact Actor ownership.
+
+Implementation requirements:
+
+```text
+artifact_read_decision(artifact, active_actor)
+draft allowed only when artifact.created_by_actor.actor_id == active_actor.actor_id
+published artifact readability remains tied to readable track publication
+template permission remains role-based
+draft edit/delete remains actor-owned
+```
+
+Update every caller that currently passes `active_role` only:
+
+```text
+source_refs.normalize_source_refs
+comment_targets.assert_target_readable
+artifact_relations relation/backlink helpers
+artifact tool list/get/list_attachments/get_attachment/create_revision/update_metadata/attach_file
+track artifact ref checks
+context candidate artifact rows
+```
+
+- [ ] Step 3: Add context candidate red tests.
+
+Required test behaviors:
+
+```text
+context.summarize shows the active Actor's own private draft as a candidate when no track filter is used.
+context.summarize does not show a same-role different Actor draft.
+context.get has the same candidate boundary.
+```
+
+Run:
+
+```bash
+python3 -m pytest tests/test_context_binding_env_tool.py -q
+```
+
+Expected before implementation: fail because own drafts without retired `created_by` are not candidate rows.
+
+- [ ] Step 4: Delete retired context candidate logic.
+
+Replace:
+
+```text
+artifact.get("created_by") == active_role
+```
+
+With:
+
+```text
+decision.relation == "owner" for active Actor draft candidates
+```
+
+- [ ] Step 5: Add ToolResult active actor red tests.
+
+Required test behaviors:
+
+```text
+tool_results.success(...) raises ValueError when active_actor is missing.
+tool_results.rejection(...) raises ValueError when active_actor is missing.
+Both helpers raise when active_actor lacks actor_id or role_id.
+Both helpers return full active_actor and active_role when supplied.
+No helper returns {"role_id": "..."} as a complete active_actor.
+```
+
+Run:
+
+```bash
+python3 -m pytest tests/test_env_tool_response_contract.py -q
+```
+
+Expected before implementation: fail because helpers synthesize a role-only active actor.
+
+- [ ] Step 6: Require full active Actor in result helpers and update callers.
+
+Implementation requirements:
+
+```text
+Remove _active_actor_payload fallback.
+Make active_actor required in success and rejection signatures.
+Pass context["active_actor"] through context, evidence, request, search, task, and local rejection helpers.
+Keep broker normalization only as a guard, not as the source of correctness.
+```
+
+- [ ] Step 7: Add evidence issuer red tests.
+
+Required test behaviors:
+
+```text
+evidence.issue_browser token has issued_by_actor equal to active_actor.
+evidence.approve_downgrade token has issued_by_actor equal to active_actor.
+tool_evidence does not contain active_role as issuer metadata.
+target authorization still requires active Actor authorship.
+```
+
+Run:
+
+```bash
+python3 -m pytest tests/test_evidence_env_tool.py -q
+```
+
+Expected before implementation: fail because tokens contain `active_role` and omit `issued_by_actor`.
+
+- [ ] Step 8: Add actor private summary red tests.
+
+Required test behaviors:
+
+```text
+Actor private file summary rows contain owner_actor={actor_id, role_id}.
+Actor private file summary rows do not contain private_to_role.
+Actor private workspace descriptors use active Actor ownership wording.
+```
+
+Run:
+
+```bash
+python3 -m pytest tests/test_runtime_actor_profile.py tests/test_context_binding_env_tool.py -q
+```
+
+Expected before implementation: fail because summaries contain `private_to_role`.
+
+- [ ] Step 9: Run final hardening focused group.
+
+```bash
+python3 -m pytest \
+  tests/test_artifact_env_tool.py \
+  tests/test_comment_env_tool.py \
+  tests/test_context_binding_env_tool.py \
+  tests/test_env_tool_response_contract.py \
+  tests/test_evidence_env_tool.py \
+  tests/test_runtime_actor_profile.py \
+  -q
+```
+
 ## Task 8: Rebuild Launcher, MCP, and Web Management
 
 **Files:**
@@ -433,7 +609,7 @@ node --test tests/web_management_ui_contract.test.js tests/web_management_ui_sta
 - Modify: `buddyswitch/env-profiles/*.json`
 - Modify: `framework/contracts/*.md`
 - Modify: `framework/contracts/buddy-env-profile.json`
-- Modify: `tools/launcher/assets/buddies/*/AGENTS.md`
+- Modify: `tools/launcher/assets/roles/*/AGENTS.md`
 - Modify: `buddyswitch/skills/**/SKILL.md`
 - Modify: `README.md`
 - Modify: repo consistency tests
@@ -459,7 +635,7 @@ python3 -m pytest tests/test_runtime_skills.py tests/test_repo_consistency.py te
 - [ ] Step 1: Run live residual scan:
 
 ```bash
-rg -n 'buddy_id|active_buddy|--buddy|\\bbuddy\\b|instance_id' \
+rg -n 'buddy_id|active_buddy|--buddy|\\bbuddy\\b|instance_id|BUDDYSWITCH_BUDDYBOX_DIR|\\bbuddybox\\b|\\bBuddybox\\b|private_to_role' \
   scripts tools framework buddyswitch tests README.md AGENTS.md \
   -g '!docs/**' \
   -g '!**/__pycache__/**'
@@ -480,6 +656,8 @@ Not allowed:
 - `--buddy`
 - public `instance_id` identity payloads
 - object fields using buddy as owner/author/recipient
+- `private_to_role` in actor private file summaries
+- `buddybox` or `$BUDDYSWITCH_BUDDYBOX_DIR` in live code, tests, role templates, or skills
 
 - [ ] Step 3: Run final focused verification from the test plan.
 

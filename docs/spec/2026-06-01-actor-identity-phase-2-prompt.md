@@ -8,12 +8,12 @@ Continue the Actor Identity Role / Actor rebuild in /Users/chen/Dev/buddyswitch/
 Read first:
 - AGENTS.md
 - docs/bitter/2026-05-26-test-resource-lifecycle-principles.md
-- docs/memo/2026-06-01-actor-identity-role-actor-upgrade-task.md
+- docs/memo/2026-06-01-actor-identity-final-rebuild-task.md
 - docs/spec/2026-06-01-actor-identity-test-plan.md
 - docs/spec/2026-06-01-actor-identity-development-plan.md
 
 Goal:
-Finish the full rebuild to Actor Identity -> Role / Actor. Do not keep buddy_id, active_buddy, --buddy, public instance_id identity, compatibility aliases, adapters, or dual paths in live runtime code.
+Finish the full rebuild to Actor Identity -> Role / Actor. Do not keep buddy_id, active_buddy, --buddy, public instance_id identity, buddybox, private_to_role, compatibility aliases, adapters, or dual paths in live runtime code.
 
 Execution rules:
 1. Stay in worktree fea-daemon. Do not touch main.
@@ -31,10 +31,11 @@ Implementation order:
 4. Central daemon and signals.
 5. Message tool and PM-to-PM same-role behavior.
 6. Object repositories and env tools.
-7. Private workspace, evidence, search.
-8. Launcher, MCP registration, and web management.
-9. Live skill/contract/profile/docs cleanup.
-10. Residual scan and final review.
+7. Final draft isolation, context candidate cleanup, ToolResult active_actor hardening, evidence issuer provenance, and actor private summary cleanup.
+8. Private workspace, evidence, search.
+9. Launcher, MCP registration, and web management.
+10. Live skill/contract/profile/docs cleanup.
+11. Residual scan and final review.
 
 Required final verification:
 - Run the focused test groups in docs/spec/2026-06-01-actor-identity-test-plan.md.
@@ -42,12 +43,15 @@ Required final verification:
 - Run residual process inspection after service-sensitive tests:
   ps -axo pid,ppid,command | rg 'buddyswitch|runtime_broker|app_server|central_daemon|chrome|fake_codex' || true
 - Run live residual scan:
-  rg -n 'buddy_id|active_buddy|--buddy|\bbuddy\b|instance_id' scripts tools framework buddyswitch tests README.md AGENTS.md -g '!docs/**' -g '!**/__pycache__/**'
+  rg -n 'buddy_id|active_buddy|--buddy|\bbuddy\b|instance_id|BUDDYSWITCH_BUDDYBOX_DIR|\bbuddybox\b|\bBuddybox\b|private_to_role' scripts tools framework buddyswitch tests README.md AGENTS.md -g '!docs/**' -g '!**/__pycache__/**'
 
 Completion requires:
 - all required tests pass,
 - PM-to-PM same-role different-Actor messaging works,
 - same-Actor self-send is rejected,
+- same-role different-Actor private draft access is blocked across artifact, comment, source_refs, supersedes, context candidates, attachments, and track refs,
+- ToolResult helpers require full active_actor,
+- evidence tokens record issued_by_actor,
 - residual scan has no disallowed live identity hits,
 - review finds no compatibility residue.
 

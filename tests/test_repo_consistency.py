@@ -896,10 +896,14 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("python3 scripts/env/client.py", text)
 
     def test_instance_private_writable_surface_has_no_legacy_actor_private_roots(self) -> None:
+        hyphen_private = "-".join(("actor", "private"))
+        legacy_hyphen_path = "/".join(("buddyswitch", "local", hyphen_private))
         forbidden = (
             'PRIVATE_WORKSPACE_ROOT_TEMPLATE = "buddyswitch/local/actor_private/{role_id}"',
             'ACTOR_PRIVATE_DIR = LOCAL_ROOT / "actor_private"',
+            f'ACTOR_PRIVATE_DIR = LOCAL_ROOT / "{hyphen_private}"',
             'workspace_actor_private_root="${workspace_dir}/buddyswitch/local/actor_private"',
+            legacy_hyphen_path,
             "state/buddyswitch/local/actor_private",
             "buddyswitch/content/actor_private",
         )

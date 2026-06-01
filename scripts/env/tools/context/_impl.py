@@ -30,6 +30,7 @@ _DISCOVERY_EXCLUDED_TOOLS: set[str] = set()
 
 class ContextServiceContext(TypedDict):
     active_role: str
+    active_actor: dict[str, Any]
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -37,7 +38,7 @@ class ContextServiceContext(TypedDict):
     manifest_path: Path | None
 
 
-def _reject_payload(*, action: str, active_role: str, message: str) -> dict[str, Any]:
+def _reject_payload(*, action: str, active_actor: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
     correctable_fields: list[str] | None = None
     if "unsupported payload fields:" in message:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
@@ -51,6 +52,7 @@ def _reject_payload(*, action: str, active_role: str, message: str) -> dict[str,
     return tool_results.rejection(
         tool="context",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code="E_CONTEXT_PAYLOAD",
         message=message,
@@ -69,7 +71,7 @@ def _reject_payload(*, action: str, active_role: str, message: str) -> dict[str,
     )
 
 
-def _require_allowed_fields(action: str, args: dict[str, Any], active_role: str) -> dict[str, Any] | None:
+def _require_allowed_fields(action: str, args: dict[str, Any], active_actor: dict[str, Any], active_role: str) -> dict[str, Any] | None:
     _, action_name = action.split(".", 1)
     allowed = set()
     for row in _ACTION_DEFINITION_MAP.get("actions", []):
@@ -80,6 +82,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_role: str)
     if unknown:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
         )
@@ -175,12 +178,14 @@ def _classify_source_root(root: Path, *, limit: int = 20) -> tuple[str, list[str
 def _source_workspace_rejection(
     *,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     message: str,
 ) -> dict[str, Any]:
     return tool_results.rejection(
         tool="context",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code="E_CONTEXT_SOURCE_WORKSPACE",
         message=message,
@@ -376,8 +381,9 @@ def _candidate_artifact_rows(
 ) -> list[dict[str, Any]]:
     normalized_track_filter = track_filter.strip() if isinstance(track_filter, str) and track_filter.strip() else None
     rows: list[dict[str, Any]] = []
+    active_actor = context["active_actor"]
     for artifact in context.repos.artifact.list_artifacts():
-        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_role)
+        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
         if not bool(decision.get("allowed")):
             continue
         if not _context_artifact_row_allowed(
@@ -399,7 +405,7 @@ def _candidate_artifact_rows(
         rows.append(
             context.rules.artifact_visibility.artifact_list_row(
                 artifact,
-                active_role,
+                active_actor,
                 comment_counts=comment_counts,
                 relation_counts=relation_counts,
             )
@@ -422,7 +428,7 @@ def _context_artifact_row_allowed(
         return relation in {"track_material", "track_proof"}
     if relation in {"track_material", "track_proof"}:
         return True
-    return artifact.get("status") == "draft" and artifact.get("created_by") == active_role
+    return artifact.get("status") == "draft" and relation == "owner"
 
 
 def _open_comment_thread_rows(
@@ -561,6 +567,7 @@ def _visible_requests(
                 target_type="track",
                 target_id=track_id,
                 active_role=active_role,
+                active_actor=context["active_actor"],
                 action="context.get",
             )
             context.rules.request.ensure_visible(request, active_role, context.actor_address)
@@ -718,8 +725,8 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "track.open / track.list via runtime env tools",
         },
         "tasks": {
-            "description": "Active-role private task hints and checklists.",
-            "scope": "active-role private task state",
+            "description": "Active actor private task hints and checklists.",
+            "scope": "active actor private task state",
             "source_of_truth": "task.current / task.propose / task.confirm via runtime env tools",
         },
         "artifacts": {
@@ -763,7 +770,8 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
 def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.get"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -778,12 +786,14 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
     except Exception as exc:
         return _source_workspace_rejection(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=str(exc),
         )
     return tool_results.success(
         tool="context",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary="Returned full runtime context sections plus source_workspace facts, writable_surfaces facts, full tool catalog, and full operation semantics.",
         state_changed=False,
@@ -800,7 +810,8 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
 def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.summarize"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -815,6 +826,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     except Exception as exc:
         return _source_workspace_rejection(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=str(exc),
         )
@@ -839,6 +851,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     return tool_results.success(
         tool="context",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary="Returned compact context orientation with source_workspace facts, writable_surfaces facts, candidate ids, and first-pass tool affordances.",
         state_changed=False,
@@ -855,13 +868,15 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
 def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.list_sources"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
     return tool_results.success(
         tool="context",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary="Returned read-only context source descriptors, including source_workspace orientation semantics.",
         state_changed=False,

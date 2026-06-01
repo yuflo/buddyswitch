@@ -26,6 +26,7 @@ _ACTION_DEFINITION_MAP = {
 
 class ArtifactServiceContext(TypedDict):
     active_role: str
+    active_actor: dict[str, Any]
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -101,6 +102,7 @@ def _allowed_templates_for_active_role(context: ArtifactServiceContext) -> tuple
 def _reject_template_permission(
     *,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     template: str,
     allowed_templates: tuple[str, ...],
@@ -109,6 +111,7 @@ def _reject_template_permission(
     return tool_results.rejection(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code="E_ARTIFACT_TEMPLATE_PERMISSION",
         message=f"template '{template}' is not declared for active role '{active_role}'",
@@ -138,6 +141,7 @@ def _reject_template_permission(
 def _reject_payload(
     *,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     message: str,
     correctable_fields: list[str] | None = None,
@@ -167,6 +171,7 @@ def _reject_payload(
     return tool_results.rejection(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code="E_ARTIFACT_PAYLOAD",
         message=message,
@@ -188,6 +193,7 @@ def _reject_payload(
 
 def _reject_publication_path(
     *,
+    active_actor: dict[str, Any],
     active_role: str,
     field: str,
     why_blocked: str,
@@ -195,6 +201,7 @@ def _reject_publication_path(
     return tool_results.rejection(
         tool="artifact",
         action="artifact.create_revision",
+        active_actor=active_actor,
         active_role=active_role,
         code="E_ARTIFACT_PUBLICATION_PATH",
         message=why_blocked,
@@ -217,6 +224,7 @@ def _reject_publication_path(
 def _reject_scope(
     *,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     boundary: str,
     message: str,
@@ -227,6 +235,7 @@ def _reject_scope(
     return tool_results.rejection(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code=code,
         message=message,
@@ -246,10 +255,11 @@ def _reject_scope(
     )
 
 
-def _reject_revision_scope(*, action: str, active_role: str, message: str) -> dict[str, Any]:
+def _reject_revision_scope(*, action: str, active_actor: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
     return tool_results.rejection(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code="E_ARTIFACT_SCOPE",
         message=message,
@@ -268,7 +278,7 @@ def _reject_revision_scope(*, action: str, active_role: str, message: str) -> di
     )
 
 
-def _require_allowed_fields(action: str, args: dict[str, Any], active_role: str) -> dict[str, Any] | None:
+def _require_allowed_fields(action: str, args: dict[str, Any], active_actor: dict[str, Any], active_role: str) -> dict[str, Any] | None:
     _, action_name = action.split(".", 1)
     allowed = set()
     for row in _ACTION_DEFINITION_MAP.get("actions", []):
@@ -277,14 +287,25 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_role: str)
             break
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
-        return _reject_payload(action=action, active_role=active_role, message=f"unsupported payload fields: {', '.join(unknown)}")
+        return _reject_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message=f"unsupported payload fields: {', '.join(unknown)}",
+        )
     if _LEGACY_SOURCE_RUN in args:
-        return _reject_payload(action=action, active_role=active_role, message="legacy artifact run lineage field is retired; use source_refs")
+        return _reject_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message="legacy artifact run lineage field is retired; use source_refs",
+        )
     return None
 
 
 def _artifact_response_row(artifact: dict[str, Any], active_role: str, context: ArtifactServiceContext) -> dict[str, Any]:
-    return context.rules.artifact_visibility.artifact_summary_row(artifact, active_role)
+    del active_role
+    return context.rules.artifact_visibility.artifact_summary_row(artifact, context["active_actor"])
 
 
 def _normalize_list_filters(
@@ -297,7 +318,12 @@ def _normalize_list_filters(
     if "track_id" in args:
         raw_track_id = args.get("track_id")
         if not isinstance(raw_track_id, str) or not raw_track_id.strip():
-            return None, _reject_payload(action=action, active_role=active_role, message="track_id must be a non-empty string")
+            return None, _reject_payload(
+                action=action,
+                active_actor=context["active_actor"],
+                active_role=active_role,
+                message="track_id must be a non-empty string",
+            )
         normalized_track_id = raw_track_id.strip()
         readable = context.rules.artifact_visibility.assert_track_readable(
             normalized_track_id,
@@ -308,9 +334,15 @@ def _normalize_list_filters(
             boundary = str(readable.get("permission_boundary", "artifact.read_scope"))
             message = str(readable.get("message", f"track not found: {normalized_track_id}"))
             if boundary == "request-payload":
-                return None, _reject_payload(action=action, active_role=active_role, message=message)
+                return None, _reject_payload(
+                    action=action,
+                    active_actor=context["active_actor"],
+                    active_role=active_role,
+                    message=message,
+                )
             return None, _reject_scope(
                 action=action,
+                active_actor=context["active_actor"],
                 active_role=active_role,
                 boundary=boundary,
                 message=message,
@@ -323,12 +355,18 @@ def _normalize_list_filters(
     if "created_by_role" in args:
         raw_created_by = args.get("created_by_role")
         if not isinstance(raw_created_by, str) or not raw_created_by.strip():
-            return None, _reject_payload(action=action, active_role=active_role, message="created_by_role must be a non-empty string")
+            return None, _reject_payload(
+                action=action,
+                active_actor=context["active_actor"],
+                active_role=active_role,
+                message="created_by_role must be a non-empty string",
+            )
         normalized_created_by = raw_created_by.strip()
         manifest_ids = context.rules.message.manifest_role_ids(context["manifest"])
         if normalized_created_by not in manifest_ids:
             return None, _reject_payload(
                 action=action,
+                active_actor=context["active_actor"],
                 active_role=active_role,
                 message="created_by_role must be one of manifest roles",
             )
@@ -340,6 +378,7 @@ def _normalize_list_filters(
         if not isinstance(raw_template, str) or raw_template not in context.repos.artifact.VALID_ARTIFACT_TEMPLATES:
             return None, _reject_payload(
                 action=action,
+                active_actor=context["active_actor"],
                 active_role=active_role,
                 message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
                 field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
@@ -352,6 +391,7 @@ def _normalize_list_filters(
         if not isinstance(raw_status, str) or raw_status not in context.repos.artifact.VALID_ARTIFACT_STATUS:
             return None, _reject_payload(
                 action=action,
+                active_actor=context["active_actor"],
                 active_role=active_role,
                 message=f"status must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_STATUS)}",
             )
@@ -361,12 +401,22 @@ def _normalize_list_filters(
     if "q" in args:
         raw_q = args.get("q")
         if not isinstance(raw_q, str):
-            return None, _reject_payload(action=action, active_role=active_role, message="q must be a string")
+            return None, _reject_payload(
+                action=action,
+                active_actor=context["active_actor"],
+                active_role=active_role,
+                message="q must be a string",
+            )
         q = raw_q.strip().lower() or None
 
     limit = args.get("limit", 20)
     if not isinstance(limit, int) or limit <= 0:
-        return None, _reject_payload(action=action, active_role=active_role, message="limit must be a positive integer")
+        return None, _reject_payload(
+            action=action,
+            active_actor=context["active_actor"],
+            active_role=active_role,
+            message="limit must be a positive integer",
+        )
 
     return (
         {
@@ -384,7 +434,8 @@ def _normalize_list_filters(
 def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.list"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -395,7 +446,7 @@ def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactSe
 
     rows: list[dict[str, Any]] = []
     for artifact in context.repos.artifact.list_artifacts():
-        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_role)
+        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
         if not bool(decision.get("allowed")):
             continue
         if isinstance(filters.get("track_id"), str) and decision.get("track_id") != filters.get("track_id"):
@@ -428,7 +479,7 @@ def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactSe
         rows.append(
             context.rules.artifact_visibility.artifact_list_row(
                 artifact,
-                active_role,
+                active_actor,
                 comment_counts=comment_counts,
                 relation_counts=relation_counts,
             )
@@ -439,6 +490,7 @@ def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactSe
     return tool_results.success(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Returned {len(limited_rows)} readable artifact summary row(s).",
         state_changed=False,
@@ -455,23 +507,25 @@ def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactSe
 def get_artifact_for_active_actor(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.get"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
     artifact_id = args.get("artifact_id")
     if not isinstance(artifact_id, str) or not artifact_id.strip():
-        return _reject_payload(action=action, active_role=active_role, message="artifact_id is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="artifact_id is required")
     artifact_id = artifact_id.strip()
 
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if artifact is None:
-        return _reject_payload(action=action, active_role=active_role, message=f"artifact not found: {artifact_id}")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"artifact not found: {artifact_id}")
 
-    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_role)
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
     if not bool(decision.get("allowed")):
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary=str(decision.get("permission_boundary", "artifact.read_scope")),
             message=str(decision.get("why", "artifact read denied")),
@@ -487,6 +541,7 @@ def get_artifact_for_active_actor(*, args: dict[str, Any], context: ArtifactServ
     return tool_results.success(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Read one readable artifact '{artifact_id}' including full markdown body.",
         state_changed=False,
@@ -503,8 +558,10 @@ def get_artifact_for_active_actor(*, args: dict[str, Any], context: ArtifactServ
 def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.create_revision"
     active_role = context["active_role"]
+    active_actor = context["active_actor"]
     if "published_to_track" in args:
         return _reject_publication_path(
+            active_actor=active_actor,
             active_role=active_role,
             field="published_to_track",
             why_blocked=(
@@ -514,11 +571,12 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         )
     if "status" in args:
         return _reject_publication_path(
+            active_actor=active_actor,
             active_role=active_role,
             field="status",
             why_blocked="artifact.create_revision always creates status=draft artifacts",
         )
-    payload_error = _require_allowed_fields(action, args, active_role)
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -528,14 +586,15 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
     template = args.get("template")
     supersedes_artifact_id = args.get("supersedes_artifact_id")
     if not isinstance(title, str) or not title.strip():
-        return _reject_payload(action=action, active_role=active_role, message="title is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="title is required")
     if not isinstance(summary, str):
-        return _reject_payload(action=action, active_role=active_role, message="summary must be a string")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="summary must be a string")
     if not isinstance(body, str) or not body.strip():
-        return _reject_payload(action=action, active_role=active_role, message="body is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="body is required")
     if not isinstance(template, str) or template not in context.repos.artifact.VALID_ARTIFACT_TEMPLATES:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
             field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
@@ -544,6 +603,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
     if template not in allowed_templates:
         return _reject_template_permission(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             template=template,
             allowed_templates=allowed_templates,
@@ -551,6 +611,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
     if supersedes_artifact_id is not None and (not isinstance(supersedes_artifact_id, str) or not supersedes_artifact_id.strip()):
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="supersedes_artifact_id must be a non-empty string",
         )
@@ -560,17 +621,19 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
 
     read_claim = args.get("read_claim")
     if read_claim is not None and not isinstance(read_claim, str):
-        return _reject_payload(action=action, active_role=active_role, message="read_claim must be a string")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="read_claim must be a string")
 
     try:
         normalized_refs, scope_error = context.rules.source_refs.normalize_source_refs(
             args.get("source_refs"),
             active_role=active_role,
+            active_actor=active_actor,
             read_claim=read_claim if isinstance(read_claim, str) else None,
         )
     except ValueError as exc:
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary="source_refs.required_fields",
             message=str(exc),
@@ -580,6 +643,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
     if isinstance(scope_error, dict):
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary=str(scope_error.get("permission_boundary", "source_refs.read_scope")),
             message=str(scope_error.get("why_blocked", "source_refs read scope denied")),
@@ -589,17 +653,18 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
 
     artifact_id = args.get("artifact_id")
     if artifact_id is not None and (not isinstance(artifact_id, str) or not artifact_id.strip()):
-        return _reject_payload(action=action, active_role=active_role, message="artifact_id must be a non-empty string")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="artifact_id must be a non-empty string")
 
     if normalized_supersedes_artifact_id is not None:
         try:
             context.rules.artifact_visibility.assert_supersedes_target_for_revision(
                 supersedes_artifact_id=normalized_supersedes_artifact_id,
-                active_role=active_role,
+                active_actor=active_actor,
             )
         except ValueError as exc:
             return _reject_revision_scope(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 message=str(exc),
             )
@@ -621,15 +686,17 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         if "supersedes_artifact_id" in message or "superseded" in message:
             return _reject_revision_scope(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 message=message,
             )
-        return _reject_payload(action=action, active_role=active_role, message=message)
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=message)
 
     row = _artifact_response_row(artifact, active_role, context)
     return tool_results.success(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Created one private draft artifact revision '{artifact['id']}' (not shared on track yet).",
         state_changed=True,
@@ -648,21 +715,23 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
 def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.update_metadata"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
     artifact_id = args.get("artifact_id")
     if not isinstance(artifact_id, str) or not artifact_id.strip():
-        return _reject_payload(action=action, active_role=active_role, message="artifact_id is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="artifact_id is required")
     artifact_id = artifact_id.strip()
 
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if artifact is None:
-        return _reject_payload(action=action, active_role=active_role, message=f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_actor") != context["active_actor"]:
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"artifact not found: {artifact_id}")
+    if artifact.get("created_by_actor") != active_actor:
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary="artifact.actor_scope",
             message=f"artifact '{artifact_id}' is owned by another actor",
@@ -674,12 +743,13 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         if field in args:
             patch[field] = args[field]
     if "title" in patch and (not isinstance(patch["title"], str) or not patch["title"].strip()):
-        return _reject_payload(action=action, active_role=active_role, message="title must be a non-empty string")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="title must be a non-empty string")
     if "summary" in patch and not isinstance(patch["summary"], str):
-        return _reject_payload(action=action, active_role=active_role, message="summary must be a string")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="summary must be a string")
     if "template" in patch and (not isinstance(patch["template"], str) or patch["template"] not in context.repos.artifact.VALID_ARTIFACT_TEMPLATES):
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
             field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
@@ -689,26 +759,29 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         if patch["template"] not in allowed_templates:
             return _reject_template_permission(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 template=patch["template"],
                 allowed_templates=allowed_templates,
             )
     if "body" in patch and (not isinstance(patch["body"], str) or not patch["body"].strip()):
-        return _reject_payload(action=action, active_role=active_role, message="body must be a non-empty string")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="body must be a non-empty string")
 
     if "source_refs" in args or "read_claim" in args:
         read_claim = args.get("read_claim")
         if read_claim is not None and not isinstance(read_claim, str):
-            return _reject_payload(action=action, active_role=active_role, message="read_claim must be a string")
+            return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="read_claim must be a string")
         try:
             refs, scope_error = context.rules.source_refs.normalize_source_refs(
                 args.get("source_refs"),
                 active_role=active_role,
+                active_actor=active_actor,
                 read_claim=read_claim if isinstance(read_claim, str) else None,
             )
         except ValueError as exc:
             return _reject_scope(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 boundary="source_refs.required_fields",
                 message=str(exc),
@@ -718,6 +791,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         if isinstance(scope_error, dict):
             return _reject_scope(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 boundary=str(scope_error.get("permission_boundary", "source_refs.read_scope")),
                 message=str(scope_error.get("why_blocked", "source_refs read scope denied")),
@@ -727,17 +801,18 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         patch["source_refs"] = refs
 
     if not patch:
-        return _reject_payload(action=action, active_role=active_role, message="at least one metadata field is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="at least one metadata field is required")
 
     try:
         updated = context.repos.artifact.update_artifact(artifact_id, patch)
     except ValueError as exc:
-        return _reject_payload(action=action, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
     row = _artifact_response_row(updated, active_role, context)
     return tool_results.success(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Updated metadata for artifact '{artifact_id}'.",
         state_changed=True,
@@ -752,19 +827,21 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
 def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.attach_file"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
     artifact_id = args.get("artifact_id")
     if not isinstance(artifact_id, str) or not artifact_id.strip():
-        return _reject_payload(action=action, active_role=active_role, message="artifact_id is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="artifact_id is required")
     artifact_id = artifact_id.strip()
 
     filename = args.get("filename")
     if not isinstance(filename, str) or not filename.strip():
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="filename is required",
             field_errors=[_attachment_filename_field_error()],
@@ -774,6 +851,7 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
     if not isinstance(source_path, str) or not source_path.strip():
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="source_path is required",
             field_errors=[_source_path_field_error()],
@@ -781,10 +859,11 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
 
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if artifact is None:
-        return _reject_payload(action=action, active_role=active_role, message=f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_actor") != context["active_actor"]:
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"artifact not found: {artifact_id}")
+    if artifact.get("created_by_actor") != active_actor:
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary="artifact.actor_scope",
             message=f"artifact '{artifact_id}' is owned by another actor",
@@ -793,6 +872,7 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
     if artifact.get("status") != "draft":
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary="artifact.lifecycle_status",
             message=f"artifact '{artifact_id}' is {artifact.get('status')} and attachments can only be added to drafts",
@@ -803,7 +883,7 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
         updated_artifact, attachment = context.repos.artifact.adopt_local_attachment(
             artifact_id=artifact_id,
             filename=filename,
-            created_by_actor=context["active_actor"],
+            created_by_actor=active_actor,
             source_path=Path(source_path.strip()),
             content_type=args.get("content_type") if isinstance(args.get("content_type"), str) else None,
             context=context,
@@ -811,6 +891,7 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
     except (FileNotFoundError, IsADirectoryError, ValueError) as exc:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=str(exc),
             correctable_fields=["source_path"],
@@ -821,6 +902,7 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
     return tool_results.success(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Attached one private file to artifact '{artifact_id}' as attachment '{attachment['attachment_id']}'.",
         state_changed=True,
@@ -839,23 +921,25 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
 def list_artifact_attachments(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.list_attachments"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
     artifact_id = args.get("artifact_id")
     if not isinstance(artifact_id, str) or not artifact_id.strip():
-        return _reject_payload(action=action, active_role=active_role, message="artifact_id is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="artifact_id is required")
     artifact_id = artifact_id.strip()
 
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if artifact is None:
-        return _reject_payload(action=action, active_role=active_role, message=f"artifact not found: {artifact_id}")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"artifact not found: {artifact_id}")
 
-    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_role)
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
     if not bool(decision.get("allowed")):
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary=str(decision.get("permission_boundary", "artifact.read_scope")),
             message=str(decision.get("why", "artifact read denied")),
@@ -866,6 +950,7 @@ def list_artifact_attachments(*, args: dict[str, Any], context: ArtifactServiceC
     return tool_results.success(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Listed {len(attachments)} attachment summary row(s) for artifact '{artifact_id}'.",
         state_changed=False,
@@ -882,18 +967,20 @@ def list_artifact_attachments(*, args: dict[str, Any], context: ArtifactServiceC
 def get_artifact_attachment(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.get_attachment"
     active_role = context["active_role"]
-    payload_error = _require_allowed_fields(action, args, active_role)
+    active_actor = context["active_actor"]
+    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
 
     artifact_id = args.get("artifact_id")
     if not isinstance(artifact_id, str) or not artifact_id.strip():
-        return _reject_payload(action=action, active_role=active_role, message="artifact_id is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="artifact_id is required")
     artifact_id = artifact_id.strip()
     attachment_id = args.get("attachment_id")
     if not isinstance(attachment_id, str) or not attachment_id.strip():
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="attachment_id is required",
             field_errors=[_attachment_id_field_error()],
@@ -902,12 +989,13 @@ def get_artifact_attachment(*, args: dict[str, Any], context: ArtifactServiceCon
 
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if artifact is None:
-        return _reject_payload(action=action, active_role=active_role, message=f"artifact not found: {artifact_id}")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"artifact not found: {artifact_id}")
 
-    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_role)
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
     if not bool(decision.get("allowed")):
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             boundary=str(decision.get("permission_boundary", "artifact.read_scope")),
             message=str(decision.get("why", "artifact read denied")),
@@ -919,6 +1007,7 @@ def get_artifact_attachment(*, args: dict[str, Any], context: ArtifactServiceCon
     except FileNotFoundError:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=f"attachment not found: {attachment_id}",
             field_errors=[_attachment_id_field_error()],
@@ -926,6 +1015,7 @@ def get_artifact_attachment(*, args: dict[str, Any], context: ArtifactServiceCon
     except ValueError as exc:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=str(exc),
             field_errors=[_attachment_id_field_error()],
@@ -936,6 +1026,7 @@ def get_artifact_attachment(*, args: dict[str, Any], context: ArtifactServiceCon
     return tool_results.success(
         tool="artifact",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Read attachment '{attachment_id}' from artifact '{artifact_id}'.",
         state_changed=False,

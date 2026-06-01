@@ -26,6 +26,7 @@ _ACTION_DEFINITION_MAP = {
 
 class CommentServiceContext(TypedDict):
     active_role: str
+    active_actor: dict[str, Any]
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -43,6 +44,7 @@ def _allowed(action: str) -> set[str]:
 def _reject_payload(
     *,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     message: str,
     correctable_fields: list[str] | None = None,
@@ -51,6 +53,7 @@ def _reject_payload(
     return tool_results.rejection(
         tool="comment",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code="E_COMMENT_PAYLOAD",
         message=message,
@@ -70,6 +73,7 @@ def _reject_payload(
 def _reject_scope(
     *,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     code: str,
     boundary: str,
@@ -80,6 +84,7 @@ def _reject_scope(
     return tool_results.rejection(
         tool="comment",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         code=code,
         message=message,
@@ -137,6 +142,7 @@ def _normalize_target(
     except context.rules.comment_target.CommentTargetPayloadError as exc:
         return _reject_payload(
             action=action,
+            active_actor=context["active_actor"],
             active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
@@ -155,11 +161,13 @@ def _ensure_target_readable(
             target_type=target_type,
             target_id=target_id,
             active_role=active_role,
+            active_actor=context["active_actor"],
             action=action,
         )
     except context.rules.comment_target.CommentTargetPayloadError as exc:
         return _reject_payload(
             action=action,
+            active_actor=context["active_actor"],
             active_role=active_role,
             message=str(exc),
             correctable_fields=exc.correctable_fields,
@@ -167,6 +175,7 @@ def _ensure_target_readable(
     except context.rules.comment_target.CommentTargetScopeError as exc:
         return _reject_scope(
             action=action,
+            active_actor=context["active_actor"],
             active_role=active_role,
             code=exc.code,
             boundary=exc.permission_boundary,
@@ -180,6 +189,7 @@ def _ensure_target_readable(
 def _normalize_mentioned_actors(
     *,
     mentioned_actors: Any,
+    active_actor: dict[str, Any],
     active_role: str,
     action: str,
     manifest: dict[str, Any],
@@ -189,6 +199,7 @@ def _normalize_mentioned_actors(
     if not isinstance(mentioned_actors, list):
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="mentioned_actors must be a list",
             correctable_fields=["mentioned_actors"],
@@ -210,6 +221,7 @@ def _normalize_mentioned_actors(
         except ValueError as exc:
             return _reject_payload(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 message=f"mentioned_actors entries must be actor address payloads: {exc}",
                 correctable_fields=["mentioned_actors"],
@@ -226,6 +238,7 @@ def _normalize_mentioned_actors(
         if role not in roles:
             return _reject_payload(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 message=f"unknown mentioned actor role: {role}",
                 correctable_fields=["mentioned_actors"],
@@ -254,6 +267,7 @@ def _validate_reply_to(
     target_type: str,
     target_id: str,
     active_role: str,
+    active_actor: dict[str, Any],
     action: str,
     context: CommentServiceContext,
 ) -> str | None | dict[str, Any]:
@@ -262,6 +276,7 @@ def _validate_reply_to(
     if not isinstance(reply_to, str) or not reply_to.strip():
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="reply_to must be a non-empty string when provided",
             correctable_fields=["reply_to"],
@@ -271,6 +286,7 @@ def _validate_reply_to(
     if parent is None:
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             code="E_COMMENT_REPLY_SCOPE",
             boundary="comment.reply_to_scope",
@@ -281,6 +297,7 @@ def _validate_reply_to(
     if parent.get("target_type") != target_type or parent.get("target_id") != target_id:
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             code="E_COMMENT_REPLY_SCOPE",
             boundary="comment.reply_to_scope",
@@ -294,12 +311,14 @@ def _validate_reply_to(
 def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict[str, Any]:
     action = "comment.add"
     active_role = context["active_role"]
+    active_actor = context["active_actor"]
     manifest = context["manifest"]
 
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
             correctable_fields=unknown,
@@ -318,6 +337,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
     if not isinstance(content, str) or not content.strip():
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="content must be a non-empty string",
             correctable_fields=["content"],
@@ -328,6 +348,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         if not isinstance(anchor, str) or not anchor.strip():
             return _reject_payload(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 message="anchor is required for target_type='artifact_section'",
                 correctable_fields=["anchor"],
@@ -345,6 +366,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         if not isinstance(anchor, str) or not anchor.strip():
             return _reject_payload(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 message="anchor must be a non-empty string when provided",
                 correctable_fields=["anchor"],
@@ -353,6 +375,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
 
     mentioned_actors = _normalize_mentioned_actors(
         mentioned_actors=args.get("mentioned_actors"),
+        active_actor=active_actor,
         active_role=active_role,
         action=action,
         manifest=manifest,
@@ -365,6 +388,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         if not isinstance(artifact_revision_id, str) or not artifact_revision_id.strip():
             return _reject_payload(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 message="artifact_revision_id must be a non-empty string when provided",
                 correctable_fields=["artifact_revision_id"],
@@ -374,6 +398,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         if not revision_chain:
             return _reject_scope(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 code="E_COMMENT_TARGET_SCOPE",
                 boundary="comment.artifact_revision_scope",
@@ -385,6 +410,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         if not target_chain.intersection(revision_chain):
             return _reject_scope(
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 code="E_COMMENT_TARGET_SCOPE",
                 boundary="comment.artifact_revision_scope",
@@ -398,6 +424,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         target_type=target_type,
         target_id=target_id,
         active_role=active_role,
+        active_actor=active_actor,
         action=action,
         context=context,
     )
@@ -416,7 +443,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         comment = context.repos.comment.create_comment(
             target_type=target_type,
             target_id=target_id,
-            by_actor=context["active_actor"],
+            by_actor=active_actor,
             content=content.strip(),
             reply_to=reply_to,
             mentioned_actors=mentioned_actors,
@@ -426,11 +453,12 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
             status="open",
         )
     except (ValueError, OSError) as exc:
-        return _reject_payload(action=action, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
     return tool_results.success(
         tool="comment",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Added one durable comment on {target_type} '{target_id}'.",
         state_changed=True,
@@ -445,11 +473,13 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
 def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> dict[str, Any]:
     action = "comment.list"
     active_role = context["active_role"]
+    active_actor = context["active_actor"]
 
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
             correctable_fields=unknown,
@@ -468,6 +498,7 @@ def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> di
     if not isinstance(status_filter, str) or status_filter not in {"open", "resolved", "all"}:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="status must be one of open|resolved|all",
             correctable_fields=["status"],
@@ -510,6 +541,7 @@ def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> di
     return tool_results.success(
         tool="comment",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Returned {len(matched)} comment(s) for {target_type} '{target_id}'.",
         state_changed=False,
@@ -529,11 +561,13 @@ def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> di
 def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict[str, Any]:
     action = "comment.resolve"
     active_role = context["active_role"]
+    active_actor = context["active_actor"]
 
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
             correctable_fields=unknown,
@@ -543,6 +577,7 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
         return tool_results.rejection(
             tool="comment",
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             code="E_COMMENT_SCOPE",
             message="comment.resolve is PM-only",
@@ -561,6 +596,7 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
     if not isinstance(comment_id, str) or not comment_id.strip():
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="comment_id must be a non-empty string",
             correctable_fields=["comment_id"],
@@ -571,6 +607,7 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
     if not isinstance(resolution_summary, str) or not resolution_summary.strip():
         return _reject_payload(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             message="resolution_summary must be a non-empty string",
             correctable_fields=["resolution_summary"],
@@ -581,6 +618,7 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
     if seed is None:
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             code="E_COMMENT_THREAD_SCOPE",
             boundary="comment.thread_scope",
@@ -593,6 +631,7 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
     if not isinstance(target_type, str) or not isinstance(target_id, str):
         return _reject_scope(
             action=action,
+            active_actor=active_actor,
             active_role=active_role,
             code="E_COMMENT_THREAD_SCOPE",
             boundary="comment.thread_scope",
@@ -608,7 +647,7 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
     try:
         resolved_rows = context.repos.comment.resolve_thread(
             comment_id=comment_id,
-            resolved_by_actor=context["active_actor"],
+            resolved_by_actor=active_actor,
             resolution_summary=resolution_summary,
         )
     except ValueError as exc:
@@ -617,6 +656,7 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
             return tool_results.rejection(
                 tool="comment",
                 action=action,
+                active_actor=active_actor,
                 active_role=active_role,
                 code="E_COMMENT_STATE",
                 message=message,
@@ -630,12 +670,13 @@ def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> 
                 allowed_next_actions=["Use comment.list to confirm thread status."],
                 correctable_fields=["comment_id"],
             )
-        return _reject_payload(action=action, active_role=active_role, message=message)
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=message)
 
     updated_ids = [row.get("id") for row in resolved_rows if isinstance(row.get("id"), str)]
     return tool_results.success(
         tool="comment",
         action=action,
+        active_actor=active_actor,
         active_role=active_role,
         effect_summary=f"Resolved thread containing comment '{comment_id}' with {len(updated_ids)} durable row update(s).",
         state_changed=True,

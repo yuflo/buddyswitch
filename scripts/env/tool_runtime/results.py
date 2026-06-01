@@ -84,10 +84,15 @@ def _require_list(value: Any, field: str) -> list[Any]:
     return value
 
 
-def _active_actor_payload(active_actor: dict[str, Any] | None, active_role: str) -> dict[str, Any]:
-    if isinstance(active_actor, dict):
-        return dict(active_actor)
-    return {"role_id": _role_id_text(active_role)}
+def _active_actor_payload(active_actor: dict[str, Any], active_role: str) -> dict[str, Any]:
+    if not isinstance(active_actor, dict):
+        raise ValueError("active_actor must be an object with actor_id and role_id")
+    actor_id = _require_non_empty_text(active_actor.get("actor_id"), "active_actor.actor_id")
+    role_id = _require_non_empty_text(active_actor.get("role_id"), "active_actor.role_id")
+    expected_role = _role_id_text(active_role)
+    if role_id != expected_role:
+        raise ValueError("active_actor.role_id must match active_role")
+    return {"actor_id": actor_id, "role_id": role_id}
 
 
 def _merge_extra(payload: dict[str, Any], extra: dict[str, Any], canonical_fields: set[str]) -> None:
@@ -222,11 +227,11 @@ def success(
     *,
     tool: str,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     effect_summary: str,
     state_changed: bool,
     durability: str,
-    active_actor: dict[str, Any] | None = None,
     allowed_next_actions: list[str] | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
     state_changes: list[dict[str, Any]] | None = None,
@@ -274,6 +279,7 @@ def rejection(
     *,
     tool: str,
     action: str,
+    active_actor: dict[str, Any],
     active_role: str,
     code: str,
     message: str,
@@ -285,7 +291,6 @@ def rejection(
     durability: str = "none",
     retryable: bool,
     retry_guidance: str,
-    active_actor: dict[str, Any] | None = None,
     allowed_next_actions: list[str] | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
     error_class: str | None = None,

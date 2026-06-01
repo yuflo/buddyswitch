@@ -97,7 +97,7 @@ def _updated_at_from_stat(path: Path) -> str:
     return datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
 
 
-def file_summary(path: Path, *, logical_name: str, active_role: str) -> dict[str, Any]:
+def file_summary(path: Path, *, logical_name: str, owner_actor: dict[str, Any]) -> dict[str, Any]:
     stat = path.stat()
     content_type, _ = mimetypes.guess_type(path.name)
     return {
@@ -106,7 +106,7 @@ def file_summary(path: Path, *, logical_name: str, active_role: str) -> dict[str
         "updated_at": _updated_at_from_stat(path),
         "content_type": content_type or "application/octet-stream",
         "visibility": "active_actor_private",
-        "private_to_role": active_role,
+        "owner_actor": dict(owner_actor),
     }
 
 
@@ -139,7 +139,7 @@ def state_summary(*, root: Path) -> dict[str, Any]:
 def list_private_file_summaries(
     *,
     root: Path,
-    active_role: str,
+    owner_actor: dict[str, Any],
     recursive: bool,
     limit: int,
     logical_prefix: str | None = None,
@@ -154,7 +154,7 @@ def list_private_file_summaries(
         logical_name = path.relative_to(root).as_posix()
         if isinstance(logical_prefix, str) and not logical_name.startswith(logical_prefix):
             continue
-        rows.append(file_summary(path, logical_name=logical_name, active_role=active_role))
+        rows.append(file_summary(path, logical_name=logical_name, owner_actor=owner_actor))
     rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("logical_name") or "")), reverse=True)
     return rows[:limit]
 

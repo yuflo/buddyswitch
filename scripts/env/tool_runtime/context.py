@@ -219,7 +219,8 @@ class RuntimeObjectAccess:
 class ActorPrivateAccess:
     """Active actor actor_private operations."""
 
-    def __init__(self, *, active_role: str, manifest: dict[str, Any], instance_payload: dict[str, Any]) -> None:
+    def __init__(self, *, active_actor: dict[str, Any], active_role: str, manifest: dict[str, Any], instance_payload: dict[str, Any]) -> None:
+        self._active_actor = dict(active_actor)
         self._active_role = active_role
         self._manifest = manifest
         self._instance_payload = instance_payload
@@ -238,6 +239,7 @@ class ActorPrivateAccess:
     def describe(self) -> dict[str, Any]:
         return _actor_private_workspace_domain.build_actor_private_desc(
             self._active_role,
+            active_actor=self._active_actor,
             instance_payload=self._instance_payload,
         )
 
@@ -250,7 +252,7 @@ class ActorPrivateAccess:
         max_rows = int(limit) if isinstance(limit, int) and limit > 0 else 100
         return _actor_private_repo.list_private_file_summaries(
             root=self._root(),
-            active_role=self._active_role,
+            owner_actor=self._active_actor,
             recursive=bool(recursive),
             limit=max_rows,
             logical_prefix=prefix,
@@ -476,6 +478,7 @@ class ToolContext(Mapping[str, Any]):
             self,
             "actor_private",
             ActorPrivateAccess(
+                active_actor=self.active_actor.to_payload(),
                 active_role=self.role_id,
                 manifest=self.manifest,
                 instance_payload=self.instance_payload,

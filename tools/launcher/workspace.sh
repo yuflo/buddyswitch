@@ -866,7 +866,6 @@ buddyswitch/objects/tracks
 buddyswitch/objects/artifacts
 buddyswitch/objects/messages
 buddyswitch/objects/comments
-buddyswitch/local/actor-private
 EOF
 }
 
@@ -933,8 +932,7 @@ buddyswitch_workspace_cleanup_stale_state_projections() {
   buddyswitch_workspace_cleanup_projection_dir "${workspace_objects_root}" "${state_objects_root}" "*.json" || return $?
 
   for workspace_private_root in \
-    "${legacy_runtime_local_root}/private" \
-    "${legacy_runtime_local_root}/actor-private"
+    "${legacy_runtime_local_root}/private"
   do
     if [[ -L "${workspace_private_root}" ]]; then
       rm -f "${workspace_private_root}"

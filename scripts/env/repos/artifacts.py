@@ -235,7 +235,7 @@ def create_artifact_revision(
 
     revision = 1
     supersedes_id: str | None = None
-    new_is_current = False
+    new_is_current = True
     demote_previous: dict[str, Any] | None = None
     if supersedes_artifact_id is not None:
         runtime_files.require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")

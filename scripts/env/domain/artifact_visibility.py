@@ -9,6 +9,13 @@ from env.repos import artifacts as artifact_repo
 from env.repos import tracks as track_repo
 
 
+def _active_actor_id(active_actor: dict[str, Any]) -> str | None:
+    if not isinstance(active_actor, dict):
+        return None
+    actor_id = active_actor.get("actor_id")
+    return actor_id if isinstance(actor_id, str) and actor_id else None
+
+
 def _track_current_material_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
     for row in track.get("shared_materials", []):
         if not isinstance(row, dict):
@@ -50,7 +57,7 @@ def _track_history_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any
 def assert_supersedes_target_for_revision(
     *,
     supersedes_artifact_id: str,
-    active_role: str,
+    active_actor: dict[str, Any],
 ) -> dict[str, Any]:
     artifact = artifact_repo.get_artifact(supersedes_artifact_id)
     if artifact is None:
@@ -59,8 +66,8 @@ def assert_supersedes_target_for_revision(
         raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
     if artifact.get("status") == "draft":
         created_by_actor = artifact.get("created_by_actor") if isinstance(artifact.get("created_by_actor"), dict) else {}
-        if created_by_actor.get("role_id") != active_role:
-            raise ValueError("supersedes_artifact_id must reference an active-role-owned current draft")
+        if created_by_actor.get("actor_id") != _active_actor_id(active_actor):
+            raise ValueError("supersedes_artifact_id must reference an active-actor-owned current draft")
         return artifact
     if artifact.get("status") != "published":
         raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
@@ -91,22 +98,23 @@ def assert_supersedes_target_for_revision(
     return artifact
 
 
-def artifact_read_decision(artifact: dict[str, Any], active_role: str) -> dict[str, Any]:
+def artifact_read_decision(artifact: dict[str, Any], active_actor: dict[str, Any]) -> dict[str, Any]:
     artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
     created_by_actor = artifact.get("created_by_actor") if isinstance(artifact.get("created_by_actor"), dict) else {}
-    owner_role = created_by_actor.get("role_id")
+    owner_actor_id = created_by_actor.get("actor_id")
+    active_actor_id = _active_actor_id(active_actor)
     published_track_id = artifact.get("published_to_track")
     status = artifact.get("status")
 
     if status == "draft":
-        if owner_role == active_role:
+        if isinstance(owner_actor_id, str) and owner_actor_id == active_actor_id:
             return {
                 "allowed": True,
                 "artifact_id": artifact_id,
                 "track_id": None,
                 "relation": "owner",
                 "permission_boundary": "none",
-                "why": "active role owns private draft artifact",
+                "why": "active actor owns private draft artifact",
             }
         return {
             "allowed": False,
@@ -203,9 +211,9 @@ def artifact_read_decision(artifact: dict[str, Any], active_role: str) -> dict[s
 
 def artifact_summary_row(
     artifact: dict[str, Any],
-    active_role: str,
+    active_actor: dict[str, Any],
 ) -> dict[str, Any]:
-    decision = artifact_read_decision(artifact, active_role)
+    decision = artifact_read_decision(artifact, active_actor)
     relation, currentness = _relation_and_currentness_for_decision(artifact=artifact, decision=decision)
     return {
         "id": artifact.get("id"),
@@ -273,14 +281,14 @@ def attachment_summary_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
 
 def artifact_list_row(
     artifact: dict[str, Any],
-    active_role: str,
+    active_actor: dict[str, Any],
     *,
     comment_counts: dict[str, int] | None = None,
     relation_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     from env.domain import source_refs as source_refs_domain
 
-    decision = artifact_read_decision(artifact, active_role)
+    decision = artifact_read_decision(artifact, active_actor)
     relation, currentness = _relation_and_currentness_for_decision(artifact=artifact, decision=decision)
     counts = comment_counts or {}
     backlinks = relation_counts or {}
@@ -309,7 +317,7 @@ def artifact_list_row(
     }
 
 
-def current_material_rows_for_track(track_id: str, active_role: str) -> list[dict[str, Any]]:
+def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[dict[str, Any]]:
     track = track_repo.get_track(track_id)
     if not isinstance(track, dict) or track.get("archived_at") is not None:
         return []
@@ -324,7 +332,7 @@ def current_material_rows_for_track(track_id: str, active_role: str) -> list[dic
         if not isinstance(artifact_id, str) or not artifact_id:
             continue
         artifact = artifact_repo.get_artifact(artifact_id)
-        decision = artifact_read_decision(artifact, active_role) if isinstance(artifact, dict) else {"allowed": False}
+        decision = artifact_read_decision(artifact, active_actor) if isinstance(artifact, dict) else {"allowed": False}
         rows.append(
             {
                 "artifact_id": artifact_id,
@@ -343,7 +351,7 @@ def current_material_rows_for_track(track_id: str, active_role: str) -> list[dic
     return rows
 
 
-def proof_rows_for_track(track_id: str, active_role: str) -> list[dict[str, Any]]:
+def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[dict[str, Any]]:
     track = track_repo.get_track(track_id)
     if not isinstance(track, dict) or track.get("archived_at") is not None:
         return []
@@ -360,7 +368,7 @@ def proof_rows_for_track(track_id: str, active_role: str) -> list[dict[str, Any]
         if not isinstance(artifact_id, str) or not artifact_id:
             continue
         artifact = artifact_repo.get_artifact(artifact_id)
-        decision = artifact_read_decision(artifact, active_role) if isinstance(artifact, dict) else {"allowed": False}
+        decision = artifact_read_decision(artifact, active_actor) if isinstance(artifact, dict) else {"allowed": False}
         rows.append(
             {
                 "artifact_id": artifact_id,
@@ -382,7 +390,7 @@ def proof_rows_for_track(track_id: str, active_role: str) -> list[dict[str, Any]
 def artifact_ref_decision_for_track_update(
     *,
     artifact_id: str,
-    active_role: str,
+    active_actor: dict[str, Any],
     track_id: str,
 ) -> dict[str, Any]:
     artifact = artifact_repo.get_artifact(artifact_id)
@@ -392,7 +400,7 @@ def artifact_ref_decision_for_track_update(
             "message": f"artifact not found: {artifact_id}",
         }
 
-    decision = artifact_read_decision(artifact, active_role)
+    decision = artifact_read_decision(artifact, active_actor)
     if not bool(decision.get("allowed")):
         why = str(decision.get("why") or "artifact is not readable for track updates")
         return {

@@ -35,6 +35,7 @@ _ACTION_DEFINITION_MAP = {
 
 class SearchServiceContext(TypedDict):
     active_role: str
+    active_actor: dict[str, Any]
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -106,6 +107,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], context: SearchSe
     return tool_results.rejection(
         tool="search",
         action=action,
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         code="E_SEARCH_PAYLOAD",
         message=f"unsupported payload fields: {', '.join(unknown)}",
@@ -175,6 +177,7 @@ def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, An
     return tool_results.rejection(
         tool="search",
         action=action,
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         code="E_SEARCH_ENGINE",
         message=f"search engine must be one of {list(ALLOWED_ENGINES)}",
@@ -215,6 +218,7 @@ def _query_error(*, action: str, context: SearchServiceContext) -> dict[str, Any
     return tool_results.rejection(
         tool="search",
         action=action,
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         code="E_SEARCH_QUERY",
         message="search query must be a non-empty string",
@@ -252,6 +256,7 @@ def _backend_error(*, context: SearchServiceContext) -> dict[str, Any]:
     return tool_results.rejection(
         tool="search",
         action="search.request",
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         code="E_SEARCH_BACKEND",
         message=f"search backend must be explicit and one of {list(ALLOWED_BACKENDS)}",
@@ -306,6 +311,7 @@ def _browser_unavailable(
     return tool_results.rejection(
         tool="search",
         action=action,
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         code="E_SEARCH_BROWSER_UNAVAILABLE",
         message="instance browser endpoint is unavailable for search",
@@ -350,6 +356,7 @@ def _browser_open_failed(
     return tool_results.rejection(
         tool="search",
         action="search.open_browser",
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         code="E_SEARCH_BROWSER_OPEN_FAILED",
         message="failed to open search page through Chrome DevTools",
@@ -405,6 +412,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
         return tool_results.rejection(
             tool="search",
             action="search.request",
+            active_actor=context["active_actor"],
             active_role=context["active_role"],
             code="E_SEARCH_BACKEND_APPROVAL_REQUIRED",
             message="search_api requires explicit user approval and no BuddySwitch-managed search API provider is configured",
@@ -453,6 +461,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
     return tool_results.rejection(
         tool="search",
         action="search.request",
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         code="E_SEARCH_BACKEND_UNAVAILABLE",
         message="search_api backend is unavailable",
@@ -538,6 +547,7 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
     return tool_results.success(
         tool="search",
         action="search.status",
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         effect_summary="Returned search capability metadata and backend/browser readiness status without opening a browser page.",
         state_changed=False,
@@ -596,6 +606,7 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
     return tool_results.success(
         tool="search",
         action="search.request",
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         effect_summary="Validated search request and returned target URL browser intent with page_opened=false.",
         state_changed=False,
@@ -662,6 +673,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
     return tool_results.success(
         tool="search",
         action="search.open_browser",
+        active_actor=context["active_actor"],
         active_role=context["active_role"],
         effect_summary="Opened the planned target URL in launcher-managed browser session without writing product objects.",
         state_changed=True,

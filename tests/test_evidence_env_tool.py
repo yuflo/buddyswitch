@@ -141,7 +141,11 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(evidence, dict)
         self.assertEqual(evidence.get("target_type"), "artifact")
         self.assertEqual(evidence.get("target_id"), artifact_id)
-        self.assertEqual(evidence.get("active_role"), "market")
+        self.assertEqual(
+            evidence.get("issued_by_actor"),
+            {"actor_id": self._runtime_actor_id(role="market", label="act-market-evidence"), "role_id": "market"},
+        )
+        self.assertNotIn("active_role", evidence)
         self.assertNotIn("run_id", evidence)
 
     def test_approve_downgrade_requires_reason_and_owns_target(self) -> None:
@@ -183,6 +187,11 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(evidence, dict)
         self.assertEqual(evidence.get("target_type"), "artifact")
         self.assertEqual(evidence.get("target_id"), artifact_id)
+        self.assertEqual(
+            evidence.get("issued_by_actor"),
+            {"actor_id": self._runtime_actor_id(role="market", label="act-market-downgrade"), "role_id": "market"},
+        )
+        self.assertNotIn("active_role", evidence)
         self.assertEqual(evidence.get("reason"), "Manual fallback approved.")
 
     def test_cross_role_target_is_rejected(self) -> None:

@@ -467,6 +467,177 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((non_owner.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
         self.assertEqual(non_owner.get("permission_boundary"), "artifact.status")
 
+    def test_same_role_different_actor_cannot_access_private_draft_surfaces(self) -> None:
+        owner_actor = "act-pm-draft-owner"
+        other_actor = "act-pm-draft-other"
+        owner_instance = self._instance_json(actor_id=owner_actor, role="pm")
+        other_instance = self._instance_json(actor_id=other_actor, role="pm")
+
+        created = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-same-role-owner-draft",
+                "title": "Owner private draft",
+                "summary": "same-role isolation",
+                "template": "brief",
+                "body": "private draft body",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        source = owner_instance.parent / "workspace" / "private" / "screens" / "draft.txt"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("attachment body", encoding="utf-8")
+        attached = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="pm",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-same-role-owner-draft",
+                "filename": "draft.txt",
+                "source_path": str(source),
+                "content_type": "text/plain",
+            },
+        )
+        self.assertTrue(attached.get("ok"), msg=attached)
+        attachment_id = str((attached.get("attachment") or {}).get("attachment_id"))
+        self.assertTrue(attachment_id, msg=attached)
+
+        owner_list = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="pm",
+            tool="artifact",
+            action="list",
+            args={"status": "draft"},
+        )
+        self.assertTrue(owner_list.get("ok"), msg=owner_list)
+        owner_ids = {
+            row.get("artifact_id")
+            for row in owner_list.get("artifacts", [])
+            if isinstance(row, dict)
+        }
+        self.assertIn("art-same-role-owner-draft", owner_ids)
+
+        owner_attachment = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="pm",
+            tool="artifact",
+            action="get_attachment",
+            args={"artifact_id": "art-same-role-owner-draft", "attachment_id": attachment_id},
+        )
+        self.assertTrue(owner_attachment.get("ok"), msg=owner_attachment)
+
+        other_get = self._dispatch(
+            instance_json=other_instance,
+            actor_id=other_actor,
+            role="pm",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-same-role-owner-draft"},
+        )
+        self.assertFalse(other_get.get("ok"), msg=other_get)
+        self.assertEqual((other_get.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
+
+        other_list = self._dispatch(
+            instance_json=other_instance,
+            actor_id=other_actor,
+            role="pm",
+            tool="artifact",
+            action="list",
+            args={"status": "draft"},
+        )
+        self.assertTrue(other_list.get("ok"), msg=other_list)
+        other_ids = {
+            row.get("artifact_id")
+            for row in other_list.get("artifacts", [])
+            if isinstance(row, dict)
+        }
+        self.assertNotIn("art-same-role-owner-draft", other_ids)
+
+        other_list_attachments = self._dispatch(
+            instance_json=other_instance,
+            actor_id=other_actor,
+            role="pm",
+            tool="artifact",
+            action="list_attachments",
+            args={"artifact_id": "art-same-role-owner-draft"},
+        )
+        self.assertFalse(other_list_attachments.get("ok"), msg=other_list_attachments)
+        self.assertEqual((other_list_attachments.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
+
+        other_get_attachment = self._dispatch(
+            instance_json=other_instance,
+            actor_id=other_actor,
+            role="pm",
+            tool="artifact",
+            action="get_attachment",
+            args={"artifact_id": "art-same-role-owner-draft", "attachment_id": attachment_id},
+        )
+        self.assertFalse(other_get_attachment.get("ok"), msg=other_get_attachment)
+        self.assertEqual((other_get_attachment.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
+
+        other_source_ref = self._dispatch(
+            instance_json=other_instance,
+            actor_id=other_actor,
+            role="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-same-role-source-claim",
+                "title": "Invalid source claim",
+                "summary": "claim",
+                "template": "brief",
+                "body": "claim body",
+                "source_refs": [{"type": "artifact", "id": "art-same-role-owner-draft"}],
+                "read_claim": "summarized-full-content",
+            },
+        )
+        self.assertFalse(other_source_ref.get("ok"), msg=other_source_ref)
+        self.assertEqual(other_source_ref.get("permission_boundary"), "source_refs.read_scope")
+
+        other_supersede = self._dispatch(
+            instance_json=other_instance,
+            actor_id=other_actor,
+            role="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-same-role-other-supersede",
+                "title": "Invalid supersede",
+                "summary": "supersede",
+                "template": "brief",
+                "body": "replacement",
+                "supersedes_artifact_id": "art-same-role-owner-draft",
+            },
+        )
+        self.assertFalse(other_supersede.get("ok"), msg=other_supersede)
+        self.assertEqual(other_supersede.get("permission_boundary"), "artifact.revision_scope")
+
+        owner_supersede = self._dispatch(
+            instance_json=owner_instance,
+            actor_id=owner_actor,
+            role="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-same-role-owner-draft-r2",
+                "title": "Owner draft r2",
+                "summary": "own supersede",
+                "template": "brief",
+                "body": "replacement",
+                "supersedes_artifact_id": "art-same-role-owner-draft",
+            },
+        )
+        self.assertTrue(owner_supersede.get("ok"), msg=owner_supersede)
+
     def test_draft_revision_does_not_replace_current_shared_material(self) -> None:
         instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")
         self.assertTrue(

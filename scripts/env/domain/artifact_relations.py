@@ -58,7 +58,7 @@ def _request_is_visible(*, request: dict[str, Any], active_role: str, active_act
     return bool(track_readable.get("ok"))
 
 
-def _source_ref_backlinks(*, artifact_id: str, active_role: str) -> list[dict[str, Any]]:
+def _source_ref_backlinks(*, artifact_id: str, active_role: str, active_actor_address: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for candidate in artifact_repo.list_artifacts():
         if not isinstance(candidate, dict):
@@ -66,7 +66,7 @@ def _source_ref_backlinks(*, artifact_id: str, active_role: str) -> list[dict[st
         candidate_id = candidate.get("id")
         if not isinstance(candidate_id, str) or not candidate_id:
             continue
-        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_role)
+        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_actor_address)
         if not bool(decision.get("allowed")):
             continue
         if not _artifact_ref_matches(candidate.get("source_refs"), artifact_id):
@@ -160,7 +160,7 @@ def _track_update_backlinks(*, artifact_id: str, active_role: str) -> list[dict[
     return rows
 
 
-def _visible_superseded_by_ids(*, artifact_id: str, active_role: str) -> list[str]:
+def _visible_superseded_by_ids(*, artifact_id: str, active_role: str, active_actor_address: dict[str, Any]) -> list[str]:
     rows: list[tuple[str, str]] = []
     for candidate in artifact_repo.list_artifacts():
         if not isinstance(candidate, dict):
@@ -170,7 +170,7 @@ def _visible_superseded_by_ids(*, artifact_id: str, active_role: str) -> list[st
             continue
         if candidate.get("supersedes_artifact_id") != artifact_id:
             continue
-        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_role)
+        decision = artifact_visibility_domain.artifact_read_decision(candidate, active_actor_address)
         if not bool(decision.get("allowed")):
             continue
         rows.append((str(candidate.get("updated_at") or ""), candidate_id))
@@ -219,7 +219,7 @@ def relation_summary_for_artifact(
             },
         }
 
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_actor_address)
     relation, currentness = _relation_and_currentness(artifact=artifact, decision=decision)
     comments = comment_repo.comments_for_target("artifact", artifact_id)
     comment_ids = [row.get("id") for row in comments if isinstance(row.get("id"), str)]
@@ -232,10 +232,18 @@ def relation_summary_for_artifact(
         },
         "lineage": {
             "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
-            "superseded_by_artifact_ids": _visible_superseded_by_ids(artifact_id=artifact_id, active_role=active_role),
+            "superseded_by_artifact_ids": _visible_superseded_by_ids(
+                artifact_id=artifact_id,
+                active_role=active_role,
+                active_actor_address=active_actor_address,
+            ),
         },
         "incoming_refs": {
-            "source_ref_by_artifacts": _source_ref_backlinks(artifact_id=artifact_id, active_role=active_role),
+            "source_ref_by_artifacts": _source_ref_backlinks(
+                artifact_id=artifact_id,
+                active_role=active_role,
+                active_actor_address=active_actor_address,
+            ),
             "target_ref_by_requests": _request_backlinks(
                 artifact_id=artifact_id,
                 active_role=active_role,
@@ -264,7 +272,7 @@ def relation_counts_for_artifact(*, artifact_id: str, active_role: str, active_a
             "track_update_ref_count": 0,
             "comment_count": 0,
         }
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_role)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_actor_address)
     if not bool(decision.get("allowed")):
         return {
             "incoming_source_ref_count": 0,

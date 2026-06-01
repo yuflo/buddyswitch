@@ -293,7 +293,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertEqual(row["kind"], "write")
                 self.assertEqual(row["mutates"], "runtime_files")
                 self.assertIn(row["required_permission"], {"task.propose", "task.confirm"})
-                self.assertIn("instance-local active-role taskbox task", row["writes"])
+                self.assertIn("instance-local active-actor taskbox task", row["writes"])
                 self.assertIn("instance-local taskbox history", row["writes"])
                 self.assertIn("track state", " ".join(row["does_not_write"]).lower())
                 self.assertIn("artifact visibility", " ".join(row["does_not_write"]).lower())
