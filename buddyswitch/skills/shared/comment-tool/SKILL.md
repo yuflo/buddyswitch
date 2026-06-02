@@ -39,6 +39,6 @@ Add, list, and PM-resolve plain-text comments on readable track, artifact, and a
 - Do not use for task comments.
 - Do not attempt PM-only resolution as a non-PM role.
 - Do not attempt to edit or delete comments.
-- Do not use for direct role messaging; use `message__send` instead.
+- Do not use for direct actor-address messaging; use `message__send` instead.
 - Do not use for review or approval workflows.
 - Do not assume non-comment workflow fields are accepted; confirm allowed fields through runtime discovery first.

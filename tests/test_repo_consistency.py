@@ -44,6 +44,7 @@ _DOC_SPEC_CONTEXT_MARKERS = (
     "task-checkout-plan",
     "task-split",
     "test-plan",
+    "phase-2-prompt",
 )
 
 
@@ -244,6 +245,59 @@ class RepoConsistencyTests(unittest.TestCase):
             self.assertNotIn(forbidden, text)
         self.assertIn("buddyswitch_actor_private_dir", text)
         self.assertIn("workspace/private", text)
+
+    def test_actor_identity_live_surfaces_do_not_reintroduce_role_as_actor_residue(self) -> None:
+        live_paths = [
+            ROOT / "scripts/env/tools/message/tool.py",
+            ROOT / "scripts/env/tools/comment/tool.py",
+            ROOT / "scripts/env/tools/task/tool.py",
+            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/pm/define-scope/SKILL.md",
+            ROOT / "README.md",
+            ROOT / "tools/launcher/assets/web-management/index.html",
+            ROOT / "tools/launcher/assets/web-management/app.js",
+            ROOT / "framework/contracts/role-env-profile.json",
+            *sorted((ROOT / "buddyswitch/env-profiles").glob("*.json")),
+        ]
+        forbidden_lower = (
+            "role messages",
+            "direct_role_channel",
+            "active_role_inbox",
+            "active-role inbox",
+            "not the active role",
+            "outside the active role",
+            "active role cannot",
+            "same role id",
+            "direct role inbox",
+            "direct role messaging",
+            "active-role tasksnapshot",
+            "active-role taskbox",
+            "current active-role taskbox task",
+            "active-role work management",
+            "role-locked codex instances",
+            "runtime workspace per role",
+            "active-role-only",
+        )
+        forbidden_case_sensitive = (
+            "selectedBuddy",
+            ">Buddy<",
+            "Stored local role instances",
+        )
+
+        hits: list[str] = []
+        for path in live_paths:
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            relative = path.relative_to(ROOT)
+            for token in forbidden_lower:
+                if token in lowered:
+                    hits.append(f"{relative}: {token}")
+            for token in forbidden_case_sensitive:
+                if token in text:
+                    hits.append(f"{relative}: {token}")
+
+        self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:
         desc = tool_catalog.env_tools_description()

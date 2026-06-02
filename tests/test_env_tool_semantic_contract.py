@@ -144,7 +144,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "summarize", ("compact", "summary", "get")),
             ("context", "list_sources", ("source", "descriptor", "catalog")),
             ("message", "contacts", ("contact", "actor", "send")),
-            ("message", "send", ("inbox", "role", "comment")),
+            ("message", "send", ("inbox", "actor address", "comment")),
             ("message", "list", ("inbox", "read", "comment")),
             ("comment", "resolve", ("pm", "thread", "resolved")),
             ("request", "create", ("track", "request", "recipient")),
@@ -268,6 +268,62 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertNotIn(text, combined)
         self.assertIn("env.tool role-action policy allows this action for the active role", combined)
+
+    def test_message_catalog_uses_actor_address_identity_language(self) -> None:
+        desc = self._desc()
+        message_desc = desc["message"]
+        operation_rows = catalog.operation_semantics()
+        message_rows = {
+            key: value
+            for key, value in operation_rows.items()
+            if key.startswith("message.")
+        }
+
+        self.assertEqual(message_desc["title"], "Direct Actor Messages")
+        self.assertEqual(message_rows["message.send"]["authority"], "message.direct_actor_address_channel")
+        self.assertEqual(message_rows["message.list"]["authority"], "message.active_actor_inbox")
+        self.assertIn("active actor inbox", message_rows["message.list"]["visibility"])
+
+        send_requires = "\n".join(message_rows["message.send"]["requires"]).lower()
+        conversation_requires = "\n".join(message_rows["message.conversation"]["requires"]).lower()
+        self.assertIn("active actor", send_requires)
+        self.assertNotIn("active role", send_requires)
+        self.assertNotIn("active role", conversation_requires)
+
+        serialized = json.dumps(
+            {"catalog": message_desc, "operations": message_rows},
+            ensure_ascii=True,
+            sort_keys=True,
+        ).lower()
+        forbidden = (
+            "role messages",
+            "direct_role_channel",
+            "active_role_inbox",
+            "active-role inbox",
+            "not the active role",
+            "outside the active role",
+            "same role id",
+            "active role cannot",
+            "target runtime actor actor id",
+        )
+        for token in forbidden:
+            with self.subTest(token=token):
+                self.assertNotIn(token, serialized)
+
+    def test_adjacent_catalog_surfaces_do_not_teach_direct_role_inbox_or_role_taskbox(self) -> None:
+        desc = self._desc()
+        comment_text = json.dumps(desc["comment"], ensure_ascii=True, sort_keys=True).lower()
+        task_text = json.dumps(desc["task"], ensure_ascii=True, sort_keys=True).lower()
+
+        for token in ("direct role inbox", "direct role messaging"):
+            with self.subTest(surface="comment", token=token):
+                self.assertNotIn(token, comment_text)
+        for token in ("active-role taskbox", "active-role tasksnapshot", "current active-role taskbox task"):
+            with self.subTest(surface="task", token=token):
+                self.assertNotIn(token, task_text)
+
+        self.assertIn("active-role readability", comment_text)
+        self.assertIn("env.tool role-action policy allows this action for the active role", task_text)
 
     def test_task_current_operation_semantics_are_read_only(self) -> None:
         current = catalog.operation_semantics()["task.current"]

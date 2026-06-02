@@ -1,6 +1,6 @@
 # BuddySwitch Workspace
 
-BuddySwitch is a launcher-managed control layer for role-locked Codex instances.
+BuddySwitch is a launcher-managed control layer for role-configured actor instances.
 
 The runtime model is runless:
 - runtime broker methods are `env.tool`, `ping`, `status`;
@@ -44,7 +44,7 @@ Launcher product mode:
 
 - `${BUDDYSWITCH_SHARED_ROOT}` shared launcher root
 - `${BUDDYSWITCH_SHARED_ROOT}/state` canonical BuddySwitch state
-- `${BUDDYSWITCH_SHARED_ROOT}/instances/<actor-id>/workspace` runtime workspace per role
+- `${BUDDYSWITCH_SHARED_ROOT}/instances/<actor-id>/workspace` runtime workspace per actor
 - `${BUDDYSWITCH_SHARED_ROOT}/project/workspace` shared product source
 - `${BUDDYSWITCH_SHARED_ROOT}/instances/<actor-id>/workspace/.agents/skills` instance-only runtime skills
 

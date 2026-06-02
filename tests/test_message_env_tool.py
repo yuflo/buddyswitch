@@ -268,7 +268,9 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         active_row = by_instance[active_pm["actor_id"]]
         self.assertEqual(active_row["role_id"], "pm")
         self.assertIs(active_row["sendable"], False)
-        self.assertIn("same actor_id", active_row.get("why_not_sendable", ""))
+        why_not_sendable = active_row.get("why_not_sendable", "")
+        self.assertIn("active actor itself", why_not_sendable)
+        self.assertNotIn("same role", why_not_sendable.lower())
         other_pm_row = by_instance[other_pm["actor_id"]]
         self.assertEqual(other_pm_row["role_id"], "pm")
         self.assertIs(other_pm_row["sendable"], True)
@@ -654,15 +656,16 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_message_conversation_role_selector_returns_visible_bidirectional_role_messages(self) -> None:
         active = self._actor_address(role="dev", label="act-dev-conversation-role")
-        pm_one = self._actor_address(role="pm", label="act-pm-conversation-one")
-        pm_two = self._actor_address(role="pm", label="act-pm-conversation-two")
-        design = self._actor_address(role="design", label="act-design-conversation-role")
+        peer = self._actor_address(role="dev", label="act-dev-conversation-peer")
+        unrelated_one = self._actor_address(role="dev", label="act-dev-conversation-unrelated-one")
+        unrelated_two = self._actor_address(role="dev", label="act-dev-conversation-unrelated-two")
+        market = self._actor_address(role="market", label="act-market-conversation-role")
         one = message_repo.save_message(
             {
                 "id": "msg-conv-role-1",
-                "from_actor_address": pm_one,
+                "from_actor_address": peer,
                 "to_actor_address": active,
-                "content": "PM one",
+                "content": "Dev peer to active Dev",
                 "reply_to": None,
                 "created_at": "2026-05-30T00:00:01Z",
             }
@@ -671,18 +674,18 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {
                 "id": "msg-conv-role-2",
                 "from_actor_address": active,
-                "to_actor_address": pm_two,
-                "content": "PM two",
+                "to_actor_address": peer,
+                "content": "Active Dev to dev peer",
                 "reply_to": None,
                 "created_at": "2026-05-30T00:00:02Z",
             }
         )
         message_repo.save_message(
             {
-                "id": "msg-conv-role-design",
-                "from_actor_address": design,
+                "id": "msg-conv-role-market",
+                "from_actor_address": market,
                 "to_actor_address": active,
-                "content": "Design",
+                "content": "Market to active Dev",
                 "reply_to": None,
                 "created_at": "2026-05-30T00:00:03Z",
             }
@@ -690,9 +693,9 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         message_repo.save_message(
             {
                 "id": "msg-conv-role-internal",
-                "from_actor_address": pm_one,
-                "to_actor_address": pm_two,
-                "content": "PM internal",
+                "from_actor_address": unrelated_one,
+                "to_actor_address": unrelated_two,
+                "content": "Unrelated dev internal",
                 "reply_to": None,
                 "created_at": "2026-05-30T00:00:04Z",
             }
@@ -705,13 +708,14 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="dev",
             tool="message",
             action="conversation",
-            args={"role": "pm"},
+            args={"role": "dev"},
         )
 
         self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("selector"), {"role": "pm"})
+        self.assertEqual(response.get("selector"), {"role": "dev"})
         messages = response.get("messages", [])
         self.assertEqual([row["id"] for row in messages], [one["id"], two["id"]])
+        self.assertNotIn("active role", str(response.get("why_blocked", "")).lower())
 
     def test_message_conversation_requires_exactly_one_selector(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-conversation-selector", role="dev")

@@ -731,6 +731,18 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_shared_message_skill_prevents_observed_invalid_calls(self) -> None:
         message_skill = self.SHARED_TOOL_SKILLS["message"].read_text(encoding="utf-8").lower()
+        forbidden_identity_residue = (
+            "active role cannot",
+            "same role id",
+            "same role cannot",
+            "same-role cannot",
+            "same buddy",
+            "buddybox",
+            "role messages",
+            "direct_role_channel",
+            "active-role inbox",
+            "not the active role",
+        )
 
         self.assertIn("message__contacts", message_skill)
         self.assertIn("target_actor_address", message_skill)
@@ -751,6 +763,11 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn('"message":', message_skill)
         self.assertNotIn('message list --payload \'{"box":"inbox"}\'', message_skill)
         self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
+        self.assertIn("active actor cannot send to itself", message_skill)
+        self.assertIn("same role with a different actor is allowed", message_skill)
+        for token in forbidden_identity_residue:
+            with self.subTest(source_token=token):
+                self.assertNotIn(token, message_skill)
 
         for role in ("pm", "market"):
             with self.subTest(materialized_for=role):
@@ -769,6 +786,10 @@ class RuntimeSkillsTests(unittest.TestCase):
                     self.assertIn("message__conversation", installed)
                     self.assertNotIn("to_role", installed)
                     self.assertNotIn("from_role", installed)
+                    self.assertIn("active actor cannot send to itself", installed)
+                    self.assertIn("same role with a different actor is allowed", installed)
+                    for token in forbidden_identity_residue:
+                        self.assertNotIn(token, installed)
 
     def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
@@ -934,7 +955,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             "use a track as a shared product outcome thread",
             "reuse an active track when the work advances the same outcome, lifecycle, and proof path",
             "create a new track when the outcome, lifecycle, collaborators, or proof path should be tracked independently",
-            "use private tasks for active-role work management",
+            "use private tasks for active actor private work management",
             "use requests for durable cross-role asks",
             "use comments/messages for discussion, not product lifecycle state",
             "context.get.tool_catalog",

@@ -47,6 +47,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             self.assertEqual(list(profile.keys()), env_profiles.profile_contract(ROOT)["top_level_key_order"])
             self.assertEqual(profile["role_id"], role_id)
             self.assertEqual(profile["private_workspace"]["root"], env_profiles.PRIVATE_WORKSPACE_ROOT)
+            self.assertEqual(profile["context_projection"]["skills"], "role-profile-only")
             self.assertEqual(
                 env_profiles.resolve_private_workspace_root(profile["private_workspace"]["root"], role_id=role_id),
                 "private",
@@ -117,6 +118,18 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         assert isinstance(enums, dict)
         self.assertIn("filesystem_capability.source_root", enums)
         self.assertNotIn("filesystem_capability.project_workspace", enums)
+
+    def test_profile_skill_projection_uses_role_profile_enum(self) -> None:
+        contract_text = (ROOT / "framework/contracts/role-env-profile.json").read_text(encoding="utf-8")
+        self.assertNotIn("active-role-only", contract_text)
+        self.assertIn("role-profile-only", contract_text)
+
+        for path in sorted(self.profile_root.glob("*.json")):
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("active-role-only", text)
+                profile = json.loads(text)
+                self.assertEqual(profile["context_projection"]["skills"], "role-profile-only")
 
     def test_validate_all_cli(self) -> None:
         completed = subprocess.run(

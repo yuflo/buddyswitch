@@ -13,7 +13,7 @@ from env.tool_runtime.definition import ActionDefinition, ToolDefinition, valida
 def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
-        title='Role Messages',
+        title='Direct Actor Messages',
         description='Discover online actor contacts, send direct actor-address messages, and list inbox messages.',
         scope='direct runtime actor inbox messaging',
         capability_boundary='Messages are direct runtime actor-address scope only.',
@@ -109,7 +109,7 @@ def _build_definition() -> ToolDefinition:
                                 },
                                 'actor_id': {
                                     'type': 'string',
-                                    'description': 'Target runtime actor actor id.',
+                                    'description': 'Target runtime actor id.',
                                 },
                             },
                             'description': 'Exact ActorAddress returned by message.contacts.',
@@ -130,7 +130,7 @@ def _build_definition() -> ToolDefinition:
                 kind='write',
                 mutates='runtime_objects',
                 required_permission='message.send',
-                authority='message.direct_role_channel',
+                authority='message.direct_actor_address_channel',
                 visibility='sender and recipient direct message visibility',
                 durability='durable',
                 result_content_level='message id and delivery status',
@@ -153,8 +153,8 @@ def _build_definition() -> ToolDefinition:
                     'browser session',
                 ),
                 preconditions=(
-                    'target_actor_address is a declared manifest role actor address',
-                    'target_actor_address is online and not the active role',
+                    'target_actor_address.role_id is a declared manifest role',
+                    'target actor is online and is not the active actor',
                 ),
                 returns=(
                     'message_id',
@@ -178,7 +178,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='list',
                 title='message.list',
-                description='List active-role inbox messages.',
+                description='List active actor inbox messages.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -190,7 +190,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'q': {
                             'type': 'string',
-                            'description': 'Optional case-insensitive keyword filter over active-role inbox message content.',
+                            'description': 'Optional case-insensitive keyword filter over active actor inbox message content.',
                         },
                         'limit': {
                             'type': 'integer',
@@ -205,14 +205,14 @@ def _build_definition() -> ToolDefinition:
                 kind='read',
                 mutates='none',
                 required_permission='message.list',
-                authority='message.active_role_inbox',
-                visibility='active-role inbox',
+                authority='message.active_actor_inbox',
+                visibility='active actor inbox',
                 durability='none',
                 result_content_level='message rows',
-                success_effect='Lists active-role inbox messages with optional filters.',
+                success_effect='Lists active actor inbox messages with optional filters.',
                 failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
                 reads=(
-                    'active-role inbox messages',
+                    'active actor inbox messages',
                 ),
                 writes=(),
                 does_not_write=(
@@ -231,7 +231,7 @@ def _build_definition() -> ToolDefinition:
                     'messages',
                 ),
                 use_when=(
-                    'You need to read active-role inbox messages, optionally filtered by sender role, keyword, or bounded count.',
+                    'You need to read active actor inbox messages, optionally filtered by sender role, keyword, or bounded count.',
                 ),
                 do_not_use_when=(
                     'You need to create a new direct message (use message.send) or discuss a track/artifact target thread (use comment.add).',
@@ -265,7 +265,7 @@ def _build_definition() -> ToolDefinition:
                                 },
                                 'actor_id': {
                                     'type': 'string',
-                                    'description': 'Target runtime actor actor id.',
+                                    'description': 'Target runtime actor id.',
                                 },
                             },
                             'description': 'Exact ActorAddress for the other conversation participant.',
@@ -312,7 +312,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=(
                     'exactly one of target_actor_address or role is provided',
-                    'target selector is a declared manifest role outside the active role',
+                    'role selector is a declared manifest role; exact actor selector must not be the active actor',
                 ),
                 returns=(
                     'messages',

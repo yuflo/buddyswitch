@@ -106,6 +106,15 @@ test('production javascript keeps the real api surface', () => {
   assertIncludes(combinedAssets, 'Copy command');
 });
 
+test('production assets present role-configured actor instance wording', () => {
+  assertIncludes(indexHtml, '>Role<');
+  assertIncludes(indexHtml, 'Stored local actor instances');
+  assertExcludes(combinedAssets, '>' + 'Buddy' + '<');
+  assertExcludes(combinedAssets, 'selected' + 'Buddy');
+  assertExcludes(combinedAssets, 'Stored local ' + 'role instances');
+  assertIncludes(combinedAssets, 'BuddySwitch');
+});
+
 test('first version does not reintroduce removed initialize ui or route', () => {
   [
     'Retry Initialize',

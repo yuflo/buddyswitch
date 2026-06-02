@@ -100,7 +100,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="current",
                 title="task.current",
-                description="Read the canonical active-role TaskSnapshot from taskbox history and task docs.",
+                description="Read the canonical active actor TaskSnapshot from taskbox history and task docs.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -124,7 +124,7 @@ def _build_definition() -> ToolDefinition:
                 result_content_level="TaskSnapshot",
                 success_effect="Returns the canonical current task snapshot without mutating taskbox state.",
                 failure_state_guarantee="Rejected reads do not mutate taskbox files or shared runtime objects.",
-                reads=("instance-local taskbox history", "current active-role taskbox task"),
+                reads=("instance-local taskbox history", "current active actor taskbox task"),
                 writes=(),
                 does_not_write=(
                     "taskbox task docs",
@@ -153,7 +153,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="propose",
                 title="task.propose",
-                description="Propose a task start, switch, finish, or block transition in the active-role taskbox.",
+                description="Propose a task start, switch, finish, or block transition in the active actor taskbox.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -221,7 +221,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="confirm",
                 title="task.confirm",
-                description="Accept or reject the one pending active-role task switch confirmation.",
+                description="Accept or reject the one pending active actor task switch confirmation.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,

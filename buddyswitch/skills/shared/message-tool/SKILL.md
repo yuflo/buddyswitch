@@ -32,7 +32,7 @@ Send direct messages to online runtime actor addresses and read message context 
 - `message__list` reads only the active actor inbox; it does not accept `box`.
 - `message__conversation` reads active actor visible bidirectional messages with a selected target role or actor.
 - Message objects are immutable after creation. No edit or removal workflow exists for normal users.
-- Active role cannot send to another actor with the same role id.
+- Active actor cannot send to itself; same role with a different actor is allowed.
 - Reply envelopes must stay within the same two-actor conversation pair.
 
 ## Do Not

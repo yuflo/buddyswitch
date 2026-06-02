@@ -59,6 +59,6 @@
   },
   "context_projection": {
     "agents_md": "from-profile-and-contract",
-    "skills": "active-role-only"
+    "skills": "role-profile-only"
   }
 }

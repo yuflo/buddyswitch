@@ -8,7 +8,7 @@
   'use strict';
 
   function computeCreateEnabled(options) {
-    return Boolean(options && options.selectedBuddy && !options.isCreating);
+    return Boolean(options && options.selectedRole && !options.isCreating);
   }
 
   function computeInstanceActionState(instance, options) {
@@ -89,7 +89,7 @@
     return {
       roles: [],
       instances: [],
-      selectedBuddy: '',
+      selectedRole: '',
       selectedInstanceId: '',
       selectedInstance: null,
       draftText: '',
@@ -227,23 +227,23 @@
     elements.messageBanner.textContent = state.message;
     elements.instructionInput.value = state.draftText;
     elements.createButton.disabled = !computeCreateEnabled({
-      selectedBuddy: state.selectedBuddy,
+      selectedRole: state.selectedRole,
       isCreating: state.createPending,
     });
 
-    if (elements.buddySelect.options.length === 0) {
+    if (elements.roleSelect.options.length === 0) {
       const placeholder = document.createElement('option');
       placeholder.value = '';
       placeholder.textContent = 'Select role';
-      elements.buddySelect.appendChild(placeholder);
+      elements.roleSelect.appendChild(placeholder);
       state.roles.forEach(function (role) {
         const option = document.createElement('option');
         option.value = role.id;
         option.textContent = role.label + ' (' + role.id + ')';
-        elements.buddySelect.appendChild(option);
+        elements.roleSelect.appendChild(option);
       });
     }
-    elements.buddySelect.value = state.selectedBuddy;
+    elements.roleSelect.value = state.selectedRole;
 
     renderTable(state, elements);
     renderDetail(state, elements);
@@ -280,15 +280,15 @@
 
   async function refreshAll(state, elements) {
     const previousSelectedInstanceId = state.selectedInstanceId;
-    const [healthPayload, buddiesPayload, instancesPayload] = await Promise.all([
+    const [healthPayload, rolesPayload, instancesPayload] = await Promise.all([
       fetchJson('/api/health'),
       fetchJson('/api/roles'),
       fetchJson('/api/instances'),
     ]);
     state.healthOk = Boolean(healthPayload.ok);
-    state.roles = buddiesPayload.roles || [];
-    if (!state.selectedBuddy && state.roles.length > 0) {
-      state.selectedBuddy = state.roles[0].id;
+    state.roles = rolesPayload.roles || [];
+    if (!state.selectedRole && state.roles.length > 0) {
+      state.selectedRole = state.roles[0].id;
     }
     state.instances = instancesPayload.instances || [];
     if (state.selectedInstanceId) {
@@ -351,7 +351,7 @@
       const payload = await fetchJson('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: state.selectedBuddy }),
+        body: JSON.stringify({ role: state.selectedRole }),
       });
       state.selectedInstanceId = payload.actor_id;
       state.message = 'Created ' + payload.actor_id + '.';
@@ -446,7 +446,7 @@
       return;
     }
     const elements = {
-      buddySelect: document.getElementById('role-select'),
+      roleSelect: document.getElementById('role-select'),
       createButton: document.getElementById('create-button'),
       refreshButton: document.getElementById('refresh-button'),
       serverStatus: document.getElementById('server-status'),
@@ -469,8 +469,8 @@
 
     const state = createState();
 
-    elements.buddySelect.addEventListener('change', function (event) {
-      state.selectedBuddy = event.target.value;
+    elements.roleSelect.addEventListener('change', function (event) {
+      state.selectedRole = event.target.value;
       render(state, elements);
     });
     elements.instructionInput.addEventListener('input', function (event) {

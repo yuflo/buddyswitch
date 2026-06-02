@@ -419,7 +419,7 @@ def normalize_contact_rows(
         sendable = contact_status == "online"
         if actor_address["actor_id"] == active_actor_address.actor_id:
             sendable = False
-            why_not_sendable = "message.send rejects targets with the same actor_id as the active actor"
+            why_not_sendable = "message.send rejects the active actor itself as a target"
         elif contact_status != "online":
             why_not_sendable = f"contact_status is {contact_status}"
         contact = {

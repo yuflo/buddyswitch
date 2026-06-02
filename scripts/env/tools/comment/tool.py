@@ -24,7 +24,7 @@ def _build_definition() -> ToolDefinition:
             'You need target-scoped discussion on tracks or artifacts.',
         ),
         do_not_use_when=(
-            'You need direct role inbox messages; use message tool.',
+            'You need direct actor-address inbox messages; use message tool.',
         ),
         actions=(
             ActionDefinition(
@@ -119,7 +119,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need canonical track timeline progress chronology entries; use track.add_update.',
-                    'You need direct role inbox communication outside object threads; use message.send.',
+                    'You need direct actor-address inbox communication outside object threads; use message.send.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -193,7 +193,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need shared progress events or publication history; use track.open or track.add_update.',
-                    'You need direct role inbox history; use message.list.',
+                    'You need direct actor-address inbox history; use message.list.',
                 ),
                 risk_hints={
                     'read_only': True,

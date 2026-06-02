@@ -34,7 +34,7 @@
     "tool_capability.search.browser_cockpit": ["required", "available", "unavailable"],
     "tool_capability.search.search_api": ["available", "user-approved-only", "unavailable"],
     "context_projection.agents_md": ["from-profile-and-contract"],
-    "context_projection.skills": ["active-role-only"]
+    "context_projection.skills": ["role-profile-only"]
   },
   "non_goals": [
       "generic permission language",
