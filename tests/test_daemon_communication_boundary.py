@@ -109,12 +109,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         chunks = []
         for path in base_files:
             if path.name == "daemon_mailbox.py":
-                chunks.append(
-                    _source_without_functions(
-                        path,
-                        {"_validate_parent_required_request", "_dispatch_parent_required"},
-                    )
-                )
+                chunks.append(_source_without_functions(path, {"_validate_local_trigger_request"}))
             else:
                 chunks.append(path.read_text(encoding="utf-8"))
         source = "\n".join(chunks)
@@ -134,7 +129,16 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
 
         self.assertIn("message.available", handler_source)
         self.assertIn("message_id", handler_source)
-        self.assertIn("handle_signal", handler_source)
+        self.assertIn("def handle(", handler_source)
+        self.assertNotIn("def handle_signal(", handler_source)
+
+    def test_mailbox_exposes_local_trigger_not_business_specific_parent_required_method(self) -> None:
+        mailbox_source = (ROOT / "tools" / "launcher" / "daemon_mailbox.py").read_text(encoding="utf-8")
+
+        self.assertIn("mailbox.local_trigger", mailbox_source)
+        self.assertNotIn("mailbox.parent_required", mailbox_source)
+        self.assertNotIn("_dispatch_parent_required", mailbox_source)
+        self.assertNotIn("_validate_parent_required_request", mailbox_source)
 
 
 if __name__ == "__main__":

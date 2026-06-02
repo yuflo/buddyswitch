@@ -23,6 +23,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import app_server  # noqa: E402
 import daemon_mailbox  # noqa: E402
+import daemon_triggers  # noqa: E402
 import side_thread_registry  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
@@ -544,9 +545,6 @@ class ActionGateway:
         self.state = state
         self.client = client
 
-    def submit_turn(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
-        return self.submit_parent_prompt(text, handler_name=handler_name, origin_id=origin_turn_id)
-
     def parent_activity(self) -> dict[str, Any]:
         try:
             result = app_server.thread_read(self.context.socket_path, self.context.main_thread_id, include_turns=False)
@@ -591,7 +589,7 @@ class ActionGateway:
             error=error,
         )
 
-    def submit_parent_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> str:
+    def _submit_parent_once(self, text: str, *, handler_name: str, origin_id: str | None) -> str:
         try:
             result = launcher_submit_turn.submit_turn(
                 socket_path=self.context.socket_path,
@@ -633,7 +631,7 @@ class ActionGateway:
         )
         return turn_id
 
-    def interrupt_parent(self, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+    def _interrupt_parent(self, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
         try:
             result = app_server.interrupt_turn(self.context.socket_path, self.context.main_thread_id)
             interrupted_turn_id = _string_field(result, "turn_id", "turnId")
@@ -657,15 +655,28 @@ class ActionGateway:
         )
         return {"interrupted_turn_id": interrupted_turn_id}
 
-    def interrupt_and_submit_parent_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
-        interrupted = self.interrupt_parent(handler_name=handler_name, origin_id=origin_id)
-        turn_id = self.submit_parent_prompt(text, handler_name=handler_name, origin_id=origin_id)
-        return {
-            "interrupted_turn_id": interrupted.get("interrupted_turn_id"),
-            "turn_id": turn_id,
-        }
+    def submit_parent_prompt(
+        self,
+        text: str,
+        *,
+        handler_name: str,
+        origin_id: str | None,
+        interrupt_policy: str = "none",
+    ) -> dict[str, Any]:
+        if interrupt_policy not in {"none", "before_submit"}:
+            raise ValueError(f"invalid interrupt_policy: {interrupt_policy}")
+        interrupted_turn_id: str | None = None
+        if interrupt_policy == "before_submit":
+            interrupted = self._interrupt_parent(handler_name=handler_name, origin_id=origin_id)
+            value = interrupted.get("interrupted_turn_id")
+            interrupted_turn_id = value if isinstance(value, str) and value else None
+        turn_id = self._submit_parent_once(text, handler_name=handler_name, origin_id=origin_id)
+        result: dict[str, Any] = {"turn_id": turn_id}
+        if interrupted_turn_id is not None:
+            result["interrupted_turn_id"] = interrupted_turn_id
+        return result
 
-    def start_side_triage(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+    def _start_side_triage(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
         side_thread_id: str | None = None
         try:
             result = app_server.side_start(
@@ -709,7 +720,7 @@ class ActionGateway:
         payload["side_thread_id"] = side_thread_id
         return payload
 
-    def send_side_triage(
+    def _send_side_triage(
         self,
         side_thread_id: str,
         text: str,
@@ -755,7 +766,7 @@ class ActionGateway:
         payload["side_thread_id"] = side_thread_id
         return payload
 
-    def start_or_reuse_side_triage(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+    def submit_side_triage_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
         row = side_thread_registry.find_open_side_thread(
             self.context.instance_json,
             actor_id=self.context.actor_id,
@@ -763,10 +774,10 @@ class ActionGateway:
         )
         side_thread_id = row.get("thread_id") if isinstance(row, dict) else None
         if isinstance(side_thread_id, str) and side_thread_id:
-            return self.send_side_triage(side_thread_id, text, handler_name=handler_name, origin_id=origin_id)
-        return self.start_side_triage(text, handler_name=handler_name, origin_id=origin_id)
+            return self._send_side_triage(side_thread_id, text, handler_name=handler_name, origin_id=origin_id)
+        return self._start_side_triage(text, handler_name=handler_name, origin_id=origin_id)
 
-    def require_side_thread(self, side_thread_id: str) -> dict[str, Any]:
+    def _require_side_thread(self, side_thread_id: str) -> dict[str, Any]:
         return side_thread_registry.require_side_thread(
             self.context.instance_json,
             actor_id=self.context.actor_id,
@@ -774,7 +785,7 @@ class ActionGateway:
             side_thread_id=side_thread_id,
         )
 
-    def close_side_triage(self, side_thread_id: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+    def _close_side_triage(self, side_thread_id: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
         try:
             side_thread_registry.require_side_thread(
                 self.context.instance_json,
@@ -931,15 +942,22 @@ def start_daemon_mailbox(
     context: DaemonContext,
     state: DaemonState,
     actor_address: actor_profile.ActorAddress,
-    mailbox_handlers: list[Any] | tuple[Any, ...],
+    handlers: list[Any] | tuple[Any, ...],
 ) -> daemon_mailbox.DaemonMailboxServer:
     server = daemon_mailbox.DaemonMailboxServer(
         socket_path=daemon_mailbox.mailbox_socket_path(context.instance_root),
         local_actor_address=actor_address,
-        handlers=mailbox_handlers,
+        handlers=handlers,
         context=context,
         state=state,
         actions_factory=lambda: ActionGateway(context=context, state=state),
+        trigger_dispatcher=lambda trigger: dispatch_trigger(
+            context,
+            state,
+            ActionGateway(context=context, state=state),
+            trigger,
+            handlers,
+        ),
     )
     thread = __import__("threading").Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -980,26 +998,89 @@ def dispatch_notification(
     notification: dict[str, Any],
     handlers: list[Any] | tuple[Any, ...],
 ) -> bool:
-    handled = False
-    origin_turn_id = _notification_turn_id(notification)
     actions = ActionGateway(context=context, state=state, client=client)
+    trigger = daemon_triggers.normalize_app_server_notification(
+        notification,
+        target_actor_address=actor_address_for_context(context).to_payload(),
+    )
+    result = dispatch_trigger(context, state, actions, trigger, handlers)
+    handled_count = result.get("handled_count")
+    return isinstance(handled_count, int) and handled_count > 0
+
+
+def _trigger_origin_id(trigger: Any) -> str | None:
+    origin_id = getattr(trigger, "origin_id", None)
+    return origin_id if isinstance(origin_id, str) and origin_id else None
+
+
+def dispatch_trigger(
+    context: DaemonContext,
+    state: DaemonState,
+    actions: Any,
+    trigger: daemon_triggers.DaemonTrigger,
+    handlers: list[Any] | tuple[Any, ...],
+) -> dict[str, Any]:
+    handled = 0
+    matched = 0
+    errors: list[str] = []
+    origin_id = _trigger_origin_id(trigger)
     for handler in handlers:
         handler_name = _handler_name(handler)
+        handles = getattr(handler, "handles", None)
+        if not callable(handles):
+            continue
         try:
-            result = handler.handle_notification(context, state, actions, notification)
+            if handles(trigger) is not True:
+                continue
         except Exception as exc:
-            state.record_handler_error(handler_name, origin_turn_id=origin_turn_id, message=str(exc))
+            errors.append(str(exc))
+            state.record_handler_error(handler_name, origin_turn_id=origin_id, message=str(exc))
             continue
-        if not isinstance(result, HandlerResult):
-            state.record_handler_error(
-                handler_name,
-                origin_turn_id=origin_turn_id,
-                message=f"handler returned invalid result: {type(result).__name__}",
-            )
+        matched += 1
+        handle = getattr(handler, "handle", None)
+        if not callable(handle):
+            message = f"handler {handler_name} has no unified handle method"
+            errors.append(message)
+            state.record_handler_error(handler_name, origin_turn_id=origin_id, message=message)
             continue
-        state.record_handler_result(handler_name, result, origin_turn_id=origin_turn_id)
-        handled = result.status == "handled" or handled
-    return handled
+        try:
+            result = handle(context, state, actions, trigger)
+        except Exception as exc:
+            errors.append(str(exc))
+            state.record_handler_error(handler_name, origin_turn_id=origin_id, message=str(exc))
+            continue
+        status = getattr(result, "status", None)
+        message = getattr(result, "message", None)
+        if isinstance(result, dict):
+            status = result.get("status")
+            message = result.get("message")
+        if status not in {"ignored", "handled", "failed"}:
+            message = f"handler returned invalid result: {type(result).__name__}"
+            errors.append(message)
+            state.record_handler_error(handler_name, origin_turn_id=origin_id, message=message)
+            continue
+        normalized = HandlerResult(status, str(message) if status == "failed" and message else None)
+        state.record_handler_result(handler_name, normalized, origin_turn_id=origin_id)
+        if status == "handled":
+            handled += 1
+        elif status == "failed":
+            errors.append(str(message or "handler failed"))
+    if errors:
+        return {
+            "accepted": True,
+            "handled_count": handled,
+            "matched_count": matched,
+            "handling_status": "failed",
+            "handling_error": "; ".join(errors),
+            "trigger": trigger.to_payload(),
+        }
+    return {
+        "accepted": True,
+        "handled_count": handled,
+        "matched_count": matched,
+        "handling_status": "handled" if handled > 0 else "ignored",
+        "trigger": trigger.to_payload(),
+    }
 
 
 def _handler_status_payload(
@@ -1057,7 +1138,6 @@ def daemon_status(
     instance_json: Path,
     *,
     handlers: list[Any] | tuple[Any, ...] | None = None,
-    mailbox_handlers: list[Any] | tuple[Any, ...] | None = None,
 ) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
     runtime = daemon_runtime_dir(context.instance_root)
@@ -1077,7 +1157,6 @@ def daemon_status(
     ready = bool(pid is not None and pid_live and state.ready_for(pid, context.main_thread_id))
     ready_payload = state.payload.get("ready")
     ready_main_thread_id = ready_payload.get("main_thread_id") if isinstance(ready_payload, dict) else None
-    mailbox_handler_names = set(_handler_names(mailbox_handlers))
     return {
         "live": bool(pid_live),
         "pid": pid,
@@ -1090,16 +1169,7 @@ def daemon_status(
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
         "actions": _action_status_payload(state),
-        "handlers": _handler_status_payload(
-            state,
-            handlers,
-            excluded_persisted_names=mailbox_handler_names,
-        ),
-        "mailbox_handlers": _handler_status_payload(
-            state,
-            mailbox_handlers,
-            include_unregistered=False,
-        ),
+        "handlers": _handler_status_payload(state, handlers),
     }
 
 
@@ -1200,7 +1270,6 @@ def run_daemon(
     instance_json: Path,
     *,
     handlers: list[Any] | None = None,
-    mailbox_handlers: list[Any] | None = None,
 ) -> int:
     context = load_daemon_context(instance_json)
     actor_address = actor_address_for_context(context)
@@ -1210,9 +1279,8 @@ def run_daemon(
         main_thread_id=context.main_thread_id,
     )
     state.save()
-    notification_handlers = list(handlers or [])
-    local_mailbox_handlers = list(mailbox_handlers or [])
-    state.register_handlers(_handler_names(notification_handlers))
+    daemon_handlers = list(handlers or [])
+    state.register_handlers(_handler_names(daemon_handlers))
     registered = False
     mailbox_server: daemon_mailbox.DaemonMailboxServer | None = None
     try:
@@ -1228,7 +1296,7 @@ def run_daemon(
                 context=context,
                 state=state,
                 actor_address=actor_address,
-                mailbox_handlers=local_mailbox_handlers,
+                handlers=daemon_handlers,
             )
             register_daemon_actor(context, actor_address)
             registered = True
@@ -1241,7 +1309,7 @@ def run_daemon(
                 except app_server.AppServerError as exc:
                     state.record_error(origin_turn_id=None, message=str(exc))
                     return 1
-                dispatch_notification(context, state, client, notification, notification_handlers)
+                dispatch_notification(context, state, client, notification, daemon_handlers)
     except app_server.AppServerError as exc:
         state.record_error(origin_turn_id=None, message=str(exc))
         return 1

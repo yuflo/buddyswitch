@@ -1,5 +1,9 @@
 # Daemon Message Async Routing Development Plan
 
+> Superseded for implementation by
+> `docs/spec/2026-06-02-daemon-trigger-handler-action-rebuild-development-plan.md`.
+> Do not use this file as source of truth for the daemon trigger-handler-action rebuild.
+
 Date: 2026-06-02
 Source memo: `docs/memo/2026-06-02-daemon-message-async-routing-task.md`
 Test plan: `docs/spec/2026-06-02-daemon-message-async-routing-test-plan.md`

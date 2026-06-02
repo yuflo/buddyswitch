@@ -105,7 +105,7 @@ class DaemonServiceContractTests(unittest.TestCase):
         self.assertEqual(failed.status, "failed")
         self.assertEqual(failed.message, "boom")
 
-    def test_dispatch_passes_context_state_actions_and_notification(self) -> None:
+    def test_dispatch_passes_context_state_actions_and_trigger(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -120,18 +120,21 @@ class DaemonServiceContractTests(unittest.TestCase):
                 def __init__(self) -> None:
                     self.received: dict[str, object] = {}
 
-                def handle_notification(
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(
                     self,
                     context_arg: object,
                     state_arg: object,
                     actions_arg: object,
-                    notification_arg: dict[str, object],
+                    trigger_arg: object,
                 ) -> object:
                     self.received = {
                         "context": context_arg,
                         "state": state_arg,
                         "actions": actions_arg,
-                        "notification": notification_arg,
+                        "trigger": trigger_arg,
                     }
                     return core.HandlerResult.handled()
 
@@ -143,7 +146,9 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertIs(handler.received["context"], context)
             self.assertIs(handler.received["state"], state)
             self.assertIsInstance(handler.received["actions"], self.core.ActionGateway)
-            self.assertEqual(handler.received["notification"], notification)
+            trigger = handler.received["trigger"]
+            self.assertEqual(getattr(trigger, "type"), "app_server.turn_completed")
+            self.assertEqual(getattr(trigger, "origin_id"), "turn-user-1")
 
     def test_dispatch_records_declared_failure_under_handler_state_and_continues(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -158,14 +163,20 @@ class DaemonServiceContractTests(unittest.TestCase):
             class FailingHandler:
                 name = "first"
 
-                def handle_notification(self, *_args: object) -> object:
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(self, *_args: object) -> object:
                     calls.append(self.name)
                     return core.HandlerResult.failed("declared failure")
 
             class LaterHandler:
                 name = "second"
 
-                def handle_notification(self, *_args: object) -> object:
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(self, *_args: object) -> object:
                     calls.append(self.name)
                     return core.HandlerResult.handled()
 
@@ -194,14 +205,20 @@ class DaemonServiceContractTests(unittest.TestCase):
             class ExplodingHandler:
                 name = "exploder"
 
-                def handle_notification(self, *_args: object) -> object:
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(self, *_args: object) -> object:
                     calls.append(self.name)
                     raise RuntimeError("handler exploded")
 
             class LaterHandler:
                 name = "second"
 
-                def handle_notification(self, *_args: object) -> object:
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(self, *_args: object) -> object:
                     calls.append(self.name)
                     return core.HandlerResult.handled()
 
@@ -215,7 +232,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(saved["handlers"]["exploder"]["last_error"]["message"], "handler exploded")
             self.assertEqual(saved["handlers"]["exploder"]["last_error"]["origin_turn_id"], "turn-user-1")
 
-    def test_action_gateway_submit_turn_delegates_to_launcher_submit_turn(self) -> None:
+    def test_submit_parent_prompt_none_delegates_to_launcher_submit_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -238,9 +255,14 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
             self.core.launcher_submit_turn.submit_turn = fake_submit_turn
 
-            turn_id = actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+            result = actions.submit_parent_prompt(
+                "daemon prompt",
+                handler_name="fake",
+                origin_id="turn-user-1",
+                interrupt_policy="none",
+            )
 
-            self.assertEqual(turn_id, "turn-daemon-1")
+            self.assertEqual(result, {"turn_id": "turn-daemon-1"})
             self.assertEqual(
                 calls,
                 [
@@ -253,7 +275,7 @@ class DaemonServiceContractTests(unittest.TestCase):
                 ],
             )
 
-    def test_action_gateway_records_daemon_origin_and_handler_action_state_from_submit_turn(self) -> None:
+    def test_submit_parent_prompt_none_records_daemon_origin_and_handler_action_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -267,7 +289,12 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
             self.core.launcher_submit_turn.submit_turn = fake_submit_turn
 
-            actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+            actions.submit_parent_prompt(
+                "daemon prompt",
+                handler_name="fake",
+                origin_id="turn-user-1",
+                interrupt_policy="none",
+            )
 
             saved = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
@@ -279,7 +306,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(saved["handlers"]["fake"]["last_action_turn_id"], "turn-daemon-1")
             self.assertIsNone(saved["handlers"]["fake"]["last_error"])
 
-    def test_action_gateway_raises_launcher_submit_turn_error_when_no_turn_id_is_returned(self) -> None:
+    def test_submit_parent_prompt_none_raises_launcher_submit_turn_error_when_no_turn_id_is_returned(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -294,7 +321,12 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.core.launcher_submit_turn.submit_turn = fake_submit_turn
 
             with self.assertRaises(self.core.launcher_submit_turn.SubmitTurnError):
-                actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+                actions.submit_parent_prompt(
+                    "daemon prompt",
+                    handler_name="fake",
+                    origin_id="turn-user-1",
+                    interrupt_policy="none",
+                )
 
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
             state_path = self.core.daemon_state_file(instance["instance_root"])
@@ -302,7 +334,7 @@ class DaemonServiceContractTests(unittest.TestCase):
                 saved = json.loads(state_path.read_text(encoding="utf-8"))
                 self.assertNotIn("fake", saved["handlers"])
 
-    def test_action_gateway_exposes_launcher_submit_turn_error_without_retry_or_steer(self) -> None:
+    def test_submit_parent_prompt_none_exposes_launcher_submit_turn_error_without_retry_or_steer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -317,7 +349,12 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.core.launcher_submit_turn.submit_turn = fake_submit_turn
 
             with self.assertRaises(self.core.launcher_submit_turn.SubmitTurnError):
-                actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+                actions.submit_parent_prompt(
+                    "daemon prompt",
+                    handler_name="fake",
+                    origin_id="turn-user-1",
+                    interrupt_policy="none",
+                )
 
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
 
@@ -362,7 +399,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertIn("app-server down", unavailable["error"])
             self.assertEqual(calls[0]["helper"], "thread_read")
 
-    def test_parent_actions_submit_interrupt_and_record_neutral_action_facts(self) -> None:
+    def test_submit_parent_prompt_before_submit_interrupts_then_submits_and_records_facts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -386,11 +423,15 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.core.launcher_submit_turn.submit_turn = fake_submit_turn
             self.core.app_server.interrupt_turn = fake_interrupt_turn
 
-            interrupt_result = actions.interrupt_parent(handler_name="message_available", origin_id="msg-1")
-            turn_id = actions.submit_parent_prompt("parent prompt", handler_name="message_available", origin_id="msg-1")
+            result = actions.submit_parent_prompt(
+                "parent prompt",
+                handler_name="message_available",
+                origin_id="msg-1",
+                interrupt_policy="before_submit",
+            )
 
-            self.assertEqual(interrupt_result["interrupted_turn_id"], "turn-main-1")
-            self.assertEqual(turn_id, "turn-daemon-1")
+            self.assertEqual(result["interrupted_turn_id"], "turn-main-1")
+            self.assertEqual(result["turn_id"], "turn-daemon-1")
             self.assertEqual(interrupt_calls, [{"socket_path": context.socket_path, "thread_id": "thr-main"}])
             self.assertEqual(submit_calls[0]["thread_id"], "thr-main")
             records = self._action_records(instance["instance_root"])
@@ -403,7 +444,22 @@ class DaemonServiceContractTests(unittest.TestCase):
             saved = self._saved_state(instance["instance_root"])
             self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
 
-    def test_interrupt_and_submit_records_submit_failure_after_successful_interrupt(self) -> None:
+    def test_submit_parent_prompt_rejects_invalid_interrupt_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            actions = self.core.ActionGateway(context=context, state=state)
+
+            with self.assertRaisesRegex(ValueError, "interrupt_policy"):
+                actions.submit_parent_prompt(
+                    "parent prompt",
+                    handler_name="message_available",
+                    origin_id="msg-1",
+                    interrupt_policy="after_submit",
+                )
+
+    def test_submit_parent_prompt_before_submit_records_submit_failure_after_successful_interrupt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -424,10 +480,11 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.core.app_server.interrupt_turn = fake_interrupt_turn
 
             with self.assertRaisesRegex(self.core.launcher_submit_turn.SubmitTurnError, "submit failed"):
-                actions.interrupt_and_submit_parent_prompt(
+                actions.submit_parent_prompt(
                     "parent prompt",
                     handler_name="message_available",
                     origin_id="msg-1",
+                    interrupt_policy="before_submit",
                 )
 
             records = self._action_records(instance["instance_root"])
@@ -438,7 +495,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertIn("submit failed after interrupt", records[1]["error"])
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
 
-    def test_side_actions_start_reuse_send_close_and_record_runtime_facts(self) -> None:
+    def test_submit_side_triage_prompt_starts_or_reuses_side_and_records_runtime_facts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
@@ -447,7 +504,6 @@ class DaemonServiceContractTests(unittest.TestCase):
             calls: list[dict[str, object]] = []
             original_side_start = self.core.app_server.side_start
             original_input_turn = self.core.app_server.input_turn
-            original_side_close = self.core.app_server.side_close
 
             def fake_side_start(
                 socket_path: Path,
@@ -475,34 +531,54 @@ class DaemonServiceContractTests(unittest.TestCase):
                 calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
                 return {"action": "start", "turn_id": "turn-side-2"}
 
-            def fake_side_close(socket_path: Path, side_thread_id: str) -> dict[str, object]:
-                calls.append({"helper": "side_close", "socket_path": socket_path, "side_thread_id": side_thread_id})
-                return {"ok": True, "turn_id": "turn-side-2"}
-
             self.addCleanup(setattr, self.core.app_server, "side_start", original_side_start)
             self.addCleanup(setattr, self.core.app_server, "input_turn", original_input_turn)
-            self.addCleanup(setattr, self.core.app_server, "side_close", original_side_close)
             self.core.app_server.side_start = fake_side_start
             self.core.app_server.input_turn = fake_input_turn
-            self.core.app_server.side_close = fake_side_close
 
-            started = actions.start_or_reuse_side_triage("triage prompt", handler_name="message_available", origin_id="msg-1")
-            reused = actions.start_or_reuse_side_triage("follow up", handler_name="message_available", origin_id="msg-2")
-            closed = actions.close_side_triage("thr-side-1", handler_name="message_available", origin_id="msg-2")
+            started = actions.submit_side_triage_prompt("triage prompt", handler_name="message_available", origin_id="msg-1")
+            reused = actions.submit_side_triage_prompt("follow up", handler_name="message_available", origin_id="msg-2")
 
             self.assertEqual(started["side_thread_id"], "thr-side-1")
             self.assertEqual(reused["side_thread_id"], "thr-side-1")
             self.assertEqual(reused["action"], "send")
-            self.assertEqual(closed["side_thread_id"], "thr-side-1")
-            self.assertEqual([call["helper"] for call in calls], ["side_start", "input_turn", "side_close"])
+            self.assertEqual([call["helper"] for call in calls], ["side_start", "input_turn"])
             self.assertEqual(calls[0]["workspace_dir"], context.workspace_dir)
             self.assertEqual(calls[0]["shared_project_workspace_dir"], context.project_workspace_dir)
             self.assertEqual(calls[0]["permissions"], "buddyswitch-runtime")
             records = self._action_records(instance["instance_root"])
-            self.assertEqual([record["action_type"] for record in records], ["side_start", "side_send", "side_close"])
-            self.assertEqual([record["side_thread_id"] for record in records], ["thr-side-1", "thr-side-1", "thr-side-1"])
+            self.assertEqual([record["action_type"] for record in records], ["side_start", "side_send"])
+            self.assertEqual([record["side_thread_id"] for record in records], ["thr-side-1", "thr-side-1"])
             payload = json.loads(instance["instance_json"].read_text(encoding="utf-8"))
-            self.assertEqual(payload.get("side_threads"), [])
+            self.assertEqual(payload["side_threads"][0]["thread_id"], "thr-side-1")
+
+    def test_action_gateway_handler_facing_surface_is_exactly_clean_runtime_actions(self) -> None:
+        public_methods = {
+            name
+            for name, value in vars(self.core.ActionGateway).items()
+            if callable(value) and not name.startswith("_")
+        }
+        self.assertEqual(
+            public_methods,
+            {
+                "parent_activity",
+                "submit_parent_prompt",
+                "submit_side_triage_prompt",
+            },
+        )
+
+    def test_action_gateway_handler_facing_surface_excludes_old_action_names(self) -> None:
+        for old_name in (
+            "submit_turn",
+            "interrupt_parent",
+            "interrupt_and_submit_parent_prompt",
+            "start_side_triage",
+            "send_side_triage",
+            "start_or_reuse_side_triage",
+            "require_side_thread",
+            "close_side_triage",
+        ):
+            self.assertFalse(hasattr(self.core.ActionGateway, old_name), old_name)
 
 
 if __name__ == "__main__":

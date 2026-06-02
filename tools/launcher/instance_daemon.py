@@ -20,12 +20,11 @@ import message_available_handler  # noqa: E402
 import task_checkout_handler  # noqa: E402
 
 
-def default_handlers() -> list[object]:
-    return [task_checkout_handler.TaskCheckoutHandler()]
-
-
-def default_mailbox_handlers() -> list[object]:
-    return [message_available_handler.MessageAvailableHandler()]
+def default_daemon_handlers() -> list[object]:
+    return [
+        task_checkout_handler.TaskCheckoutHandler(),
+        message_available_handler.MessageAvailableHandler(),
+    ]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,11 +46,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             return daemon_core.run_daemon(
                 instance_json,
-                handlers=default_handlers(),
-                mailbox_handlers=default_mailbox_handlers(),
+                handlers=default_daemon_handlers(),
             )
         if args.command == "start":
-            print(json.dumps(daemon_core.start_daemon(instance_json, handlers=default_handlers()), ensure_ascii=True))
+            print(json.dumps(daemon_core.start_daemon(instance_json, handlers=default_daemon_handlers()), ensure_ascii=True))
             return 0
         if args.command == "stop":
             print(json.dumps(daemon_core.stop_daemon(instance_json), ensure_ascii=True))
@@ -61,8 +59,7 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(
                     daemon_core.daemon_status(
                         instance_json,
-                        handlers=default_handlers(),
-                        mailbox_handlers=default_mailbox_handlers(),
+                        handlers=default_daemon_handlers(),
                     ),
                     ensure_ascii=True,
                 )

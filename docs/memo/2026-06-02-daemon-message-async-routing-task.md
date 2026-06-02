@@ -248,9 +248,9 @@ thread, and side developer instructions.
 The daemon is not implementing a new side runtime. It is making the existing side capability available to daemon
 handlers with validation and provenance.
 
-### 5.5 Typed Parent-Required Request
+### 5.5 Typed Local Trigger For Parent-Required
 
-Add a narrow typed ingress for side-to-daemon escalation.
+Add a typed local trigger for side-to-daemon escalation.
 
 Required semantics:
 
@@ -264,21 +264,21 @@ daemon executes: controlled parent interrupt/submit action
 This is not a generic event bus. It is one explicit runtime control request needed because a child side turn cannot
 own parent thread control directly.
 
-The exact transport can be finalized in the implementation plan, but it must be typed and local-daemon-owned. It must
-not rely on:
+The transport should be the unified local trigger ingress:
+
+```text
+mailbox.local_trigger(type="message.parent_required")
+```
+
+It must not rely on:
 
 - parsing side natural language output;
 - side directly calling launcher parent interrupt;
 - sending a normal message to self;
 - adding a broad workflow/event framework.
 
-Allowed transport shapes:
-
-- a new local daemon mailbox/control method with a narrow schema;
-- or a generic signal type handled by a message-owned mailbox handler.
-
-In both shapes, daemon core must remain business-neutral. The transport must not become central-daemon routing, normal
-self-message delivery, or a generic multi-purpose event bus.
+Daemon core must remain business-neutral. The transport must not become a business-specific mailbox/control method,
+central-daemon routing, normal self-message delivery, or a generic multi-purpose event bus.
 
 ### 5.6 Neutral Action Provenance And Status
 
@@ -288,7 +288,7 @@ Records should support, at minimum:
 
 - handler name;
 - origin id, such as message id or signal id;
-- action type, such as parent_submit, parent_interrupt, side_start, side_send, parent_required;
+- action type, such as parent_submit, parent_interrupt, side_start, side_send, local_trigger;
 - parent thread id;
 - side thread id when relevant;
 - action turn id or interrupted turn id when relevant;
@@ -350,13 +350,13 @@ Required focused tests:
 - parent action gateway: submit, interrupt, interrupt-and-submit;
 - side registry helper: register, validate, reject main thread as side, unregister;
 - side action gateway: start side, send existing side, close side;
-- parent-required typed request: accepts valid side request, rejects wrong actor/parent/side;
+- message.parent_required local trigger: accepts valid side request, rejects wrong actor/parent/side;
 - action provenance/status records for parent and side actions.
 
 Required boundary tests:
 
 - daemon core still does not import message domain logic;
-- daemon mailbox remains generic except typed local control request support if implemented there;
+- daemon mailbox exposes generic local-trigger support, not business-specific local control methods;
 - central daemon still only owns reachability/delivery, not thread activity;
 - message handler owns `message.available` payload semantics;
 - message module does not call launcher parent interrupt directly;

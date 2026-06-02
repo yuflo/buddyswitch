@@ -49,17 +49,25 @@ class FakeActionGateway:
         self.error = error
         self.calls: list[dict[str, object]] = []
 
-    def submit_turn(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
+    def submit_parent_prompt(
+        self,
+        text: str,
+        *,
+        handler_name: str,
+        origin_id: str | None,
+        interrupt_policy: str,
+    ) -> dict[str, object]:
         self.calls.append(
             {
                 "text": text,
                 "handler_name": handler_name,
-                "origin_turn_id": origin_turn_id,
+                "origin_id": origin_id,
+                "interrupt_policy": interrupt_policy,
             }
         )
         if self.error is not None:
             raise self.error
-        return self.result
+        return {"turn_id": self.result}
 
 
 class TaskCheckoutHandlerTestCase(unittest.TestCase):
@@ -95,10 +103,15 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
             main_thread_id="thr-main",
         )
 
-    def _completed(self, *, thread_id: str = "thr-main", turn_id: str = "turn-user-1", status: str = "completed") -> dict[str, object]:
-        return {
-            "method": "turn/completed",
-            "params": {
+    def _completed(
+        self,
+        *,
+        thread_id: str = "thr-main",
+        turn_id: str = "turn-user-1",
+        status: str = "completed",
+        trigger_type: str = "app_server.turn_completed",
+    ) -> object:
+        params = {
                 "threadId": thread_id,
                 "turn": {
                     "id": turn_id,
@@ -110,8 +123,22 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
                     "completedAt": 1 if status != "inProgress" else None,
                     "durationMs": 1 if status != "inProgress" else None,
                 },
-            },
+            }
+        source_context = {
+            "method": "turn/completed",
+            "thread_id": thread_id,
+            "turn_id": turn_id,
+            "turn_status": status,
         }
+        return self.daemon_core.daemon_triggers.DaemonTrigger(
+            source="app_server_notification",
+            type=trigger_type,
+            target_actor_address={"role_id": "dev", "actor_id": "act-dev-daed00000001"},
+            origin_id=turn_id,
+            correlation_id=None,
+            payload=params,
+            source_context=source_context,
+        )
 
     def _patch_snapshot_render(self) -> list[tuple[str, object]]:
         calls: list[tuple[str, object]] = []
@@ -141,6 +168,7 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
     def test_task_checkout_handler_source_has_no_app_server_import(self) -> None:
         source = TASK_CHECKOUT_HANDLER_PATH.read_text(encoding="utf-8")
         self.assertNotIn("import app_server", source)
+        self.assertNotIn("handle_notification", source)
 
     def test_completed_main_thread_user_turn_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -179,26 +207,17 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             state = self._state(instance["instance_root"])
+            missing_thread = self._completed()
+            missing_thread.source_context.pop("thread_id")
+            missing_turn = self._completed()
+            missing_turn.source_context.pop("turn_id")
+            missing_status = self._completed()
+            missing_status.source_context.pop("turn_status")
 
-            self.assertIsNone(self.task_checkout_handler.completed_turn_for_checkout({"method": "turn/completed"}, state))
-            self.assertIsNone(
-                self.task_checkout_handler.completed_turn_for_checkout(
-                    {"method": "turn/completed", "params": {}},
-                    state,
-                )
-            )
-            self.assertIsNone(
-                self.task_checkout_handler.completed_turn_for_checkout(
-                    {"method": "turn/completed", "params": {"threadId": "thr-main", "turn": {"status": "completed"}}},
-                    state,
-                )
-            )
-            self.assertIsNone(
-                self.task_checkout_handler.completed_turn_for_checkout(
-                    {"method": "turn/completed", "params": {"turn": {"id": "turn-user-1", "status": "completed"}}},
-                    state,
-                )
-            )
+            self.assertIsNone(self.task_checkout_handler.completed_turn_for_checkout(object(), state))
+            self.assertIsNone(self.task_checkout_handler.completed_turn_for_checkout(missing_thread, state))
+            self.assertIsNone(self.task_checkout_handler.completed_turn_for_checkout(missing_turn, state))
+            self.assertIsNone(self.task_checkout_handler.completed_turn_for_checkout(missing_status, state))
 
     def test_task_checkout_origin_turn_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -249,22 +268,22 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
             )
             actions = FakeActionGateway()
 
-            ignored_notifications = [
+            ignored_triggers = [
                 self._completed(thread_id="thr-side"),
                 self._completed(status="failed"),
                 self._completed(turn_id="turn-daemon-1"),
-                {"method": "turn/completed", "params": {}},
+                self._completed(trigger_type="app_server.turn_failed"),
             ]
 
-            for notification in ignored_notifications:
-                result = self.handler.handle_notification(context, state, actions, notification)
+            for trigger in ignored_triggers:
+                result = self.handler.handle(context, state, actions, trigger)
                 self.assertEqual(result.status, "ignored")
 
             self.assertEqual(actions.calls, [])
 
 
 class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
-    def test_accepted_completed_turn_uses_actions_submit_turn(self) -> None:
+    def test_accepted_completed_turn_uses_actions_submit_parent_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
@@ -272,12 +291,13 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             calls = self._patch_snapshot_render()
             actions = FakeActionGateway(result="turn-daemon-1")
 
-            result = self.handler.handle_notification(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, actions, self._completed())
 
             self.assertEqual(result.status, "handled")
             self.assertEqual(len(actions.calls), 1)
             self.assertEqual(actions.calls[0]["handler_name"], "task_checkout")
-            self.assertEqual(actions.calls[0]["origin_turn_id"], "turn-user-1")
+            self.assertEqual(actions.calls[0]["origin_id"], "turn-user-1")
+            self.assertEqual(actions.calls[0]["interrupt_policy"], "none")
             prompt = actions.calls[0]["text"]
             assert isinstance(prompt, str)
             self.assertTrue(prompt.startswith("[TASK CHECKOUT]"))
@@ -305,7 +325,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.addCleanup(setattr, self.daemon_core.launcher_submit_turn, "submit_turn", original_submit_turn)
             self.daemon_core.launcher_submit_turn.submit_turn = fake_submit_turn
 
-            result = self.handler.handle_notification(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, actions, self._completed())
 
             self.assertEqual(result.status, "handled")
             self.assertTrue(state.is_daemon_origin_turn("turn-daemon-1"))
@@ -330,7 +350,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.addCleanup(setattr, self.daemon_core.launcher_submit_turn, "submit_turn", original_submit_turn)
             self.daemon_core.launcher_submit_turn.submit_turn = fake_submit_turn
 
-            result = self.handler.handle_notification(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, actions, self._completed())
 
             self.assertEqual(result.status, "failed")
             self.assertIn("submit_turn did not return a turn id", result.message)
@@ -345,7 +365,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
                 error=self.task_checkout_handler.launcher_submit_turn.SubmitTurnError("submit_turn failed: active thread"),
             )
 
-            result = self.handler.handle_notification(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, actions, self._completed())
 
             self.assertEqual(result.status, "failed")
             self.assertIn("submit_turn failed", result.message)
@@ -354,7 +374,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
 
             actions.error = None
             actions.result = "turn-daemon-2"
-            result_later = self.handler.handle_notification(
+            result_later = self.handler.handle(
                 context,
                 state,
                 actions,

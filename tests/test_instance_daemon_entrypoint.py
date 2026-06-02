@@ -36,7 +36,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.instance_daemon = load_instance_daemon()
 
-    def test_run_passes_explicit_task_checkout_handler_list_to_daemon_core(self) -> None:
+    def test_run_passes_unified_daemon_handler_list_to_daemon_core(self) -> None:
         recorded: dict[str, object] = {}
         original_run = self.instance_daemon.daemon_core.run_daemon
 
@@ -44,11 +44,9 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             instance_json: Path,
             *,
             handlers: list[object] | None = None,
-            mailbox_handlers: list[object] | None = None,
         ) -> int:
             recorded["instance_json"] = instance_json
             recorded["handlers"] = handlers or []
-            recorded["mailbox_handlers"] = mailbox_handlers or []
             return 0
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "run_daemon", original_run)
@@ -59,14 +57,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
-        self.assertEqual(len(handlers), 1)
+        self.assertEqual([type(handler).__name__ for handler in handlers], ["TaskCheckoutHandler", "MessageAvailableHandler"])
         self.assertEqual(type(handlers[0]).__name__, "TaskCheckoutHandler")
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
-        mailbox_handlers = recorded["mailbox_handlers"]
-        assert isinstance(mailbox_handlers, list)
-        self.assertEqual(len(mailbox_handlers), 1)
-        self.assertEqual(type(mailbox_handlers[0]).__name__, "MessageAvailableHandler")
-        self.assertEqual(getattr(mailbox_handlers[0], "name", None), "message_available")
+        self.assertEqual(getattr(handlers[1], "name", None), "message_available")
         self.assertEqual(recorded["instance_json"], Path("/tmp/inst.json"))
 
     def test_start_prints_json_from_daemon_core(self) -> None:
@@ -88,7 +82,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {"started": True, "pid": 4321})
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
-        self.assertEqual(len(handlers), 1)
+        self.assertEqual([getattr(handler, "name", None) for handler in handlers], ["task_checkout", "message_available"])
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
 
     def test_stop_prints_json_from_daemon_core(self) -> None:
@@ -115,11 +109,9 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             instance_json: Path,
             *,
             handlers: list[object] | None = None,
-            mailbox_handlers: list[object] | None = None,
         ) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
             recorded["handlers"] = handlers or []
-            recorded["mailbox_handlers"] = mailbox_handlers or []
             return {"live": True, "ready": True}
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "daemon_status", original_status)
@@ -132,12 +124,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {"live": True, "ready": True})
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
-        self.assertEqual(len(handlers), 1)
-        self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
-        mailbox_handlers = recorded["mailbox_handlers"]
-        assert isinstance(mailbox_handlers, list)
-        self.assertEqual(len(mailbox_handlers), 1)
-        self.assertEqual(getattr(mailbox_handlers[0], "name", None), "message_available")
+        self.assertEqual([getattr(handler, "name", None) for handler in handlers], ["task_checkout", "message_available"])
 
     def test_daemon_shell_still_calls_instance_daemon_entrypoint(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")

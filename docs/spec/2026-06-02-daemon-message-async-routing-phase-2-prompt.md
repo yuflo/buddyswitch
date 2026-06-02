@@ -1,5 +1,9 @@
 # Phase 2 Execution Prompt
 
+> Superseded by
+> `docs/spec/2026-06-02-daemon-trigger-handler-action-rebuild-phase-2-prompt.md`.
+> Do not use this prompt for the daemon trigger-handler-action rebuild.
+
 Use this prompt in worktree `/Users/chen/Dev/buddyswitch/.worktrees/fea-daemon`.
 
 ```text

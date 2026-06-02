@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task checkout handler for daemon notifications."""
+"""Task checkout handler for daemon triggers."""
 
 from __future__ import annotations
 
@@ -28,20 +28,17 @@ def _string_field(payload: dict[str, Any], *names: str) -> str:
     return ""
 
 
-def completed_turn_for_checkout(notification: dict[str, Any], state: Any) -> dict[str, str] | None:
-    if notification.get("method") != "turn/completed":
+def completed_turn_for_checkout(trigger: Any, state: Any) -> dict[str, str] | None:
+    if getattr(trigger, "type", None) != "app_server.turn_completed":
         return None
-    params = notification.get("params")
-    if not isinstance(params, dict):
-        return None
-    turn = params.get("turn")
-    if not isinstance(turn, dict):
+    source_context = getattr(trigger, "source_context", None)
+    if not isinstance(source_context, dict):
         return None
 
-    thread_id = _string_field(params, "threadId")
-    turn_id = _string_field(turn, "id")
-    status = _string_field(turn, "status")
-    if not thread_id or not turn_id:
+    thread_id = _string_field(source_context, "thread_id")
+    turn_id = _string_field(source_context, "turn_id")
+    status = _string_field(source_context, "turn_status")
+    if not thread_id or not turn_id or not status:
         return None
     if thread_id != state.payload.get("main_thread_id"):
         return None
@@ -67,7 +64,12 @@ def send_checkout_prompt(
             instance_payload=context.instance_payload,
         )
         prompt = task_tui.render_stop_task_tui(snapshot, previous_turn)
-        actions.submit_turn(prompt, handler_name="task_checkout", origin_turn_id=origin_turn_id)
+        actions.submit_parent_prompt(
+            prompt,
+            handler_name="task_checkout",
+            origin_id=origin_turn_id,
+            interrupt_policy="none",
+        )
         return daemon_core.HandlerResult.handled()
     except launcher_submit_turn.SubmitTurnError as exc:
         return daemon_core.HandlerResult.failed(str(exc))
@@ -76,14 +78,17 @@ def send_checkout_prompt(
 class TaskCheckoutHandler:
     name = "task_checkout"
 
-    def handle_notification(
+    def handles(self, trigger: Any) -> bool:
+        return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+    def handle(
         self,
         context: Any,
         state: Any,
         actions: Any,
-        notification: dict[str, Any],
+        trigger: Any,
     ) -> daemon_core.HandlerResult:
-        previous_turn = completed_turn_for_checkout(notification, state)
+        previous_turn = completed_turn_for_checkout(trigger, state)
         if previous_turn is None:
             return daemon_core.HandlerResult.ignored()
         return send_checkout_prompt(context, state, actions, previous_turn)

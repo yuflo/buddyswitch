@@ -688,16 +688,12 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             class FakeHandler:
                 name = "task_checkout"
 
-            class FakeMailboxHandler:
-                name = "message_available"
-
             payload = self.core.daemon_status(
                 instance["instance_json"],
-                handlers=[FakeHandler()],
-                mailbox_handlers=[FakeMailboxHandler()],
+                handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "message_available"})()],
             )
 
-            self.assertEqual(payload["handlers"]["registered"], ["task_checkout"])
+            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "message_available"])
             item = payload["handlers"]["items"]["task_checkout"]
             self.assertIs(item["registered"], True)
             self.assertIs(item["enabled"], True)
@@ -705,9 +701,8 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIsNone(item["last_result"])
             self.assertIsNone(item["last_error"])
             self.assertIsNone(item["last_action_turn_id"])
-            self.assertNotIn("message_available", payload["handlers"]["items"])
-            self.assertEqual(payload["mailbox_handlers"]["registered"], ["message_available"])
-            mailbox_item = payload["mailbox_handlers"]["items"]["message_available"]
+            self.assertNotIn("mailbox_handlers", payload)
+            mailbox_item = payload["handlers"]["items"]["message_available"]
             self.assertIs(mailbox_item["registered"], True)
             self.assertIs(mailbox_item["enabled"], True)
             self.assertIs(mailbox_item["active"], True)
@@ -733,23 +728,19 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             class FakeHandler:
                 name = "task_checkout"
 
-            class FakeMailboxHandler:
-                name = "message_available"
-
             payload = self.core.daemon_status(
                 instance["instance_json"],
-                handlers=[FakeHandler()],
-                mailbox_handlers=[FakeMailboxHandler()],
+                handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "message_available"})()],
             )
 
-            self.assertEqual(payload["handlers"]["registered"], ["task_checkout"])
+            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "message_available"])
             message_state = payload["handlers"]["items"]["message"]
             self.assertIs(message_state["registered"], False)
             self.assertIs(message_state["enabled"], False)
             self.assertIs(message_state["active"], False)
             self.assertEqual(message_state["last_error"]["message"], "message failed")
-            self.assertNotIn("message_available", payload["handlers"]["items"])
-            mailbox_state = payload["mailbox_handlers"]["items"]["message_available"]
+            self.assertNotIn("mailbox_handlers", payload)
+            mailbox_state = payload["handlers"]["items"]["message_available"]
             self.assertIs(mailbox_state["registered"], True)
             self.assertIs(mailbox_state["enabled"], True)
             self.assertIs(mailbox_state["active"], True)
@@ -796,16 +787,19 @@ class RecordingHandler:
     def __init__(self, *, name: str, result: object) -> None:
         self.name = name
         self.result = result
-        self.notifications: list[dict[str, object]] = []
+        self.triggers: list[object] = []
 
-    def handle_notification(
+    def handles(self, trigger: object) -> bool:
+        return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+    def handle(
         self,
         context: object,
         state: object,
         actions: object,
-        notification: dict[str, object],
+        trigger: object,
     ) -> object:
-        self.notifications.append(notification)
+        self.triggers.append(trigger)
         return self.result
 
 
@@ -815,12 +809,15 @@ class ExplodingOnceHandler:
         self.result = result
         self.calls = 0
 
-    def handle_notification(
+    def handles(self, trigger: object) -> bool:
+        return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+    def handle(
         self,
         context: object,
         state: object,
         actions: object,
-        notification: dict[str, object],
+        trigger: object,
     ) -> object:
         self.calls += 1
         if self.calls == 1:
@@ -938,7 +935,8 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 self.core.run_daemon(instance["instance_json"], handlers=[handler])
 
             self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume"])
-            self.assertEqual(handler.notifications, [self._completed(turn_id="turn-user-1")])
+            self.assertEqual([trigger.type for trigger in handler.triggers], ["app_server.turn_completed"])
+            self.assertEqual([trigger.origin_id for trigger in handler.triggers], ["turn-user-1"])
             self.assertEqual(len(communication["mailbox_started"]), 1)
             self.assertEqual(len(communication["heartbeat"]), 1)
             self.assertEqual(len(communication["unregistered"]), 1)
@@ -983,7 +981,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 self.core.run_daemon(instance["instance_json"], handlers=[exploding, recorder])
 
             self.assertEqual(exploding.calls, 2)
-            self.assertEqual(recorder.notifications, [notification_one, notification_two])
+            self.assertEqual([trigger.origin_id for trigger in recorder.triggers], ["turn-user-1", "turn-user-2"])
             state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIsNone(state["last_error"])
             self.assertEqual(state["handlers"]["exploder"]["last_error"]["origin_turn_id"], "turn-user-1")
@@ -1000,14 +998,18 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 def __init__(self, name: str) -> None:
                     self.name = name
 
-                def handle_notification(
+                def handles(self, trigger_payload: object) -> bool:
+                    return getattr(trigger_payload, "type", None) == "app_server.turn_completed"
+
+                def handle(
                     self,
                     context: object,
                     state: object,
                     actions: object,
-                    notification_payload: dict[str, object],
+                    trigger_payload: object,
                 ) -> object:
-                    turn = notification_payload["params"]["turn"]["id"]
+                    source_context = getattr(trigger_payload, "source_context")
+                    turn = source_context["turn_id"]
                     assert isinstance(turn, str)
                     seen.append((self.name, turn))
                     return result

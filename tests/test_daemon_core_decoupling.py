@@ -226,9 +226,11 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         self.assertNotIn("side_thread_registry", source)
         self.assertNotIn("submit_turn(", source)
 
-    def test_mailbox_parent_required_support_is_narrow_not_generic_event_bus(self) -> None:
+    def test_mailbox_local_trigger_support_is_narrow_not_generic_event_bus(self) -> None:
         source = DAEMON_MAILBOX_PATH.read_text(encoding="utf-8")
-        self.assertIn("mailbox.parent_required", source)
+        self.assertIn("mailbox.local_trigger", source)
+        self.assertIn("message.parent_required", source)
+        self.assertNotIn("mailbox.parent_required", source)
         self.assertNotIn("workflow", source.lower())
         self.assertNotIn("plugin", source.lower())
         self.assertNotIn("event_bus", source.lower())
@@ -246,25 +248,29 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             )
             self._patch_app_server_client(daemon_core, fake_client)
             self._patch_daemon_communication(daemon_core)
-            handled: list[dict[str, object]] = []
+            handled: list[object] = []
 
             class NoopHandler:
                 name = "noop"
 
-                def handle_notification(
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(
                     self,
                     context: object,
                     state: object,
                     actions: object,
-                    notification_payload: dict[str, object],
+                    trigger: object,
                 ) -> object:
-                    handled.append(notification_payload)
+                    handled.append(trigger)
                     return daemon_core.HandlerResult.ignored()
 
             with self.assertRaises(StopDaemonLoop):
                 daemon_core.run_daemon(instance["instance_json"], handlers=[NoopHandler()])
 
-            self.assertEqual(handled, [notification])
+            self.assertEqual([trigger.type for trigger in handled], ["app_server.turn_completed"])
+            self.assertEqual([trigger.origin_id for trigger in handled], ["turn-user-1"])
             self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume"])
 
     def test_no_task_handler_means_no_checkout_turn_start(self) -> None:

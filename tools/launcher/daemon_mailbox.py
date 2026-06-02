@@ -21,6 +21,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
+import daemon_triggers  # noqa: E402
+import side_thread_registry  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
 
 
@@ -102,6 +104,7 @@ class DaemonMailboxServer:
         context: Any | None = None,
         state: Any | None = None,
         actions_factory: Any | None = None,
+        trigger_dispatcher: Any | None = None,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve(strict=False)
         self.local_actor_address = ActorAddress.from_payload(
@@ -111,6 +114,7 @@ class DaemonMailboxServer:
         self.context = context
         self.state = state
         self.actions_factory = actions_factory
+        self.trigger_dispatcher = trigger_dispatcher
         self._stop_event = threading.Event()
         self._server: socket.socket | None = None
 
@@ -194,11 +198,11 @@ class DaemonMailboxServer:
         if request.get("protocol") != daemon_client.MAILBOX_PROTOCOL:
             return self._response(request_id, code="mailbox_protocol_error", message="unsupported mailbox protocol")
         method = request.get("method")
-        if method == "mailbox.parent_required":
+        if method == "mailbox.local_trigger":
             params = request.get("params")
             if not isinstance(params, dict):
                 return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
-            return self._dispatch_parent_required(request_id, params)
+            return self._dispatch_local_trigger(request_id, params)
         if method != "mailbox.deliver":
             return self._response(request_id, code="mailbox_unknown_method", message="unsupported mailbox method")
         params = request.get("params")
@@ -211,140 +215,80 @@ class DaemonMailboxServer:
         to_actor = ActorAddress.from_payload(signal["target_actor_address"])
         if to_actor != self.local_actor_address:
             return self._response(request_id, code="wrong_target_actor", message="signal target does not match local actor")
+        trigger = daemon_triggers.normalize_cross_actor_signal(signal)
+        return self._dispatch_trigger(request_id, trigger)
 
-        handled = 0
-        errors: list[str] = []
-        matched = 0
-        for handler in self.handlers:
-            handles = getattr(handler, "handles", None)
-            if not callable(handles):
-                continue
-            try:
-                if handles(signal) is not True:
-                    continue
-            except Exception as exc:
-                errors.append(str(exc))
-                continue
-            matched += 1
-            handle = getattr(handler, "handle_signal", None)
-            if not callable(handle):
-                continue
-            try:
-                actions = self.actions_factory() if callable(self.actions_factory) else None
-                result = handle(self.context, self.state, actions, signal)
-                status = getattr(result, "status", None)
-                if isinstance(result, dict):
-                    status = result.get("status")
-                if status == "handled":
-                    handled += 1
-                if status == "failed":
-                    message = result.get("message") if isinstance(result, dict) else getattr(result, "message", "")
-                    errors.append(str(message or "handler failed"))
-            except Exception as exc:
-                errors.append(str(exc))
-        if errors:
-            return self._response(
-                request_id,
-                {
-                    "accepted": True,
-                    "handled_count": handled,
-                    "matched_count": matched,
-                    "handling_status": "failed",
-                    "handling_error": "; ".join(errors),
-                    "signal": signal,
-                },
-            )
-        handling_status = "handled" if handled > 0 else "ignored"
-        return self._response(
-            request_id,
-            {
+    def _dispatch_trigger(self, request_id: str | None, trigger: daemon_triggers.DaemonTrigger) -> dict[str, Any]:
+        if callable(self.trigger_dispatcher):
+            result = self.trigger_dispatcher(trigger)
+            if not isinstance(result, dict):
+                return self._response(
+                    request_id,
+                    code="mailbox_dispatch_error",
+                    message=f"trigger dispatcher returned invalid result: {type(result).__name__}",
+                )
+            payload = dict(result)
+        else:
+            payload = {
                 "accepted": True,
-                "handled_count": handled,
-                "matched_count": matched,
-                "handling_status": handling_status,
-                "signal": signal,
-            },
-        )
+                "handled_count": 0,
+                "matched_count": 0,
+                "handling_status": "ignored",
+            }
+        payload.setdefault("trigger", trigger.to_payload())
+        return self._response(request_id, payload)
 
-    def _validate_parent_required_request(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _validate_local_trigger_request(self, params: dict[str, Any]) -> daemon_triggers.DaemonTrigger:
         actor_payload = _actor_address_payload(params.get("actor_address"), "actor_address")
         actor_address = ActorAddress.from_payload(actor_payload)
         if actor_address != self.local_actor_address:
             raise PermissionError("signal target does not match local actor")
+        trigger_type = _non_empty_string(params.get("type"), "type")
+        if trigger_type != "message.parent_required":
+            raise ValueError(f"unsupported local trigger type: {trigger_type}")
         parent_thread_id = runtime_files.require_id(params.get("parent_thread_id"), "parent_thread_id")
         side_thread_id = runtime_files.require_id(params.get("side_thread_id"), "side_thread_id")
-        message_id = runtime_files.require_id(params.get("message_id"), "message_id")
-        reason = _non_empty_string(params.get("reason"), "reason")
+        payload = params.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        message_id = runtime_files.require_id(payload.get("message_id"), "message_id")
+        reason = _non_empty_string(payload.get("reason"), "reason")
         context_parent = getattr(self.context, "main_thread_id", None)
         if not isinstance(context_parent, str) or not context_parent:
-            raise ValueError("parent-required request requires daemon context main_thread_id")
+            raise ValueError("local trigger requires daemon context main_thread_id")
         if parent_thread_id != context_parent:
             raise ValueError("parent_thread_id does not match local parent thread")
         if side_thread_id == parent_thread_id:
             raise ValueError("side_thread_id must not be the parent thread id")
-        return {
-            "actor_address": actor_payload,
-            "parent_thread_id": parent_thread_id,
-            "side_thread_id": side_thread_id,
-            "message_id": message_id,
-            "reason": reason,
-        }
+        actor_id = getattr(self.context, "actor_id", None)
+        instance_json = getattr(self.context, "instance_json", None)
+        if not isinstance(actor_id, str) or not actor_id:
+            raise ValueError("local trigger requires daemon context actor_id")
+        if instance_json is None:
+            raise ValueError("local trigger requires daemon context instance_json")
+        side_thread_registry.require_side_thread(
+            Path(instance_json),
+            actor_id=actor_id,
+            parent_thread_id=parent_thread_id,
+            side_thread_id=side_thread_id,
+        )
+        return daemon_triggers.normalize_local_trigger(
+            trigger_type=trigger_type,
+            target_actor_address=actor_payload,
+            origin_id=message_id,
+            correlation_id=params.get("correlation_id") if isinstance(params.get("correlation_id"), str) else None,
+            payload={"message_id": message_id, "reason": reason},
+            source_context={"parent_thread_id": parent_thread_id, "side_thread_id": side_thread_id},
+        )
 
-    def _dispatch_parent_required(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
+    def _dispatch_local_trigger(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            parent_required = self._validate_parent_required_request(params)
+            trigger = self._validate_local_trigger_request(params)
         except PermissionError as exc:
             return self._response(request_id, code="wrong_target_actor", message=str(exc))
         except Exception as exc:
-            return self._response(request_id, code="invalid_parent_required", message=str(exc))
-
-        handled = 0
-        matched = 0
-        errors: list[str] = []
-        handled_payload: dict[str, Any] = {}
-        for handler in self.handlers:
-            handle = getattr(handler, "handle_parent_required", None)
-            if not callable(handle):
-                continue
-            matched += 1
-            try:
-                actions = self.actions_factory() if callable(self.actions_factory) else None
-                result = handle(self.context, self.state, actions, parent_required)
-                status = result.get("status") if isinstance(result, dict) else getattr(result, "status", None)
-                if status == "handled":
-                    handled += 1
-                    if isinstance(result, dict):
-                        handled_payload.update(
-                            {
-                                key: value
-                                for key, value in result.items()
-                                if key not in {"status", "message"} and value is not None
-                            }
-                        )
-                elif status == "failed":
-                    message = result.get("message") if isinstance(result, dict) else getattr(result, "message", "")
-                    errors.append(str(message or "handler failed"))
-            except Exception as exc:
-                errors.append(str(exc))
-        if errors:
-            payload = {
-                "accepted": True,
-                "handled_count": handled,
-                "matched_count": matched,
-                "handling_status": "failed",
-                "handling_error": "; ".join(errors),
-            }
-            payload.update(handled_payload)
-            return self._response(request_id, payload)
-        handling_status = "handled" if handled > 0 else "ignored"
-        payload = {
-            "accepted": True,
-            "handled_count": handled,
-            "matched_count": matched,
-            "handling_status": handling_status,
-        }
-        payload.update(handled_payload)
-        return self._response(request_id, payload)
+            return self._response(request_id, code="invalid_local_trigger", message=str(exc))
+        return self._dispatch_trigger(request_id, trigger)
 
 
 def mailbox_socket_path(instance_root: Path) -> Path:
