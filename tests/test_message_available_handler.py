@@ -30,21 +30,64 @@ def load_module(path: Path) -> Any:
 
 
 class FakeActionGateway:
-    def __init__(self, *, error: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        activity: dict[str, object] | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        self.activity = activity or {"status": "idle", "active_turn_id": None}
         self.error = error
         self.calls: list[dict[str, object]] = []
 
-    def submit_turn(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
+    def parent_activity(self) -> dict[str, object]:
+        self.calls.append({"method": "parent_activity"})
+        return self.activity
+
+    def submit_parent_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> str:
         self.calls.append(
             {
+                "method": "submit_parent_prompt",
                 "text": text,
                 "handler_name": handler_name,
-                "origin_turn_id": origin_turn_id,
+                "origin_id": origin_id,
             }
         )
         if self.error is not None:
             raise self.error
         return "turn-message-read"
+
+    def start_or_reuse_side_triage(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, object]:
+        self.calls.append(
+            {
+                "method": "start_or_reuse_side_triage",
+                "text": text,
+                "handler_name": handler_name,
+                "origin_id": origin_id,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return {"action": "start", "side_thread_id": "thr-side-1", "turn_id": "turn-side-1"}
+
+    def require_side_thread(self, side_thread_id: str) -> dict[str, object]:
+        self.calls.append({"method": "require_side_thread", "side_thread_id": side_thread_id})
+        if self.error is not None:
+            raise self.error
+        return {"thread_id": side_thread_id, "parent_thread_id": "thr-main", "status": "open"}
+
+    def interrupt_and_submit_parent_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, object]:
+        self.calls.append(
+            {
+                "method": "interrupt_and_submit_parent_prompt",
+                "text": text,
+                "handler_name": handler_name,
+                "origin_id": origin_id,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return {"interrupted_turn_id": "turn-main-1", "turn_id": "turn-parent-message"}
 
 
 class MessageAvailableHandlerTests(unittest.TestCase):
@@ -137,7 +180,7 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertIn("message_id", result.message)
             self.assertEqual(actions.calls, [])
 
-    def test_message_available_handler_submits_read_prompt_through_action_gateway(self) -> None:
+    def test_message_available_handler_routes_idle_parent_to_parent_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             actions = FakeActionGateway()
@@ -147,10 +190,10 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             result = self.handler.handle_signal(instance["context"], instance["state"], actions, signal)
 
             self.assertEqual(result.status, "handled")
-            self.assertEqual(len(actions.calls), 1)
-            call = actions.calls[0]
+            self.assertEqual([call["method"] for call in actions.calls], ["parent_activity", "submit_parent_prompt"])
+            call = actions.calls[1]
             self.assertEqual(call["handler_name"], "message_available")
-            self.assertEqual(call["origin_turn_id"], "msg-readable")
+            self.assertEqual(call["origin_id"], "msg-readable")
             prompt = call["text"]
             self.assertIsInstance(prompt, str)
             self.assertIn("[MESSAGE AVAILABLE]", prompt)
@@ -165,7 +208,39 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertNotIn("content", prompt)
             self.assertNotIn("message body", prompt.lower())
 
-    def test_message_available_handler_records_failed_submit_turn_as_handler_failure(self) -> None:
+    def test_message_available_handler_routes_running_parent_to_side_triage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            actions = FakeActionGateway(activity={"status": "running", "active_turn_id": "turn-main-1"})
+
+            result = self.handler.handle_signal(instance["context"], instance["state"], actions, self._signal())
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual([call["method"] for call in actions.calls], ["parent_activity", "start_or_reuse_side_triage"])
+            call = actions.calls[1]
+            self.assertEqual(call["handler_name"], "message_available")
+            self.assertEqual(call["origin_id"], "msg-readable")
+            prompt = call["text"]
+            self.assertIsInstance(prompt, str)
+            self.assertIn("[MESSAGE TRIAGE]", prompt)
+            self.assertIn("message__list", prompt)
+            self.assertIn("message__conversation", prompt)
+            self.assertIn("message__send", prompt)
+            self.assertIn("parent is required", prompt.lower())
+            self.assertNotIn("codex-remote", prompt)
+
+    def test_message_available_handler_fails_when_parent_activity_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            actions = FakeActionGateway(activity={"status": "unavailable", "error": "app-server down"})
+
+            result = self.handler.handle_signal(instance["context"], instance["state"], actions, self._signal())
+
+            self.assertEqual(result.status, "failed")
+            self.assertIn("app-server down", result.message)
+            self.assertEqual([call["method"] for call in actions.calls], ["parent_activity"])
+
+    def test_message_available_handler_records_failed_parent_submit_as_handler_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             actions = FakeActionGateway(error=RuntimeError("submit failed"))
@@ -174,6 +249,55 @@ class MessageAvailableHandlerTests(unittest.TestCase):
 
             self.assertEqual(result.status, "failed")
             self.assertIn("submit failed", result.message)
+
+    def test_parent_required_request_validates_side_and_interrupts_then_submits_parent_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            actions = FakeActionGateway()
+
+            result = self.handler.handle_parent_required(
+                instance["context"],
+                instance["state"],
+                actions,
+                {
+                    "message_id": "msg-readable",
+                    "parent_thread_id": "thr-main",
+                    "side_thread_id": "thr-side-1",
+                    "reason": "parent is required",
+                },
+            )
+
+            self.assertEqual(result["status"], "handled")
+            self.assertEqual(result["side_thread_id"], "thr-side-1")
+            self.assertEqual(result["interrupted_turn_id"], "turn-main-1")
+            self.assertEqual(result["turn_id"], "turn-parent-message")
+            self.assertEqual(
+                [call["method"] for call in actions.calls],
+                ["require_side_thread", "interrupt_and_submit_parent_prompt"],
+            )
+            prompt = actions.calls[1]["text"]
+            self.assertIn("[MESSAGE AVAILABLE]", prompt)
+            self.assertIn("message__list", prompt)
+
+    def test_parent_required_request_reports_side_validation_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            actions = FakeActionGateway(error=RuntimeError("side not registered"))
+
+            result = self.handler.handle_parent_required(
+                instance["context"],
+                instance["state"],
+                actions,
+                {
+                    "message_id": "msg-readable",
+                    "parent_thread_id": "thr-main",
+                    "side_thread_id": "thr-side-unknown",
+                    "reason": "parent is required",
+                },
+            )
+
+            self.assertEqual(result["status"], "failed")
+            self.assertIn("side not registered", result["message"])
 
 
 if __name__ == "__main__":

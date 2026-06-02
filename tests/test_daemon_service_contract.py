@@ -72,6 +72,15 @@ class DaemonServiceContractTests(unittest.TestCase):
             main_thread_id="thr-main",
         )
 
+    def _saved_state(self, instance_root: Path) -> dict[str, Any]:
+        return json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+
+    def _action_records(self, instance_root: Path) -> list[dict[str, Any]]:
+        saved = self._saved_state(instance_root)
+        action_ids = saved.get("daemon_action_ids", [])
+        actions = saved.get("daemon_actions", {})
+        return [actions[action_id] for action_id in action_ids]
+
     def _completed(self, *, turn_id: str = "turn-user-1") -> dict[str, object]:
         return {
             "method": "turn/completed",
@@ -311,6 +320,189 @@ class DaemonServiceContractTests(unittest.TestCase):
                 actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
 
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
+
+    def test_parent_activity_reports_idle_running_and_unavailable_from_local_app_server(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            actions = self.core.ActionGateway(context=context, state=state)
+            calls: list[dict[str, object]] = []
+            original_thread_read = self.core.app_server.thread_read
+            original_active_turn_id = self.core.app_server.active_turn_id
+
+            def idle_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+                calls.append({"helper": "thread_read", "socket_path": socket_path, "thread_id": thread_id, "include_turns": include_turns})
+                return {"thread": {"id": thread_id, "status": {"type": "idle"}}}
+
+            def running_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+                calls.append({"helper": "thread_read", "socket_path": socket_path, "thread_id": thread_id, "include_turns": include_turns})
+                return {"thread": {"id": thread_id, "status": {"type": "active", "activeFlags": []}}}
+
+            def fake_active_turn_id(socket_path: Path, thread_id: str) -> str:
+                calls.append({"helper": "active_turn_id", "socket_path": socket_path, "thread_id": thread_id})
+                return "turn-main-1"
+
+            self.addCleanup(setattr, self.core.app_server, "thread_read", original_thread_read)
+            self.addCleanup(setattr, self.core.app_server, "active_turn_id", original_active_turn_id)
+            self.core.app_server.thread_read = idle_thread_read
+
+            self.assertEqual(actions.parent_activity(), {"status": "idle", "active_turn_id": None})
+
+            self.core.app_server.thread_read = running_thread_read
+            self.core.app_server.active_turn_id = fake_active_turn_id
+            self.assertEqual(actions.parent_activity(), {"status": "running", "active_turn_id": "turn-main-1"})
+
+            def failing_thread_read(*_args: object, **_kwargs: object) -> dict[str, object]:
+                raise self.core.app_server.AppServerUnavailableError("app-server down")
+
+            self.core.app_server.thread_read = failing_thread_read
+            unavailable = actions.parent_activity()
+            self.assertEqual(unavailable["status"], "unavailable")
+            self.assertIn("app-server down", unavailable["error"])
+            self.assertEqual(calls[0]["helper"], "thread_read")
+
+    def test_parent_actions_submit_interrupt_and_record_neutral_action_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            actions = self.core.ActionGateway(context=context, state=state)
+            submit_calls: list[dict[str, object]] = []
+            interrupt_calls: list[dict[str, object]] = []
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
+            original_interrupt_turn = self.core.app_server.interrupt_turn
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                submit_calls.append({"socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, object]:
+                interrupt_calls.append({"socket_path": socket_path, "thread_id": thread_id})
+                return {"ok": True, "turn_id": "turn-main-1"}
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.addCleanup(setattr, self.core.app_server, "interrupt_turn", original_interrupt_turn)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+            self.core.app_server.interrupt_turn = fake_interrupt_turn
+
+            interrupt_result = actions.interrupt_parent(handler_name="message_available", origin_id="msg-1")
+            turn_id = actions.submit_parent_prompt("parent prompt", handler_name="message_available", origin_id="msg-1")
+
+            self.assertEqual(interrupt_result["interrupted_turn_id"], "turn-main-1")
+            self.assertEqual(turn_id, "turn-daemon-1")
+            self.assertEqual(interrupt_calls, [{"socket_path": context.socket_path, "thread_id": "thr-main"}])
+            self.assertEqual(submit_calls[0]["thread_id"], "thr-main")
+            records = self._action_records(instance["instance_root"])
+            self.assertEqual([record["action_type"] for record in records], ["parent_interrupt", "parent_submit"])
+            self.assertEqual(records[0]["interrupted_turn_id"], "turn-main-1")
+            self.assertEqual(records[1]["turn_id"], "turn-daemon-1")
+            self.assertEqual(records[1]["handler_name"], "message_available")
+            self.assertEqual(records[1]["origin_id"], "msg-1")
+            self.assertEqual(records[1]["status"], "handled")
+            saved = self._saved_state(instance["instance_root"])
+            self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
+
+    def test_interrupt_and_submit_records_submit_failure_after_successful_interrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            actions = self.core.ActionGateway(context=context, state=state)
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
+            original_interrupt_turn = self.core.app_server.interrupt_turn
+
+            def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, object]:
+                return {"ok": True, "turn_id": "turn-main-1"}
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                raise self.core.launcher_submit_turn.SubmitTurnError("submit failed after interrupt")
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.addCleanup(setattr, self.core.app_server, "interrupt_turn", original_interrupt_turn)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+            self.core.app_server.interrupt_turn = fake_interrupt_turn
+
+            with self.assertRaisesRegex(self.core.launcher_submit_turn.SubmitTurnError, "submit failed"):
+                actions.interrupt_and_submit_parent_prompt(
+                    "parent prompt",
+                    handler_name="message_available",
+                    origin_id="msg-1",
+                )
+
+            records = self._action_records(instance["instance_root"])
+            self.assertEqual([record["action_type"] for record in records], ["parent_interrupt", "parent_submit"])
+            self.assertEqual(records[0]["status"], "handled")
+            self.assertEqual(records[0]["interrupted_turn_id"], "turn-main-1")
+            self.assertEqual(records[1]["status"], "failed")
+            self.assertIn("submit failed after interrupt", records[1]["error"])
+            self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
+
+    def test_side_actions_start_reuse_send_close_and_record_runtime_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            actions = self.core.ActionGateway(context=context, state=state)
+            calls: list[dict[str, object]] = []
+            original_side_start = self.core.app_server.side_start
+            original_input_turn = self.core.app_server.input_turn
+            original_side_close = self.core.app_server.side_close
+
+            def fake_side_start(
+                socket_path: Path,
+                parent_thread_id: str,
+                text: str,
+                *,
+                workspace_dir: Path,
+                shared_project_workspace_dir: Path,
+                permissions: str,
+            ) -> dict[str, object]:
+                calls.append(
+                    {
+                        "helper": "side_start",
+                        "socket_path": socket_path,
+                        "parent_thread_id": parent_thread_id,
+                        "text": text,
+                        "workspace_dir": workspace_dir,
+                        "shared_project_workspace_dir": shared_project_workspace_dir,
+                        "permissions": permissions,
+                    }
+                )
+                return {"action": "start", "side_thread_id": "thr-side-1", "turn_id": "turn-side-1"}
+
+            def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+                return {"action": "start", "turn_id": "turn-side-2"}
+
+            def fake_side_close(socket_path: Path, side_thread_id: str) -> dict[str, object]:
+                calls.append({"helper": "side_close", "socket_path": socket_path, "side_thread_id": side_thread_id})
+                return {"ok": True, "turn_id": "turn-side-2"}
+
+            self.addCleanup(setattr, self.core.app_server, "side_start", original_side_start)
+            self.addCleanup(setattr, self.core.app_server, "input_turn", original_input_turn)
+            self.addCleanup(setattr, self.core.app_server, "side_close", original_side_close)
+            self.core.app_server.side_start = fake_side_start
+            self.core.app_server.input_turn = fake_input_turn
+            self.core.app_server.side_close = fake_side_close
+
+            started = actions.start_or_reuse_side_triage("triage prompt", handler_name="message_available", origin_id="msg-1")
+            reused = actions.start_or_reuse_side_triage("follow up", handler_name="message_available", origin_id="msg-2")
+            closed = actions.close_side_triage("thr-side-1", handler_name="message_available", origin_id="msg-2")
+
+            self.assertEqual(started["side_thread_id"], "thr-side-1")
+            self.assertEqual(reused["side_thread_id"], "thr-side-1")
+            self.assertEqual(reused["action"], "send")
+            self.assertEqual(closed["side_thread_id"], "thr-side-1")
+            self.assertEqual([call["helper"] for call in calls], ["side_start", "input_turn", "side_close"])
+            self.assertEqual(calls[0]["workspace_dir"], context.workspace_dir)
+            self.assertEqual(calls[0]["shared_project_workspace_dir"], context.project_workspace_dir)
+            self.assertEqual(calls[0]["permissions"], "buddyswitch-runtime")
+            records = self._action_records(instance["instance_root"])
+            self.assertEqual([record["action_type"] for record in records], ["side_start", "side_send", "side_close"])
+            self.assertEqual([record["side_thread_id"] for record in records], ["thr-side-1", "thr-side-1", "thr-side-1"])
+            payload = json.loads(instance["instance_json"].read_text(encoding="utf-8"))
+            self.assertEqual(payload.get("side_threads"), [])
 
 
 if __name__ == "__main__":

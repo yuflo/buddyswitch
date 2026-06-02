@@ -193,7 +193,13 @@ class DaemonMailboxServer:
         request_id = request.get("request_id") if isinstance(request.get("request_id"), str) else None
         if request.get("protocol") != daemon_client.MAILBOX_PROTOCOL:
             return self._response(request_id, code="mailbox_protocol_error", message="unsupported mailbox protocol")
-        if request.get("method") != "mailbox.deliver":
+        method = request.get("method")
+        if method == "mailbox.parent_required":
+            params = request.get("params")
+            if not isinstance(params, dict):
+                return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
+            return self._dispatch_parent_required(request_id, params)
+        if method != "mailbox.deliver":
             return self._response(request_id, code="mailbox_unknown_method", message="unsupported mailbox method")
         params = request.get("params")
         if not isinstance(params, dict):
@@ -259,6 +265,86 @@ class DaemonMailboxServer:
                 "signal": signal,
             },
         )
+
+    def _validate_parent_required_request(self, params: dict[str, Any]) -> dict[str, Any]:
+        actor_payload = _actor_address_payload(params.get("actor_address"), "actor_address")
+        actor_address = ActorAddress.from_payload(actor_payload)
+        if actor_address != self.local_actor_address:
+            raise PermissionError("signal target does not match local actor")
+        parent_thread_id = runtime_files.require_id(params.get("parent_thread_id"), "parent_thread_id")
+        side_thread_id = runtime_files.require_id(params.get("side_thread_id"), "side_thread_id")
+        message_id = runtime_files.require_id(params.get("message_id"), "message_id")
+        reason = _non_empty_string(params.get("reason"), "reason")
+        context_parent = getattr(self.context, "main_thread_id", None)
+        if not isinstance(context_parent, str) or not context_parent:
+            raise ValueError("parent-required request requires daemon context main_thread_id")
+        if parent_thread_id != context_parent:
+            raise ValueError("parent_thread_id does not match local parent thread")
+        if side_thread_id == parent_thread_id:
+            raise ValueError("side_thread_id must not be the parent thread id")
+        return {
+            "actor_address": actor_payload,
+            "parent_thread_id": parent_thread_id,
+            "side_thread_id": side_thread_id,
+            "message_id": message_id,
+            "reason": reason,
+        }
+
+    def _dispatch_parent_required(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parent_required = self._validate_parent_required_request(params)
+        except PermissionError as exc:
+            return self._response(request_id, code="wrong_target_actor", message=str(exc))
+        except Exception as exc:
+            return self._response(request_id, code="invalid_parent_required", message=str(exc))
+
+        handled = 0
+        matched = 0
+        errors: list[str] = []
+        handled_payload: dict[str, Any] = {}
+        for handler in self.handlers:
+            handle = getattr(handler, "handle_parent_required", None)
+            if not callable(handle):
+                continue
+            matched += 1
+            try:
+                actions = self.actions_factory() if callable(self.actions_factory) else None
+                result = handle(self.context, self.state, actions, parent_required)
+                status = result.get("status") if isinstance(result, dict) else getattr(result, "status", None)
+                if status == "handled":
+                    handled += 1
+                    if isinstance(result, dict):
+                        handled_payload.update(
+                            {
+                                key: value
+                                for key, value in result.items()
+                                if key not in {"status", "message"} and value is not None
+                            }
+                        )
+                elif status == "failed":
+                    message = result.get("message") if isinstance(result, dict) else getattr(result, "message", "")
+                    errors.append(str(message or "handler failed"))
+            except Exception as exc:
+                errors.append(str(exc))
+        if errors:
+            payload = {
+                "accepted": True,
+                "handled_count": handled,
+                "matched_count": matched,
+                "handling_status": "failed",
+                "handling_error": "; ".join(errors),
+            }
+            payload.update(handled_payload)
+            return self._response(request_id, payload)
+        handling_status = "handled" if handled > 0 else "ignored"
+        payload = {
+            "accepted": True,
+            "handled_count": handled,
+            "matched_count": matched,
+            "handling_status": handling_status,
+        }
+        payload.update(handled_payload)
+        return self._response(request_id, payload)
 
 
 def mailbox_socket_path(instance_root: Path) -> Path:

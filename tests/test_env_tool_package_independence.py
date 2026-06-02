@@ -185,6 +185,7 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
                         return results.success(
                             tool="probe",
                             action="probe.ping",
+                            active_actor=context.active_actor.to_payload(),
                             active_role=context.active_role,
                             effect_summary="Probe ping success.",
                             state_changed=False,

@@ -23,12 +23,14 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import app_server  # noqa: E402
 import daemon_mailbox  # noqa: E402
+import side_thread_registry  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 
 
 MAX_DAEMON_ORIGIN_TURN_IDS = 50
+MAX_DAEMON_ACTION_IDS = 200
 DAEMON_CLIENT_NAME = "buddyswitch_daemon"
 DAEMON_CLIENT_TITLE = "BuddySwitch Daemon"
 DAEMON_PERMISSIONS = "buddyswitch-runtime"
@@ -132,6 +134,8 @@ def _state_payload(actor_id: str, main_thread_id: str) -> dict[str, Any]:
         "main_thread_id": main_thread_id,
         "daemon_origin_turn_ids": [],
         "daemon_origin_turns": {},
+        "daemon_action_ids": [],
+        "daemon_actions": {},
         "ready": None,
         "last_error": None,
         "handlers": {},
@@ -248,6 +252,53 @@ class DaemonState:
                 "created_at": created_at,
             }
         payload["daemon_origin_turns"] = turn_records
+        if not isinstance(payload.get("daemon_action_ids"), list):
+            payload["daemon_action_ids"] = []
+        payload["daemon_action_ids"] = [
+            item for item in payload["daemon_action_ids"] if isinstance(item, str) and item
+        ][-MAX_DAEMON_ACTION_IDS:]
+        raw_action_records = payload.get("daemon_actions")
+        if not isinstance(raw_action_records, dict):
+            raw_action_records = {}
+        action_records: dict[str, Any] = {}
+        for action_id in payload["daemon_action_ids"]:
+            raw_record = raw_action_records.get(action_id)
+            if not isinstance(raw_record, dict):
+                continue
+            record_action_id = raw_record.get("action_id")
+            if isinstance(record_action_id, str) and record_action_id and record_action_id != action_id:
+                continue
+            action_type = raw_record.get("action_type")
+            handler_name = raw_record.get("handler_name")
+            status = raw_record.get("status")
+            if not isinstance(action_type, str) or not action_type:
+                continue
+            if not isinstance(handler_name, str) or not handler_name:
+                continue
+            if status not in {"handled", "failed"}:
+                continue
+            created_at = raw_record.get("created_at")
+            if not isinstance(created_at, str) or not created_at:
+                created_at = _utc_now()
+            updated_at = raw_record.get("updated_at")
+            if not isinstance(updated_at, str) or not updated_at:
+                updated_at = created_at
+            record = {
+                "action_id": action_id,
+                "handler_name": handler_name,
+                "origin_id": raw_record.get("origin_id") if isinstance(raw_record.get("origin_id"), str) else None,
+                "action_type": action_type,
+                "parent_thread_id": raw_record.get("parent_thread_id") if isinstance(raw_record.get("parent_thread_id"), str) else None,
+                "side_thread_id": raw_record.get("side_thread_id") if isinstance(raw_record.get("side_thread_id"), str) else None,
+                "turn_id": raw_record.get("turn_id") if isinstance(raw_record.get("turn_id"), str) else None,
+                "interrupted_turn_id": raw_record.get("interrupted_turn_id") if isinstance(raw_record.get("interrupted_turn_id"), str) else None,
+                "status": status,
+                "error": raw_record.get("error") if isinstance(raw_record.get("error"), str) else None,
+                "created_at": created_at,
+                "updated_at": updated_at,
+            }
+            action_records[action_id] = record
+        payload["daemon_actions"] = action_records
         if not isinstance(payload.get("ready"), dict):
             payload["ready"] = None
         if "last_error" not in payload:
@@ -309,6 +360,60 @@ class DaemonState:
             records.pop(turn_id, None)
         self.payload["daemon_origin_turns"] = records
         self.save()
+
+    def record_daemon_action(
+        self,
+        *,
+        handler_name: str,
+        origin_id: str | None,
+        action_type: str,
+        parent_thread_id: str | None = None,
+        side_thread_id: str | None = None,
+        turn_id: str | None = None,
+        interrupted_turn_id: str | None = None,
+        status: str,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(handler_name, str) or not handler_name:
+            raise ValueError("handler_name is required")
+        if not isinstance(action_type, str) or not action_type:
+            raise ValueError("action_type is required")
+        if status not in {"handled", "failed"}:
+            raise ValueError(f"invalid daemon action status: {status}")
+        action_ids = [item for item in self.payload.get("daemon_action_ids", []) if isinstance(item, str) and item]
+        actions = self.payload.get("daemon_actions")
+        if not isinstance(actions, dict):
+            actions = {}
+        counter = 1
+        while True:
+            action_id = f"daemon-action-{counter}"
+            if action_id not in actions:
+                break
+            counter += 1
+        timestamp = _utc_now()
+        record = {
+            "action_id": action_id,
+            "handler_name": handler_name,
+            "origin_id": origin_id if isinstance(origin_id, str) and origin_id else None,
+            "action_type": action_type,
+            "parent_thread_id": parent_thread_id if isinstance(parent_thread_id, str) and parent_thread_id else None,
+            "side_thread_id": side_thread_id if isinstance(side_thread_id, str) and side_thread_id else None,
+            "turn_id": turn_id if isinstance(turn_id, str) and turn_id else None,
+            "interrupted_turn_id": interrupted_turn_id if isinstance(interrupted_turn_id, str) and interrupted_turn_id else None,
+            "status": status,
+            "error": error if isinstance(error, str) and error else None,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        action_ids = [item for item in action_ids if item != action_id]
+        action_ids.append(action_id)
+        action_ids = action_ids[-MAX_DAEMON_ACTION_IDS:]
+        actions = {key: value for key, value in actions.items() if key in action_ids}
+        actions[action_id] = record
+        self.payload["daemon_action_ids"] = action_ids
+        self.payload["daemon_actions"] = actions
+        self.save()
+        return record
 
     def record_error(self, *, origin_turn_id: str | None, message: str) -> None:
         self.payload["last_error"] = {
@@ -440,29 +545,273 @@ class ActionGateway:
         self.client = client
 
     def submit_turn(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
-        result = launcher_submit_turn.submit_turn(
-            socket_path=self.context.socket_path,
-            thread_id=self.context.main_thread_id,
-            text=text,
-            permissions=self.context.permissions,
+        return self.submit_parent_prompt(text, handler_name=handler_name, origin_id=origin_turn_id)
+
+    def parent_activity(self) -> dict[str, Any]:
+        try:
+            result = app_server.thread_read(self.context.socket_path, self.context.main_thread_id, include_turns=False)
+            thread = result.get("thread")
+            if not isinstance(thread, dict):
+                raise app_server.AppServerProtocolError("thread/read did not return a thread object")
+            status_kind = app_server._thread_status_kind(thread.get("status"))
+            if status_kind == "idle":
+                return {"status": "idle", "active_turn_id": None}
+            if status_kind == "active":
+                return {
+                    "status": "running",
+                    "active_turn_id": app_server.active_turn_id(self.context.socket_path, self.context.main_thread_id),
+                }
+            raise app_server.AppServerUnavailableError(
+                f"thread {self.context.main_thread_id} is not active or idle"
+            )
+        except Exception as exc:
+            return {"status": "unavailable", "error": str(exc)}
+
+    def _record_action(
+        self,
+        *,
+        handler_name: str,
+        origin_id: str | None,
+        action_type: str,
+        status: str,
+        side_thread_id: str | None = None,
+        turn_id: str | None = None,
+        interrupted_turn_id: str | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        return self.state.record_daemon_action(
+            handler_name=handler_name,
+            origin_id=origin_id,
+            action_type=action_type,
+            parent_thread_id=self.context.main_thread_id,
+            side_thread_id=side_thread_id,
+            turn_id=turn_id,
+            interrupted_turn_id=interrupted_turn_id,
+            status=status,
+            error=error,
         )
-        turn_id = _turn_id_from_submit_result(result)
-        if not turn_id:
-            raise launcher_submit_turn.SubmitTurnError("submit_turn did not return a turn id")
+
+    def submit_parent_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> str:
+        try:
+            result = launcher_submit_turn.submit_turn(
+                socket_path=self.context.socket_path,
+                thread_id=self.context.main_thread_id,
+                text=text,
+                permissions=self.context.permissions,
+            )
+            turn_id = _turn_id_from_submit_result(result)
+            if not turn_id:
+                raise launcher_submit_turn.SubmitTurnError("submit_turn did not return a turn id")
+        except Exception as exc:
+            self._record_action(
+                handler_name=handler_name,
+                origin_id=origin_id,
+                action_type="parent_submit",
+                status="failed",
+                error=str(exc),
+            )
+            raise
+        self._record_action(
+            handler_name=handler_name,
+            origin_id=origin_id,
+            action_type="parent_submit",
+            status="handled",
+            turn_id=turn_id,
+        )
         self.state.record_daemon_origin_turn(
             turn_id,
             handler_name=handler_name,
-            origin_turn_id=origin_turn_id,
+            origin_turn_id=origin_id,
         )
         self.state.update_handler_state(
             handler_name,
             {
-                "last_origin_turn_id": origin_turn_id,
+                "last_origin_turn_id": origin_id,
                 "last_action_turn_id": turn_id,
                 "last_error": None,
             },
         )
         return turn_id
+
+    def interrupt_parent(self, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+        try:
+            result = app_server.interrupt_turn(self.context.socket_path, self.context.main_thread_id)
+            interrupted_turn_id = _string_field(result, "turn_id", "turnId")
+            if not interrupted_turn_id:
+                raise app_server.AppServerProtocolError("turn/interrupt did not return a turn id")
+        except Exception as exc:
+            self._record_action(
+                handler_name=handler_name,
+                origin_id=origin_id,
+                action_type="parent_interrupt",
+                status="failed",
+                error=str(exc),
+            )
+            raise
+        self._record_action(
+            handler_name=handler_name,
+            origin_id=origin_id,
+            action_type="parent_interrupt",
+            status="handled",
+            interrupted_turn_id=interrupted_turn_id,
+        )
+        return {"interrupted_turn_id": interrupted_turn_id}
+
+    def interrupt_and_submit_parent_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+        interrupted = self.interrupt_parent(handler_name=handler_name, origin_id=origin_id)
+        turn_id = self.submit_parent_prompt(text, handler_name=handler_name, origin_id=origin_id)
+        return {
+            "interrupted_turn_id": interrupted.get("interrupted_turn_id"),
+            "turn_id": turn_id,
+        }
+
+    def start_side_triage(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+        side_thread_id: str | None = None
+        try:
+            result = app_server.side_start(
+                self.context.socket_path,
+                self.context.main_thread_id,
+                text,
+                workspace_dir=self.context.workspace_dir,
+                shared_project_workspace_dir=self.context.project_workspace_dir,
+                permissions=self.context.permissions,
+            )
+            side_thread_id = _string_field(result, "side_thread_id", "sideThreadId")
+            if not side_thread_id:
+                raise app_server.AppServerProtocolError("side_start did not return a side_thread_id")
+            side_thread_registry.register_side_thread(
+                self.context.instance_json,
+                actor_id=self.context.actor_id,
+                parent_thread_id=self.context.main_thread_id,
+                side_thread_id=side_thread_id,
+            )
+            turn_id = _string_field(result, "turn_id", "turnId")
+        except Exception as exc:
+            self._record_action(
+                handler_name=handler_name,
+                origin_id=origin_id,
+                action_type="side_start",
+                side_thread_id=side_thread_id,
+                status="failed",
+                error=str(exc),
+            )
+            raise
+        self._record_action(
+            handler_name=handler_name,
+            origin_id=origin_id,
+            action_type="side_start",
+            side_thread_id=side_thread_id,
+            turn_id=turn_id,
+            status="handled",
+        )
+        payload = dict(result)
+        payload["action"] = "start"
+        payload["side_thread_id"] = side_thread_id
+        return payload
+
+    def send_side_triage(
+        self,
+        side_thread_id: str,
+        text: str,
+        *,
+        handler_name: str,
+        origin_id: str | None,
+    ) -> dict[str, Any]:
+        try:
+            side_thread_registry.require_side_thread(
+                self.context.instance_json,
+                actor_id=self.context.actor_id,
+                parent_thread_id=self.context.main_thread_id,
+                side_thread_id=side_thread_id,
+            )
+            result = app_server.input_turn(
+                self.context.socket_path,
+                side_thread_id,
+                text,
+                self.context.permissions,
+            )
+            turn_id = _string_field(result, "turn_id", "turnId")
+        except Exception as exc:
+            self._record_action(
+                handler_name=handler_name,
+                origin_id=origin_id,
+                action_type="side_send",
+                side_thread_id=side_thread_id,
+                status="failed",
+                error=str(exc),
+            )
+            raise
+        self._record_action(
+            handler_name=handler_name,
+            origin_id=origin_id,
+            action_type="side_send",
+            side_thread_id=side_thread_id,
+            turn_id=turn_id,
+            status="handled",
+        )
+        payload: dict[str, Any] = dict(result)
+        payload["action"] = "send"
+        payload["thread_action"] = result.get("action")
+        payload["side_thread_id"] = side_thread_id
+        return payload
+
+    def start_or_reuse_side_triage(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+        row = side_thread_registry.find_open_side_thread(
+            self.context.instance_json,
+            actor_id=self.context.actor_id,
+            parent_thread_id=self.context.main_thread_id,
+        )
+        side_thread_id = row.get("thread_id") if isinstance(row, dict) else None
+        if isinstance(side_thread_id, str) and side_thread_id:
+            return self.send_side_triage(side_thread_id, text, handler_name=handler_name, origin_id=origin_id)
+        return self.start_side_triage(text, handler_name=handler_name, origin_id=origin_id)
+
+    def require_side_thread(self, side_thread_id: str) -> dict[str, Any]:
+        return side_thread_registry.require_side_thread(
+            self.context.instance_json,
+            actor_id=self.context.actor_id,
+            parent_thread_id=self.context.main_thread_id,
+            side_thread_id=side_thread_id,
+        )
+
+    def close_side_triage(self, side_thread_id: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+        try:
+            side_thread_registry.require_side_thread(
+                self.context.instance_json,
+                actor_id=self.context.actor_id,
+                parent_thread_id=self.context.main_thread_id,
+                side_thread_id=side_thread_id,
+            )
+            result = app_server.side_close(self.context.socket_path, side_thread_id)
+            side_thread_registry.unregister_side_thread(
+                self.context.instance_json,
+                actor_id=self.context.actor_id,
+                parent_thread_id=self.context.main_thread_id,
+                side_thread_id=side_thread_id,
+            )
+            turn_id = _string_field(result, "turn_id", "turnId")
+        except Exception as exc:
+            self._record_action(
+                handler_name=handler_name,
+                origin_id=origin_id,
+                action_type="side_close",
+                side_thread_id=side_thread_id,
+                status="failed",
+                error=str(exc),
+            )
+            raise
+        self._record_action(
+            handler_name=handler_name,
+            origin_id=origin_id,
+            action_type="side_close",
+            side_thread_id=side_thread_id,
+            turn_id=turn_id,
+            status="handled",
+        )
+        payload: dict[str, Any] = dict(result)
+        payload["action"] = "close"
+        payload["side_thread_id"] = side_thread_id
+        return payload
 
 
 def load_daemon_context(instance_json: Path) -> DaemonContext:
@@ -696,6 +1045,14 @@ def _handler_status_payload(
     return {"registered": registered, "items": items}
 
 
+def _action_status_payload(state: DaemonState) -> dict[str, Any]:
+    action_ids = [item for item in state.payload.get("daemon_action_ids", []) if isinstance(item, str) and item]
+    actions = state.payload.get("daemon_actions")
+    action_items = actions if isinstance(actions, dict) else {}
+    items = {action_id: action_items[action_id] for action_id in action_ids if action_id in action_items}
+    return {"ids": list(items), "items": items}
+
+
 def daemon_status(
     instance_json: Path,
     *,
@@ -732,6 +1089,7 @@ def daemon_status(
         "log_path": str(log_path),
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
+        "actions": _action_status_payload(state),
         "handlers": _handler_status_payload(
             state,
             handlers,

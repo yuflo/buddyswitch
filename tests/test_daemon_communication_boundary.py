@@ -48,6 +48,20 @@ def _class_source(path: Path, class_name: str) -> str:
     raise AssertionError(f"{class_name} not found in {path}")
 
 
+def _source_without_functions(path: Path, excluded_names: set[str]) -> str:
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    segments: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in excluded_names:
+            segment = ast.get_source_segment(source, node)
+            if segment:
+                segments.append(segment)
+    for segment in segments:
+        source = source.replace(segment, "")
+    return source
+
+
 class DaemonCommunicationBoundaryTests(unittest.TestCase):
     def test_daemon_uses_central_client_not_daemon_presence_helper(self) -> None:
         imports_by_file = {path: _imported_modules(path) for path in _existing_sources()}
@@ -92,7 +106,18 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
             for path in _existing_sources()
             if path.name not in {"message_available_handler.py", "context.py"}
         ]
-        source = "\n".join(path.read_text(encoding="utf-8") for path in base_files)
+        chunks = []
+        for path in base_files:
+            if path.name == "daemon_mailbox.py":
+                chunks.append(
+                    _source_without_functions(
+                        path,
+                        {"_validate_parent_required_request", "_dispatch_parent_required"},
+                    )
+                )
+            else:
+                chunks.append(path.read_text(encoding="utf-8"))
+        source = "\n".join(chunks)
 
         self.assertIn("signal.deliver", source)
         self.assertIn("deliver_signal", source)

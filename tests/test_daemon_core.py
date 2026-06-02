@@ -129,6 +129,8 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             self.assertEqual(state.payload["actor_id"], "act-dev-daed00000001")
             self.assertEqual(state.payload["main_thread_id"], "thr-main")
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
+            self.assertEqual(state.payload["daemon_action_ids"], [])
+            self.assertEqual(state.payload["daemon_actions"], {})
             self.assertEqual(state.payload["handlers"], {})
             self.assertIsNone(state.payload["ready"])
             self.assertIsNone(state.payload["last_error"])
@@ -653,6 +655,31 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertEqual(payload["state_path"], str(self.core.daemon_state_file(instance["instance_root"])))
             self.assertIsNone(payload["last_error"]["origin_turn_id"])
             self.assertEqual(payload["last_error"]["message"], "socket gone")
+
+    def test_daemon_status_reports_recent_runtime_action_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            state = self.core.DaemonState.load(
+                instance_root=instance["instance_root"],
+                actor_id="act-dev-daed00000001",
+                main_thread_id="thr-main",
+            )
+            record = state.record_daemon_action(
+                handler_name="message_available",
+                origin_id="msg-1",
+                action_type="side_start",
+                parent_thread_id="thr-main",
+                side_thread_id="thr-side-1",
+                turn_id="turn-side-1",
+                status="handled",
+            )
+
+            payload = self.core.daemon_status(instance["instance_json"])
+
+            self.assertEqual(payload["actions"]["ids"], [record["action_id"]])
+            self.assertEqual(payload["actions"]["items"][record["action_id"]]["action_type"], "side_start")
+            self.assertEqual(payload["actions"]["items"][record["action_id"]]["side_thread_id"], "thr-side-1")
+            self.assertEqual(payload["actions"]["items"][record["action_id"]]["origin_id"], "msg-1")
 
     def test_daemon_status_reports_registered_handler_observability(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

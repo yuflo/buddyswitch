@@ -410,6 +410,7 @@ print(json.dumps({
                         return results.success(
                             tool="probe",
                             action="probe.ping",
+                            active_actor=context.active_actor.to_payload(),
                             active_role=context.active_role,
                             effect_summary="Probe echoed one payload message.",
                             state_changed=False,

@@ -33,6 +33,25 @@ class MessageAvailableHandler:
     def handles(self, signal: dict[str, Any]) -> bool:
         return isinstance(signal, dict) and signal.get("type") == "message.available"
 
+    def parent_prompt(self) -> str:
+        return (
+            "[MESSAGE AVAILABLE]\n"
+            "A direct message is available for this actor.\n"
+            "Use native `message__list` to read the inbox.\n"
+            "Use native `message__conversation` when bidirectional context is needed."
+        )
+
+    def side_triage_prompt(self) -> str:
+        return (
+            "[MESSAGE TRIAGE]\n"
+            "A direct message is available for this actor while the parent thread is running.\n"
+            "Use native `message__list` to read the inbox.\n"
+            "Use native `message__conversation` when bidirectional context is needed.\n"
+            "When the message can be handled independently, send the direct reply with native `message__send`.\n"
+            "When parent is required because the message conflicts with, interrupts, corrects, or materially affects "
+            "the parent work, send the typed parent-required request to the local daemon."
+        )
+
     def handle_signal(
         self,
         context: Any,
@@ -52,17 +71,57 @@ class MessageAvailableHandler:
             if not isinstance(payload, dict):
                 return daemon_core.HandlerResult.failed("message.available payload must be an object")
             message_id = runtime_files.require_id(payload.get("message_id"), "message_id")
-            prompt = (
-                "[MESSAGE AVAILABLE]\n"
-                "A direct message is available for this actor.\n"
-                "Use native `message__list` to read the inbox.\n"
-                "Use native `message__conversation` when bidirectional context is needed."
-            )
-            actions.submit_turn(
-                prompt,
-                handler_name=self.name,
-                origin_turn_id=message_id,
-            )
-            return daemon_core.HandlerResult.handled()
+            activity = actions.parent_activity()
+            status = activity.get("status") if isinstance(activity, dict) else None
+            if status == "idle":
+                actions.submit_parent_prompt(
+                    self.parent_prompt(),
+                    handler_name=self.name,
+                    origin_id=message_id,
+                )
+                return daemon_core.HandlerResult.handled()
+            if status == "running":
+                actions.start_or_reuse_side_triage(
+                    self.side_triage_prompt(),
+                    handler_name=self.name,
+                    origin_id=message_id,
+                )
+                return daemon_core.HandlerResult.handled()
+            error = activity.get("error") if isinstance(activity, dict) else None
+            return daemon_core.HandlerResult.failed(str(error or "parent thread activity is unavailable"))
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))
+
+    def handle_parent_required(
+        self,
+        context: Any,
+        state: Any,
+        actions: Any,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        del context, state
+        try:
+            if not isinstance(request, dict):
+                raise ValueError("parent-required request must be an object")
+            message_id = runtime_files.require_id(request.get("message_id"), "message_id")
+            side_thread_id = runtime_files.require_id(request.get("side_thread_id"), "side_thread_id")
+            actions.require_side_thread(side_thread_id)
+            result = actions.interrupt_and_submit_parent_prompt(
+                self.parent_prompt(),
+                handler_name=self.name,
+                origin_id=message_id,
+            )
+            payload = {
+                "status": "handled",
+                "side_thread_id": side_thread_id,
+            }
+            if isinstance(result, dict):
+                interrupted_turn_id = result.get("interrupted_turn_id")
+                turn_id = result.get("turn_id")
+                if isinstance(interrupted_turn_id, str) and interrupted_turn_id:
+                    payload["interrupted_turn_id"] = interrupted_turn_id
+                if isinstance(turn_id, str) and turn_id:
+                    payload["turn_id"] = turn_id
+            return payload
+        except Exception as exc:
+            return {"status": "failed", "message": str(exc)}

@@ -585,52 +585,11 @@ buddyswitch_instance_register_side_thread() {
   local instance_json
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
-  python3 - "${instance_json}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-instance_json = Path(sys.argv[1])
-actor_id = sys.argv[2]
-parent_thread_id = sys.argv[3]
-side_thread_id = sys.argv[4]
-
-if not instance_json.exists():
-    raise SystemExit(f"Instance record missing: {instance_json}")
-if not parent_thread_id:
-    raise SystemExit("Parent thread id is required")
-if not side_thread_id:
-    raise SystemExit("Side thread id is required")
-if side_thread_id == parent_thread_id:
-    raise SystemExit("Side thread id must not equal main thread id")
-
-payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("actor_id") != actor_id:
-    raise SystemExit(f"Actor id mismatch in {instance_json}")
-
-now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-side_threads = payload.get("side_threads")
-if not isinstance(side_threads, list):
-    side_threads = []
-payload["side_threads"] = [
-    row for row in side_threads
-    if not (isinstance(row, dict) and row.get("thread_id") == side_thread_id)
-]
-payload["side_threads"].append(
-    {
-        "thread_id": side_thread_id,
-        "parent_thread_id": parent_thread_id,
-        "status": "open",
-        "created_at": now,
-        "updated_at": now,
-    }
-)
-payload["updated_at"] = now
-temp_path = instance_json.with_suffix(".tmp")
-temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-temp_path.replace(instance_json)
-PY
+  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_registry.py" register \
+    --instance-json "${instance_json}" \
+    --actor-id "${actor_id}" \
+    --parent-thread-id "${parent_thread_id}" \
+    --side-thread-id "${side_thread_id}" >/dev/null
 }
 
 buddyswitch_instance_require_side_thread() {
@@ -640,44 +599,11 @@ buddyswitch_instance_require_side_thread() {
   local instance_json
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
-  python3 - "${instance_json}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-instance_json = Path(sys.argv[1])
-actor_id = sys.argv[2]
-parent_thread_id = sys.argv[3]
-side_thread_id = sys.argv[4]
-
-if not instance_json.exists():
-    print(f"Instance record missing: {instance_json}", file=sys.stderr)
-    raise SystemExit(2)
-if not side_thread_id:
-    print("Side thread id is required", file=sys.stderr)
-    raise SystemExit(2)
-if side_thread_id == parent_thread_id:
-    print("Side thread id must not be the main thread id.", file=sys.stderr)
-    raise SystemExit(2)
-
-payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("actor_id") != actor_id:
-    print(f"Actor id mismatch in {instance_json}", file=sys.stderr)
-    raise SystemExit(2)
-
-side_threads = payload.get("side_threads")
-if not isinstance(side_threads, list):
-    side_threads = []
-for row in side_threads:
-    if not isinstance(row, dict):
-        continue
-    if row.get("thread_id") == side_thread_id and row.get("parent_thread_id") == parent_thread_id:
-        print(json.dumps(row, ensure_ascii=True))
-        raise SystemExit(0)
-
-print(f"Side thread is not registered for this instance: {side_thread_id}", file=sys.stderr)
-raise SystemExit(3)
-PY
+  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_registry.py" require \
+    --instance-json "${instance_json}" \
+    --actor-id "${actor_id}" \
+    --parent-thread-id "${parent_thread_id}" \
+    --side-thread-id "${side_thread_id}"
 }
 
 buddyswitch_instance_unregister_side_thread() {
@@ -687,39 +613,11 @@ buddyswitch_instance_unregister_side_thread() {
   local instance_json
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
-  python3 - "${instance_json}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-instance_json = Path(sys.argv[1])
-actor_id = sys.argv[2]
-parent_thread_id = sys.argv[3]
-side_thread_id = sys.argv[4]
-
-if not instance_json.exists():
-    raise SystemExit(f"Instance record missing: {instance_json}")
-payload = json.loads(instance_json.read_text(encoding="utf-8"))
-if payload.get("actor_id") != actor_id:
-    raise SystemExit(f"Actor id mismatch in {instance_json}")
-
-side_threads = payload.get("side_threads")
-if not isinstance(side_threads, list):
-    side_threads = []
-payload["side_threads"] = [
-    row for row in side_threads
-    if not (
-        isinstance(row, dict)
-        and row.get("thread_id") == side_thread_id
-        and row.get("parent_thread_id") == parent_thread_id
-    )
-]
-payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-temp_path = instance_json.with_suffix(".tmp")
-temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-temp_path.replace(instance_json)
-PY
+  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_registry.py" unregister \
+    --instance-json "${instance_json}" \
+    --actor-id "${actor_id}" \
+    --parent-thread-id "${parent_thread_id}" \
+    --side-thread-id "${side_thread_id}" >/dev/null
 }
 
 buddyswitch_instance_clear_app_server() {

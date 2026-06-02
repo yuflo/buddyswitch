@@ -18,6 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
 TASK_CHECKOUT_HANDLER_PATH = ROOT / "tools" / "launcher" / "task_checkout_handler.py"
+CENTRAL_DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
+MESSAGE_AVAILABLE_HANDLER_PATH = ROOT / "tools" / "launcher" / "message_available_handler.py"
+DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
 MODULE_COUNTER = count()
 TASK_DOMAIN_IMPORTS = {"env.domain.task_management", "env.domain.task_tui"}
 TASK_DOMAIN_SYMBOLS = {"task_management", "task_tui"}
@@ -197,6 +200,38 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         self.assertNotIn("task_tui", daemon_core_source)
         self.assertNotIn("task_management", daemon_core_source)
         self.assertNotIn("stop_tui", daemon_core_source)
+
+    def test_daemon_core_does_not_import_message_handler_or_message_domain(self) -> None:
+        daemon_core_imports = _imported_modules(DAEMON_CORE_PATH)
+        self.assertNotIn("message_available_handler", daemon_core_imports)
+        self.assertNotIn("env.domain.message", daemon_core_imports)
+        self.assertNotIn("env.domain.messages", daemon_core_imports)
+
+    def test_central_daemon_remains_reachability_only_without_thread_activity_imports(self) -> None:
+        imports = _imported_modules(CENTRAL_DAEMON_CORE_PATH)
+        source = CENTRAL_DAEMON_CORE_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("app_server", imports)
+        self.assertNotIn("daemon_core", imports)
+        self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("thread_read", source)
+        self.assertNotIn("active_turn_id", source)
+        self.assertNotIn("parent_activity", source)
+
+    def test_message_handler_does_not_directly_interrupt_or_mutate_side_registry(self) -> None:
+        source = MESSAGE_AVAILABLE_HANDLER_PATH.read_text(encoding="utf-8")
+        self.assertIn("message.available", source)
+        self.assertIn("message_id", source)
+        self.assertNotIn("interrupt_turn", source)
+        self.assertNotIn("launcher_submit_turn", source)
+        self.assertNotIn("side_thread_registry", source)
+        self.assertNotIn("submit_turn(", source)
+
+    def test_mailbox_parent_required_support_is_narrow_not_generic_event_bus(self) -> None:
+        source = DAEMON_MAILBOX_PATH.read_text(encoding="utf-8")
+        self.assertIn("mailbox.parent_required", source)
+        self.assertNotIn("workflow", source.lower())
+        self.assertNotIn("plugin", source.lower())
+        self.assertNotIn("event_bus", source.lower())
 
     def test_daemon_core_can_dispatch_to_noop_handler(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

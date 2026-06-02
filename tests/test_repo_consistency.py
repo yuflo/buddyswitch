@@ -41,6 +41,7 @@ _DOC_SPEC_CONTEXT_MARKERS = (
     "parallel-agent-execution-plan",
     "remove-" + "dash" + "board-and-skill-create",
     "scope",
+    "task-checkout-plan",
     "task-split",
     "test-plan",
 )

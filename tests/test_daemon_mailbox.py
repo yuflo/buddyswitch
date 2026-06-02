@@ -64,6 +64,42 @@ class FailedSignalHandler:
         return {"status": "failed", "message": "handler failed intentionally"}
 
 
+class ParentRequiredContext:
+    main_thread_id = "thr-main"
+
+
+class RecordingParentRequiredHandler:
+    name = "parent_required"
+
+    def __init__(self) -> None:
+        self.requests: list[dict[str, Any]] = []
+
+    def handles(self, _signal: dict[str, Any]) -> bool:
+        return False
+
+    def handle_parent_required(
+        self,
+        _context: object,
+        _state: object,
+        _actions: object,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.requests.append(request)
+        return {
+            "status": "handled",
+            "side_thread_id": request["side_thread_id"],
+            "interrupted_turn_id": "turn-main-1",
+            "turn_id": "turn-parent-message",
+        }
+
+
+class FailedParentRequiredHandler:
+    name = "failed_parent_required"
+
+    def handle_parent_required(self, *_args: object) -> dict[str, Any]:
+        return {"status": "failed", "message": "side thread is not registered"}
+
+
 class DaemonMailboxTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mailbox = load_module(MAILBOX_PATH)
@@ -256,6 +292,104 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertTrue(result["ok"], msg=result)
             self.assertEqual(result["result"]["handling_status"], "failed")
             self.assertIn("handler failed intentionally", result["result"]["handling_error"])
+
+    def test_parent_required_method_dispatches_to_typed_local_handler(self) -> None:
+        handler = RecordingParentRequiredHandler()
+        server = self.mailbox.DaemonMailboxServer(
+            socket_path=Path("/tmp/not-used.sock"),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            handlers=[handler],
+            context=ParentRequiredContext(),
+            actions_factory=lambda: object(),
+        )
+        request = {
+            "protocol": self.client.MAILBOX_PROTOCOL,
+            "request_id": "req-parent-required",
+            "method": "mailbox.parent_required",
+            "params": {
+                "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                "parent_thread_id": "thr-main",
+                "side_thread_id": "thr-side-1",
+                "message_id": "msg-daemon-mailbox",
+                "reason": "parent is required",
+            },
+        }
+
+        response = server.dispatch(request)
+
+        self.assertTrue(response["ok"], msg=response)
+        result = response["result"]
+        self.assertEqual(result["handling_status"], "handled")
+        self.assertEqual(result["side_thread_id"], "thr-side-1")
+        self.assertEqual(result["interrupted_turn_id"], "turn-main-1")
+        self.assertEqual(result["turn_id"], "turn-parent-message")
+        self.assertEqual(len(handler.requests), 1)
+        self.assertEqual(handler.requests[0]["message_id"], "msg-daemon-mailbox")
+
+    def test_parent_required_method_rejects_wrong_actor_wrong_parent_and_parent_as_side(self) -> None:
+        server = self.mailbox.DaemonMailboxServer(
+            socket_path=Path("/tmp/not-used.sock"),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            handlers=[RecordingParentRequiredHandler()],
+            context=ParentRequiredContext(),
+            actions_factory=lambda: object(),
+        )
+
+        def dispatch(params: dict[str, Any]) -> dict[str, Any]:
+            return server.dispatch(
+                {
+                    "protocol": self.client.MAILBOX_PROTOCOL,
+                    "request_id": "req-parent-required",
+                    "method": "mailbox.parent_required",
+                    "params": params,
+                }
+            )
+
+        base = {
+            "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+            "parent_thread_id": "thr-main",
+            "side_thread_id": "thr-side-1",
+            "message_id": "msg-daemon-mailbox",
+            "reason": "parent is required",
+        }
+        wrong_actor = dict(base)
+        wrong_actor["actor_address"] = {"role_id": "pm", "actor_id": "act-pm-daemon"}
+        wrong_parent = dict(base)
+        wrong_parent["parent_thread_id"] = "thr-other"
+        parent_as_side = dict(base)
+        parent_as_side["side_thread_id"] = "thr-main"
+
+        self.assertEqual(dispatch(wrong_actor)["error"]["code"], "wrong_target_actor")
+        self.assertEqual(dispatch(wrong_parent)["error"]["code"], "invalid_parent_required")
+        self.assertEqual(dispatch(parent_as_side)["error"]["code"], "invalid_parent_required")
+
+    def test_parent_required_method_reports_handler_failure_for_unknown_side(self) -> None:
+        server = self.mailbox.DaemonMailboxServer(
+            socket_path=Path("/tmp/not-used.sock"),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            handlers=[FailedParentRequiredHandler()],
+            context=ParentRequiredContext(),
+            actions_factory=lambda: object(),
+        )
+
+        response = server.dispatch(
+            {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-parent-required",
+                "method": "mailbox.parent_required",
+                "params": {
+                    "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                    "parent_thread_id": "thr-main",
+                    "side_thread_id": "thr-side-unknown",
+                    "message_id": "msg-daemon-mailbox",
+                    "reason": "parent is required",
+                },
+            }
+        )
+
+        self.assertTrue(response["ok"], msg=response)
+        self.assertEqual(response["result"]["handling_status"], "failed")
+        self.assertIn("not registered", response["result"]["handling_error"])
 
 
 if __name__ == "__main__":
