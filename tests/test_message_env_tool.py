@@ -194,6 +194,29 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.addCleanup(restore)
         return calls
 
+    def _patch_parent_message_handling(self) -> list[dict[str, object]]:
+        calls: list[dict[str, object]] = []
+        original = getattr(runtime_context.DaemonAccess, "request_parent_message_handling", None)
+
+        def fake_request_parent_message_handling(
+            daemon_access: object,
+            *,
+            message_id: str,
+            prompt: str,
+        ) -> dict[str, object]:
+            calls.append({"message_id": message_id, "prompt": prompt})
+            return {"turn_id": "turn-parent-required", "interrupted_turn_id": "turn-main-1"}
+
+        def restore() -> None:
+            if original is None:
+                delattr(runtime_context.DaemonAccess, "request_parent_message_handling")
+            else:
+                runtime_context.DaemonAccess.request_parent_message_handling = original
+
+        runtime_context.DaemonAccess.request_parent_message_handling = fake_request_parent_message_handling
+        self.addCleanup(restore)
+        return calls
+
     def test_message_contacts_lists_online_actor_contacts(self) -> None:
         dev_address = self._actor_address(role="dev", label="act-dev-contact")
         calls = self._patch_daemon(
@@ -453,6 +476,10 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(msg["from_actor_address"], source)
         self.assertEqual(msg["to_actor_address"], target)
         self.assertEqual(msg["content"], "Please inspect the prototype.")
+        self.assertEqual(msg["disposition"], "unseen")
+        self.assertIsNone(msg["disposition_reason"])
+        self.assertIsNone(msg["disposition_updated_at"])
+        self.assertIsNone(msg["processed_by_actor_address"])
         self.assertNotIn("from_role", msg)
         self.assertNotIn("to_role", msg)
 
@@ -577,6 +604,245 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(len(messages), 1, msg=response)
         self.assertEqual(messages[0]["from_actor_address"], design)
 
+    def test_message_get_returns_exact_processable_inbound_message(self) -> None:
+        active = self._actor_address(role="dev", label="act-dev-get")
+        pm = self._actor_address(role="pm", label="act-pm-get")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-get-processable",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "Please review this exact message.",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-get", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-get",
+            role="dev",
+            tool="message",
+            action="get",
+            args={"message_id": seed["id"]},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("message_id"), seed["id"])
+        self.assertEqual(response.get("disposition"), "unseen")
+        message = response.get("message")
+        self.assertIsInstance(message, dict, msg=response)
+        assert isinstance(message, dict)
+        self.assertEqual(message["content"], "Please review this exact message.")
+        self.assertEqual(message["from_actor_address"], pm)
+        self.assertEqual(message["to_actor_address"], active)
+        self.assertEqual(message["reply_to"], None)
+        self.assertEqual(message["disposition"], "unseen")
+        self.assertIsNone(message["disposition_reason"])
+        self.assertIsNone(message["disposition_updated_at"])
+        self.assertIsNone(message["processed_by_actor_address"])
+
+    def test_message_get_rejects_unknown_invisible_and_completed_messages(self) -> None:
+        active = self._actor_address(role="dev", label="act-dev-get-reject")
+        other_dev = self._actor_address(role="dev", label="act-dev-get-reject-other")
+        pm = self._actor_address(role="pm", label="act-pm-get-reject")
+        message_repo.save_message(
+            {
+                "id": "msg-get-invisible",
+                "from_actor_address": pm,
+                "to_actor_address": other_dev,
+                "content": "not for active dev",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        for message_id, disposition in (("msg-get-absorbed", "absorbed"), ("msg-get-replied", "replied")):
+            message_repo.save_message(
+                {
+                    "id": message_id,
+                    "from_actor_address": pm,
+                    "to_actor_address": active,
+                    "content": f"completed {disposition}",
+                    "reply_to": None,
+                    "created_at": "2026-05-30T00:00:02Z",
+                    "disposition": disposition,
+                    "disposition_reason": None,
+                    "disposition_updated_at": "2026-05-30T00:00:03Z",
+                    "processed_by_actor_address": active,
+                }
+            )
+        instance_json = self._instance_json(actor_id="act-dev-get-reject", role="dev")
+
+        for message_id in ("msg-get-missing", "msg-get-invisible", "msg-get-absorbed", "msg-get-replied"):
+            with self.subTest(message_id=message_id):
+                response = self._dispatch(
+                    instance_json=instance_json,
+                    actor_id="act-dev-get-reject",
+                    role="dev",
+                    tool="message",
+                    action="get",
+                    args={"message_id": message_id},
+                )
+
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertEqual(response.get("state_changed"), False)
+
+    def test_message_mark_absorbed_transitions_unseen_and_needs_parent(self) -> None:
+        active = self._actor_address(role="dev", label="act-dev-mark-absorb")
+        pm = self._actor_address(role="pm", label="act-pm-mark-absorb")
+        unseen = message_repo.save_message(
+            {
+                "id": "msg-mark-absorbed-unseen",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "FYI only",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        needs_parent = message_repo.save_message(
+            {
+                "id": "msg-mark-absorbed-parent",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "Parent reviewed now",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:02Z",
+                "disposition": "needs_parent",
+                "disposition_reason": "Requires parent context.",
+                "disposition_updated_at": "2026-05-30T00:00:03Z",
+                "processed_by_actor_address": active,
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-mark-absorb", role="dev")
+
+        for seed in (unseen, needs_parent):
+            with self.subTest(message_id=seed["id"]):
+                response = self._dispatch(
+                    instance_json=instance_json,
+                    actor_id="act-dev-mark-absorb",
+                    role="dev",
+                    tool="message",
+                    action="mark",
+                    args={"message_id": seed["id"], "disposition": "absorbed"},
+                )
+
+                self.assertTrue(response.get("ok"), msg=response)
+                stored = message_repo.get_message(seed["id"])
+                self.assertIsNotNone(stored)
+                assert stored is not None
+                self.assertEqual(stored["disposition"], "absorbed")
+                self.assertIsNone(stored["disposition_reason"])
+                self.assertIsInstance(stored["disposition_updated_at"], str)
+                self.assertEqual(stored["processed_by_actor_address"], active)
+
+    def test_message_mark_needs_parent_stores_reason_and_requests_parent_prompt(self) -> None:
+        parent_calls = self._patch_parent_message_handling()
+        active = self._actor_address(role="dev", label="act-dev-mark-parent")
+        pm = self._actor_address(role="pm", label="act-pm-mark-parent")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-mark-needs-parent",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "This changes your current work.",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-mark-parent", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-mark-parent",
+            role="dev",
+            tool="message",
+            action="mark",
+            args={
+                "message_id": seed["id"],
+                "disposition": "needs_parent",
+                "reason": "It changes the active implementation direction.",
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        stored = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored["disposition"], "needs_parent")
+        self.assertEqual(stored["disposition_reason"], "It changes the active implementation direction.")
+        self.assertIsInstance(stored["disposition_updated_at"], str)
+        self.assertEqual(stored["processed_by_actor_address"], active)
+        self.assertEqual(len(parent_calls), 1)
+        self.assertEqual(parent_calls[0]["message_id"], seed["id"])
+        prompt = parent_calls[0]["prompt"]
+        self.assertIsInstance(prompt, str)
+        assert isinstance(prompt, str)
+        self.assertIn("[MESSAGE NEEDS PARENT]", prompt)
+        self.assertIn(seed["id"], prompt)
+        self.assertIn("It changes the active implementation direction.", prompt)
+        self.assertIn("message__get", prompt)
+        self.assertIn("message__conversation", prompt)
+        self.assertIn("message__send", prompt)
+        self.assertIn("message__mark", prompt)
+        self.assertNotIn("message.parent_required", prompt)
+        self.assertNotIn("mailbox.local_trigger", prompt)
+
+    def test_message_mark_rejects_missing_parent_reason_and_invalid_transitions(self) -> None:
+        active = self._actor_address(role="dev", label="act-dev-mark-reject")
+        pm = self._actor_address(role="pm", label="act-pm-mark-reject")
+        message_repo.save_message(
+            {
+                "id": "msg-mark-no-reason",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "needs reason",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        for message_id, disposition in (("msg-mark-done-absorbed", "absorbed"), ("msg-mark-done-replied", "replied")):
+            message_repo.save_message(
+                {
+                    "id": message_id,
+                    "from_actor_address": pm,
+                    "to_actor_address": active,
+                    "content": f"done {disposition}",
+                    "reply_to": None,
+                    "created_at": "2026-05-30T00:00:02Z",
+                    "disposition": disposition,
+                    "disposition_reason": None,
+                    "disposition_updated_at": "2026-05-30T00:00:03Z",
+                    "processed_by_actor_address": active,
+                }
+            )
+        instance_json = self._instance_json(actor_id="act-dev-mark-reject", role="dev")
+        cases = (
+            ("msg-mark-no-reason", {"message_id": "msg-mark-no-reason", "disposition": "needs_parent"}),
+            ("msg-mark-done-absorbed", {"message_id": "msg-mark-done-absorbed", "disposition": "absorbed"}),
+            (
+                "msg-mark-done-replied",
+                {"message_id": "msg-mark-done-replied", "disposition": "needs_parent", "reason": "retry"},
+            ),
+        )
+
+        for message_id, args in cases:
+            with self.subTest(message_id=message_id):
+                before = message_repo.get_message(message_id)
+                response = self._dispatch(
+                    instance_json=instance_json,
+                    actor_id="act-dev-mark-reject",
+                    role="dev",
+                    tool="message",
+                    action="mark",
+                    args=args,
+                )
+                after = message_repo.get_message(message_id)
+
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertEqual(after, before)
+
     def test_message_conversation_returns_visible_bidirectional_actor_messages(self) -> None:
         active = self._actor_address(role="dev", label="act-dev-conversation")
         other_dev = self._actor_address(role="dev", label="act-dev-conversation-other")
@@ -654,52 +920,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("count"), 2)
         self.assertEqual({row["content"] for row in messages}, {"PM to active Dev", "Dev to PM"})
 
-    def test_message_conversation_role_selector_returns_visible_bidirectional_role_messages(self) -> None:
-        active = self._actor_address(role="dev", label="act-dev-conversation-role")
-        peer = self._actor_address(role="dev", label="act-dev-conversation-peer")
-        unrelated_one = self._actor_address(role="dev", label="act-dev-conversation-unrelated-one")
-        unrelated_two = self._actor_address(role="dev", label="act-dev-conversation-unrelated-two")
-        market = self._actor_address(role="market", label="act-market-conversation-role")
-        one = message_repo.save_message(
-            {
-                "id": "msg-conv-role-1",
-                "from_actor_address": peer,
-                "to_actor_address": active,
-                "content": "Dev peer to active Dev",
-                "reply_to": None,
-                "created_at": "2026-05-30T00:00:01Z",
-            }
-        )
-        two = message_repo.save_message(
-            {
-                "id": "msg-conv-role-2",
-                "from_actor_address": active,
-                "to_actor_address": peer,
-                "content": "Active Dev to dev peer",
-                "reply_to": None,
-                "created_at": "2026-05-30T00:00:02Z",
-            }
-        )
-        message_repo.save_message(
-            {
-                "id": "msg-conv-role-market",
-                "from_actor_address": market,
-                "to_actor_address": active,
-                "content": "Market to active Dev",
-                "reply_to": None,
-                "created_at": "2026-05-30T00:00:03Z",
-            }
-        )
-        message_repo.save_message(
-            {
-                "id": "msg-conv-role-internal",
-                "from_actor_address": unrelated_one,
-                "to_actor_address": unrelated_two,
-                "content": "Unrelated dev internal",
-                "reply_to": None,
-                "created_at": "2026-05-30T00:00:04Z",
-            }
-        )
+    def test_message_conversation_rejects_role_field(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-conversation-role", role="dev")
 
         response = self._dispatch(
@@ -711,31 +932,29 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"role": "dev"},
         )
 
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("selector"), {"role": "dev"})
-        messages = response.get("messages", [])
-        self.assertEqual([row["id"] for row in messages], [one["id"], two["id"]])
-        self.assertNotIn("active role", str(response.get("why_blocked", "")).lower())
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+        self.assertEqual(response.get("correctable_fields"), ["role"])
 
-    def test_message_conversation_requires_exactly_one_selector(self) -> None:
+    def test_message_conversation_requires_target_actor_address(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-conversation-selector", role="dev")
-        target = self._actor_address(role="pm", label="act-pm-conversation-selector")
-        for args in ({}, {"role": "pm", "target_actor_address": target}):
-            with self.subTest(args=args):
-                response = self._dispatch(
-                    instance_json=instance_json,
-                    actor_id="act-dev-conversation-selector",
-                    role="dev",
-                    tool="message",
-                    action="conversation",
-                    args=args,
-                )
-                self.assertFalse(response.get("ok"), msg=response)
-                self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
-                self.assertEqual(set(response.get("correctable_fields", [])), {"target_actor_address", "role"})
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-conversation-selector",
+            role="dev",
+            tool="message",
+            action="conversation",
+            args={},
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+        self.assertEqual(response.get("correctable_fields"), ["target_actor_address"])
 
     def test_message_conversation_rejects_old_direction_fields(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-conversation-old-fields", role="dev")
+        target = self._actor_address(role="pm", label="act-pm-conversation-old-fields")
         for field, value in (("box", "inbox"), ("to_role", "pm"), ("from_role", "pm")):
             with self.subTest(field=field):
                 response = self._dispatch(
@@ -744,7 +963,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     role="dev",
                     tool="message",
                     action="conversation",
-                    args={"role": "pm", field: value},
+                    args={"target_actor_address": target, field: value},
                 )
                 self.assertFalse(response.get("ok"), msg=response)
                 self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
@@ -774,7 +993,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="dev",
             tool="message",
             action="conversation",
-            args={"role": "pm", "limit": 3},
+            args={"target_actor_address": pm, "limit": 3},
         )
 
         self.assertTrue(response.get("ok"), msg=response)
@@ -800,6 +1019,104 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         rows = self._message_rows()
         reply = next(row for row in rows if row["id"] == response["message_id"])
         self.assertEqual(reply["reply_to"], seed["id"])
+        original = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(original)
+        assert original is not None
+        self.assertEqual(original["disposition"], "replied")
+        self.assertEqual(original["processed_by_actor_address"], dev)
+        self.assertIsInstance(original["disposition_updated_at"], str)
+
+    def test_message_send_reply_to_transitions_needs_parent_to_replied(self) -> None:
+        self._patch_daemon()
+        dev = self._actor_address(role="dev", label="act-dev-reply-parent")
+        pm = self._actor_address(role="pm", label="act-pm-reply-parent")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-reply-needs-parent",
+                "from_actor_address": pm,
+                "to_actor_address": dev,
+                "content": "Needs parent before reply",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+                "disposition": "needs_parent",
+                "disposition_reason": "Requires parent context.",
+                "disposition_updated_at": "2026-05-30T00:00:02Z",
+                "processed_by_actor_address": dev,
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-reply-parent", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-reply-parent",
+            role="dev",
+            tool="message",
+            action="send",
+            args={"target_actor_address": pm, "content": "parent-approved reply", "reply_to": seed["id"]},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        original = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(original)
+        assert original is not None
+        self.assertEqual(original["disposition"], "replied")
+        self.assertIsNone(original["disposition_reason"])
+        self.assertEqual(original["processed_by_actor_address"], dev)
+
+    def test_message_send_reply_to_delivery_failure_does_not_transition_original(self) -> None:
+        self._patch_daemon(delivery={"delivery_status": "delivery_failed", "signal_error": "socket gone"})
+        dev = self._actor_address(role="dev", label="act-dev-reply-failed")
+        pm = self._actor_address(role="pm", label="act-pm-reply-failed")
+        seed = env_store.create_message(from_actor_address=pm, to_actor_address=dev, content="Hello from PM")
+        instance_json = self._instance_json(actor_id="act-dev-reply-failed", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-reply-failed",
+            role="dev",
+            tool="message",
+            action="send",
+            args={"target_actor_address": pm, "content": "ack", "reply_to": seed["id"]},
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        original = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(original)
+        assert original is not None
+        self.assertEqual(original["disposition"], "unseen")
+        self.assertIsNone(original["processed_by_actor_address"])
+
+    def test_message_send_reply_to_rejects_duplicate_completed_processing(self) -> None:
+        self._patch_daemon()
+        dev = self._actor_address(role="dev", label="act-dev-reply-duplicate")
+        pm = self._actor_address(role="pm", label="act-pm-reply-duplicate")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-reply-duplicate",
+                "from_actor_address": pm,
+                "to_actor_address": dev,
+                "content": "Already handled",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+                "disposition": "replied",
+                "disposition_reason": None,
+                "disposition_updated_at": "2026-05-30T00:00:02Z",
+                "processed_by_actor_address": dev,
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-reply-duplicate", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-reply-duplicate",
+            role="dev",
+            tool="message",
+            action="send",
+            args={"target_actor_address": pm, "content": "second reply", "reply_to": seed["id"]},
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(message_repo.get_message(seed["id"]), seed)
 
     def test_message_send_reply_to_requires_same_visible_actor_conversation_pair(self) -> None:
         self._patch_daemon()

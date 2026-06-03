@@ -36,7 +36,7 @@ def _guess_correctable_fields(message: str) -> list[str] | None:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
         if suffix:
             return [row.strip() for row in suffix.split(",") if row.strip()]
-    for field in ("target_actor_address", "content", "reply_to", "role", "q", "limit"):
+    for field in ("target_actor_address", "content", "reply_to", "message_id", "disposition", "reason", "role", "q", "limit"):
         if field in message:
             return [field]
     return None
@@ -426,6 +426,31 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
             target_actor_address=target_payload,
         )
 
+    reply_to_message = request["reply_to_message"]
+    if reply_to_message is not None:
+        try:
+            updated_reply_to = context.rules.message.transition_message_disposition(
+                message=reply_to_message,
+                active_actor_address=context.actor_address,
+                disposition="replied",
+                reason=None,
+                now=context.repos.runtime_files.now_iso(),
+            )
+            context.repos.message.save_message(updated_reply_to)
+        except (context.rules.message.MessagePayloadError, context.rules.message.MessageScopeError) as exc:
+            return _reject_scope(
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                code=getattr(exc, "code", "E_MESSAGE_SCOPE"),
+                message=str(exc),
+                permission_boundary=getattr(exc, "permission_boundary", "message.disposition"),
+                human_summary=getattr(exc, "human_summary", "Message disposition transition failed."),
+                why_blocked=getattr(exc, "why_blocked", str(exc)),
+                retryable=getattr(exc, "retryable", False),
+                correctable_fields=getattr(exc, "correctable_fields", ["reply_to"]),
+            )
+
     handling_status = delivery.get("handling_status") if isinstance(delivery.get("handling_status"), str) else None
     return tool_results.success(
         tool="message",
@@ -449,6 +474,199 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
             "handling_status": handling_status,
             "target_actor_address": target_payload,
         },
+    )
+
+
+def get_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
+    action = "message.get"
+    active_actor = context["active_actor"]
+    active_role = context["active_role"]
+    manifest_roles = _manifest_role_ids(context)
+
+    try:
+        context.rules.message.ensure_active_role_is_manifest_declared(
+            active_role=active_role,
+            manifest_role_ids=manifest_roles,
+        )
+        request = context.rules.message.prepare_get_request(
+            args=args,
+            allowed_fields=_allowed_fields("get"),
+        )
+        message = context.rules.message.ensure_processable_inbound_message(
+            message_id=request["message_id"],
+            message=context.repos.message.get_message(request["message_id"]),
+            active_actor_address=context.actor_address,
+        )
+    except context.rules.message.MessagePayloadError as exc:
+        return _reject_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message=str(exc),
+            correctable_fields=exc.correctable_fields,
+        )
+    except context.rules.message.MessageScopeError as exc:
+        return _reject_scope(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            code=exc.code,
+            message=str(exc),
+            permission_boundary=exc.permission_boundary,
+            human_summary=exc.human_summary,
+            why_blocked=exc.why_blocked,
+            retryable=exc.retryable,
+            correctable_fields=exc.correctable_fields,
+        )
+
+    return tool_results.success(
+        tool="message",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Returned exact message '{message['id']}' for active actor '{context.actor_address.actor_id}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="active actor exact processable inbound message",
+        allowed_next_actions=[
+            "Use message.send with reply_to to reply.",
+            "Use message.mark to finish without a reply.",
+        ],
+        extra={
+            "message_id": message["id"],
+            "message": message,
+            "from_actor_address": message["from_actor_address"],
+            "to_actor_address": message["to_actor_address"],
+            "reply_to": message["reply_to"],
+            "disposition": message["disposition"],
+            "disposition_reason": message["disposition_reason"],
+            "disposition_updated_at": message["disposition_updated_at"],
+            "processed_by_actor_address": message["processed_by_actor_address"],
+        },
+    )
+
+
+def mark_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
+    action = "message.mark"
+    active_actor = context["active_actor"]
+    active_role = context["active_role"]
+    manifest_roles = _manifest_role_ids(context)
+
+    try:
+        context.rules.message.ensure_active_role_is_manifest_declared(
+            active_role=active_role,
+            manifest_role_ids=manifest_roles,
+        )
+        request = context.rules.message.prepare_mark_request(
+            args=args,
+            allowed_fields=_allowed_fields("mark"),
+        )
+        current_message = context.rules.message.ensure_processable_inbound_message(
+            message_id=request["message_id"],
+            message=context.repos.message.get_message(request["message_id"]),
+            active_actor_address=context.actor_address,
+        )
+        updated_message = context.rules.message.transition_message_disposition(
+            message=current_message,
+            active_actor_address=context.actor_address,
+            disposition=request["disposition"],
+            reason=request["reason"],
+            now=context.repos.runtime_files.now_iso(),
+        )
+    except context.rules.message.MessagePayloadError as exc:
+        return _reject_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message=str(exc),
+            correctable_fields=exc.correctable_fields,
+        )
+    except context.rules.message.MessageScopeError as exc:
+        return _reject_scope(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            code=exc.code,
+            message=str(exc),
+            permission_boundary=exc.permission_boundary,
+            human_summary=exc.human_summary,
+            why_blocked=exc.why_blocked,
+            retryable=exc.retryable,
+            correctable_fields=exc.correctable_fields,
+        )
+
+    try:
+        saved_message = context.repos.message.save_message(updated_message)
+    except (ValueError, OSError) as exc:
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
+
+    parent_request: dict[str, Any] | None = None
+    if request["disposition"] == "needs_parent":
+        prompt = context.rules.message.render_parent_required_prompt(
+            request["message_id"],
+            saved_message["from_actor_address"],
+            saved_message["to_actor_address"],
+            request["reason"] or "",
+        )
+        try:
+            parent_request = context.daemon.request_parent_message_handling(
+                message_id=request["message_id"],
+                prompt=prompt,
+            )
+        except Exception as exc:
+            return tool_results.rejection(
+                tool="message",
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                code="E_MESSAGE_PARENT_REQUIRED_SUBMIT_FAILED",
+                message=str(exc),
+                permission_boundary="message.needs_parent_runtime",
+                human_summary="Parent-required message handoff failed.",
+                why_blocked="The message was marked needs_parent, but parent prompt submission failed.",
+                impact="Message disposition changed to needs_parent, but parent prompt delivery failed.",
+                state_changed=True,
+                durability="durable",
+                retryable=True,
+                retry_guidance="Retry only after checking parent runtime availability.",
+                allowed_next_actions=[
+                    "Use message.get to inspect the needs_parent message.",
+                ],
+                extra={
+                    "message_id": saved_message["id"],
+                    "disposition": saved_message["disposition"],
+                    "message": saved_message,
+                },
+            )
+
+    state_change = {
+        "object_type": "message",
+        "change": f"marked_{saved_message['disposition']}",
+        "message_id": saved_message["id"],
+    }
+    extra: dict[str, Any] = {
+        "message_id": saved_message["id"],
+        "disposition": saved_message["disposition"],
+        "message": saved_message,
+        "disposition_reason": saved_message["disposition_reason"],
+        "disposition_updated_at": saved_message["disposition_updated_at"],
+        "processed_by_actor_address": saved_message["processed_by_actor_address"],
+    }
+    if parent_request is not None:
+        extra["parent_request"] = parent_request
+    return tool_results.success(
+        tool="message",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Marked message '{saved_message['id']}' as {saved_message['disposition']}.",
+        state_changed=True,
+        durability="durable",
+        state_changes=[state_change],
+        allowed_next_actions=[
+            "Finish after this disposition path succeeds.",
+        ],
+        extra=extra,
     )
 
 
@@ -567,20 +785,14 @@ def conversation_messages(*, args: dict[str, Any], context: MessageServiceContex
         )
 
     target_actor = request["target_actor_address"]
-    target_role = request["role"]
     messages = context.rules.message.filter_conversation_messages(
         messages=context.repos.message.list_messages(),
         active_actor_address=context.actor_address,
         target_actor_address=target_actor,
-        target_role=target_role,
         q=request["q"],
         limit=request["limit"],
     )
-    selector: dict[str, Any]
-    if target_actor is not None:
-        selector = {"target_actor_address": target_actor.to_payload()}
-    else:
-        selector = {"role": target_role}
+    selector: dict[str, Any] = {"target_actor_address": target_actor.to_payload()}
 
     return tool_results.success(
         tool="message",
@@ -611,7 +823,9 @@ def conversation_messages(*, args: dict[str, Any], context: MessageServiceContex
 _ACTION_HANDLERS = {
     'contacts': contacts_message,
     'conversation': conversation_messages,
+    'get': get_message,
     'list': list_messages,
+    'mark': mark_message,
     'send': send_message,
 }
 

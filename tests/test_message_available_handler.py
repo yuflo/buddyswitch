@@ -120,6 +120,15 @@ class MessageAvailableHandlerTests(unittest.TestCase):
         payload: dict[str, Any] | None = None,
         source_context: dict[str, Any] | None = None,
     ) -> object:
+        context_payload = (
+            {
+                "signal_id": "sig-readable",
+                "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-readable"},
+                "created_at": "2026-06-03T00:00:00Z",
+            }
+            if source_context is None
+            else source_context
+        )
         return self.daemon_core.daemon_triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal" if trigger_type == "message.available" else "mailbox_local_trigger",
             type=trigger_type,
@@ -127,7 +136,7 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             origin_id="sig-readable",
             correlation_id=None,
             payload={"message_id": "msg-readable"} if payload is None else payload,
-            source_context={} if source_context is None else source_context,
+            source_context=context_payload,
         )
 
     def test_message_handler_source_uses_unified_trigger_interface_and_clean_runtime(self) -> None:
@@ -200,8 +209,13 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertIsInstance(prompt, str)
             self.assertIn("[MESSAGE AVAILABLE]", prompt)
             self.assertIn("msg-readable", prompt)
-            self.assertIn("message__list", prompt)
+            self.assertIn('From: {"actor_id": "act-pm-readable", "role_id": "pm"}', prompt)
+            self.assertIn('To: {"actor_id": "act-dev-daemon", "role_id": "dev"}', prompt)
+            self.assertIn("message__get", prompt)
             self.assertIn("message__conversation", prompt)
+            self.assertIn("message__send", prompt)
+            self.assertIn("message__mark", prompt)
+            self.assertNotIn("message__" + "list", prompt)
             self.assertNotIn("Fallback CLI", prompt)
             self.assertNotIn("python3 scripts/env/client.py", prompt)
             self.assertNotIn("message body", prompt.lower())
@@ -222,12 +236,37 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertIsInstance(prompt, str)
             self.assertIn("[MESSAGE TRIAGE]", prompt)
             self.assertIn("msg-readable", prompt)
-            self.assertIn("message__list", prompt)
+            self.assertIn('From: {"actor_id": "act-pm-readable", "role_id": "pm"}', prompt)
+            self.assertIn('To: {"actor_id": "act-dev-daemon", "role_id": "dev"}', prompt)
+            self.assertIn("message__get", prompt)
             self.assertIn("message__conversation", prompt)
             self.assertIn("message__send", prompt)
+            self.assertIn("message__mark", prompt)
+            self.assertIn("needs_parent", prompt)
+            self.assertNotIn("message__" + "list", prompt)
             self.assertNotIn("mailbox.local_trigger", prompt)
             self.assertNotIn("message." + "parent_required", prompt)
+            self.assertNotIn("parent_thread_id", prompt)
+            self.assertNotIn("side_thread_id", prompt)
             self.assertNotIn("codex-remote", prompt)
+
+    def test_parent_required_prompt_renderer_is_message_owned(self) -> None:
+        prompt = self.handler_module.message_rules.render_parent_required_prompt(
+            "msg-readable",
+            {"role_id": "pm", "actor_id": "act-pm-readable"},
+            {"role_id": "dev", "actor_id": "act-dev-daemon"},
+            "Requires parent context.",
+        )
+
+        self.assertIn("[MESSAGE NEEDS PARENT]", prompt)
+        self.assertIn("Requires parent context.", prompt)
+        self.assertIn("message__get", prompt)
+        self.assertIn("message__conversation", prompt)
+        self.assertIn("message__send", prompt)
+        self.assertIn("message__mark", prompt)
+        self.assertNotIn("message__" + "list", prompt)
+        self.assertNotIn("message." + "parent_required", prompt)
+        self.assertNotIn("mailbox.local_trigger", prompt)
 
     def test_message_available_handler_fails_when_parent_activity_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

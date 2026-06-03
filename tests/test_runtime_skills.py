@@ -747,7 +747,9 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertIn("message__contacts", message_skill)
         self.assertIn("target_actor_address", message_skill)
         self.assertIn("contact.actor_address", message_skill)
+        self.assertIn("message__get", message_skill)
         self.assertIn("message__send", message_skill)
+        self.assertIn("message__mark", message_skill)
         self.assertIn("message__conversation", message_skill)
         self.assertIn("message__list", message_skill)
         self.assertIn("does not accept `box`", message_skill)
@@ -763,6 +765,8 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn('"message":', message_skill)
         self.assertNotIn('message list --payload \'{"box":"inbox"}\'', message_skill)
         self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
+        self.assertNotIn("selected target role", message_skill)
+        self.assertNotIn("role selector", message_skill)
         self.assertIn("active actor cannot send to itself", message_skill)
         self.assertIn("same role with a different actor is allowed", message_skill)
         for token in forbidden_identity_residue:
@@ -783,9 +787,13 @@ class RuntimeSkillsTests(unittest.TestCase):
                         encoding="utf-8"
                     ).lower()
                     self.assertIn("target_actor_address", installed)
+                    self.assertIn("message__get", installed)
+                    self.assertIn("message__mark", installed)
                     self.assertIn("message__conversation", installed)
                     self.assertNotIn("to_role", installed)
                     self.assertNotIn("from_role", installed)
+                    self.assertNotIn("selected target role", installed)
+                    self.assertNotIn("role selector", installed)
                     self.assertIn("active actor cannot send to itself", installed)
                     self.assertIn("same role with a different actor is allowed", installed)
                     for token in forbidden_identity_residue:

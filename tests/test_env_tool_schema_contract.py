@@ -130,6 +130,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         search_request = catalog.get_action_definition("search", "request").input_schema
         search_open = catalog.get_action_definition("search", "open_browser").input_schema
         message_send = catalog.get_action_definition("message", "send").input_schema
+        message_get_action = catalog.get_action_definition("message", "get")
+        message_get = message_get_action.input_schema
+        message_mark_action = catalog.get_action_definition("message", "mark")
+        message_mark = message_mark_action.input_schema
         message_conversation_action = catalog.get_action_definition("message", "conversation")
         message_conversation = message_conversation_action.input_schema
         request_create = catalog.get_action_definition("request", "create").input_schema
@@ -238,14 +242,33 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(message_contacts.get("required"), [])
         self.assertEqual(set(message_contacts.get("properties", {})), {"role"})
 
+        self.assertEqual(message_get_action.kind, "read")
+        self.assertEqual(message_get_action.mutates, "none")
+        self.assertEqual(message_get_action.required_permission, "message.get")
+        self.assertEqual(message_get_action.durability, "none")
+        self.assertEqual(message_get.get("required"), ["message_id"])
+        self.assertEqual(set(message_get.get("properties", {})), {"message_id"})
+        self.assertEqual(message_get["properties"]["message_id"].get("type"), "string")
+
+        self.assertEqual(message_mark_action.kind, "write")
+        self.assertEqual(message_mark_action.mutates, "runtime_objects")
+        self.assertEqual(message_mark_action.required_permission, "message.mark")
+        self.assertEqual(message_mark_action.durability, "durable")
+        self.assertEqual(set(message_mark.get("required", [])), {"message_id", "disposition"})
+        self.assertEqual(set(message_mark.get("properties", {})), {"message_id", "disposition", "reason"})
+        self.assertEqual(message_mark["properties"]["message_id"].get("type"), "string")
+        self.assertEqual(message_mark["properties"]["disposition"].get("enum"), ["absorbed", "needs_parent"])
+        self.assertEqual(message_mark["properties"]["reason"].get("type"), "string")
+
         self.assertEqual(message_conversation_action.kind, "read")
         self.assertEqual(message_conversation_action.mutates, "none")
         self.assertEqual(message_conversation_action.required_permission, "message.conversation")
         self.assertEqual(message_conversation_action.durability, "none")
-        self.assertEqual(message_conversation.get("required"), [])
+        self.assertEqual(message_conversation.get("required"), ["target_actor_address"])
         conversation_properties = message_conversation.get("properties", {})
-        self.assertEqual(set(conversation_properties), {"target_actor_address", "role", "q", "limit"})
+        self.assertEqual(set(conversation_properties), {"target_actor_address", "q", "limit"})
         self.assertNotIn("box", conversation_properties)
+        self.assertNotIn("role", conversation_properties)
         self.assertNotIn("to_role", conversation_properties)
         self.assertNotIn("from_role", conversation_properties)
         conversation_target = conversation_properties["target_actor_address"]

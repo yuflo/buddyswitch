@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import sys
 import uuid
 
 from env.domain import artifact_relations as _artifact_relations_domain
@@ -384,8 +385,9 @@ def _actor_address_payload(value: ActorAddress | dict[str, Any]) -> dict[str, An
 class DaemonAccess:
     """Explicit central daemon access for runtime tools."""
 
-    def __init__(self, *, actor_address: ActorAddress) -> None:
+    def __init__(self, *, actor_address: ActorAddress, instance_json: Path) -> None:
         self._actor_address = actor_address
+        self._instance_json = instance_json
 
     def list_contacts(self, *, role_id: str | None = None) -> dict[str, Any]:
         return daemon_client.list_contacts(role_id=role_id)
@@ -422,6 +424,26 @@ class DaemonAccess:
             signal_type="message.available",
             target_actor_address=target_actor_address,
             payload={"message_id": message_id},
+        )
+
+    def request_parent_message_handling(self, *, message_id: str, prompt: str) -> dict[str, Any]:
+        launcher_dir = Path(__file__).resolve().parents[3] / "tools" / "launcher"
+        if str(launcher_dir) not in sys.path:
+            sys.path.insert(0, str(launcher_dir))
+        import daemon_core  # type: ignore[import-not-found]
+
+        daemon_context = daemon_core.load_daemon_context(self._instance_json)
+        daemon_state = daemon_core.DaemonState.load(
+            instance_root=daemon_context.instance_root,
+            actor_id=daemon_context.actor_id,
+            main_thread_id=daemon_context.main_thread_id,
+        )
+        runtime = daemon_core.DaemonRuntime(context=daemon_context, state=daemon_state)
+        return runtime.submit_parent_prompt(
+            prompt,
+            handler_name="message_mark",
+            origin_id=message_id,
+            interrupt_policy="before_submit",
         )
 
 
@@ -493,7 +515,7 @@ class ToolContext(Mapping[str, Any]):
                 manifest_path=self.manifest_path,
             ),
         )
-        object.__setattr__(self, "daemon", DaemonAccess(actor_address=self.actor_address))
+        object.__setattr__(self, "daemon", DaemonAccess(actor_address=self.actor_address, instance_json=self.instance_json))
 
     @classmethod
     def from_actor_profile(

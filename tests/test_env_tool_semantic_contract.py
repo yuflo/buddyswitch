@@ -25,7 +25,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "context": {"get", "summarize", "list_sources"},
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request", "open_browser"},
-    "message": {"contacts", "send", "list", "conversation"},
+    "message": {"contacts", "send", "get", "mark", "list", "conversation"},
     "comment": {"add", "list", "resolve"},
     "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
 }
@@ -145,6 +145,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "list_sources", ("source", "descriptor", "catalog")),
             ("message", "contacts", ("contact", "actor", "send")),
             ("message", "send", ("inbox", "actor address", "comment")),
+            ("message", "get", ("exact", "message_id", "disposition")),
+            ("message", "mark", ("absorbed", "needs_parent", "disposition")),
             ("message", "list", ("inbox", "read", "comment")),
             ("comment", "resolve", ("pm", "thread", "resolved")),
             ("request", "create", ("track", "request", "recipient")),
@@ -281,12 +283,18 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
         self.assertEqual(message_desc["title"], "Direct Actor Messages")
         self.assertEqual(message_rows["message.send"]["authority"], "message.direct_actor_address_channel")
+        self.assertEqual(message_rows["message.get"]["authority"], "message.active_actor_exact_message")
+        self.assertEqual(message_rows["message.mark"]["authority"], "message.active_actor_message_disposition")
         self.assertEqual(message_rows["message.list"]["authority"], "message.active_actor_inbox")
         self.assertIn("active actor inbox", message_rows["message.list"]["visibility"])
 
         send_requires = "\n".join(message_rows["message.send"]["requires"]).lower()
+        get_requires = "\n".join(message_rows["message.get"]["requires"]).lower()
+        mark_requires = "\n".join(message_rows["message.mark"]["requires"]).lower()
         conversation_requires = "\n".join(message_rows["message.conversation"]["requires"]).lower()
         self.assertIn("active actor", send_requires)
+        self.assertIn("active actor", get_requires)
+        self.assertIn("active actor", mark_requires)
         self.assertNotIn("active role", send_requires)
         self.assertNotIn("active role", conversation_requires)
 

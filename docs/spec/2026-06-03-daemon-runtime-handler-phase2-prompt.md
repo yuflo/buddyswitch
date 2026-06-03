@@ -20,7 +20,7 @@ Rules:
 Primary loop:
 
 ```bash
-python3 -m pytest tests/test_daemon_core.py tests/test_daemon_service_contract.py tests/test_daemon_trigger_router.py -q
+python3 -m pytest tests/test_daemon_core.py tests/test_daemon_trigger_router.py -q
 python3 -m pytest tests/test_daemon_mailbox.py tests/test_daemon_core_decoupling.py -q
 python3 -m pytest tests/test_task_checkout_handler.py tests/test_message_available_handler.py -q
 python3 -m pytest tests/test_instance_daemon_entrypoint.py tests/test_central_daemon_service.py tests/test_message_env_tool.py tests/test_runtime_actor_profile.py -q
@@ -39,4 +39,3 @@ Final review:
 - Check every dependent module listed in the memo was either updated or verified unaffected.
 - Confirm no old status/actions fallback remains.
 - Confirm verification commands passed with fresh output.
-

@@ -65,7 +65,15 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
                 self.assertEqual(denied.allowed_roles, ("pm",))
 
     def test_common_permissions_allow_every_manifest_role(self) -> None:
-        for permission in ("request.accept", "artifact.create", "evidence.approve", "track.add_proof", "message.conversation"):
+        for permission in (
+            "request.accept",
+            "artifact.create",
+            "evidence.approve",
+            "track.add_proof",
+            "message.conversation",
+            "message.get",
+            "message.mark",
+        ):
             with self.subTest(permission=permission):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
 

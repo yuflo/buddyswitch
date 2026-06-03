@@ -15,6 +15,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
+from env.domain import messages as message_rules  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
@@ -31,25 +32,6 @@ class MessageAvailableHandler:
 
     def handles(self, trigger: Any) -> bool:
         return getattr(trigger, "type", None) == "message.available"
-
-    def parent_prompt(self, message_id: str) -> str:
-        return (
-            "[MESSAGE AVAILABLE]\n"
-            f"Message id: {message_id}\n"
-            "A direct message is available for this actor.\n"
-            "Use native `message__list` to read the inbox.\n"
-            "Use native `message__conversation` when bidirectional context is needed."
-        )
-
-    def side_triage_prompt(self, message_id: str) -> str:
-        return (
-            "[MESSAGE TRIAGE]\n"
-            f"Message id: {message_id}\n"
-            "A direct message is available for this actor while the parent thread is running.\n"
-            "Use native `message__list` to read the inbox.\n"
-            "Use native `message__conversation` when bidirectional context is needed.\n"
-            "When the message can be handled independently, send the direct reply with native `message__send`."
-        )
 
     def handle(
         self,
@@ -76,15 +58,23 @@ class MessageAvailableHandler:
         if target_actor != local_actor:
             raise PermissionError("wrong target actor for message trigger")
 
+    def _source_actor_address(self, trigger: Any) -> ActorAddress:
+        source_context = getattr(trigger, "source_context", None)
+        if not isinstance(source_context, dict):
+            raise ValueError("message trigger source_context must be an object")
+        return ActorAddress.from_payload(source_context.get("source_actor_address"))
+
     def _handle_message_available(self, context: Any, runtime: Any, trigger: Any) -> daemon_core.HandlerResult:
         try:
             self._ensure_target_actor(context, trigger)
             message_id = self._message_id(trigger)
+            source_actor = self._source_actor_address(trigger)
+            target_actor = _context_actor_address(context)
             activity = runtime.parent_activity()
             status = activity.get("status") if isinstance(activity, dict) else None
             if status == "idle":
                 runtime.submit_parent_prompt(
-                    self.parent_prompt(message_id),
+                    message_rules.render_parent_message_prompt(message_id, source_actor, target_actor),
                     handler_name=self.name,
                     origin_id=message_id,
                     interrupt_policy="none",
@@ -92,7 +82,7 @@ class MessageAvailableHandler:
                 return daemon_core.HandlerResult.handled()
             if status == "running":
                 runtime.submit_side_triage_prompt(
-                    self.side_triage_prompt(message_id),
+                    message_rules.render_side_triage_prompt(message_id, source_actor, target_actor),
                     handler_name=self.name,
                     origin_id=message_id,
                 )

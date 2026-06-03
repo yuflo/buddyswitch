@@ -14,7 +14,7 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
         title='Direct Actor Messages',
-        description='Discover online actor contacts, send direct actor-address messages, and list inbox messages.',
+        description='Discover online actor contacts, send direct actor-address messages, read exact inbound messages, and mark message processing dispositions.',
         scope='direct runtime actor inbox messaging',
         capability_boundary='Messages are direct runtime actor-address scope only.',
         object_model=(
@@ -176,6 +176,145 @@ def _build_definition() -> ToolDefinition:
                 },
             ),
             ActionDefinition(
+                name='get',
+                title='message.get',
+                description='Read one exact processable inbound message by id.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['message_id'],
+                    'properties': {
+                        'message_id': {
+                            'type': 'string',
+                            'description': 'Exact inbound message id to process.',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='read',
+                mutates='none',
+                required_permission='message.get',
+                authority='message.active_actor_exact_message',
+                visibility='active actor exact processable inbound message',
+                durability='none',
+                result_content_level='full message row with disposition metadata',
+                success_effect='Returns one exact processable inbound message without changing disposition.',
+                failure_state_guarantee='Rejected reads do not mutate message state.',
+                reads=(
+                    'one active actor processable inbound message',
+                ),
+                writes=(),
+                does_not_write=(
+                    'messages',
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'comments',
+                    'requests',
+                    'actor_private files',
+                ),
+                preconditions=(
+                    'message_id references a message addressed to the active actor',
+                    'message disposition is unseen or needs_parent',
+                ),
+                returns=(
+                    'message',
+                    'message_id',
+                    'disposition',
+                ),
+                use_when=(
+                    'A prompt gives an exact message_id and you need to read that exact inbound message and its disposition metadata.',
+                ),
+                do_not_use_when=(
+                    'You need general inbox scanning (use message.list) or conversation context (use message.conversation).',
+                ),
+                risk_hints={
+                    'read_only': True,
+                    'destructive': False,
+                    'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='mark',
+                title='message.mark',
+                description='Set a non-reply processing disposition for one exact inbound message.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['message_id', 'disposition'],
+                    'properties': {
+                        'message_id': {
+                            'type': 'string',
+                            'description': 'Exact inbound message id to mark.',
+                        },
+                        'disposition': {
+                            'type': 'string',
+                            'description': 'Processing disposition to apply.',
+                            'enum': ['absorbed', 'needs_parent'],
+                        },
+                        'reason': {
+                            'type': 'string',
+                            'description': 'Required concise reason when disposition is needs_parent.',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='write',
+                mutates='runtime_objects',
+                required_permission='message.mark',
+                authority='message.active_actor_message_disposition',
+                visibility='active actor exact processable inbound message disposition',
+                durability='durable',
+                result_content_level='updated message disposition metadata',
+                success_effect='Transitions one processable inbound message to absorbed or needs_parent.',
+                failure_state_guarantee='Rejected marks do not mutate message state.',
+                reads=(
+                    'one active actor processable inbound message',
+                ),
+                writes=(
+                    'message disposition metadata',
+                ),
+                does_not_write=(
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'comments',
+                    'requests',
+                    'actor_private files',
+                ),
+                preconditions=(
+                    'message_id references a message addressed to the active actor',
+                    'message disposition transition is valid',
+                    'needs_parent includes a non-empty reason',
+                ),
+                returns=(
+                    'message_id',
+                    'disposition',
+                    'message',
+                ),
+                use_when=(
+                    'You processed an exact inbound message and need to mark disposition absorbed, or side triage needs_parent with a reason.',
+                ),
+                do_not_use_when=(
+                    'You need to reply; use message.send with reply_to so the message is marked replied after delivery.',
+                ),
+                risk_hints={
+                    'read_only': False,
+                    'destructive': False,
+                    'idempotent': False,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
                 name='list',
                 title='message.list',
                 description='List active actor inbox messages.',
@@ -248,11 +387,11 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='conversation',
                 title='message.conversation',
-                description='Read active actor visible bidirectional direct messages with one target actor or role.',
+                description='Read active actor visible bidirectional direct messages with one target actor address.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
-                    'required': [],
+                    'required': ['target_actor_address'],
                     'properties': {
                         'target_actor_address': {
                             'type': 'object',
@@ -269,10 +408,6 @@ def _build_definition() -> ToolDefinition:
                                 },
                             },
                             'description': 'Exact ActorAddress for the other conversation participant.',
-                        },
-                        'role': {
-                            'type': 'string',
-                            'description': 'Target manifest role id for all visible actor-address conversations with that role.',
                         },
                         'q': {
                             'type': 'string',
@@ -295,7 +430,7 @@ def _build_definition() -> ToolDefinition:
                 visibility='active actor visible direct conversation messages',
                 durability='none',
                 result_content_level='message rows',
-                success_effect='Lists active actor visible bidirectional direct messages for the selected target actor or role.',
+                success_effect='Lists active actor visible bidirectional direct messages for the selected target actor address.',
                 failure_state_guarantee='Rejected reads do not mutate runtime state and do not create messages.',
                 reads=(
                     'active actor visible direct messages',
@@ -311,8 +446,8 @@ def _build_definition() -> ToolDefinition:
                     'actor_private files',
                 ),
                 preconditions=(
-                    'exactly one of target_actor_address or role is provided',
-                    'role selector is a declared manifest role; exact actor selector must not be the active actor',
+                    'target_actor_address is provided and is a declared manifest role actor address',
+                    'target_actor_address must not be the active actor',
                 ),
                 returns=(
                     'messages',
@@ -320,7 +455,7 @@ def _build_definition() -> ToolDefinition:
                     'selector',
                 ),
                 use_when=(
-                    'You need bidirectional context between the active actor and one target actor or role.',
+                    'You need bidirectional context between the active actor and one target actor address.',
                 ),
                 do_not_use_when=(
                     'You only need active actor inbox messages (use message.list) or need to send a new message (use message.send).',

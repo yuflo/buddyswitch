@@ -17,6 +17,7 @@ VALID_UPDATE_KIND = ("progress", "decision", "blocker", "proof")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
 VALID_ARTIFACT_STATUS = ("draft", "published", "archived")
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
+VALID_MESSAGE_DISPOSITIONS = ("unseen", "absorbed", "replied", "needs_parent")
 
 _LEGACY_TASK_RUN_IDS = "run" + "_ids"
 _LEGACY_TASK_LATEST_RUN = "latest" + "_run_id"
@@ -399,6 +400,21 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
     if reply_to is not None:
         require_id(reply_to, "message.reply_to")
     created_at = _require_non_empty_text(message.get("created_at"), "message.created_at")
+    disposition = message.get("disposition", "unseen")
+    if disposition not in VALID_MESSAGE_DISPOSITIONS:
+        raise ValueError("message.disposition must be one of absorbed, needs_parent, replied, unseen")
+    disposition_reason = message.get("disposition_reason")
+    if disposition_reason is not None:
+        disposition_reason = _require_non_empty_text(disposition_reason, "message.disposition_reason")
+    disposition_updated_at = message.get("disposition_updated_at")
+    if disposition_updated_at is not None:
+        disposition_updated_at = _require_non_empty_text(disposition_updated_at, "message.disposition_updated_at")
+    processed_by_actor_address = message.get("processed_by_actor_address")
+    if processed_by_actor_address is not None:
+        processed_by_actor_address = _message_actor_payload(
+            processed_by_actor_address,
+            "message.processed_by_actor_address",
+        )
 
     return {
         "id": msg_id,
@@ -407,6 +423,10 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
         "content": content,
         "reply_to": reply_to,
         "created_at": created_at,
+        "disposition": disposition,
+        "disposition_reason": disposition_reason,
+        "disposition_updated_at": disposition_updated_at,
+        "processed_by_actor_address": processed_by_actor_address,
     }
 
 
@@ -1208,6 +1228,10 @@ def create_message(
         "content": content.strip(),
         "reply_to": reply_to,
         "created_at": now_iso(),
+        "disposition": "unseen",
+        "disposition_reason": None,
+        "disposition_updated_at": None,
+        "processed_by_actor_address": None,
     }
     return save_message(message)
 
