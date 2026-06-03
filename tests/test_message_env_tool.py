@@ -217,6 +217,81 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.addCleanup(restore)
         return calls
 
+    def _patch_parent_message_handling_with_failures(
+        self,
+        *,
+        failures: int,
+        operations: list[str] | None = None,
+    ) -> list[dict[str, object]]:
+        calls: list[dict[str, object]] = []
+        original = getattr(runtime_context.DaemonAccess, "request_parent_message_handling", None)
+
+        def fake_request_parent_message_handling(
+            daemon_access: object,
+            *,
+            message_id: str,
+            prompt: str,
+        ) -> dict[str, object]:
+            del daemon_access
+            calls.append({"message_id": message_id, "prompt": prompt})
+            if operations is not None:
+                operations.append("parent_prompt")
+            if len(calls) <= failures:
+                raise RuntimeError(f"parent prompt unavailable on attempt {len(calls)}")
+            return {"turn_id": "turn-parent-required", "interrupted_turn_id": "turn-main-1"}
+
+        def restore() -> None:
+            if original is None:
+                delattr(runtime_context.DaemonAccess, "request_parent_message_handling")
+            else:
+                runtime_context.DaemonAccess.request_parent_message_handling = original
+
+        runtime_context.DaemonAccess.request_parent_message_handling = fake_request_parent_message_handling
+        self.addCleanup(restore)
+        return calls
+
+    def _patch_message_save_failures(
+        self,
+        *,
+        should_fail: object,
+        failures: int,
+        operations: list[str] | None = None,
+        operation_label: str = "save",
+    ) -> list[dict[str, object]]:
+        attempts: list[dict[str, object]] = []
+        original = message_repo.save_message
+
+        def fake_save_message(message: dict[str, object]) -> dict[str, object]:
+            if callable(should_fail) and should_fail(message):
+                attempts.append(dict(message))
+                if operations is not None:
+                    operations.append(operation_label)
+                if len(attempts) <= failures:
+                    raise OSError(f"injected message save failure {len(attempts)}")
+            return original(message)
+
+        def restore() -> None:
+            message_repo.save_message = original
+
+        message_repo.save_message = fake_save_message
+        self.addCleanup(restore)
+        return attempts
+
+    def _patch_message_retry_sleep(self) -> list[float]:
+        from env.tools.message import _impl as message_impl
+
+        calls: list[float] = []
+        original = getattr(message_impl, "_sleep_for_message_mutation_retry", None)
+        if original is None:
+            return calls
+
+        def fake_sleep(seconds: float) -> None:
+            calls.append(seconds)
+
+        message_impl._sleep_for_message_mutation_retry = fake_sleep
+        self.addCleanup(setattr, message_impl, "_sleep_for_message_mutation_retry", original)
+        return calls
+
     def test_message_contacts_lists_online_actor_contacts(self) -> None:
         dev_address = self._actor_address(role="dev", label="act-dev-contact")
         calls = self._patch_daemon(
@@ -256,14 +331,16 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         active_pm = self._actor_address(role="pm", label="act-pm-contacts-self")
         other_pm = self._actor_address(role="pm", label="act-pm-other")
         market = self._actor_address(role="market", label="act-market-contacts")
+        market_same_actor_id = {"role_id": "market", "actor_id": active_pm["actor_id"]}
         self._patch_daemon(
             contacts={
                 "contacts": [
                     {"actor_address": active_pm, "status": "online"},
                     {"actor_address": other_pm, "status": "online"},
                     {"actor_address": market, "status": "online"},
+                    {"actor_address": market_same_actor_id, "status": "online"},
                 ],
-                "count": 3,
+                "count": 4,
             }
         )
         instance_json = self._instance_json(actor_id="act-pm-contacts-self", role="pm")
@@ -278,26 +355,28 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("count"), 3)
-        self.assertEqual(response.get("sendable_count"), 2)
+        self.assertEqual(response.get("count"), 4)
+        self.assertEqual(response.get("sendable_count"), 3)
         contacts = response.get("contacts")
         self.assertIsInstance(contacts, list, msg=response)
         assert isinstance(contacts, list)
-        by_instance = {
-            row["actor_address"]["actor_id"]: row
+        by_address = {
+            (row["actor_address"]["role_id"], row["actor_address"]["actor_id"]): row
             for row in contacts
             if isinstance(row, dict) and isinstance(row.get("actor_address"), dict)
         }
-        active_row = by_instance[active_pm["actor_id"]]
+        active_row = by_address[(active_pm["role_id"], active_pm["actor_id"])]
         self.assertEqual(active_row["role_id"], "pm")
         self.assertIs(active_row["sendable"], False)
         why_not_sendable = active_row.get("why_not_sendable", "")
-        self.assertIn("active actor itself", why_not_sendable)
+        self.assertIn("active full ActorAddress itself", why_not_sendable)
         self.assertNotIn("same role", why_not_sendable.lower())
-        other_pm_row = by_instance[other_pm["actor_id"]]
+        other_pm_row = by_address[(other_pm["role_id"], other_pm["actor_id"])]
         self.assertEqual(other_pm_row["role_id"], "pm")
         self.assertIs(other_pm_row["sendable"], True)
-        self.assertIs(by_instance[market["actor_id"]]["sendable"], True)
+        self.assertIs(by_address[(market["role_id"], market["actor_id"])]["sendable"], True)
+        same_actor_id_row = by_address[(market_same_actor_id["role_id"], market_same_actor_id["actor_id"])]
+        self.assertIs(same_actor_id_row["sendable"], True)
         self.assertIn("target_actor_address", " ".join(response.get("allowed_next_actions", [])))
 
     def test_message_contacts_rejects_unknown_role_filter(self) -> None:
@@ -789,6 +868,214 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("message.parent_required", prompt)
         self.assertNotIn("mailbox.local_trigger", prompt)
 
+    def test_message_mark_needs_parent_submits_parent_prompt_before_saving_disposition(self) -> None:
+        operations: list[str] = []
+        self._patch_parent_message_handling_with_failures(failures=0, operations=operations)
+        active = self._actor_address(role="dev", label="act-dev-mark-parent-order")
+        pm = self._actor_address(role="pm", label="act-pm-mark-parent-order")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-mark-needs-parent-order",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "This needs parent ordering.",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        self._patch_message_save_failures(
+            should_fail=lambda row: row.get("id") == seed["id"] and row.get("disposition") == "needs_parent",
+            failures=0,
+            operations=operations,
+            operation_label="save_needs_parent",
+        )
+        instance_json = self._instance_json(actor_id="act-dev-mark-parent-order", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-mark-parent-order",
+            role="dev",
+            tool="message",
+            action="mark",
+            args={
+                "message_id": seed["id"],
+                "disposition": "needs_parent",
+                "reason": "Parent must decide ordering.",
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(operations[:2], ["parent_prompt", "save_needs_parent"])
+
+    def test_message_mark_needs_parent_retries_parent_prompt_before_save(self) -> None:
+        sleeps = self._patch_message_retry_sleep()
+        parent_calls = self._patch_parent_message_handling_with_failures(failures=1)
+        active = self._actor_address(role="dev", label="act-dev-mark-parent-retry-prompt")
+        pm = self._actor_address(role="pm", label="act-pm-mark-parent-retry-prompt")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-mark-needs-parent-retry-prompt",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "Retry parent prompt once.",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-mark-parent-retry-prompt", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-mark-parent-retry-prompt",
+            role="dev",
+            tool="message",
+            action="mark",
+            args={
+                "message_id": seed["id"],
+                "disposition": "needs_parent",
+                "reason": "Parent prompt is briefly unavailable.",
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(len(parent_calls), 2)
+        self.assertIn(0.1, sleeps)
+        stored = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored["disposition"], "needs_parent")
+
+    def test_message_mark_needs_parent_prompt_failure_leaves_original_unchanged(self) -> None:
+        sleeps = self._patch_message_retry_sleep()
+        parent_calls = self._patch_parent_message_handling_with_failures(failures=3)
+        active = self._actor_address(role="dev", label="act-dev-mark-parent-prompt-fail")
+        pm = self._actor_address(role="pm", label="act-pm-mark-parent-prompt-fail")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-mark-needs-parent-prompt-fail",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "Parent prompt never submits.",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-mark-parent-prompt-fail", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-mark-parent-prompt-fail",
+            role="dev",
+            tool="message",
+            action="mark",
+            args={
+                "message_id": seed["id"],
+                "disposition": "needs_parent",
+                "reason": "Parent prompt is unavailable.",
+            },
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(len(parent_calls), 3)
+        self.assertIn(0.1, sleeps)
+        self.assertIn(0.25, sleeps)
+        self.assertIs(response.get("state_changed"), False, msg=response)
+        self.assertEqual(response.get("durability"), "none", msg=response)
+        self.assertEqual(response.get("original_final_disposition"), "unseen")
+        self.assertIn("parent prompt", response.get("why_blocked", "").lower())
+        self.assertEqual(message_repo.get_message(seed["id"]), seed)
+
+    def test_message_mark_needs_parent_retries_disposition_save_after_prompt(self) -> None:
+        sleeps = self._patch_message_retry_sleep()
+        parent_calls = self._patch_parent_message_handling_with_failures(failures=0)
+        active = self._actor_address(role="dev", label="act-dev-mark-parent-save-retry")
+        pm = self._actor_address(role="pm", label="act-pm-mark-parent-save-retry")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-mark-needs-parent-save-retry",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "Save needs retry after prompt.",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        save_attempts = self._patch_message_save_failures(
+            should_fail=lambda row: row.get("id") == seed["id"] and row.get("disposition") == "needs_parent",
+            failures=1,
+        )
+        instance_json = self._instance_json(actor_id="act-dev-mark-parent-save-retry", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-mark-parent-save-retry",
+            role="dev",
+            tool="message",
+            action="mark",
+            args={
+                "message_id": seed["id"],
+                "disposition": "needs_parent",
+                "reason": "Disposition save is briefly unavailable.",
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(len(parent_calls), 1)
+        self.assertEqual(len(save_attempts), 2)
+        self.assertIn(0.1, sleeps)
+        stored = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored["disposition"], "needs_parent")
+
+    def test_message_mark_needs_parent_save_failure_reports_prompt_submitted_and_unchanged_original(self) -> None:
+        sleeps = self._patch_message_retry_sleep()
+        parent_calls = self._patch_parent_message_handling_with_failures(failures=0)
+        active = self._actor_address(role="dev", label="act-dev-mark-parent-save-fail")
+        pm = self._actor_address(role="pm", label="act-pm-mark-parent-save-fail")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-mark-needs-parent-save-fail",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "Save never succeeds after prompt.",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        save_attempts = self._patch_message_save_failures(
+            should_fail=lambda row: row.get("id") == seed["id"] and row.get("disposition") == "needs_parent",
+            failures=3,
+        )
+        instance_json = self._instance_json(actor_id="act-dev-mark-parent-save-fail", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-mark-parent-save-fail",
+            role="dev",
+            tool="message",
+            action="mark",
+            args={
+                "message_id": seed["id"],
+                "disposition": "needs_parent",
+                "reason": "Disposition store is unavailable.",
+            },
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(len(parent_calls), 1)
+        self.assertEqual(len(save_attempts), 3)
+        self.assertIn(0.1, sleeps)
+        self.assertIn(0.25, sleeps)
+        self.assertIs(response.get("state_changed"), True, msg=response)
+        self.assertEqual(response.get("durability"), "durable", msg=response)
+        self.assertEqual(response.get("message_id"), seed["id"])
+        self.assertEqual(response.get("original_previous_disposition"), "unseen")
+        self.assertEqual(response.get("original_final_disposition"), "unseen")
+        self.assertIn("parent_request", response)
+        self.assertIn("disposition save failed", response.get("why_blocked", "").lower())
+        self.assertEqual(message_repo.get_message(seed["id"]), seed)
+
     def test_message_mark_rejects_missing_parent_reason_and_invalid_transitions(self) -> None:
         active = self._actor_address(role="dev", label="act-dev-mark-reject")
         pm = self._actor_address(role="pm", label="act-pm-mark-reject")
@@ -1062,6 +1349,82 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(original["disposition"], "replied")
         self.assertIsNone(original["disposition_reason"])
         self.assertEqual(original["processed_by_actor_address"], dev)
+
+    def test_message_send_reply_to_retries_replied_save_after_delivery(self) -> None:
+        self._patch_daemon()
+        sleeps = self._patch_message_retry_sleep()
+        dev = self._actor_address(role="dev", label="act-dev-reply-save-retry")
+        pm = self._actor_address(role="pm", label="act-pm-reply-save-retry")
+        seed = env_store.create_message(from_actor_address=pm, to_actor_address=dev, content="Retry save after reply")
+        save_attempts = self._patch_message_save_failures(
+            should_fail=lambda row: row.get("id") == seed["id"] and row.get("disposition") == "replied",
+            failures=1,
+        )
+        instance_json = self._instance_json(actor_id="act-dev-reply-save-retry", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-reply-save-retry",
+            role="dev",
+            tool="message",
+            action="send",
+            args={"target_actor_address": pm, "content": "ack after retry", "reply_to": seed["id"]},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(len(save_attempts), 2)
+        self.assertIn(0.1, sleeps)
+        self.assertEqual(response.get("delivery_status"), "delivered")
+        self.assertEqual(response.get("reply_to"), seed["id"])
+        self.assertEqual(response.get("original_message_id"), seed["id"])
+        self.assertEqual(response.get("original_final_disposition"), "replied")
+        original = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(original)
+        assert original is not None
+        self.assertEqual(original["disposition"], "replied")
+
+    def test_message_send_reply_to_save_failure_reports_delivered_reply_and_unchanged_original(self) -> None:
+        self._patch_daemon()
+        sleeps = self._patch_message_retry_sleep()
+        dev = self._actor_address(role="dev", label="act-dev-reply-save-fail")
+        pm = self._actor_address(role="pm", label="act-pm-reply-save-fail")
+        seed = env_store.create_message(from_actor_address=pm, to_actor_address=dev, content="Reply save will fail")
+        save_attempts = self._patch_message_save_failures(
+            should_fail=lambda row: row.get("id") == seed["id"] and row.get("disposition") == "replied",
+            failures=3,
+        )
+        instance_json = self._instance_json(actor_id="act-dev-reply-save-fail", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-reply-save-fail",
+            role="dev",
+            tool="message",
+            action="send",
+            args={"target_actor_address": pm, "content": "ack but save fails", "reply_to": seed["id"]},
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(len(save_attempts), 3)
+        self.assertIn(0.1, sleeps)
+        self.assertIn(0.25, sleeps)
+        self.assertIs(response.get("state_changed"), True, msg=response)
+        self.assertEqual(response.get("durability"), "durable", msg=response)
+        self.assertEqual(response.get("delivery_status"), "delivered")
+        self.assertIsInstance(response.get("message_id"), str, msg=response)
+        self.assertEqual(response.get("reply_to"), seed["id"])
+        self.assertEqual(response.get("original_message_id"), seed["id"])
+        self.assertEqual(response.get("original_previous_disposition"), "unseen")
+        self.assertEqual(response.get("original_final_disposition"), "unseen")
+        self.assertIn("Do not blindly send another reply", response.get("retry_guidance", ""))
+        rows = self._message_rows()
+        reply = next(row for row in rows if row["id"] == response.get("message_id"))
+        self.assertEqual(reply["reply_to"], seed["id"])
+        original = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(original)
+        assert original is not None
+        self.assertEqual(original["disposition"], "unseen")
+        self.assertIsNone(original["processed_by_actor_address"])
 
     def test_message_send_reply_to_delivery_failure_does_not_transition_original(self) -> None:
         self._patch_daemon(delivery={"delivery_status": "delivery_failed", "signal_error": "socket gone"})

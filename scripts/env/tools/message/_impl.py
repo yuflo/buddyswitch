@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, TypedDict
 
 from .tool import DEFINITION
 from env.tool_runtime import results as tool_results
+
+
+MESSAGE_MUTATION_RETRY_DELAYS_SECONDS = (0.0, 0.1, 0.25)
 
 
 _ACTION_DEFINITION_MAP = {
@@ -22,6 +26,24 @@ _ACTION_DEFINITION_MAP = {
         for row in DEFINITION.actions
     ]
 }
+
+
+def _sleep_for_message_mutation_retry(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _run_message_mutation_with_retry(operation: Any) -> Any:
+    last_exc: Exception | None = None
+    for delay in MESSAGE_MUTATION_RETRY_DELAYS_SECONDS:
+        if delay > 0:
+            _sleep_for_message_mutation_retry(delay)
+        try:
+            return operation()
+        except Exception as exc:
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("message mutation retry did not run")
 
 
 class MessageServiceContext(TypedDict):
@@ -427,7 +449,9 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         )
 
     reply_to_message = request["reply_to_message"]
+    reply_to_updated: dict[str, Any] | None = None
     if reply_to_message is not None:
+        original_previous_disposition = str(reply_to_message.get("disposition") or "unseen")
         try:
             updated_reply_to = context.rules.message.transition_message_disposition(
                 message=reply_to_message,
@@ -436,7 +460,6 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
                 reason=None,
                 now=context.repos.runtime_files.now_iso(),
             )
-            context.repos.message.save_message(updated_reply_to)
         except (context.rules.message.MessagePayloadError, context.rules.message.MessageScopeError) as exc:
             return _reject_scope(
                 action=action,
@@ -450,8 +473,71 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
                 retryable=getattr(exc, "retryable", False),
                 correctable_fields=getattr(exc, "correctable_fields", ["reply_to"]),
             )
+        try:
+            reply_to_updated = _run_message_mutation_with_retry(
+                lambda: context.repos.message.save_message(updated_reply_to)
+            )
+        except Exception as exc:
+            final_message = context.repos.message.get_message(reply_to_message["id"]) or reply_to_message
+            original_final_disposition = str(final_message.get("disposition") or original_previous_disposition)
+            return tool_results.rejection(
+                tool="message",
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                code="E_MESSAGE_REPLY_DISPOSITION_SAVE_FAILED",
+                message=str(exc),
+                permission_boundary="message.reply_disposition",
+                human_summary="Reply was delivered, but the original message disposition could not be saved.",
+                why_blocked="The reply message is durable and delivered, but saving the original message as replied failed.",
+                impact="The reply exists and was delivered; the original message remains in its previous disposition.",
+                state_changed=True,
+                durability="durable",
+                retryable=True,
+                retry_guidance="Do not blindly send another reply. Inspect the original message state before deciding whether any follow-up is needed.",
+                allowed_next_actions=[
+                    "Use message.get to inspect the original processable message if it is still available.",
+                    "Use message.conversation to inspect whether the delivered reply already covers the message.",
+                ],
+                extra={
+                    "message_id": message["id"],
+                    "reply_message_id": message["id"],
+                    "delivery_status": "delivered",
+                    "reply_to": request["reply_to"],
+                    "original_message_id": reply_to_message["id"],
+                    "original_previous_disposition": original_previous_disposition,
+                    "original_final_disposition": original_final_disposition,
+                    "target_actor_address": target_payload,
+                },
+            )
 
     handling_status = delivery.get("handling_status") if isinstance(delivery.get("handling_status"), str) else None
+    state_changes = [{"object_type": "message", "change": "sent", "message_id": message["id"]}]
+    extra: dict[str, Any] = {
+        "message_id": message["id"],
+        "delivery_status": "delivered",
+        "handling_status": handling_status,
+        "target_actor_address": target_payload,
+    }
+    updated_ids: list[str] | None = None
+    if reply_to_message is not None and reply_to_updated is not None:
+        state_changes.append(
+            {
+                "object_type": "message",
+                "change": "marked_replied",
+                "message_id": reply_to_updated["id"],
+            }
+        )
+        updated_ids = [reply_to_updated["id"]]
+        extra.update(
+            {
+                "reply_to": request["reply_to"],
+                "original_message_id": reply_to_updated["id"],
+                "original_previous_disposition": original_previous_disposition,
+                "original_final_disposition": reply_to_updated["disposition"],
+                "original_message": reply_to_updated,
+            }
+        )
     return tool_results.success(
         tool="message",
         action=action,
@@ -464,16 +550,12 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         state_changed=True,
         durability="durable",
         created_ids=[message["id"]],
-        state_changes=[{"object_type": "message", "change": "sent", "message_id": message["id"]}],
+        updated_ids=updated_ids,
+        state_changes=state_changes,
         allowed_next_actions=[
             "Use message.list to inspect delivered inbox messages when needed.",
         ],
-        extra={
-            "message_id": message["id"],
-            "delivery_status": "delivered",
-            "handling_status": handling_status,
-            "target_actor_address": target_payload,
-        },
+        extra=extra,
     )
 
 
@@ -595,25 +677,25 @@ def mark_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
             correctable_fields=exc.correctable_fields,
         )
 
-    try:
-        saved_message = context.repos.message.save_message(updated_message)
-    except (ValueError, OSError) as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
-
     parent_request: dict[str, Any] | None = None
     if request["disposition"] == "needs_parent":
+        original_previous_disposition = str(current_message.get("disposition") or "unseen")
         prompt = context.rules.message.render_parent_required_prompt(
             request["message_id"],
-            saved_message["from_actor_address"],
-            saved_message["to_actor_address"],
+            current_message["from_actor_address"],
+            current_message["to_actor_address"],
             request["reason"] or "",
         )
         try:
-            parent_request = context.daemon.request_parent_message_handling(
-                message_id=request["message_id"],
-                prompt=prompt,
+            parent_request = _run_message_mutation_with_retry(
+                lambda: context.daemon.request_parent_message_handling(
+                    message_id=request["message_id"],
+                    prompt=prompt,
+                )
             )
         except Exception as exc:
+            final_message = context.repos.message.get_message(request["message_id"]) or current_message
+            original_final_disposition = str(final_message.get("disposition") or original_previous_disposition)
             return tool_results.rejection(
                 tool="message",
                 action=action,
@@ -623,21 +705,65 @@ def mark_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
                 message=str(exc),
                 permission_boundary="message.needs_parent_runtime",
                 human_summary="Parent-required message handoff failed.",
-                why_blocked="The message was marked needs_parent, but parent prompt submission failed.",
-                impact="Message disposition changed to needs_parent, but parent prompt delivery failed.",
+                why_blocked="The parent prompt could not be submitted, so the message was not marked needs_parent.",
+                impact="No message disposition changed; the original message remains in its previous disposition.",
+                state_changed=False,
+                durability="none",
+                retryable=True,
+                retry_guidance="Retry message.mark(needs_parent) after parent runtime availability is restored.",
+                allowed_next_actions=[
+                    "Use message.get to inspect the original processable message.",
+                ],
+                extra={
+                    "message_id": current_message["id"],
+                    "original_message_id": current_message["id"],
+                    "original_previous_disposition": original_previous_disposition,
+                    "original_final_disposition": original_final_disposition,
+                    "parent_prompt_submitted": False,
+                    "message": final_message,
+                },
+            )
+        try:
+            saved_message = _run_message_mutation_with_retry(
+                lambda: context.repos.message.save_message(updated_message)
+            )
+        except Exception as exc:
+            final_message = context.repos.message.get_message(request["message_id"]) or current_message
+            original_final_disposition = str(final_message.get("disposition") or original_previous_disposition)
+            return tool_results.rejection(
+                tool="message",
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                code="E_MESSAGE_NEEDS_PARENT_DISPOSITION_SAVE_FAILED",
+                message=str(exc),
+                permission_boundary="message.needs_parent_disposition",
+                human_summary="Parent prompt was submitted, but the message disposition could not be saved.",
+                why_blocked="The parent prompt was submitted, but the needs_parent disposition save failed.",
+                impact="Parent handling was requested; the original message remains in its previous disposition.",
                 state_changed=True,
                 durability="durable",
                 retryable=True,
-                retry_guidance="Retry only after checking parent runtime availability.",
+                retry_guidance="Inspect message state before repeating the parent handoff; the parent prompt was already submitted.",
                 allowed_next_actions=[
-                    "Use message.get to inspect the needs_parent message.",
+                    "Use message.get to inspect the original processable message if it is still available.",
+                    "Inspect parent runtime state before repeating message.mark(needs_parent).",
                 ],
                 extra={
-                    "message_id": saved_message["id"],
-                    "disposition": saved_message["disposition"],
-                    "message": saved_message,
+                    "message_id": current_message["id"],
+                    "original_message_id": current_message["id"],
+                    "original_previous_disposition": original_previous_disposition,
+                    "original_final_disposition": original_final_disposition,
+                    "parent_prompt_submitted": True,
+                    "parent_request": parent_request,
+                    "message": final_message,
                 },
             )
+    else:
+        try:
+            saved_message = context.repos.message.save_message(updated_message)
+        except (ValueError, OSError) as exc:
+            return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
     state_change = {
         "object_type": "message",
@@ -654,6 +780,7 @@ def mark_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
     }
     if parent_request is not None:
         extra["parent_request"] = parent_request
+        extra["parent_prompt_submitted"] = True
     return tool_results.success(
         tool="message",
         action=action,

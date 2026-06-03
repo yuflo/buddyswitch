@@ -303,6 +303,23 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ensure_ascii=True,
             sort_keys=True,
         ).lower()
+        required = (
+            "online actor contact discovery",
+            "direct actor-address sends",
+            "exact processable inbound reads",
+            "non-reply disposition marking",
+            "reply_to",
+            "replied",
+            "previous disposition",
+            "absorbed",
+            "needs_parent",
+            "message.send(reply_to=...)",
+            "generic disposition editor",
+            "full actoraddress",
+        )
+        for token in required:
+            with self.subTest(required=token):
+                self.assertIn(token, serialized)
         forbidden = (
             "role messages",
             "direct_role_channel",

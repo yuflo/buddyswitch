@@ -129,7 +129,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         evidence_approve = catalog.get_action_definition("evidence", "approve_downgrade").input_schema
         search_request = catalog.get_action_definition("search", "request").input_schema
         search_open = catalog.get_action_definition("search", "open_browser").input_schema
-        message_send = catalog.get_action_definition("message", "send").input_schema
+        message_send_action = catalog.get_action_definition("message", "send")
+        message_send = message_send_action.input_schema
+        message_contacts_action = catalog.get_action_definition("message", "contacts")
         message_get_action = catalog.get_action_definition("message", "get")
         message_get = message_get_action.input_schema
         message_mark_action = catalog.get_action_definition("message", "mark")
@@ -259,6 +261,50 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(message_mark["properties"]["message_id"].get("type"), "string")
         self.assertEqual(message_mark["properties"]["disposition"].get("enum"), ["absorbed", "needs_parent"])
         self.assertEqual(message_mark["properties"]["reason"].get("type"), "string")
+        send_contract_text = " ".join(
+            str(row)
+            for row in (
+                message_send_action.description,
+                message_send["properties"]["reply_to"].get("description"),
+                message_send_action.success_effect,
+                message_send_action.failure_state_guarantee,
+                message_send_action.do_not_use_when,
+            )
+        ).lower()
+        for snippet in (
+            "direct outbound",
+            "reply_to",
+            "processable inbound",
+            "active actor",
+            "replied",
+            "disposition save failure",
+            "previous disposition",
+            "message.mark(absorbed)",
+            "message.mark(needs_parent)",
+        ):
+            self.assertIn(snippet, send_contract_text)
+        mark_contract_text = " ".join(
+            str(row)
+            for row in (
+                message_mark_action.description,
+                message_mark["properties"]["disposition"].get("description"),
+                message_mark["properties"]["reason"].get("description"),
+                message_mark_action.success_effect,
+                message_mark_action.failure_state_guarantee,
+                message_mark_action.do_not_use_when,
+            )
+        ).lower()
+        for snippet in (
+            "absorbed",
+            "needs_parent",
+            "message.send(reply_to=...)",
+            "parent prompt first",
+            "then saves",
+            "generic disposition editor",
+        ):
+            self.assertIn(snippet, mark_contract_text)
+        self.assertIn("full actoraddress", str(message_contacts_action.description).lower())
+        self.assertIn("self", str(message_contacts_action.description).lower())
 
         self.assertEqual(message_conversation_action.kind, "read")
         self.assertEqual(message_conversation_action.mutates, "none")

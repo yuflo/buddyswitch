@@ -361,12 +361,12 @@ def prepare_send_request(
             f"unknown target actor role: {target_actor.role_id}",
             correctable_fields=["target_actor_address"],
         )
-    if target_actor.actor_id == source_actor_address.actor_id:
+    if target_actor == source_actor_address:
         raise MessageScopeError(
-            message="cannot send a message to the same actor",
+            message="cannot send a message to the same full actor address",
             permission_boundary="message.self_send",
             human_summary="Self-send messages are not allowed.",
-            why_blocked="message.send requires target_actor_address.actor_id to differ from the active actor.",
+            why_blocked="message.send requires target_actor_address to differ from the active full ActorAddress.",
             retryable=True,
             correctable_fields=["target_actor_address"],
         )
@@ -537,12 +537,12 @@ def prepare_conversation_request(
             f"unknown target actor role: {target_actor.role_id}",
             correctable_fields=["target_actor_address"],
         )
-    if target_actor.actor_id == source_actor_address.actor_id:
+    if target_actor == source_actor_address:
         raise MessageScopeError(
-            message="cannot read a message conversation with the same actor",
+            message="cannot read a message conversation with the same full actor address",
             permission_boundary="message.self_conversation",
             human_summary="Self-conversation is not supported.",
-            why_blocked="message.conversation requires the selected target actor to differ from the active actor.",
+            why_blocked="message.conversation requires the selected target ActorAddress to differ from the active full ActorAddress.",
             retryable=True,
             correctable_fields=["target_actor_address"],
         )
@@ -630,16 +630,17 @@ def normalize_contact_rows(
         if not isinstance(row, dict):
             continue
         try:
-            actor_address = ActorAddress.from_payload(row.get("actor_address")).to_payload()
+            row_actor_address = ActorAddress.from_payload(row.get("actor_address"))
+            actor_address = row_actor_address.to_payload()
         except Exception:
             continue
         status = row.get("status")
         contact_status = status if isinstance(status, str) and status else "online"
         why_not_sendable: str | None = None
         sendable = contact_status == "online"
-        if actor_address["actor_id"] == active_actor_address.actor_id:
+        if row_actor_address == active_actor_address:
             sendable = False
-            why_not_sendable = "message.send rejects the active actor itself as a target"
+            why_not_sendable = "message.send rejects the active full ActorAddress itself as a target"
         elif contact_status != "online":
             why_not_sendable = f"contact_status is {contact_status}"
         contact = {

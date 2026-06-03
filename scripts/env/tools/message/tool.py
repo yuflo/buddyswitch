@@ -14,11 +14,11 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
         title='Direct Actor Messages',
-        description='Discover online actor contacts, send direct actor-address messages, read exact inbound messages, and mark message processing dispositions.',
+        description='Message tools cover online actor contact discovery, direct actor-address sends, exact processable inbound reads, and non-reply disposition marking.',
         scope='direct runtime actor inbox messaging',
         capability_boundary='Messages are direct runtime actor-address scope only.',
         object_model=(
-            'Messages are direct actor-address inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, or request lifecycle state.'
+            'Messages are direct actor-address inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, requests, browser state, or actor private files.'
         ),
         use_when=(
             'You need direct inbox messaging between online runtime actors.',
@@ -30,7 +30,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='contacts',
                 title='message.contacts',
-                description='List online actor contacts that can receive direct messages.',
+                description='List online actor contacts for direct sends; only the active full ActorAddress row is not sendable as self.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -92,7 +92,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='send',
                 title='message.send',
-                description='Send one direct message to an online runtime actor address.',
+                description='Send one direct outbound message to an online runtime actor address, or reply to one processable inbound message with reply_to.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -120,7 +120,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'reply_to': {
                             'type': 'string',
-                            'description': 'Optional parent message id for threading.',
+                            'description': 'Optional processable inbound message id addressed to the active actor. When reply_to is provided, success marks that original message as replied after delivery.',
                         },
                     },
                 },
@@ -134,14 +134,15 @@ def _build_definition() -> ToolDefinition:
                 visibility='sender and recipient direct message visibility',
                 durability='durable',
                 result_content_level='message id and delivery status',
-                success_effect='Creates one durable inbox message and delivers a message.available signal to the target daemon.',
-                failure_state_guarantee='Rejected non-writes do not mutate runtime objects; delivery failures clean up the message or report an indeterminate write.',
+                success_effect='Creates and delivers one durable inbox message; when reply_to is provided, also transitions the original processable inbound message to replied.',
+                failure_state_guarantee='Reachability and payload rejections do not mutate state; delivery failures clean up the created message or report delivery cleanup uncertainty; reply disposition save failure can leave the delivered reply durable while the original remains in its previous disposition.',
                 reads=(
                     'manifest role ids',
                     'central daemon actor reachability',
                 ),
                 writes=(
                     'direct actor-address inbox message',
+                    'original message replied disposition when reply_to succeeds',
                 ),
                 does_not_write=(
                     'tracks',
@@ -154,17 +155,22 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=(
                     'target_actor_address.role_id is a declared manifest role',
-                    'target actor is online and is not the active actor',
+                    'target actor is online and is not the active full ActorAddress',
+                    'reply_to, when provided, references a processable inbound message addressed to the active actor',
                 ),
                 returns=(
                     'message_id',
                     'delivery_status',
+                    'original_message_id and original_final_disposition when reply_to is provided',
                 ),
                 use_when=(
                     'You need to deliver a direct inbox message to a specific online actor address.',
+                    'You need to reply to one processable inbound message and mark the original replied after delivery.',
                 ),
                 do_not_use_when=(
                     'You only have a role id but no actor address (use message.contacts) or need target-scoped track/artifact discussion (use comment.add).',
+                    'Use message.mark(absorbed) when no reply is needed.',
+                    'Use message.mark(needs_parent) when side triage needs parent handling.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -178,7 +184,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='get',
                 title='message.get',
-                description='Read one exact processable inbound message by id.',
+                description='Read one exact processable inbound message by id without changing disposition; processable means unseen or needs_parent.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -242,7 +248,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='mark',
                 title='message.mark',
-                description='Set a non-reply processing disposition for one exact inbound message.',
+                description='Set only non-reply processing dispositions for one exact inbound message: absorbed or needs_parent.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -254,12 +260,12 @@ def _build_definition() -> ToolDefinition:
                         },
                         'disposition': {
                             'type': 'string',
-                            'description': 'Processing disposition to apply.',
+                            'description': 'Allowed values are absorbed and needs_parent. Use message.send(reply_to=...) for replied.',
                             'enum': ['absorbed', 'needs_parent'],
                         },
                         'reason': {
                             'type': 'string',
-                            'description': 'Required concise reason when disposition is needs_parent.',
+                            'description': 'Required and non-empty for needs_parent; ignored or omitted for absorbed.',
                         },
                     },
                 },
@@ -273,8 +279,8 @@ def _build_definition() -> ToolDefinition:
                 visibility='active actor exact processable inbound message disposition',
                 durability='durable',
                 result_content_level='updated message disposition metadata',
-                success_effect='Transitions one processable inbound message to absorbed or needs_parent.',
-                failure_state_guarantee='Rejected marks do not mutate message state.',
+                success_effect='absorbed saves the message as processed without a reply; needs_parent submits the parent prompt first, then saves the message as needs_parent.',
+                failure_state_guarantee='Validation failures do not mutate state; needs_parent prompt-submit failure leaves the message in its previous disposition; needs_parent save failure after prompt submit leaves the message in its previous disposition but the parent prompt was already submitted.',
                 reads=(
                     'one active actor processable inbound message',
                 ),
@@ -304,6 +310,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need to reply; use message.send with reply_to so the message is marked replied after delivery.',
+                    'Do not use message.mark as a generic disposition editor.',
                 ),
                 risk_hints={
                     'read_only': False,
