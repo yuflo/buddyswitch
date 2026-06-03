@@ -2610,10 +2610,13 @@ exec "$real_git" "$@"
             status_payload = json.loads(status_result.stdout)
             self.assertTrue(status_payload["daemon"]["ready"])
             self.assertEqual(status_payload["daemon"]["ready_main_thread_id"], instance_payload["thread_id"])
-            self.assertEqual(status_payload["daemon"]["handlers"]["registered"], ["task_checkout"])
+            self.assertEqual(status_payload["daemon"]["handlers"]["registered"], ["task_checkout", "message_available"])
             task_checkout_status = status_payload["daemon"]["handlers"]["items"]["task_checkout"]
             self.assertIs(task_checkout_status["enabled"], True)
             self.assertIs(task_checkout_status["active"], True)
+            message_status = status_payload["daemon"]["handlers"]["items"]["message_available"]
+            self.assertIs(message_status["enabled"], True)
+            self.assertIs(message_status["active"], True)
 
             calls = self._read_json_lines(Path(str(ctx["calls_path"])))
             daemon_resume = next(
@@ -5299,8 +5302,9 @@ exec "$real_git" "$@"
             self.assertIn("daemon", payload)
             self.assertTrue(payload["daemon"]["pid_file"].endswith("runtime/daemon/daemon.pid"))
             self.assertTrue(payload["daemon"]["state_path"].endswith("runtime/daemon/state.json"))
-            self.assertEqual(payload["daemon"]["handlers"]["registered"], ["task_checkout"])
+            self.assertEqual(payload["daemon"]["handlers"]["registered"], ["task_checkout", "message_available"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["task_checkout"]["active"])
+            self.assertTrue(payload["daemon"]["handlers"]["items"]["message_available"]["active"])
             self.assertEqual(payload["thread"]["status"], "idle")
 
     def test_human_status_reports_daemon_health_line(self) -> None:
@@ -5420,8 +5424,9 @@ exec "$real_git" "$@"
             self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "task_checkout")
             self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "turn-user-1")
             self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_origin_turn_id"], "turn-user-1")
-            self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_action_turn_id"], "turn-daemon-1")
+            self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_runtime_turn_id"], "turn-daemon-1")
             self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_result"], "handled")
+            self.assertNotIn("last_" + "action" + "_turn_id", daemon_state["handlers"]["task_checkout"])
             self.assertNotIn("last_checkout_turn_id", daemon_state["handlers"]["task_checkout"])
 
     def test_daemon_origin_completion_real_shape_does_not_loop(self) -> None:

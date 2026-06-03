@@ -29,7 +29,7 @@ def load_module(path: Path) -> Any:
     return module
 
 
-class FakeActionGateway:
+class FakeDaemonRuntime:
     def __init__(
         self,
         *,
@@ -124,73 +124,75 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             source="mailbox_cross_actor_signal" if trigger_type == "message.available" else "mailbox_local_trigger",
             type=trigger_type,
             target_actor_address={"role_id": to_role, "actor_id": to_instance},
-            origin_id="msg-readable" if trigger_type == "message.parent_required" else "sig-readable",
+            origin_id="sig-readable",
             correlation_id=None,
             payload={"message_id": "msg-readable"} if payload is None else payload,
             source_context={} if source_context is None else source_context,
         )
 
-    def test_message_handler_source_uses_unified_trigger_interface_and_clean_actions(self) -> None:
+    def test_message_handler_source_uses_unified_trigger_interface_and_clean_runtime(self) -> None:
         source = HANDLER_PATH.read_text(encoding="utf-8")
 
         self.assertIn("def handle(", source)
         self.assertNotIn("handle_signal", source)
         self.assertNotIn("handle_parent_required", source)
         self.assertNotIn("require_side_thread", source)
+        self.assertNotIn("message." + "parent_required", source)
+        self.assertNotIn("mailbox.local_trigger", source)
         self.assertNotIn("interrupt_and_submit_parent_prompt", source)
         self.assertNotIn("start_or_reuse_side_triage", source)
 
     def test_message_available_handler_ignores_unknown_trigger_types(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway()
+            runtime = FakeDaemonRuntime()
             trigger = self._trigger(trigger_type="task.updated", payload={"task_id": "task-1"})
 
             self.assertFalse(self.handler.handles(trigger))
-            result = self.handler.handle(instance["context"], instance["state"], actions, trigger)
+            result = self.handler.handle(instance["context"], instance["state"], runtime, trigger)
 
             self.assertEqual(result.status, "ignored")
-            self.assertEqual(actions.calls, [])
+            self.assertEqual(runtime.calls, [])
 
     def test_message_available_handler_rejects_trigger_for_other_actor_address(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway()
+            runtime = FakeDaemonRuntime()
 
             result = self.handler.handle(
                 instance["context"],
                 instance["state"],
-                actions,
+                runtime,
                 self._trigger(to_role="design", to_instance="act-design-daemon"),
             )
 
             self.assertEqual(result.status, "failed")
             self.assertIn("wrong target actor", result.message)
-            self.assertEqual(actions.calls, [])
+            self.assertEqual(runtime.calls, [])
 
     def test_message_available_handler_rejects_missing_payload_message_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway()
+            runtime = FakeDaemonRuntime()
 
-            result = self.handler.handle(instance["context"], instance["state"], actions, self._trigger(payload={}))
+            result = self.handler.handle(instance["context"], instance["state"], runtime, self._trigger(payload={}))
 
             self.assertEqual(result.status, "failed")
             self.assertIn("message_id", result.message)
-            self.assertEqual(actions.calls, [])
+            self.assertEqual(runtime.calls, [])
 
     def test_message_available_handler_routes_idle_parent_to_parent_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway()
+            runtime = FakeDaemonRuntime()
             trigger = self._trigger()
 
             self.assertTrue(self.handler.handles(trigger))
-            result = self.handler.handle(instance["context"], instance["state"], actions, trigger)
+            result = self.handler.handle(instance["context"], instance["state"], runtime, trigger)
 
             self.assertEqual(result.status, "handled")
-            self.assertEqual([call["method"] for call in actions.calls], ["parent_activity", "submit_parent_prompt"])
-            call = actions.calls[1]
+            self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity", "submit_parent_prompt"])
+            call = runtime.calls[1]
             self.assertEqual(call["handler_name"], "message_available")
             self.assertEqual(call["origin_id"], "msg-readable")
             self.assertEqual(call["interrupt_policy"], "none")
@@ -207,13 +209,13 @@ class MessageAvailableHandlerTests(unittest.TestCase):
     def test_message_available_handler_routes_running_parent_to_side_triage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway(activity={"status": "running", "active_turn_id": "turn-main-1"})
+            runtime = FakeDaemonRuntime(activity={"status": "running", "active_turn_id": "turn-main-1"})
 
-            result = self.handler.handle(instance["context"], instance["state"], actions, self._trigger())
+            result = self.handler.handle(instance["context"], instance["state"], runtime, self._trigger())
 
             self.assertEqual(result.status, "handled")
-            self.assertEqual([call["method"] for call in actions.calls], ["parent_activity", "submit_side_triage_prompt"])
-            call = actions.calls[1]
+            self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity", "submit_side_triage_prompt"])
+            call = runtime.calls[1]
             self.assertEqual(call["handler_name"], "message_available")
             self.assertEqual(call["origin_id"], "msg-readable")
             prompt = call["text"]
@@ -223,74 +225,46 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertIn("message__list", prompt)
             self.assertIn("message__conversation", prompt)
             self.assertIn("message__send", prompt)
-            self.assertIn('mailbox.local_trigger(type="message.parent_required"', prompt)
+            self.assertNotIn("mailbox.local_trigger", prompt)
+            self.assertNotIn("message." + "parent_required", prompt)
             self.assertNotIn("codex-remote", prompt)
 
     def test_message_available_handler_fails_when_parent_activity_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway(activity={"status": "unavailable", "error": "app-server down"})
+            runtime = FakeDaemonRuntime(activity={"status": "unavailable", "error": "app-server down"})
 
-            result = self.handler.handle(instance["context"], instance["state"], actions, self._trigger())
+            result = self.handler.handle(instance["context"], instance["state"], runtime, self._trigger())
 
             self.assertEqual(result.status, "failed")
             self.assertIn("app-server down", result.message)
-            self.assertEqual([call["method"] for call in actions.calls], ["parent_activity"])
+            self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity"])
 
     def test_message_available_handler_records_failed_parent_submit_as_handler_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway(error=RuntimeError("submit failed"))
+            runtime = FakeDaemonRuntime(error=RuntimeError("submit failed"))
 
-            result = self.handler.handle(instance["context"], instance["state"], actions, self._trigger())
+            result = self.handler.handle(instance["context"], instance["state"], runtime, self._trigger())
 
             self.assertEqual(result.status, "failed")
             self.assertIn("submit failed", result.message)
 
-    def test_parent_required_trigger_interrupts_then_submits_parent_prompt_without_side_validation(self) -> None:
+    def test_parent_required_trigger_is_no_longer_a_message_handler_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            actions = FakeActionGateway()
-
-            result = self.handler.handle(
-                instance["context"],
-                instance["state"],
-                actions,
-                self._trigger(
-                    trigger_type="message.parent_required",
-                    payload={"message_id": "msg-readable", "reason": "parent is required"},
-                    source_context={"parent_thread_id": "thr-main", "side_thread_id": "thr-side-1"},
-                ),
+            runtime = FakeDaemonRuntime()
+            trigger = self._trigger(
+                trigger_type="message." + "parent_required",
+                payload={"message_id": "msg-readable", "reason": "parent is required"},
+                source_context={"side_thread_id": "thr-side-1"},
             )
 
-            self.assertEqual(result["status"], "handled")
-            self.assertEqual(result["side_thread_id"], "thr-side-1")
-            self.assertEqual(result["interrupted_turn_id"], "turn-main-1")
-            self.assertEqual(result["turn_id"], "turn-parent-message")
-            self.assertEqual([call["method"] for call in actions.calls], ["submit_parent_prompt"])
-            self.assertEqual(actions.calls[0]["interrupt_policy"], "before_submit")
-            self.assertEqual(actions.calls[0]["origin_id"], "msg-readable")
-            self.assertIn("[MESSAGE AVAILABLE]", actions.calls[0]["text"])
-            self.assertIn("msg-readable", actions.calls[0]["text"])
+            self.assertFalse(self.handler.handles(trigger))
+            result = self.handler.handle(instance["context"], instance["state"], runtime, trigger)
 
-    def test_parent_required_trigger_reports_submit_failure(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance = self._instance(temp_root)
-            actions = FakeActionGateway(error=RuntimeError("submit failed"))
-
-            result = self.handler.handle(
-                instance["context"],
-                instance["state"],
-                actions,
-                self._trigger(
-                    trigger_type="message.parent_required",
-                    payload={"message_id": "msg-readable", "reason": "parent is required"},
-                    source_context={"parent_thread_id": "thr-main", "side_thread_id": "thr-side-1"},
-                ),
-            )
-
-            self.assertEqual(result["status"], "failed")
-            self.assertIn("submit failed", result["message"])
+            self.assertEqual(result.status, "ignored")
+            self.assertEqual(runtime.calls, [])
 
 
 if __name__ == "__main__":

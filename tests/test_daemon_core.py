@@ -129,8 +129,10 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             self.assertEqual(state.payload["actor_id"], "act-dev-daed00000001")
             self.assertEqual(state.payload["main_thread_id"], "thr-main")
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
-            self.assertEqual(state.payload["daemon_action_ids"], [])
-            self.assertEqual(state.payload["daemon_actions"], {})
+            self.assertEqual(state.payload["daemon_runtime_call_ids"], [])
+            self.assertEqual(state.payload["daemon_runtime_calls"], {})
+            self.assertNotIn("daemon_" + "action_ids", state.payload)
+            self.assertNotIn("daemon_" + "actions", state.payload)
             self.assertEqual(state.payload["handlers"], {})
             self.assertIsNone(state.payload["ready"])
             self.assertIsNone(state.payload["last_error"])
@@ -233,7 +235,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 "task_checkout",
                 {
                     "last_origin_turn_id": "turn-user-1",
-                    "last_action_turn_id": "turn-daemon-1",
+                    "last_runtime_turn_id": "turn-daemon-1",
                 },
             )
 
@@ -242,14 +244,14 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 saved["handlers"]["task_checkout"],
                 {
                     "last_origin_turn_id": "turn-user-1",
-                    "last_action_turn_id": "turn-daemon-1",
+                    "last_runtime_turn_id": "turn-daemon-1",
                 },
             )
             self.assertEqual(
                 state.handler_state("task_checkout"),
                 {
                     "last_origin_turn_id": "turn-user-1",
-                    "last_action_turn_id": "turn-daemon-1",
+                    "last_runtime_turn_id": "turn-daemon-1",
                 },
             )
 
@@ -656,7 +658,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIsNone(payload["last_error"]["origin_turn_id"])
             self.assertEqual(payload["last_error"]["message"], "socket gone")
 
-    def test_daemon_status_reports_recent_runtime_action_records(self) -> None:
+    def test_daemon_status_reports_recent_runtime_call_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             state = self.core.DaemonState.load(
@@ -664,22 +666,23 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
                 actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
             )
-            record = state.record_daemon_action(
+            record = state.record_runtime_call(
                 handler_name="message_available",
                 origin_id="msg-1",
-                action_type="side_start",
+                runtime_method="side_start",
                 parent_thread_id="thr-main",
                 side_thread_id="thr-side-1",
                 turn_id="turn-side-1",
-                status="handled",
+                status="succeeded",
             )
 
             payload = self.core.daemon_status(instance["instance_json"])
 
-            self.assertEqual(payload["actions"]["ids"], [record["action_id"]])
-            self.assertEqual(payload["actions"]["items"][record["action_id"]]["action_type"], "side_start")
-            self.assertEqual(payload["actions"]["items"][record["action_id"]]["side_thread_id"], "thr-side-1")
-            self.assertEqual(payload["actions"]["items"][record["action_id"]]["origin_id"], "msg-1")
+            self.assertNotIn("actions", payload)
+            self.assertEqual(payload["runtime"]["ids"], [record["runtime_call_id"]])
+            self.assertEqual(payload["runtime"]["items"][record["runtime_call_id"]]["runtime_method"], "side_start")
+            self.assertEqual(payload["runtime"]["items"][record["runtime_call_id"]]["side_thread_id"], "thr-side-1")
+            self.assertEqual(payload["runtime"]["items"][record["runtime_call_id"]]["origin_id"], "msg-1")
 
     def test_daemon_status_reports_registered_handler_observability(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -700,7 +703,8 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIs(item["active"], True)
             self.assertIsNone(item["last_result"])
             self.assertIsNone(item["last_error"])
-            self.assertIsNone(item["last_action_turn_id"])
+            self.assertIsNone(item["last_runtime_turn_id"])
+            self.assertNotIn("last_" + "action" + "_turn_id", item)
             self.assertNotIn("mailbox_handlers", payload)
             mailbox_item = payload["handlers"]["items"]["message_available"]
             self.assertIs(mailbox_item["registered"], True)
@@ -708,7 +712,8 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIs(mailbox_item["active"], True)
             self.assertIsNone(mailbox_item["last_result"])
             self.assertIsNone(mailbox_item["last_error"])
-            self.assertIsNone(mailbox_item["last_action_turn_id"])
+            self.assertIsNone(mailbox_item["last_runtime_turn_id"])
+            self.assertNotIn("last_" + "action" + "_turn_id", mailbox_item)
 
     def test_daemon_status_includes_persisted_unregistered_handler_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -796,9 +801,10 @@ class RecordingHandler:
         self,
         context: object,
         state: object,
-        actions: object,
+        runtime: object,
         trigger: object,
     ) -> object:
+        del context, state, runtime
         self.triggers.append(trigger)
         return self.result
 
@@ -816,9 +822,10 @@ class ExplodingOnceHandler:
         self,
         context: object,
         state: object,
-        actions: object,
+        runtime: object,
         trigger: object,
     ) -> object:
+        del context, state, runtime, trigger
         self.calls += 1
         if self.calls == 1:
             raise RuntimeError("handler exploded")
@@ -1005,9 +1012,10 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                     self,
                     context: object,
                     state: object,
-                    actions: object,
+                    runtime: object,
                     trigger_payload: object,
                 ) -> object:
+                    del context, state, runtime
                     source_context = getattr(trigger_payload, "source_context")
                     turn = source_context["turn_id"]
                     assert isinstance(turn, str)

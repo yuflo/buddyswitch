@@ -46,13 +46,6 @@ class RecordingTriggerDispatcher:
         return dict(self.result)
 
 
-class LocalTriggerContext:
-    def __init__(self, *, instance_json: Path) -> None:
-        self.instance_json = instance_json
-        self.actor_id = "act-dev-daemon"
-        self.main_thread_id = "thr-main"
-
-
 class DaemonMailboxTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mailbox = load_module(MAILBOX_PATH)
@@ -269,39 +262,19 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertEqual(result["result"]["handling_status"], "failed")
             self.assertIn("handler failed intentionally", result["result"]["handling_error"])
 
-    def _local_trigger_context(self, temp_root: str, *, side_thread_id: str = "thr-side-1") -> LocalTriggerContext:
-        instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
-        instance_root.mkdir(parents=True, exist_ok=True)
-        instance_json = instance_root / "instance.json"
-        payload = {
-            "actor_id": "act-dev-daemon",
-            "role": "dev",
-            "status": "active",
-            "instance_root": str(instance_root),
-            "workspace_dir": str(instance_root / "workspace"),
-            "thread_id": "thr-main",
-            "side_threads": [
-                {
-                    "thread_id": side_thread_id,
-                    "parent_thread_id": "thr-main",
-                    "status": "open",
-                    "created_at": "2026-05-30T00:00:00Z",
-                    "updated_at": "2026-05-30T00:00:00Z",
-                }
-            ],
-        }
-        instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
-        return LocalTriggerContext(instance_json=instance_json)
-
     def _local_trigger_params(self) -> dict[str, Any]:
         return {
             "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
-            "type": "message.parent_required",
-            "parent_thread_id": "thr-main",
-            "side_thread_id": "thr-side-1",
+            "type": "example.attention_needed",
+            "origin_id": "origin-1",
+            "correlation_id": "corr-1",
             "payload": {
-                "message_id": "msg-daemon-mailbox",
-                "reason": "parent is required",
+                "example_id": "example-1",
+                "priority": "high",
+            },
+            "source_context": {
+                "sender": "local-side",
+                "thread_id": "thr-side-1",
             },
         }
 
@@ -324,109 +297,105 @@ class DaemonMailboxTests(unittest.TestCase):
         self.assertFalse(response["ok"], msg=response)
         self.assertEqual(response["error"]["code"], "mailbox_unknown_method")
 
-    def test_local_trigger_dispatches_parent_required_daemon_trigger(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            dispatcher = RecordingTriggerDispatcher()
-            server = self.mailbox.DaemonMailboxServer(
-                socket_path=Path("/tmp/not-used.sock"),
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
-                handlers=[],
-                context=self._local_trigger_context(temp_root),
-                trigger_dispatcher=dispatcher,
-            )
+    def test_local_trigger_dispatches_generic_daemon_trigger(self) -> None:
+        dispatcher = RecordingTriggerDispatcher()
+        server = self.mailbox.DaemonMailboxServer(
+            socket_path=Path("/tmp/not-used.sock"),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            handlers=[],
+            trigger_dispatcher=dispatcher,
+        )
 
-            response = server.dispatch(
+        response = server.dispatch(
+            {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-local-trigger",
+                "method": "mailbox.local_trigger",
+                "params": self._local_trigger_params(),
+            }
+        )
+
+        self.assertTrue(response["ok"], msg=response)
+        self.assertEqual(response["result"]["handling_status"], "handled")
+        self.assertEqual(len(dispatcher.triggers), 1)
+        trigger = dispatcher.triggers[0]
+        self.assertEqual(trigger.source, "mailbox_local_trigger")
+        self.assertEqual(trigger.type, "example.attention_needed")
+        self.assertEqual(trigger.origin_id, "origin-1")
+        self.assertEqual(trigger.correlation_id, "corr-1")
+        self.assertEqual(trigger.payload, {"example_id": "example-1", "priority": "high"})
+        self.assertEqual(trigger.source_context, {"sender": "local-side", "thread_id": "thr-side-1"})
+
+    def test_local_trigger_defaults_source_context_and_does_not_require_business_fields(self) -> None:
+        dispatcher = RecordingTriggerDispatcher()
+        server = self.mailbox.DaemonMailboxServer(
+            socket_path=Path("/tmp/not-used.sock"),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            handlers=[],
+            trigger_dispatcher=dispatcher,
+        )
+        params = {
+            "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+            "type": "example.attention_needed",
+            "payload": {"note": "generic local trigger"},
+        }
+
+        response = server.dispatch(
+            {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-local-trigger",
+                "method": "mailbox.local_trigger",
+                "params": params,
+            }
+        )
+
+        self.assertTrue(response["ok"], msg=response)
+        trigger = dispatcher.triggers[0]
+        self.assertEqual(trigger.origin_id, None)
+        self.assertEqual(trigger.correlation_id, None)
+        self.assertEqual(trigger.payload, {"note": "generic local trigger"})
+        self.assertEqual(trigger.source_context, {})
+
+    def test_local_trigger_rejects_wrong_actor_and_invalid_generic_shape_before_dispatch(self) -> None:
+        dispatcher = RecordingTriggerDispatcher()
+        server = self.mailbox.DaemonMailboxServer(
+            socket_path=Path("/tmp/not-used.sock"),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            handlers=[],
+            trigger_dispatcher=dispatcher,
+        )
+
+        def dispatch(params: dict[str, Any]) -> dict[str, Any]:
+            return server.dispatch(
                 {
                     "protocol": self.client.MAILBOX_PROTOCOL,
                     "request_id": "req-local-trigger",
                     "method": "mailbox.local_trigger",
-                    "params": self._local_trigger_params(),
+                    "params": params,
                 }
             )
 
-            self.assertTrue(response["ok"], msg=response)
-            self.assertEqual(response["result"]["handling_status"], "handled")
-            self.assertEqual(len(dispatcher.triggers), 1)
-            trigger = dispatcher.triggers[0]
-            self.assertEqual(trigger.source, "mailbox_local_trigger")
-            self.assertEqual(trigger.type, "message.parent_required")
-            self.assertEqual(trigger.origin_id, "msg-daemon-mailbox")
-            self.assertEqual(trigger.payload, {"message_id": "msg-daemon-mailbox", "reason": "parent is required"})
-            self.assertEqual(
-                trigger.source_context,
-                {"parent_thread_id": "thr-main", "side_thread_id": "thr-side-1"},
-            )
+        base = self._local_trigger_params()
+        wrong_actor = dict(base)
+        wrong_actor["actor_address"] = {"role_id": "pm", "actor_id": "act-pm-daemon"}
+        empty_type = dict(base)
+        empty_type["type"] = " "
+        non_object_payload = dict(base)
+        non_object_payload["payload"] = ["not", "object"]
+        non_object_source_context = dict(base)
+        non_object_source_context["source_context"] = "not-object"
+        empty_origin = dict(base)
+        empty_origin["origin_id"] = ""
+        empty_correlation = dict(base)
+        empty_correlation["correlation_id"] = ""
 
-    def test_local_trigger_rejects_wrong_actor_wrong_parent_and_parent_as_side_before_dispatch(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            dispatcher = RecordingTriggerDispatcher()
-            server = self.mailbox.DaemonMailboxServer(
-                socket_path=Path("/tmp/not-used.sock"),
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
-                handlers=[],
-                context=self._local_trigger_context(temp_root),
-                trigger_dispatcher=dispatcher,
-            )
+        self.assertEqual(dispatch(wrong_actor)["error"]["code"], "wrong_target_actor")
+        for params in (empty_type, non_object_payload, non_object_source_context, empty_origin, empty_correlation):
+            response = dispatch(params)
+            self.assertFalse(response["ok"], msg=response)
+            self.assertEqual(response["error"]["code"], "invalid_local_trigger")
 
-            def dispatch(params: dict[str, Any]) -> dict[str, Any]:
-                return server.dispatch(
-                    {
-                        "protocol": self.client.MAILBOX_PROTOCOL,
-                        "request_id": "req-local-trigger",
-                        "method": "mailbox.local_trigger",
-                        "params": params,
-                    }
-                )
-
-            base = self._local_trigger_params()
-            wrong_actor = dict(base)
-            wrong_actor["actor_address"] = {"role_id": "pm", "actor_id": "act-pm-daemon"}
-            wrong_parent = dict(base)
-            wrong_parent["parent_thread_id"] = "thr-other"
-            parent_as_side = dict(base)
-            parent_as_side["side_thread_id"] = "thr-main"
-
-            self.assertEqual(dispatch(wrong_actor)["error"]["code"], "wrong_target_actor")
-            self.assertEqual(dispatch(wrong_parent)["error"]["code"], "invalid_local_trigger")
-            self.assertEqual(dispatch(parent_as_side)["error"]["code"], "invalid_local_trigger")
-            self.assertEqual(dispatcher.triggers, [])
-
-    def test_local_trigger_rejects_unknown_side_and_invalid_payload_before_dispatch(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            dispatcher = RecordingTriggerDispatcher()
-            server = self.mailbox.DaemonMailboxServer(
-                socket_path=Path("/tmp/not-used.sock"),
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
-                handlers=[],
-                context=self._local_trigger_context(temp_root),
-                trigger_dispatcher=dispatcher,
-            )
-
-            def dispatch(params: dict[str, Any]) -> dict[str, Any]:
-                return server.dispatch(
-                    {
-                        "protocol": self.client.MAILBOX_PROTOCOL,
-                        "request_id": "req-local-trigger",
-                        "method": "mailbox.local_trigger",
-                        "params": params,
-                    }
-                )
-
-            unknown_side = self._local_trigger_params()
-            unknown_side["side_thread_id"] = "thr-side-unknown"
-            missing_payload = self._local_trigger_params()
-            missing_payload.pop("payload")
-            missing_message_id = self._local_trigger_params()
-            missing_message_id["payload"] = {"reason": "parent is required"}
-            missing_reason = self._local_trigger_params()
-            missing_reason["payload"] = {"message_id": "msg-daemon-mailbox"}
-
-            for params in (unknown_side, missing_payload, missing_message_id, missing_reason):
-                response = dispatch(params)
-                self.assertFalse(response["ok"], msg=response)
-                self.assertEqual(response["error"]["code"], "invalid_local_trigger")
-
-            self.assertEqual(dispatcher.triggers, [])
+        self.assertEqual(dispatcher.triggers, [])
 
 
 if __name__ == "__main__":

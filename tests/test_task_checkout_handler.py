@@ -43,7 +43,7 @@ class FakeDaemonClient:
         return self.result
 
 
-class FakeActionGateway:
+class FakeDaemonRuntime:
     def __init__(self, *, result: str = "turn-daemon-1", error: BaseException | None = None) -> None:
         self.result = result
         self.error = error
@@ -266,7 +266,7 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
                 handler_name="task_checkout",
                 origin_turn_id="turn-user-1",
             )
-            actions = FakeActionGateway()
+            runtime = FakeDaemonRuntime()
 
             ignored_triggers = [
                 self._completed(thread_id="thr-side"),
@@ -276,29 +276,29 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
             ]
 
             for trigger in ignored_triggers:
-                result = self.handler.handle(context, state, actions, trigger)
+                result = self.handler.handle(context, state, runtime, trigger)
                 self.assertEqual(result.status, "ignored")
 
-            self.assertEqual(actions.calls, [])
+            self.assertEqual(runtime.calls, [])
 
 
 class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
-    def test_accepted_completed_turn_uses_actions_submit_parent_prompt(self) -> None:
+    def test_accepted_completed_turn_uses_runtime_submit_parent_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             calls = self._patch_snapshot_render()
-            actions = FakeActionGateway(result="turn-daemon-1")
+            runtime = FakeDaemonRuntime(result="turn-daemon-1")
 
-            result = self.handler.handle(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, runtime, self._completed())
 
             self.assertEqual(result.status, "handled")
-            self.assertEqual(len(actions.calls), 1)
-            self.assertEqual(actions.calls[0]["handler_name"], "task_checkout")
-            self.assertEqual(actions.calls[0]["origin_id"], "turn-user-1")
-            self.assertEqual(actions.calls[0]["interrupt_policy"], "none")
-            prompt = actions.calls[0]["text"]
+            self.assertEqual(len(runtime.calls), 1)
+            self.assertEqual(runtime.calls[0]["handler_name"], "task_checkout")
+            self.assertEqual(runtime.calls[0]["origin_id"], "turn-user-1")
+            self.assertEqual(runtime.calls[0]["interrupt_policy"], "none")
+            prompt = runtime.calls[0]["text"]
             assert isinstance(prompt, str)
             self.assertTrue(prompt.startswith("[TASK CHECKOUT]"))
             self.assertNotIn("[TASK CONTEXT]", prompt)
@@ -310,13 +310,13 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
                 {"actor_id": "act-dev-daed00000001", "role_id": "dev"},
             )
 
-    def test_task_checkout_state_uses_standard_action_field(self) -> None:
+    def test_task_checkout_state_uses_standard_runtime_field(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
-            actions = self.daemon_core.ActionGateway(context=context, state=state)
+            runtime = self.daemon_core.DaemonRuntime(context=context, state=state)
             original_submit_turn = self.daemon_core.launcher_submit_turn.submit_turn
 
             def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
@@ -325,14 +325,15 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.addCleanup(setattr, self.daemon_core.launcher_submit_turn, "submit_turn", original_submit_turn)
             self.daemon_core.launcher_submit_turn.submit_turn = fake_submit_turn
 
-            result = self.handler.handle(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, runtime, self._completed())
 
             self.assertEqual(result.status, "handled")
             self.assertTrue(state.is_daemon_origin_turn("turn-daemon-1"))
             saved = json.loads(self.daemon_core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertEqual(saved["handlers"]["task_checkout"]["last_origin_turn_id"], "turn-user-1")
-            self.assertEqual(saved["handlers"]["task_checkout"]["last_action_turn_id"], "turn-daemon-1")
+            self.assertEqual(saved["handlers"]["task_checkout"]["last_runtime_turn_id"], "turn-daemon-1")
             self.assertIsNone(saved["handlers"]["task_checkout"]["last_error"])
+            self.assertNotIn("last_" + "action" + "_turn_id", saved["handlers"]["task_checkout"])
             self.assertNotIn("last_checkout_turn_id", saved["handlers"]["task_checkout"])
 
     def test_missing_turn_id_records_error_and_returns_failed_result(self) -> None:
@@ -341,7 +342,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
-            actions = self.daemon_core.ActionGateway(context=context, state=state)
+            runtime = self.daemon_core.DaemonRuntime(context=context, state=state)
             original_submit_turn = self.daemon_core.launcher_submit_turn.submit_turn
 
             def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
@@ -350,7 +351,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.addCleanup(setattr, self.daemon_core.launcher_submit_turn, "submit_turn", original_submit_turn)
             self.daemon_core.launcher_submit_turn.submit_turn = fake_submit_turn
 
-            result = self.handler.handle(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, runtime, self._completed())
 
             self.assertEqual(result.status, "failed")
             self.assertIn("submit_turn did not return a turn id", result.message)
@@ -361,27 +362,27 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
-            actions = FakeActionGateway(
+            runtime = FakeDaemonRuntime(
                 error=self.task_checkout_handler.launcher_submit_turn.SubmitTurnError("submit_turn failed: active thread"),
             )
 
-            result = self.handler.handle(context, state, actions, self._completed())
+            result = self.handler.handle(context, state, runtime, self._completed())
 
             self.assertEqual(result.status, "failed")
             self.assertIn("submit_turn failed", result.message)
-            self.assertEqual(len(actions.calls), 1)
+            self.assertEqual(len(runtime.calls), 1)
             self.assertFalse(state.is_daemon_origin_turn("turn-user-1"))
 
-            actions.error = None
-            actions.result = "turn-daemon-2"
+            runtime.error = None
+            runtime.result = "turn-daemon-2"
             result_later = self.handler.handle(
                 context,
                 state,
-                actions,
+                runtime,
                 self._completed(turn_id="turn-user-2"),
             )
             self.assertEqual(result_later.status, "handled")
-            self.assertEqual(len(actions.calls), 2)
+            self.assertEqual(len(runtime.calls), 2)
 
 
 if __name__ == "__main__":

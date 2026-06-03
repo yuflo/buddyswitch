@@ -226,14 +226,24 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         self.assertNotIn("side_thread_registry", source)
         self.assertNotIn("submit_turn(", source)
 
-    def test_mailbox_local_trigger_support_is_narrow_not_generic_event_bus(self) -> None:
+    def test_mailbox_local_trigger_support_is_generic_without_business_hardcoding(self) -> None:
         source = DAEMON_MAILBOX_PATH.read_text(encoding="utf-8")
         self.assertIn("mailbox.local_trigger", source)
-        self.assertIn("message.parent_required", source)
+        self.assertNotIn("message." + "parent_required", source)
+        self.assertNotIn("require_" + "side_thread", source)
         self.assertNotIn("mailbox.parent_required", source)
         self.assertNotIn("workflow", source.lower())
         self.assertNotIn("plugin", source.lower())
         self.assertNotIn("event_bus", source.lower())
+
+    def test_daemon_core_has_no_old_action_gateway_or_action_record_vocabulary(self) -> None:
+        source = DAEMON_CORE_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("Action" + "Gateway", source)
+        self.assertNotIn("record_daemon_" + "action", source)
+        self.assertNotIn("daemon_" + "actions", source)
+        self.assertNotIn("daemon_" + "action_ids", source)
+        self.assertNotIn("last_" + "action" + "_turn_id", source)
+        self.assertNotIn("_" + "action_status_payload", source)
 
     def test_daemon_core_can_dispatch_to_noop_handler(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -260,9 +270,10 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                     self,
                     context: object,
                     state: object,
-                    actions: object,
+                    runtime: object,
                     trigger: object,
                 ) -> object:
+                    del context, state, runtime
                     handled.append(trigger)
                     return daemon_core.HandlerResult.ignored()
 

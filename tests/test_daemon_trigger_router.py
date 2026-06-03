@@ -39,7 +39,7 @@ class RecordingHandler:
     def handles(self, trigger: Any) -> bool:
         return trigger.type == "message.available"
 
-    def handle(self, _context: object, _state: object, _actions: object, trigger: Any) -> object:
+    def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
         self.handled.append(trigger)
         import daemon_core
 
@@ -52,7 +52,7 @@ class FailingHandler:
     def handles(self, trigger: Any) -> bool:
         return trigger.type == "message.available"
 
-    def handle(self, _context: object, _state: object, _actions: object, _trigger: Any) -> object:
+    def handle(self, _context: object, _state: object, _runtime: object, _trigger: Any) -> object:
         import daemon_core
 
         return daemon_core.HandlerResult.failed("handler failed intentionally")
@@ -64,7 +64,7 @@ class InvalidReturnHandler:
     def handles(self, trigger: Any) -> bool:
         return trigger.type == "message.available"
 
-    def handle(self, _context: object, _state: object, _actions: object, _trigger: Any) -> object:
+    def handle(self, _context: object, _state: object, _runtime: object, _trigger: Any) -> object:
         return object()
 
 
@@ -194,7 +194,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             result = self.daemon_core.dispatch_trigger(
                 instance["context"],
                 instance["state"],
-                actions=object(),
+                runtime=object(),
                 trigger=self._trigger(),
                 handlers=[IgnoringHandler(), handler],
             )
@@ -214,7 +214,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             result = self.daemon_core.dispatch_trigger(
                 instance["context"],
                 instance["state"],
-                actions=object(),
+                runtime=object(),
                 trigger=self._trigger(),
                 handlers=[FailingHandler(), InvalidReturnHandler()],
             )

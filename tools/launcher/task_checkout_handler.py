@@ -52,7 +52,7 @@ def completed_turn_for_checkout(trigger: Any, state: Any) -> dict[str, str] | No
 def send_checkout_prompt(
     context: Any,
     state: Any,
-    actions: Any,
+    runtime: Any,
     previous_turn: dict[str, str],
 ) -> daemon_core.HandlerResult:
     origin_turn_id = previous_turn["turn_id"]
@@ -64,7 +64,7 @@ def send_checkout_prompt(
             instance_payload=context.instance_payload,
         )
         prompt = task_tui.render_stop_task_tui(snapshot, previous_turn)
-        actions.submit_parent_prompt(
+        runtime.submit_parent_prompt(
             prompt,
             handler_name="task_checkout",
             origin_id=origin_turn_id,
@@ -85,10 +85,10 @@ class TaskCheckoutHandler:
         self,
         context: Any,
         state: Any,
-        actions: Any,
+        runtime: Any,
         trigger: Any,
     ) -> daemon_core.HandlerResult:
         previous_turn = completed_turn_for_checkout(trigger, state)
         if previous_turn is None:
             return daemon_core.HandlerResult.ignored()
-        return send_checkout_prompt(context, state, actions, previous_turn)
+        return send_checkout_prompt(context, state, runtime, previous_turn)

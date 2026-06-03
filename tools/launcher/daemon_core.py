@@ -11,7 +11,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 
 HELPER_DIR = Path(__file__).resolve().parent
@@ -31,7 +31,7 @@ from env.tool_runtime import daemon_client  # noqa: E402
 
 
 MAX_DAEMON_ORIGIN_TURN_IDS = 50
-MAX_DAEMON_ACTION_IDS = 200
+MAX_DAEMON_RUNTIME_CALL_IDS = 200
 DAEMON_CLIENT_NAME = "buddyswitch_daemon"
 DAEMON_CLIENT_TITLE = "BuddySwitch Daemon"
 DAEMON_PERMISSIONS = "buddyswitch-runtime"
@@ -50,7 +50,7 @@ HANDLER_STATUS_FIELDS = (
     "last_result",
     "last_handled_at",
     "last_origin_turn_id",
-    "last_action_turn_id",
+    "last_runtime_turn_id",
     "last_error",
 )
 INSTANCE_DAEMON_ENTRYPOINT = HELPER_DIR / "instance_daemon.py"
@@ -135,8 +135,8 @@ def _state_payload(actor_id: str, main_thread_id: str) -> dict[str, Any]:
         "main_thread_id": main_thread_id,
         "daemon_origin_turn_ids": [],
         "daemon_origin_turns": {},
-        "daemon_action_ids": [],
-        "daemon_actions": {},
+        "daemon_runtime_call_ids": [],
+        "daemon_runtime_calls": {},
         "ready": None,
         "last_error": None,
         "handlers": {},
@@ -202,6 +202,22 @@ class HandlerResult:
         return cls("failed", message or "handler failed")
 
 
+class DaemonHandler(Protocol):
+    name: str
+
+    def handles(self, trigger: daemon_triggers.DaemonTrigger) -> bool:
+        ...
+
+    def handle(
+        self,
+        context: DaemonContext,
+        state: DaemonState,
+        runtime: DaemonRuntime,
+        trigger: daemon_triggers.DaemonTrigger,
+    ) -> HandlerResult | dict[str, Any]:
+        ...
+
+
 class DaemonState:
     def __init__(self, *, path: Path, payload: dict[str, Any]) -> None:
         self.path = path
@@ -220,6 +236,8 @@ class DaemonState:
         payload["actor_id"] = actor_id
         payload["main_thread_id"] = main_thread_id
         for field in LEGACY_STATE_FIELDS:
+            payload.pop(field, None)
+        for field in ("daemon_" + "action_ids", "daemon_" + "action" + "s"):
             payload.pop(field, None)
         if not isinstance(payload.get("daemon_origin_turn_ids"), list):
             payload["daemon_origin_turn_ids"] = []
@@ -253,30 +271,34 @@ class DaemonState:
                 "created_at": created_at,
             }
         payload["daemon_origin_turns"] = turn_records
-        if not isinstance(payload.get("daemon_action_ids"), list):
-            payload["daemon_action_ids"] = []
-        payload["daemon_action_ids"] = [
-            item for item in payload["daemon_action_ids"] if isinstance(item, str) and item
-        ][-MAX_DAEMON_ACTION_IDS:]
-        raw_action_records = payload.get("daemon_actions")
-        if not isinstance(raw_action_records, dict):
-            raw_action_records = {}
-        action_records: dict[str, Any] = {}
-        for action_id in payload["daemon_action_ids"]:
-            raw_record = raw_action_records.get(action_id)
+        if not isinstance(payload.get("daemon_runtime_call_ids"), list):
+            payload["daemon_runtime_call_ids"] = []
+        payload["daemon_runtime_call_ids"] = [
+            item for item in payload["daemon_runtime_call_ids"] if isinstance(item, str) and item
+        ][-MAX_DAEMON_RUNTIME_CALL_IDS:]
+        raw_runtime_records = payload.get("daemon_runtime_calls")
+        if not isinstance(raw_runtime_records, dict):
+            raw_runtime_records = {}
+        runtime_records: dict[str, Any] = {}
+        for runtime_call_id in payload["daemon_runtime_call_ids"]:
+            raw_record = raw_runtime_records.get(runtime_call_id)
             if not isinstance(raw_record, dict):
                 continue
-            record_action_id = raw_record.get("action_id")
-            if isinstance(record_action_id, str) and record_action_id and record_action_id != action_id:
+            record_runtime_call_id = raw_record.get("runtime_call_id")
+            if (
+                isinstance(record_runtime_call_id, str)
+                and record_runtime_call_id
+                and record_runtime_call_id != runtime_call_id
+            ):
                 continue
-            action_type = raw_record.get("action_type")
+            runtime_method = raw_record.get("runtime_method")
             handler_name = raw_record.get("handler_name")
             status = raw_record.get("status")
-            if not isinstance(action_type, str) or not action_type:
+            if not isinstance(runtime_method, str) or not runtime_method:
                 continue
             if not isinstance(handler_name, str) or not handler_name:
                 continue
-            if status not in {"handled", "failed"}:
+            if status not in {"succeeded", "failed"}:
                 continue
             created_at = raw_record.get("created_at")
             if not isinstance(created_at, str) or not created_at:
@@ -285,10 +307,10 @@ class DaemonState:
             if not isinstance(updated_at, str) or not updated_at:
                 updated_at = created_at
             record = {
-                "action_id": action_id,
+                "runtime_call_id": runtime_call_id,
                 "handler_name": handler_name,
                 "origin_id": raw_record.get("origin_id") if isinstance(raw_record.get("origin_id"), str) else None,
-                "action_type": action_type,
+                "runtime_method": runtime_method,
                 "parent_thread_id": raw_record.get("parent_thread_id") if isinstance(raw_record.get("parent_thread_id"), str) else None,
                 "side_thread_id": raw_record.get("side_thread_id") if isinstance(raw_record.get("side_thread_id"), str) else None,
                 "turn_id": raw_record.get("turn_id") if isinstance(raw_record.get("turn_id"), str) else None,
@@ -298,8 +320,8 @@ class DaemonState:
                 "created_at": created_at,
                 "updated_at": updated_at,
             }
-            action_records[action_id] = record
-        payload["daemon_actions"] = action_records
+            runtime_records[runtime_call_id] = record
+        payload["daemon_runtime_calls"] = runtime_records
         if not isinstance(payload.get("ready"), dict):
             payload["ready"] = None
         if "last_error" not in payload:
@@ -309,6 +331,8 @@ class DaemonState:
         for handler_name, handler_payload in list(payload["handlers"].items()):
             if not isinstance(handler_name, str) or not isinstance(handler_payload, dict):
                 payload["handlers"].pop(handler_name, None)
+                continue
+            handler_payload.pop("last_" + "action" + "_turn_id", None)
         return cls(path=path, payload=payload)
 
     def save(self) -> None:
@@ -362,12 +386,12 @@ class DaemonState:
         self.payload["daemon_origin_turns"] = records
         self.save()
 
-    def record_daemon_action(
+    def record_runtime_call(
         self,
         *,
         handler_name: str,
         origin_id: str | None,
-        action_type: str,
+        runtime_method: str,
         parent_thread_id: str | None = None,
         side_thread_id: str | None = None,
         turn_id: str | None = None,
@@ -377,26 +401,28 @@ class DaemonState:
     ) -> dict[str, Any]:
         if not isinstance(handler_name, str) or not handler_name:
             raise ValueError("handler_name is required")
-        if not isinstance(action_type, str) or not action_type:
-            raise ValueError("action_type is required")
-        if status not in {"handled", "failed"}:
-            raise ValueError(f"invalid daemon action status: {status}")
-        action_ids = [item for item in self.payload.get("daemon_action_ids", []) if isinstance(item, str) and item]
-        actions = self.payload.get("daemon_actions")
-        if not isinstance(actions, dict):
-            actions = {}
+        if not isinstance(runtime_method, str) or not runtime_method:
+            raise ValueError("runtime_method is required")
+        if status not in {"succeeded", "failed"}:
+            raise ValueError(f"invalid daemon runtime call status: {status}")
+        runtime_call_ids = [
+            item for item in self.payload.get("daemon_runtime_call_ids", []) if isinstance(item, str) and item
+        ]
+        runtime_calls = self.payload.get("daemon_runtime_calls")
+        if not isinstance(runtime_calls, dict):
+            runtime_calls = {}
         counter = 1
         while True:
-            action_id = f"daemon-action-{counter}"
-            if action_id not in actions:
+            runtime_call_id = f"daemon-runtime-call-{counter}"
+            if runtime_call_id not in runtime_calls:
                 break
             counter += 1
         timestamp = _utc_now()
         record = {
-            "action_id": action_id,
+            "runtime_call_id": runtime_call_id,
             "handler_name": handler_name,
             "origin_id": origin_id if isinstance(origin_id, str) and origin_id else None,
-            "action_type": action_type,
+            "runtime_method": runtime_method,
             "parent_thread_id": parent_thread_id if isinstance(parent_thread_id, str) and parent_thread_id else None,
             "side_thread_id": side_thread_id if isinstance(side_thread_id, str) and side_thread_id else None,
             "turn_id": turn_id if isinstance(turn_id, str) and turn_id else None,
@@ -406,13 +432,13 @@ class DaemonState:
             "created_at": timestamp,
             "updated_at": timestamp,
         }
-        action_ids = [item for item in action_ids if item != action_id]
-        action_ids.append(action_id)
-        action_ids = action_ids[-MAX_DAEMON_ACTION_IDS:]
-        actions = {key: value for key, value in actions.items() if key in action_ids}
-        actions[action_id] = record
-        self.payload["daemon_action_ids"] = action_ids
-        self.payload["daemon_actions"] = actions
+        runtime_call_ids = [item for item in runtime_call_ids if item != runtime_call_id]
+        runtime_call_ids.append(runtime_call_id)
+        runtime_call_ids = runtime_call_ids[-MAX_DAEMON_RUNTIME_CALL_IDS:]
+        runtime_calls = {key: value for key, value in runtime_calls.items() if key in runtime_call_ids}
+        runtime_calls[runtime_call_id] = record
+        self.payload["daemon_runtime_call_ids"] = runtime_call_ids
+        self.payload["daemon_runtime_calls"] = runtime_calls
         self.save()
         return record
 
@@ -466,7 +492,7 @@ class DaemonState:
                 "last_result": state.get("last_result"),
                 "last_handled_at": state.get("last_handled_at"),
                 "last_origin_turn_id": state.get("last_origin_turn_id"),
-                "last_action_turn_id": state.get("last_action_turn_id"),
+                "last_runtime_turn_id": state.get("last_runtime_turn_id"),
                 "last_error": state.get("last_error"),
             }
             state.update(values)
@@ -539,7 +565,7 @@ class DaemonContext:
         self.permissions = permissions
 
 
-class ActionGateway:
+class DaemonRuntime:
     def __init__(self, *, context: DaemonContext, state: DaemonState, client: Any | None = None) -> None:
         self.context = context
         self.state = state
@@ -565,22 +591,22 @@ class ActionGateway:
         except Exception as exc:
             return {"status": "unavailable", "error": str(exc)}
 
-    def _record_action(
+    def _record_runtime_call(
         self,
         *,
         handler_name: str,
         origin_id: str | None,
-        action_type: str,
+        runtime_method: str,
         status: str,
         side_thread_id: str | None = None,
         turn_id: str | None = None,
         interrupted_turn_id: str | None = None,
         error: str | None = None,
     ) -> dict[str, Any]:
-        return self.state.record_daemon_action(
+        return self.state.record_runtime_call(
             handler_name=handler_name,
             origin_id=origin_id,
-            action_type=action_type,
+            runtime_method=runtime_method,
             parent_thread_id=self.context.main_thread_id,
             side_thread_id=side_thread_id,
             turn_id=turn_id,
@@ -601,19 +627,19 @@ class ActionGateway:
             if not turn_id:
                 raise launcher_submit_turn.SubmitTurnError("submit_turn did not return a turn id")
         except Exception as exc:
-            self._record_action(
+            self._record_runtime_call(
                 handler_name=handler_name,
                 origin_id=origin_id,
-                action_type="parent_submit",
+                runtime_method="parent_submit",
                 status="failed",
                 error=str(exc),
             )
             raise
-        self._record_action(
+        self._record_runtime_call(
             handler_name=handler_name,
             origin_id=origin_id,
-            action_type="parent_submit",
-            status="handled",
+            runtime_method="parent_submit",
+            status="succeeded",
             turn_id=turn_id,
         )
         self.state.record_daemon_origin_turn(
@@ -625,7 +651,7 @@ class ActionGateway:
             handler_name,
             {
                 "last_origin_turn_id": origin_id,
-                "last_action_turn_id": turn_id,
+                "last_runtime_turn_id": turn_id,
                 "last_error": None,
             },
         )
@@ -638,19 +664,19 @@ class ActionGateway:
             if not interrupted_turn_id:
                 raise app_server.AppServerProtocolError("turn/interrupt did not return a turn id")
         except Exception as exc:
-            self._record_action(
+            self._record_runtime_call(
                 handler_name=handler_name,
                 origin_id=origin_id,
-                action_type="parent_interrupt",
+                runtime_method="parent_interrupt",
                 status="failed",
                 error=str(exc),
             )
             raise
-        self._record_action(
+        self._record_runtime_call(
             handler_name=handler_name,
             origin_id=origin_id,
-            action_type="parent_interrupt",
-            status="handled",
+            runtime_method="parent_interrupt",
+            status="succeeded",
             interrupted_turn_id=interrupted_turn_id,
         )
         return {"interrupted_turn_id": interrupted_turn_id}
@@ -698,22 +724,22 @@ class ActionGateway:
             )
             turn_id = _string_field(result, "turn_id", "turnId")
         except Exception as exc:
-            self._record_action(
+            self._record_runtime_call(
                 handler_name=handler_name,
                 origin_id=origin_id,
-                action_type="side_start",
+                runtime_method="side_start",
                 side_thread_id=side_thread_id,
                 status="failed",
                 error=str(exc),
             )
             raise
-        self._record_action(
+        self._record_runtime_call(
             handler_name=handler_name,
             origin_id=origin_id,
-            action_type="side_start",
+            runtime_method="side_start",
             side_thread_id=side_thread_id,
             turn_id=turn_id,
-            status="handled",
+            status="succeeded",
         )
         payload = dict(result)
         payload["action"] = "start"
@@ -743,22 +769,22 @@ class ActionGateway:
             )
             turn_id = _string_field(result, "turn_id", "turnId")
         except Exception as exc:
-            self._record_action(
+            self._record_runtime_call(
                 handler_name=handler_name,
                 origin_id=origin_id,
-                action_type="side_send",
+                runtime_method="side_send",
                 side_thread_id=side_thread_id,
                 status="failed",
                 error=str(exc),
             )
             raise
-        self._record_action(
+        self._record_runtime_call(
             handler_name=handler_name,
             origin_id=origin_id,
-            action_type="side_send",
+            runtime_method="side_send",
             side_thread_id=side_thread_id,
             turn_id=turn_id,
-            status="handled",
+            status="succeeded",
         )
         payload: dict[str, Any] = dict(result)
         payload["action"] = "send"
@@ -802,22 +828,22 @@ class ActionGateway:
             )
             turn_id = _string_field(result, "turn_id", "turnId")
         except Exception as exc:
-            self._record_action(
+            self._record_runtime_call(
                 handler_name=handler_name,
                 origin_id=origin_id,
-                action_type="side_close",
+                runtime_method="side_close",
                 side_thread_id=side_thread_id,
                 status="failed",
                 error=str(exc),
             )
             raise
-        self._record_action(
+        self._record_runtime_call(
             handler_name=handler_name,
             origin_id=origin_id,
-            action_type="side_close",
+            runtime_method="side_close",
             side_thread_id=side_thread_id,
             turn_id=turn_id,
-            status="handled",
+            status="succeeded",
         )
         payload: dict[str, Any] = dict(result)
         payload["action"] = "close"
@@ -950,11 +976,10 @@ def start_daemon_mailbox(
         handlers=handlers,
         context=context,
         state=state,
-        actions_factory=lambda: ActionGateway(context=context, state=state),
         trigger_dispatcher=lambda trigger: dispatch_trigger(
             context,
             state,
-            ActionGateway(context=context, state=state),
+            DaemonRuntime(context=context, state=state),
             trigger,
             handlers,
         ),
@@ -998,12 +1023,12 @@ def dispatch_notification(
     notification: dict[str, Any],
     handlers: list[Any] | tuple[Any, ...],
 ) -> bool:
-    actions = ActionGateway(context=context, state=state, client=client)
+    runtime = DaemonRuntime(context=context, state=state, client=client)
     trigger = daemon_triggers.normalize_app_server_notification(
         notification,
         target_actor_address=actor_address_for_context(context).to_payload(),
     )
-    result = dispatch_trigger(context, state, actions, trigger, handlers)
+    result = dispatch_trigger(context, state, runtime, trigger, handlers)
     handled_count = result.get("handled_count")
     return isinstance(handled_count, int) and handled_count > 0
 
@@ -1016,7 +1041,7 @@ def _trigger_origin_id(trigger: Any) -> str | None:
 def dispatch_trigger(
     context: DaemonContext,
     state: DaemonState,
-    actions: Any,
+    runtime: Any,
     trigger: daemon_triggers.DaemonTrigger,
     handlers: list[Any] | tuple[Any, ...],
 ) -> dict[str, Any]:
@@ -1044,7 +1069,7 @@ def dispatch_trigger(
             state.record_handler_error(handler_name, origin_turn_id=origin_id, message=message)
             continue
         try:
-            result = handle(context, state, actions, trigger)
+            result = handle(context, state, runtime, trigger)
         except Exception as exc:
             errors.append(str(exc))
             state.record_handler_error(handler_name, origin_turn_id=origin_id, message=str(exc))
@@ -1116,7 +1141,7 @@ def _handler_status_payload(
             "last_result": None,
             "last_handled_at": None,
             "last_origin_turn_id": None,
-            "last_action_turn_id": None,
+            "last_runtime_turn_id": None,
             "last_error": None,
         }
         for field in HANDLER_STATUS_FIELDS:
@@ -1126,11 +1151,17 @@ def _handler_status_payload(
     return {"registered": registered, "items": items}
 
 
-def _action_status_payload(state: DaemonState) -> dict[str, Any]:
-    action_ids = [item for item in state.payload.get("daemon_action_ids", []) if isinstance(item, str) and item]
-    actions = state.payload.get("daemon_actions")
-    action_items = actions if isinstance(actions, dict) else {}
-    items = {action_id: action_items[action_id] for action_id in action_ids if action_id in action_items}
+def _runtime_status_payload(state: DaemonState) -> dict[str, Any]:
+    runtime_call_ids = [
+        item for item in state.payload.get("daemon_runtime_call_ids", []) if isinstance(item, str) and item
+    ]
+    runtime_calls = state.payload.get("daemon_runtime_calls")
+    runtime_items = runtime_calls if isinstance(runtime_calls, dict) else {}
+    items = {
+        runtime_call_id: runtime_items[runtime_call_id]
+        for runtime_call_id in runtime_call_ids
+        if runtime_call_id in runtime_items
+    }
     return {"ids": list(items), "items": items}
 
 
@@ -1168,7 +1199,7 @@ def daemon_status(
         "log_path": str(log_path),
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
-        "actions": _action_status_payload(state),
+        "runtime": _runtime_status_payload(state),
         "handlers": _handler_status_payload(state, handlers),
     }
 

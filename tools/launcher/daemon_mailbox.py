@@ -22,7 +22,6 @@ from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 import daemon_triggers  # noqa: E402
-import side_thread_registry  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
 
 
@@ -49,6 +48,12 @@ def _non_empty_string(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
+
+
+def _optional_non_empty_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    return _non_empty_string(value, field)
 
 
 def daemon_signal_envelope(
@@ -103,7 +108,6 @@ class DaemonMailboxServer:
         handlers: list[Any] | tuple[Any, ...],
         context: Any | None = None,
         state: Any | None = None,
-        actions_factory: Any | None = None,
         trigger_dispatcher: Any | None = None,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve(strict=False)
@@ -113,7 +117,6 @@ class DaemonMailboxServer:
         self.handlers = list(handlers or [])
         self.context = context
         self.state = state
-        self.actions_factory = actions_factory
         self.trigger_dispatcher = trigger_dispatcher
         self._stop_event = threading.Event()
         self._server: socket.socket | None = None
@@ -238,52 +241,30 @@ class DaemonMailboxServer:
         payload.setdefault("trigger", trigger.to_payload())
         return self._response(request_id, payload)
 
-    def _validate_local_trigger_request(self, params: dict[str, Any]) -> daemon_triggers.DaemonTrigger:
+    def _normalize_local_trigger_request(self, params: dict[str, Any]) -> daemon_triggers.DaemonTrigger:
         actor_payload = _actor_address_payload(params.get("actor_address"), "actor_address")
         actor_address = ActorAddress.from_payload(actor_payload)
         if actor_address != self.local_actor_address:
             raise PermissionError("signal target does not match local actor")
         trigger_type = _non_empty_string(params.get("type"), "type")
-        if trigger_type != "message.parent_required":
-            raise ValueError(f"unsupported local trigger type: {trigger_type}")
-        parent_thread_id = runtime_files.require_id(params.get("parent_thread_id"), "parent_thread_id")
-        side_thread_id = runtime_files.require_id(params.get("side_thread_id"), "side_thread_id")
         payload = params.get("payload")
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
-        message_id = runtime_files.require_id(payload.get("message_id"), "message_id")
-        reason = _non_empty_string(payload.get("reason"), "reason")
-        context_parent = getattr(self.context, "main_thread_id", None)
-        if not isinstance(context_parent, str) or not context_parent:
-            raise ValueError("local trigger requires daemon context main_thread_id")
-        if parent_thread_id != context_parent:
-            raise ValueError("parent_thread_id does not match local parent thread")
-        if side_thread_id == parent_thread_id:
-            raise ValueError("side_thread_id must not be the parent thread id")
-        actor_id = getattr(self.context, "actor_id", None)
-        instance_json = getattr(self.context, "instance_json", None)
-        if not isinstance(actor_id, str) or not actor_id:
-            raise ValueError("local trigger requires daemon context actor_id")
-        if instance_json is None:
-            raise ValueError("local trigger requires daemon context instance_json")
-        side_thread_registry.require_side_thread(
-            Path(instance_json),
-            actor_id=actor_id,
-            parent_thread_id=parent_thread_id,
-            side_thread_id=side_thread_id,
-        )
+        source_context = params.get("source_context", {})
+        if not isinstance(source_context, dict):
+            raise ValueError("source_context must be an object")
         return daemon_triggers.normalize_local_trigger(
             trigger_type=trigger_type,
             target_actor_address=actor_payload,
-            origin_id=message_id,
-            correlation_id=params.get("correlation_id") if isinstance(params.get("correlation_id"), str) else None,
-            payload={"message_id": message_id, "reason": reason},
-            source_context={"parent_thread_id": parent_thread_id, "side_thread_id": side_thread_id},
+            origin_id=_optional_non_empty_string(params.get("origin_id"), "origin_id"),
+            correlation_id=_optional_non_empty_string(params.get("correlation_id"), "correlation_id"),
+            payload=dict(payload),
+            source_context=dict(source_context),
         )
 
     def _dispatch_local_trigger(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            trigger = self._validate_local_trigger_request(params)
+            trigger = self._normalize_local_trigger_request(params)
         except PermissionError as exc:
             return self._response(request_id, code="wrong_target_actor", message=str(exc))
         except Exception as exc:

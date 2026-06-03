@@ -30,7 +30,7 @@ class MessageAvailableHandler:
     name = "message_available"
 
     def handles(self, trigger: Any) -> bool:
-        return getattr(trigger, "type", None) in {"message.available", "message.parent_required"}
+        return getattr(trigger, "type", None) == "message.available"
 
     def parent_prompt(self, message_id: str) -> str:
         return (
@@ -48,25 +48,20 @@ class MessageAvailableHandler:
             "A direct message is available for this actor while the parent thread is running.\n"
             "Use native `message__list` to read the inbox.\n"
             "Use native `message__conversation` when bidirectional context is needed.\n"
-            "When the message can be handled independently, send the direct reply with native `message__send`.\n"
-            "When parent is required because the message conflicts with, interrupts, corrects, or materially affects "
-            "the parent work, send mailbox.local_trigger(type=\"message.parent_required\", "
-            "payload={message_id, reason}) to the local daemon."
+            "When the message can be handled independently, send the direct reply with native `message__send`."
         )
 
     def handle(
         self,
         context: Any,
         state: Any,
-        actions: Any,
+        runtime: Any,
         trigger: Any,
     ) -> Any:
         del state
         trigger_type = getattr(trigger, "type", None)
         if trigger_type == "message.available":
-            return self._handle_message_available(context, actions, trigger)
-        if trigger_type == "message.parent_required":
-            return self._handle_message_parent_required(context, actions, trigger)
+            return self._handle_message_available(context, runtime, trigger)
         return daemon_core.HandlerResult.ignored()
 
     def _message_id(self, trigger: Any) -> str:
@@ -81,14 +76,14 @@ class MessageAvailableHandler:
         if target_actor != local_actor:
             raise PermissionError("wrong target actor for message trigger")
 
-    def _handle_message_available(self, context: Any, actions: Any, trigger: Any) -> daemon_core.HandlerResult:
+    def _handle_message_available(self, context: Any, runtime: Any, trigger: Any) -> daemon_core.HandlerResult:
         try:
             self._ensure_target_actor(context, trigger)
             message_id = self._message_id(trigger)
-            activity = actions.parent_activity()
+            activity = runtime.parent_activity()
             status = activity.get("status") if isinstance(activity, dict) else None
             if status == "idle":
-                actions.submit_parent_prompt(
+                runtime.submit_parent_prompt(
                     self.parent_prompt(message_id),
                     handler_name=self.name,
                     origin_id=message_id,
@@ -96,7 +91,7 @@ class MessageAvailableHandler:
                 )
                 return daemon_core.HandlerResult.handled()
             if status == "running":
-                actions.submit_side_triage_prompt(
+                runtime.submit_side_triage_prompt(
                     self.side_triage_prompt(message_id),
                     handler_name=self.name,
                     origin_id=message_id,
@@ -106,41 +101,6 @@ class MessageAvailableHandler:
             return daemon_core.HandlerResult.failed(str(error or "parent thread activity is unavailable"))
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))
-
-    def _handle_message_parent_required(self, context: Any, actions: Any, trigger: Any) -> dict[str, Any]:
-        try:
-            self._ensure_target_actor(context, trigger)
-            message_id = self._message_id(trigger)
-            payload = getattr(trigger, "payload", None)
-            if not isinstance(payload, dict):
-                raise ValueError("message.parent_required payload must be an object")
-            reason = payload.get("reason")
-            if not isinstance(reason, str) or not reason.strip():
-                raise ValueError("reason must be a non-empty string")
-            source_context = getattr(trigger, "source_context", None)
-            if not isinstance(source_context, dict):
-                raise ValueError("message.parent_required source_context must be an object")
-            side_thread_id = runtime_files.require_id(source_context.get("side_thread_id"), "side_thread_id")
-            result = actions.submit_parent_prompt(
-                self.parent_prompt(message_id),
-                handler_name=self.name,
-                origin_id=message_id,
-                interrupt_policy="before_submit",
-            )
-            payload_result: dict[str, Any] = {
-                "status": "handled",
-                "side_thread_id": side_thread_id,
-            }
-            if isinstance(result, dict):
-                interrupted_turn_id = result.get("interrupted_turn_id")
-                turn_id = result.get("turn_id")
-                if isinstance(interrupted_turn_id, str) and interrupted_turn_id:
-                    payload_result["interrupted_turn_id"] = interrupted_turn_id
-                if isinstance(turn_id, str) and turn_id:
-                    payload_result["turn_id"] = turn_id
-            return payload_result
-        except Exception as exc:
-            return {"status": "failed", "message": str(exc)}
 
 
 if __name__ == "__main__":
