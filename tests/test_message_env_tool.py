@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
 import json
+import os
 import sys
 import unittest
 import uuid
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -144,6 +148,25 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 continue
             payload[key] = value
         return payload
+
+    def _load_projected_context_module(self, workspace_root: Path):
+        projected_context = workspace_root / "scripts" / "env" / "tool_runtime" / "context.py"
+        projected_context.parent.mkdir(parents=True, exist_ok=True)
+        projected_context.write_text(
+            (ROOT / "scripts" / "env" / "tool_runtime" / "context.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        module_name = f"projected_context_{uuid.uuid4().hex}"
+        spec = importlib.util.spec_from_file_location(module_name, projected_context)
+        self.assertIsNotNone(spec)
+        assert spec is not None
+        self.assertIsNotNone(spec.loader)
+        assert spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        self.addCleanup(sys.modules.pop, module_name, None)
+        spec.loader.exec_module(module)
+        return module
 
     def _patch_daemon(
         self,
@@ -867,6 +890,83 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("message__mark", prompt)
         self.assertNotIn("message.parent_required", prompt)
         self.assertNotIn("mailbox.local_trigger", prompt)
+
+    def test_projected_runtime_context_uses_repo_root_for_parent_handoff_import(self) -> None:
+        instance_json = self._instance_json(actor_id="act-dev-projected-parent", role="dev")
+        projected_workspace = self._runtime_path("projection/workspace")
+        fake_repo_root = self._runtime_path("projection/source-repo")
+        launcher_dir = fake_repo_root / "tools" / "launcher"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        (launcher_dir / "daemon_core.py").write_text(
+            "\n".join(
+                (
+                    "from pathlib import Path",
+                    "",
+                    "class _DaemonContext:",
+                    "    def __init__(self, instance_json):",
+                    "        self.instance_root = Path(instance_json).resolve().parent",
+                    "        self.actor_id = 'act-parent-projected'",
+                    "        self.main_thread_id = 'thr-parent-projected'",
+                    "",
+                    "def load_daemon_context(instance_json):",
+                    "    return _DaemonContext(instance_json)",
+                    "",
+                    "class DaemonState:",
+                    "    @staticmethod",
+                    "    def load(*, instance_root, actor_id, main_thread_id):",
+                    "        return {",
+                    "            'instance_root': str(instance_root),",
+                    "            'actor_id': actor_id,",
+                    "            'main_thread_id': main_thread_id,",
+                    "        }",
+                    "",
+                    "class DaemonRuntime:",
+                    "    def __init__(self, *, context, state):",
+                    "        self.context = context",
+                    "        self.state = state",
+                    "",
+                    "    def submit_parent_prompt(self, prompt, *, handler_name, origin_id, interrupt_policy):",
+                    "        return {",
+                    "            'prompt': prompt,",
+                    "            'handler_name': handler_name,",
+                    "            'origin_id': origin_id,",
+                    "            'interrupt_policy': interrupt_policy,",
+                    "            'instance_root': str(self.context.instance_root),",
+                    "            'actor_id': self.context.actor_id,",
+                    "            'main_thread_id': self.context.main_thread_id,",
+                    "        }",
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        projected_module = self._load_projected_context_module(projected_workspace)
+        self.assertFalse((projected_workspace / "tools" / "launcher").exists())
+
+        original_daemon_core = sys.modules.pop("daemon_core", None)
+        try:
+            with patch.dict(os.environ, {"BUDDYSWITCH_REPO_ROOT": str(fake_repo_root)}, clear=False):
+                access = projected_module.DaemonAccess(
+                    actor_address=ActorAddress(actor_id="act-dev-projected-parent", role_id="dev"),
+                    instance_json=instance_json,
+                )
+                result = access.request_parent_message_handling(
+                    message_id="msg-projected-parent",
+                    prompt="projected parent prompt",
+                )
+        finally:
+            if original_daemon_core is not None:
+                sys.modules["daemon_core"] = original_daemon_core
+            else:
+                sys.modules.pop("daemon_core", None)
+            with contextlib.suppress(ValueError):
+                sys.path.remove(str(launcher_dir))
+
+        self.assertEqual(result["handler_name"], "message_mark")
+        self.assertEqual(result["origin_id"], "msg-projected-parent")
+        self.assertEqual(result["interrupt_policy"], "before_submit")
+        self.assertEqual(result["actor_id"], "act-parent-projected")
 
     def test_message_mark_needs_parent_submits_parent_prompt_before_saving_disposition(self) -> None:
         operations: list[str] = []

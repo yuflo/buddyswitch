@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Any
 import sys
@@ -382,6 +383,13 @@ def _actor_address_payload(value: ActorAddress | dict[str, Any]) -> dict[str, An
     return ActorAddress.from_payload(value).to_payload()
 
 
+def _launcher_dir_for_runtime() -> Path:
+    repo_root = os.environ.get("BUDDYSWITCH_REPO_ROOT")
+    if isinstance(repo_root, str) and repo_root.strip():
+        return Path(repo_root.strip()).expanduser().resolve(strict=False) / "tools" / "launcher"
+    return Path(__file__).resolve().parents[3] / "tools" / "launcher"
+
+
 class DaemonAccess:
     """Explicit central daemon access for runtime tools."""
 
@@ -427,7 +435,7 @@ class DaemonAccess:
         )
 
     def request_parent_message_handling(self, *, message_id: str, prompt: str) -> dict[str, Any]:
-        launcher_dir = Path(__file__).resolve().parents[3] / "tools" / "launcher"
+        launcher_dir = _launcher_dir_for_runtime()
         if str(launcher_dir) not in sys.path:
             sys.path.insert(0, str(launcher_dir))
         import daemon_core  # type: ignore[import-not-found]

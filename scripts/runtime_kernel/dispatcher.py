@@ -114,13 +114,16 @@ def _runtime_server_env(
     role_id: str,
     instance_json_path: Path,
     instance_record: dict[str, Any],
+    manifest_path: Path,
 ) -> Iterator[None]:
     shared_root = _instance_shared_root(instance_json_path)
+    repo_root = manifest_path.expanduser().resolve(strict=False).parents[1]
     updates = {
         "BUDDYSWITCH_RUNTIME_BROKER_MODE": "server",
         "BUDDYSWITCH_ACTOR_ID": actor_id,
         "BUDDYSWITCH_ROLE_ID": role_id,
         "BUDDYSWITCH_INSTANCE_JSON": str(instance_json_path),
+        "BUDDYSWITCH_REPO_ROOT": str(repo_root),
         "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
         "BUDDYSWITCH_STATE_ROOT": str(shared_root / "state"),
     }
@@ -256,6 +259,7 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
             role_id=active_role,
             instance_json_path=session.instance_json_path,
             instance_record=instance_record,
+            manifest_path=session.manifest_path,
         ):
             if method == "env.tool":
                 return _env_tool_dispatch(

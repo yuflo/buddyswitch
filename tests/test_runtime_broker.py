@@ -321,6 +321,40 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual([session["actor_id"] for session in lock_sessions], [expected_actor_id, expected_actor_id])
         self.assertTrue(all(session["instance_json"] == instance_json for session in lock_sessions))
 
+    def test_env_tool_dispatch_exports_repo_root_from_manifest_path(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        instance_json = self._instance_json()
+        active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
+        session = dispatcher.RuntimeBrokerSession(instance_json_path=instance_json, manifest_path=MANIFEST)
+        seen_repo_roots: list[str | None] = []
+
+        def fake_dispatch_env_tool_request(**_kwargs: object) -> dict[str, object]:
+            seen_repo_roots.append(os.environ.get("BUDDYSWITCH_REPO_ROOT"))
+            return {"ok": True, "tool": "context", "action": "context.summarize"}
+
+        request = {
+            "protocol": BROKER_V2_PROTOCOL,
+            "request_id": "req-env-tool-repo-root",
+            "method": "env.tool",
+            "params": {
+                "actor_id": active_actor_id,
+                "active_role": "pm",
+                "tool": "context",
+                "action": "summarize",
+                "args": {},
+            },
+            "deadline_ms": 35000,
+        }
+
+        with (
+            patch("runtime_kernel.dispatcher.dispatch_env_tool_request", side_effect=fake_dispatch_env_tool_request),
+            patch.dict(os.environ, {"BUDDYSWITCH_REPO_ROOT": ""}, clear=False),
+        ):
+            response = dispatcher.dispatch_runtime_request(request, session)
+
+        self.assertTrue(response["ok"], msg=response)
+        self.assertEqual(seen_repo_roots, [str(ROOT.resolve(strict=False))])
+
     def test_rejects_wrong_actor_id(self) -> None:
         instance_json = self._instance_json()
         response = self._dispatch(

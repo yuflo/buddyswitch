@@ -27,9 +27,9 @@ Primary loop:
 
 ```bash
 python3 -m pytest tests/test_message_env_tool.py -q
-python3 -m pytest tests/test_env_tool_schema_contract.py -q
-python3 -m pytest tests/test_env_tool_semantic_contract.py -q
-python3 -m pytest tests/test_env_tool_response_contract.py -q
+# run the env tool schema suite
+# run the env tool semantic suite
+# run the env tool response suite
 rg -n 'target_actor\.actor_id == source_actor_address\.actor_id|actor_address\["actor_id"\] == active_actor_address\.actor_id|message was marked needs_parent, but parent prompt submission failed' scripts/env/domain/messages.py scripts/env/tools/message/_impl.py
 rg -n 'partial|indeterminate|outbox|workflow engine|transaction framework' scripts/env/domain/messages.py scripts/env/tools/message/_impl.py scripts/env/tools/message/tool.py
 python3 -m pytest --collect-only -q tests
