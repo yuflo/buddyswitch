@@ -43,10 +43,12 @@ def _runtime_session(
     *,
     socket_path: Path | None,
     pid_file: Path | None,
+    repo_root_path: Path | None = None,
 ) -> dispatcher.RuntimeBrokerSession:
     return dispatcher.RuntimeBrokerSession(
         instance_json_path=instance_json_path,
         manifest_path=manifest_path,
+        repo_root_path=repo_root_path,
         socket_path=socket_path,
         pid_file=pid_file,
     )
@@ -91,6 +93,7 @@ def _dispatch_v2_request(
     manifest_path: Path,
     socket_path: Path | None = None,
     pid_file: Path | None = None,
+    repo_root_path: Path | None = None,
 ) -> dict[str, Any]:
     try:
         validated = protocol.validate_request(request)
@@ -108,6 +111,7 @@ def _dispatch_v2_request(
         manifest_path,
         socket_path=socket_path,
         pid_file=pid_file,
+        repo_root_path=repo_root_path,
     )
 
     payload = coordinator.dispatch_with_coordination(
@@ -138,6 +142,7 @@ def dispatch_runtime_request(
     manifest_path: Path,
     socket_path: Path | None = None,
     pid_file: Path | None = None,
+    repo_root_path: Path | None = None,
 ) -> dict[str, Any]:
     if not isinstance(request, dict):
         return protocol.error_response(
@@ -152,6 +157,7 @@ def dispatch_runtime_request(
         manifest_path=manifest_path,
         socket_path=socket_path,
         pid_file=pid_file,
+        repo_root_path=repo_root_path,
     )
 
 
@@ -164,6 +170,7 @@ def _parse_args() -> argparse.Namespace:
     serve.add_argument("--pid-file", required=True, type=Path)
     serve.add_argument("--instance-json", required=True, type=Path)
     serve.add_argument("--manifest", required=True, type=Path)
+    serve.add_argument("--repo-root", type=Path)
 
     for name in ("ping", "status", "ensure", "stop"):
         cmd = sub.add_parser(name, help=f"Runtime broker {name}")
@@ -173,6 +180,7 @@ def _parse_args() -> argparse.Namespace:
         cmd.add_argument("--log-file", required=True, type=Path)
         cmd.add_argument("--instance-json", required=True, type=Path)
         cmd.add_argument("--manifest", required=True, type=Path)
+        cmd.add_argument("--repo-root", type=Path)
 
     return parser.parse_args()
 
@@ -210,6 +218,7 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             pid_file=args.pid_file,
             instance_json_path=args.instance_json,
             manifest_path=args.manifest,
+            repo_root_path=args.repo_root,
         )
         broker_server = server.RuntimeBrokerServer(
             config=cfg,
@@ -248,6 +257,7 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             paths,
             instance_json_path=args.instance_json,
             manifest_path=args.manifest,
+            repo_root_path=args.repo_root,
             expected_actor_id=expected_actor_id,
             expected_active_role=expected_active_role,
             expected_workspace_root=expected_workspace_root,

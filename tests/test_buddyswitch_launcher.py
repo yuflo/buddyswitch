@@ -1841,6 +1841,8 @@ exec "$real_git" "$@"
             self.assertIsInstance(status_probe, dict)
             assert isinstance(status_probe, dict)
             self.assertEqual(status_probe["returncode"], 0, msg=status_probe)
+            self.assertIn("--repo-root", status_probe["command"])
+            self.assertNotIn("unrecognized arguments: --repo-root", status_probe["stderr"])
             status_payload = status_probe["json"]
             self.assertIsInstance(status_payload, dict, msg=status_probe)
             assert isinstance(status_payload, dict)
@@ -1848,8 +1850,21 @@ exec "$real_git" "$@"
             self.assertIs(status_payload.get("runtime_workspace"), True)
 
             workspace_dir = Path(payload["cwd"])
+            self.assertEqual(Path(payload["repo_root"]).resolve(strict=False), ROOT.resolve(strict=False))
             self.assertTrue((workspace_dir / "scripts" / "runtime_kernel" / "broker.py").exists())
             self.assertTrue((workspace_dir / "buddyswitch" / "manifest.toml").exists())
+            self.assertFalse((workspace_dir / "tools" / "launcher").exists())
+            broker_pid_raw = status_probe.get("pid_file_text")
+            self.assertIsInstance(broker_pid_raw, str, msg=status_probe)
+            broker_ps = subprocess.run(
+                ["ps", "-p", broker_pid_raw, "-o", "command="],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(broker_ps.returncode, 0, msg=broker_ps.stderr)
+            self.assertIn("--repo-root", broker_ps.stdout)
+            self.assertIn(str(ROOT.resolve(strict=False)), broker_ps.stdout)
 
     def test_local_non_role_start_allows_codex_search_args(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

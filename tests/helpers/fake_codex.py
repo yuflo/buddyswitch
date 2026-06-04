@@ -166,24 +166,28 @@ def maybe_capture_broker_probe(entry: dict[str, object]) -> dict[str, object] | 
         return None
     instance_json_path = Path(instance_json)
     runtime_dir = instance_json_path.parent / "runtime"
+    status_command = [
+        "python3",
+        "scripts/runtime_kernel/broker.py",
+        "status",
+        "--socket",
+        entry.get("runtime_broker_socket") or str(runtime_dir / "runtime-broker.sock"),
+        "--pid-file",
+        str(runtime_dir / "runtime-broker.pid"),
+        "--marker-file",
+        str(runtime_dir / "runtime-broker.socket"),
+        "--log-file",
+        str(runtime_dir / "runtime-broker.log"),
+        "--instance-json",
+        str(instance_json_path),
+        "--manifest",
+        str(Path(os.getcwd()) / "buddyswitch" / "manifest.toml"),
+    ]
+    repo_root = entry.get("repo_root")
+    if isinstance(repo_root, str) and repo_root:
+        status_command.extend(["--repo-root", repo_root])
     status_result = subprocess.run(
-        [
-            "python3",
-            "scripts/runtime_kernel/broker.py",
-            "status",
-            "--socket",
-            entry.get("runtime_broker_socket") or str(runtime_dir / "runtime-broker.sock"),
-            "--pid-file",
-            str(runtime_dir / "runtime-broker.pid"),
-            "--marker-file",
-            str(runtime_dir / "runtime-broker.socket"),
-            "--log-file",
-            str(runtime_dir / "runtime-broker.log"),
-            "--instance-json",
-            str(instance_json_path),
-            "--manifest",
-            str(Path(os.getcwd()) / "buddyswitch" / "manifest.toml"),
-        ],
+        status_command,
         cwd=os.getcwd(),
         text=True,
         capture_output=True,
@@ -191,6 +195,7 @@ def maybe_capture_broker_probe(entry: dict[str, object]) -> dict[str, object] | 
     )
     payload: dict[str, object] = {
         "returncode": status_result.returncode,
+        "command": status_command,
         "stdout": status_result.stdout,
         "stderr": status_result.stderr,
         "json": None,
@@ -1082,6 +1087,7 @@ def main(argv: list[str]) -> int:
         "active_role": os.environ.get("BUDDYSWITCH_ROLE_ID"),
         "actor_id": os.environ.get("BUDDYSWITCH_ACTOR_ID"),
         "instance_json": os.environ.get("BUDDYSWITCH_INSTANCE_JSON"),
+        "repo_root": os.environ.get("BUDDYSWITCH_REPO_ROOT"),
         "actor_private_dir": os.environ.get("BUDDYSWITCH_ACTOR_PRIVATE_DIR"),
         "instance_tmp": os.environ.get("BUDDYSWITCH_INSTANCE_TMP"),
         "project_workspace_dir": os.environ.get("BUDDYSWITCH_PROJECT_WORKSPACE_DIR"),

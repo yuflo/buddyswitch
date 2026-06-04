@@ -20,6 +20,7 @@ class RuntimeBrokerConfig:
     pid_file: Path
     instance_json_path: Path
     manifest_path: Path
+    repo_root_path: Path | None = None
     max_workers: int = 4
     request_body_limit_bytes: int = 1048576
     response_margin_ms: int = 1000
@@ -35,6 +36,7 @@ class RuntimeBrokerServer:
         self._session = dispatcher.RuntimeBrokerSession(
             instance_json_path=config.instance_json_path,
             manifest_path=config.manifest_path,
+            repo_root_path=config.repo_root_path,
             socket_path=config.socket_path,
             pid_file=config.pid_file,
         )

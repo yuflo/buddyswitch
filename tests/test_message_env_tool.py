@@ -21,6 +21,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from runtime_kernel import dispatcher  # noqa: E402
 from env.repos import messages as message_repo  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
@@ -967,6 +968,132 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(result["origin_id"], "msg-projected-parent")
         self.assertEqual(result["interrupt_policy"], "before_submit")
         self.assertEqual(result["actor_id"], "act-parent-projected")
+
+    def test_message_mark_needs_parent_uses_source_repo_root_when_broker_manifest_is_projected(self) -> None:
+        active = self._actor_address(role="dev", label="act-dev-projected-broker-parent")
+        pm = self._actor_address(role="pm", label="act-pm-projected-broker-parent")
+        seed = message_repo.save_message(
+            {
+                "id": "msg-mark-needs-parent-projected-root",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "This changes the active parent-thread objective.",
+                "reply_to": None,
+                "created_at": "2026-06-04T00:00:00Z",
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-projected-broker-parent", role="dev")
+        projected_workspace = self._runtime_path("projected-broker-workspace")
+        projected_manifest = projected_workspace / "buddyswitch" / "manifest.toml"
+        projected_manifest.parent.mkdir(parents=True, exist_ok=True)
+        projected_manifest.write_text(MANIFEST.read_text(encoding="utf-8"), encoding="utf-8")
+        fake_source_root = self._runtime_path("projected-broker-source")
+        launcher_dir = fake_source_root / "tools" / "launcher"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        (launcher_dir / "daemon_core.py").write_text(
+            "\n".join(
+                (
+                    "from pathlib import Path",
+                    "import json",
+                    "",
+                    "class _DaemonContext:",
+                    "    def __init__(self, instance_json):",
+                    "        payload = json.loads(Path(instance_json).read_text(encoding='utf-8'))",
+                    "        self.instance_root = Path(instance_json).resolve().parent",
+                    "        self.actor_id = payload['actor_id']",
+                    "        self.main_thread_id = payload.get('main_thread_id') or 'thread-main-projected'",
+                    "",
+                    "def load_daemon_context(instance_json):",
+                    "    return _DaemonContext(instance_json)",
+                    "",
+                    "class DaemonState:",
+                    "    @staticmethod",
+                    "    def load(*, instance_root, actor_id, main_thread_id):",
+                    "        return {",
+                    "            'instance_root': str(instance_root),",
+                    "            'actor_id': actor_id,",
+                    "            'main_thread_id': main_thread_id,",
+                    "        }",
+                    "",
+                    "class DaemonRuntime:",
+                    "    def __init__(self, *, context, state):",
+                    "        self.context = context",
+                    "        self.state = state",
+                    "",
+                    "    def submit_parent_prompt(self, prompt, *, handler_name, origin_id, interrupt_policy):",
+                    "        payload = {",
+                    "            'prompt': prompt,",
+                    "            'handler_name': handler_name,",
+                    "            'origin_id': origin_id,",
+                    "            'interrupt_policy': interrupt_policy,",
+                    "            'state': self.state,",
+                    "        }",
+                    "        runtime_dir = Path(self.context.instance_root) / 'runtime'",
+                    "        runtime_dir.mkdir(parents=True, exist_ok=True)",
+                    "        (runtime_dir / 'parent-request.json').write_text(",
+                    "            json.dumps(payload, ensure_ascii=True, indent=2) + '\\n',",
+                    "            encoding='utf-8',",
+                    "        )",
+                    "        return payload",
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.assertFalse((projected_workspace / "tools" / "launcher").exists())
+
+        request = {
+            "protocol": PROTOCOL,
+            "request_id": "req-message-needs-parent-projected-root",
+            "method": "env.tool",
+            "params": {
+                "actor_id": active["actor_id"],
+                "active_role": "dev",
+                "tool": "message",
+                "action": "mark",
+                "args": {
+                    "message_id": seed["id"],
+                    "disposition": "needs_parent",
+                    "reason": "This changes the active parent-thread objective.",
+                },
+            },
+            "deadline_ms": 35000,
+        }
+        session = dispatcher.RuntimeBrokerSession(
+            instance_json_path=instance_json,
+            manifest_path=projected_manifest,
+            repo_root_path=fake_source_root,
+        )
+
+        original_daemon_core = sys.modules.pop("daemon_core", None)
+        try:
+            response = dispatcher.dispatch_runtime_request(request, session)
+        finally:
+            if original_daemon_core is not None:
+                sys.modules["daemon_core"] = original_daemon_core
+            else:
+                sys.modules.pop("daemon_core", None)
+            with contextlib.suppress(ValueError):
+                sys.path.remove(str(launcher_dir))
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertIs(response.get("parent_prompt_submitted"), True, msg=response)
+        response_parent_request = response.get("parent_request")
+        self.assertIsInstance(response_parent_request, dict, msg=response)
+        assert isinstance(response_parent_request, dict)
+        self.assertEqual(response_parent_request["handler_name"], "message_mark")
+        self.assertEqual(response_parent_request["origin_id"], seed["id"])
+        self.assertEqual(response_parent_request["interrupt_policy"], "before_submit")
+        stored = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored["disposition"], "needs_parent")
+        self.assertEqual(stored["disposition_reason"], "This changes the active parent-thread objective.")
+        parent_request_path = self.runtime_root / "runtime" / "parent-request.json"
+        parent_request = json.loads(parent_request_path.read_text(encoding="utf-8"))
+        self.assertEqual(parent_request["handler_name"], "message_mark")
+        self.assertEqual(parent_request["origin_id"], seed["id"])
+        self.assertEqual(parent_request["interrupt_policy"], "before_submit")
 
     def test_message_mark_needs_parent_submits_parent_prompt_before_saving_disposition(self) -> None:
         operations: list[str] = []

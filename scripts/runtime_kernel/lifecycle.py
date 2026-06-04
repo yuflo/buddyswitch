@@ -419,6 +419,7 @@ def start_broker_process(
     *,
     instance_json_path: Path,
     manifest_path: Path,
+    repo_root_path: Path | None = None,
 ) -> dict[str, Any]:
     broker_script = Path(__file__).resolve().parent / "broker.py"
     command = [
@@ -434,6 +435,8 @@ def start_broker_process(
         "--manifest",
         str(manifest_path),
     ]
+    if repo_root_path is not None:
+        command.extend(["--repo-root", str(repo_root_path)])
     paths.log_file.parent.mkdir(parents=True, exist_ok=True)
     with paths.log_file.open("a", encoding="utf-8") as log_handle:
         process = subprocess.Popen(
@@ -453,6 +456,7 @@ def ensure_broker(
     *,
     instance_json_path: Path,
     manifest_path: Path,
+    repo_root_path: Path | None = None,
     expected_actor_id: str,
     expected_active_role: str,
     expected_workspace_root: Path | None = None,
@@ -480,6 +484,7 @@ def ensure_broker(
         paths,
         instance_json_path=instance_json_path,
         manifest_path=manifest_path,
+        repo_root_path=repo_root_path,
     )
     if started.get("ok") is not True:
         cleanup_stale_broker_state(paths)

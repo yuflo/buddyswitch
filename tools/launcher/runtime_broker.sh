@@ -97,7 +97,8 @@ _buddyswitch_runtime_broker_lifecycle_json() {
       --marker-file "${marker_file}" \
       --log-file "${log_file}" \
       --instance-json "${BUDDYSWITCH_INSTANCE_JSON}" \
-      --manifest "${manifest_path}"
+      --manifest "${manifest_path}" \
+      --repo-root "${BUDDYSWITCH_REPO_ROOT}"
   )
 }
 

@@ -20,6 +20,7 @@ from env_manifest import ManifestError, load_manifest
 class RuntimeBrokerSession:
     instance_json_path: Path
     manifest_path: Path
+    repo_root_path: Path | None = None
     socket_path: Path | None = None
     pid_file: Path | None = None
 
@@ -107,6 +108,12 @@ def _instance_shared_root(instance_json_path: Path) -> Path:
     return instance_root
 
 
+def _runtime_source_repo_root(*, manifest_path: Path, repo_root_path: Path | None) -> Path:
+    if repo_root_path is not None:
+        return repo_root_path.expanduser().resolve(strict=False)
+    return manifest_path.expanduser().resolve(strict=False).parents[1]
+
+
 @contextlib.contextmanager
 def _runtime_server_env(
     *,
@@ -115,9 +122,10 @@ def _runtime_server_env(
     instance_json_path: Path,
     instance_record: dict[str, Any],
     manifest_path: Path,
+    repo_root_path: Path | None,
 ) -> Iterator[None]:
     shared_root = _instance_shared_root(instance_json_path)
-    repo_root = manifest_path.expanduser().resolve(strict=False).parents[1]
+    repo_root = _runtime_source_repo_root(manifest_path=manifest_path, repo_root_path=repo_root_path)
     updates = {
         "BUDDYSWITCH_RUNTIME_BROKER_MODE": "server",
         "BUDDYSWITCH_ACTOR_ID": actor_id,
@@ -260,6 +268,7 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
             instance_json_path=session.instance_json_path,
             instance_record=instance_record,
             manifest_path=session.manifest_path,
+            repo_root_path=session.repo_root_path,
         ):
             if method == "env.tool":
                 return _env_tool_dispatch(

@@ -355,6 +355,54 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(response["ok"], msg=response)
         self.assertEqual(seen_repo_roots, [str(ROOT.resolve(strict=False))])
 
+    def test_env_tool_dispatch_uses_explicit_repo_root_with_projected_manifest(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        instance_json = self._instance_json()
+        active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
+        projected_workspace = self._runtime_path("projected-runtime-workspace")
+        projected_manifest = projected_workspace / "buddyswitch" / "manifest.toml"
+        projected_manifest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(MANIFEST, projected_manifest)
+        fake_source_root = self._runtime_path("source-checkout")
+        fake_launcher_dir = fake_source_root / "tools" / "launcher"
+        fake_launcher_dir.mkdir(parents=True, exist_ok=True)
+        (fake_launcher_dir / "daemon_core.py").write_text("# fake daemon_core for repo-root routing\n", encoding="utf-8")
+        self.assertFalse((projected_workspace / "tools" / "launcher").exists())
+
+        session = dispatcher.RuntimeBrokerSession(
+            instance_json_path=instance_json,
+            manifest_path=projected_manifest,
+            repo_root_path=fake_source_root,
+        )
+        seen_repo_roots: list[str | None] = []
+
+        def fake_dispatch_env_tool_request(**_kwargs: object) -> dict[str, object]:
+            seen_repo_roots.append(os.environ.get("BUDDYSWITCH_REPO_ROOT"))
+            return {"ok": True, "tool": "context", "action": "context.summarize"}
+
+        request = {
+            "protocol": BROKER_V2_PROTOCOL,
+            "request_id": "req-env-tool-explicit-repo-root",
+            "method": "env.tool",
+            "params": {
+                "actor_id": active_actor_id,
+                "active_role": "pm",
+                "tool": "context",
+                "action": "summarize",
+                "args": {},
+            },
+            "deadline_ms": 35000,
+        }
+
+        with (
+            patch("runtime_kernel.dispatcher.dispatch_env_tool_request", side_effect=fake_dispatch_env_tool_request),
+            patch.dict(os.environ, {"BUDDYSWITCH_REPO_ROOT": ""}, clear=False),
+        ):
+            response = dispatcher.dispatch_runtime_request(request, session)
+
+        self.assertTrue(response["ok"], msg=response)
+        self.assertEqual(seen_repo_roots, [str(fake_source_root.resolve(strict=False))])
+
     def test_rejects_wrong_actor_id(self) -> None:
         instance_json = self._instance_json()
         response = self._dispatch(
@@ -1145,26 +1193,30 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
         paths,
         instance_json: Path,
         manifest_path: Path,
+        repo_root_path: Path | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
         broker_script = workspace_dir / "scripts" / "runtime_kernel" / "broker.py"
+        broker_command = [
+            "python3",
+            str(broker_script),
+            command,
+            "--socket",
+            str(paths.socket_path),
+            "--pid-file",
+            str(paths.pid_file),
+            "--marker-file",
+            str(paths.marker_file),
+            "--log-file",
+            str(paths.log_file),
+            "--instance-json",
+            str(instance_json),
+            "--manifest",
+            str(manifest_path),
+        ]
+        if repo_root_path is not None:
+            broker_command.extend(["--repo-root", str(repo_root_path)])
         completed = subprocess.run(
-            [
-                "python3",
-                str(broker_script),
-                command,
-                "--socket",
-                str(paths.socket_path),
-                "--pid-file",
-                str(paths.pid_file),
-                "--marker-file",
-                str(paths.marker_file),
-                "--log-file",
-                str(paths.log_file),
-                "--instance-json",
-                str(instance_json),
-                "--manifest",
-                str(manifest_path),
-            ],
+            broker_command,
             cwd=workspace_dir,
             text=True,
             capture_output=True,
@@ -1255,6 +1307,182 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     paths=paths,
                     instance_json=instance_json,
                     manifest_path=manifest_path,
+                )
+
+    def test_live_broker_needs_parent_uses_repo_root_with_workspace_manifest(self) -> None:
+        protocol = _require_module("runtime_kernel.protocol")
+        with tempfile.TemporaryDirectory() as temp:
+            workspace_dir = Path(temp) / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            (workspace_dir / "AGENTS.md").write_text(
+                "# BuddySwitch Runtime Workspace\n",
+                encoding="utf-8",
+            )
+            self._sync_runtime_surface(workspace_dir)
+            self.assertFalse((workspace_dir / "tools").exists())
+            runtime_dir = workspace_dir / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            paths = self._paths(runtime_dir)
+            manifest_path = workspace_dir / "buddyswitch" / "manifest.toml"
+            instance_json = workspace_dir / "instance.json"
+            instance_json.write_text(
+                json.dumps(
+                    {
+                        "actor_id": "act-pm-aaaaaaaaaaaa",
+                        "role": "pm",
+                        "status": "active",
+                        "instance_root": str(workspace_dir),
+                        "current_task_id": None,
+                        "current_track_id": None,
+                        "workspace_dir": str(workspace_dir),
+                        "browser_port": None,
+                        "created_at": "2026-06-04T00:00:00Z",
+                        "updated_at": "2026-06-04T00:00:00Z",
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            message_dir = workspace_dir / "state" / "buddyswitch" / "objects" / "messages"
+            message_dir.mkdir(parents=True, exist_ok=True)
+            message_path = message_dir / "msg-live-projected-root.json"
+            message_path.write_text(
+                json.dumps(
+                    {
+                        "id": "msg-live-projected-root",
+                        "from_actor_address": {"actor_id": "act-dev-bbbbbbbbbbbb", "role_id": "dev"},
+                        "to_actor_address": {"actor_id": "act-pm-aaaaaaaaaaaa", "role_id": "pm"},
+                        "content": "This changes the active parent-thread objective.",
+                        "reply_to": None,
+                        "created_at": "2026-06-04T00:00:00Z",
+                        "disposition": "unseen",
+                        "disposition_reason": None,
+                        "disposition_updated_at": None,
+                        "processed_by_actor_address": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            fake_source_root = Path(temp) / "source-checkout"
+            launcher_dir = fake_source_root / "tools" / "launcher"
+            launcher_dir.mkdir(parents=True, exist_ok=True)
+            (launcher_dir / "daemon_core.py").write_text(
+                "\n".join(
+                    (
+                        "from pathlib import Path",
+                        "import json",
+                        "",
+                        "class _DaemonContext:",
+                        "    def __init__(self, instance_json):",
+                        "        payload = json.loads(Path(instance_json).read_text(encoding='utf-8'))",
+                        "        self.instance_root = Path(payload['instance_root'])",
+                        "        self.actor_id = payload['actor_id']",
+                        "        self.main_thread_id = payload.get('main_thread_id') or 'thread-main-live'",
+                        "",
+                        "def load_daemon_context(instance_json):",
+                        "    return _DaemonContext(instance_json)",
+                        "",
+                        "class DaemonState:",
+                        "    @staticmethod",
+                        "    def load(*, instance_root, actor_id, main_thread_id):",
+                        "        return {",
+                        "            'instance_root': str(instance_root),",
+                        "            'actor_id': actor_id,",
+                        "            'main_thread_id': main_thread_id,",
+                        "        }",
+                        "",
+                        "class DaemonRuntime:",
+                        "    def __init__(self, *, context, state):",
+                        "        self.context = context",
+                        "        self.state = state",
+                        "",
+                        "    def submit_parent_prompt(self, prompt, *, handler_name, origin_id, interrupt_policy):",
+                        "        payload = {",
+                        "            'prompt': prompt,",
+                        "            'handler_name': handler_name,",
+                        "            'origin_id': origin_id,",
+                        "            'interrupt_policy': interrupt_policy,",
+                        "            'state': self.state,",
+                        "        }",
+                        "        runtime_dir = Path(self.context.instance_root) / 'runtime'",
+                        "        runtime_dir.mkdir(parents=True, exist_ok=True)",
+                        "        (runtime_dir / 'parent-request.json').write_text(",
+                        "            json.dumps(payload, ensure_ascii=True, indent=2) + '\\n',",
+                        "            encoding='utf-8',",
+                        "        )",
+                        "        return payload",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            ensure_completed, ensure_payload = self._run_broker_cli(
+                workspace_dir=workspace_dir,
+                command="ensure",
+                paths=paths,
+                instance_json=instance_json,
+                manifest_path=manifest_path,
+                repo_root_path=fake_source_root,
+            )
+            self.assertEqual(ensure_completed.returncode, 0, msg=ensure_completed.stderr)
+            self.assertTrue(ensure_payload.get("ok"), msg=ensure_payload)
+            try:
+                request = {
+                    "protocol": BROKER_V2_PROTOCOL,
+                    "request_id": "req-live-needs-parent-projected-root",
+                    "method": "env.tool",
+                    "params": {
+                        "actor_id": "act-pm-aaaaaaaaaaaa",
+                        "active_role": "pm",
+                        "tool": "message",
+                        "action": "mark",
+                        "args": {
+                            "message_id": "msg-live-projected-root",
+                            "disposition": "needs_parent",
+                            "reason": "This changes the active parent-thread objective.",
+                        },
+                    },
+                    "deadline_ms": 35000,
+                }
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(5.0)
+                    sock.connect(str(paths.socket_path))
+                    protocol.write_message(sock, request)
+                    response = protocol.read_message(sock)
+
+                self.assertTrue(response.get("ok"), msg=response)
+                result = response.get("result")
+                self.assertIsInstance(result, dict, msg=response)
+                assert isinstance(result, dict)
+                self.assertTrue(result.get("ok"), msg=response)
+                response_parent_request = result.get("parent_request")
+                self.assertIsInstance(response_parent_request, dict, msg=response)
+                assert isinstance(response_parent_request, dict)
+                self.assertEqual(response_parent_request["handler_name"], "message_mark")
+                self.assertEqual(response_parent_request["origin_id"], "msg-live-projected-root")
+                self.assertEqual(response_parent_request["interrupt_policy"], "before_submit")
+                stored = json.loads(message_path.read_text(encoding="utf-8"))
+                self.assertEqual(stored["disposition"], "needs_parent")
+                self.assertEqual(stored["disposition_reason"], "This changes the active parent-thread objective.")
+                parent_request_path = workspace_dir / "runtime" / "parent-request.json"
+                parent_request = json.loads(parent_request_path.read_text(encoding="utf-8"))
+                self.assertEqual(parent_request["handler_name"], "message_mark")
+                self.assertEqual(parent_request["origin_id"], "msg-live-projected-root")
+                self.assertEqual(parent_request["interrupt_policy"], "before_submit")
+            finally:
+                self._run_broker_cli(
+                    workspace_dir=workspace_dir,
+                    command="stop",
+                    paths=paths,
+                    instance_json=instance_json,
+                    manifest_path=manifest_path,
+                    repo_root_path=fake_source_root,
                 )
 
     def test_status_reports_unhealthy_when_pid_live_but_socket_missing(self) -> None:
