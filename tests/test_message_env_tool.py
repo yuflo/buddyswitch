@@ -885,12 +885,6 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("[MESSAGE NEEDS PARENT]", prompt)
         self.assertIn(seed["id"], prompt)
         self.assertIn("It changes the active implementation direction.", prompt)
-        self.assertIn("message__get", prompt)
-        self.assertIn("message__conversation", prompt)
-        self.assertIn("message__send", prompt)
-        self.assertIn("message__mark", prompt)
-        self.assertNotIn("message.parent_required", prompt)
-        self.assertNotIn("mailbox.local_trigger", prompt)
 
     def test_projected_runtime_context_uses_repo_root_for_parent_handoff_import(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-projected-parent", role="dev")

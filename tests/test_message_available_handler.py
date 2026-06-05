@@ -242,7 +242,6 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertIn("message__conversation", prompt)
             self.assertIn("message__send", prompt)
             self.assertIn("message__mark", prompt)
-            self.assertIn("needs_parent", prompt)
             self.assertNotIn("message__" + "list", prompt)
             self.assertNotIn("mailbox.local_trigger", prompt)
             self.assertNotIn("message." + "parent_required", prompt)

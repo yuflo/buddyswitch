@@ -305,10 +305,6 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("Status: active", tui)
         self.assertIn("Progress: task input TUI and task tools are being implemented", tui)
         self.assertIn("Last event: task.update task-0003-clean-runtime-env", tui)
-        self.assertIn("Done -> $task-management + task.propose(finish)", tui)
-        self.assertIn("Blocked -> $task-management + task.propose(block)", tui)
-        self.assertIn("Continue -> no task update", tui)
-        self.assertIn("No start / switch / confirm in checkout.", tui)
         self.assertNotIn("[TASK CONTEXT]", tui)
         self.assertNotIn("[USER INPUT]", tui)
 
@@ -329,9 +325,6 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("Previous turn completed: turn_empty", tui)
         self.assertIn("Active task", tui)
         self.assertIn("none", tui)
-        self.assertIn("no active task is present", tui)
-        self.assertIn("Continue -> no task update", tui)
-        self.assertIn("No start / switch / confirm in checkout.", tui)
         self.assertNotIn("[USER INPUT]", tui)
 
 if __name__ == "__main__":

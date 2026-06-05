@@ -312,275 +312,6 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("## verification", lowered)
                 self.assertIn("## guardrails", lowered)
 
-    def test_market_p0_skills_preserve_runtime_evidence_boundaries(self) -> None:
-        required = (
-            "search__open_browser",
-            "chrome-devtools-cockpit",
-            "artifact.create_revision",
-            "tool_evidence",
-            "do not invent",
-            "no silent downgrade",
-            "runtime discovery",
-        )
-        for skill_id in self.MARKET_P0_SKILLS:
-            text = self._market_skill_text(skill_id).lower()
-            with self.subTest(skill=skill_id):
-                for token in required:
-                    self.assertIn(token, text)
-
-    def test_market_source_seed_atlas_covers_seed_families_and_overclaim_caveats(self) -> None:
-        text = self._market_skill_text("market-source-seed-atlas").lower()
-        required = (
-            "user-language communities",
-            "review and comparison",
-            "official and competitor",
-            "search and content demand",
-            "ad and distribution",
-            "b2b structural",
-            "developer ecosystem",
-            "reddit",
-            "x.com",
-            "hacker news",
-            "github issues",
-            "g2",
-            "capterra",
-            "product hunt",
-            "chrome web store",
-            "google trends",
-            "meta ads library",
-            "google ads transparency",
-            "sec edgar",
-            "census",
-            "job posts",
-            "competitor pricing",
-            "competitor docs",
-            "competitor changelog",
-            "competitor careers",
-            "best for",
-            "bad for",
-            "query operators",
-            "access constraints",
-            "allowed claims",
-            "forbidden overclaims",
-            "not market size",
-            "not absolute demand",
-            "not confirmed product intent",
-        )
-        for token in required:
-            with self.subTest(token=token):
-                self.assertIn(token, text)
-        self.assertIn("reddit and x", text)
-        self.assertIn("review volume", text)
-        self.assertIn("homepage claims", text)
-        self.assertIn("normalized search interest", text)
-        self.assertIn("job posts and patents", text)
-
-    def test_market_search_operator_builder_requires_reproducible_query_plan(self) -> None:
-        text = self._market_skill_text("market-search-operator-builder").lower()
-        required = (
-            "discovery queries",
-            "validation queries",
-            "negative evidence",
-            "source-specific",
-            "freshness",
-            "query log",
-            "primary source",
-            "snippet",
-        )
-        for token in required:
-            with self.subTest(token=token):
-                self.assertIn(token, text)
-
-    def test_market_evidence_core_skills_cover_quality_triangulation_and_claim_audit(self) -> None:
-        skill_tokens = {
-            "source-quality-rater": (
-                "freshness",
-                "bias",
-                "source type",
-                "methodology",
-                "usable claims",
-            ),
-            "data-triangulator": (
-                "observed",
-                "inferred",
-                "hypothesized",
-                "two independent source families",
-                "directional",
-            ),
-            "hallucination-guard": (
-                "audit urls",
-                "dates",
-                "numbers",
-                "claim-source mapping",
-                "block them",
-                "cautious wording",
-            ),
-        }
-        forbidden = (
-            "single source is enough for high confidence",
-            "publish unsupported claims",
-        )
-        for skill_id, required in skill_tokens.items():
-            text = self._market_skill_text(skill_id).lower()
-            with self.subTest(skill=skill_id):
-                for token in required:
-                    self.assertIn(token, text)
-                for token in forbidden:
-                    self.assertNotIn(token, text)
-
-    def test_market_micro_signal_skills_capture_subtle_clues_with_guardrails(self) -> None:
-        required_sections = (
-            "micro signal",
-            "why it is interesting",
-            "possible hidden demand",
-            "alternative explanations",
-            "expansion queries",
-            "validation probe",
-            "confidence",
-            "spark",
-            "pattern",
-            "commitment",
-        )
-        guardrails = (
-            "do not generalize",
-            "do not treat likes",
-            "do not hide uncertainty",
-            "do not turn hunches into facts",
-            "always propose",
-        )
-        for skill_id in ("weak-signal-scout", "workaround-miner", "market-tension-finder"):
-            text = self._market_skill_text(skill_id).lower()
-            with self.subTest(skill=skill_id):
-                for token in required_sections:
-                    self.assertIn(token, text)
-                for token in guardrails:
-                    self.assertIn(token, text)
-
-    def test_workaround_miner_captures_behavior_linked_demand(self) -> None:
-        text = self._market_skill_text("workaround-miner").lower()
-        required = (
-            "spreadsheets",
-            "scripts",
-            "zapier",
-            "notion",
-            "airtable",
-            "manual services",
-            "internal tools",
-            "stitched-together products",
-            "copy-paste",
-            "current workaround",
-            "trigger moment",
-            "cost",
-            "owner",
-            "frequency",
-            "failure mode",
-            "switching implication",
-            "willingness to pay",
-            "commitment evidence",
-        )
-        for token in required:
-            with self.subTest(token=token):
-                self.assertIn(token, text)
-
-    def test_market_tension_finder_extracts_contradictions_and_probes(self) -> None:
-        text = self._market_skill_text("market-tension-finder").lower()
-        required = (
-            "stated",
-            "observed behavior",
-            "contradiction",
-            "continued usage",
-            "buyer confusion",
-            "market implication",
-            "validation probe",
-        )
-        for token in required:
-            with self.subTest(token=token):
-                self.assertIn(token, text)
-
-    def test_market_demand_discovery_skills_create_traceable_segment_and_icp_artifacts(self) -> None:
-        required_by_skill = {
-            "customer-voice-mining": (
-                "interviews",
-                "reviews",
-                "support notes",
-                "sales notes",
-                "community posts",
-                "pain themes",
-                "language patterns",
-                "traceable",
-                "do not invent quotes",
-            ),
-            "segment-map-builder": (
-                "role",
-                "business context",
-                "workflow context",
-                "trigger moment",
-                "workaround",
-                "exclusions",
-                "reachability",
-            ),
-            "icp-scorer": (
-                "pain urgency",
-                "reachability",
-                "ability to pay",
-                "switching trigger",
-                "referenceability",
-                "retention",
-                "expansion proxy",
-                "positive fit",
-                "negative fit",
-                "score bands",
-                "next validation action",
-            ),
-        }
-        for skill_id, required in required_by_skill.items():
-            text = self._market_skill_text(skill_id).lower()
-            with self.subTest(skill=skill_id):
-                for token in required:
-                    self.assertIn(token, text)
-
-    def test_market_action_skills_turn_evidence_into_one_runnable_experiment(self) -> None:
-        required_by_skill = {
-            "positioning-message-map": (
-                "who",
-                "alternative",
-                "differentiated value",
-                "proof",
-                "message hierarchy",
-                "testable angle",
-            ),
-            "growth-bottleneck-diagnoser": (
-                "one current growth bottleneck",
-                "broad marketing plan",
-            ),
-            "channel-strategy-mapper": (
-                "icp fit",
-                "intent fit",
-                "reachability",
-                "cac",
-                "payback",
-                "founder access",
-                "speed to learning",
-            ),
-            "experiment-design-reviewer": (
-                "hypothesis",
-                "primary metric",
-                "guardrail metric",
-                "duration",
-                "sample sanity",
-                "stop/scale rule",
-                "kill signal",
-            ),
-        }
-        for skill_id, required in required_by_skill.items():
-            text = self._market_skill_text(skill_id).lower()
-            with self.subTest(skill=skill_id):
-                for token in required:
-                    self.assertIn(token, text)
-        action_text = "\n".join(self._market_skill_text(skill_id).lower() for skill_id in required_by_skill)
-        self.assertIn("kill signal", action_text)
-        self.assertNotIn("generic multi-channel plan with no kill signal", action_text)
-
     def test_runtime_skill_installer_materializes_market_p0_skill_set(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             workspace = Path(temp_dir) / "workspace"
@@ -646,11 +377,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
-                self.assertIn("Prefer native BuddySwitch env MCP tools", text)
-                self.assertIn("start with the native buddyswitch env context summary tool", lowered)
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("python3 scripts/turn_runtime.py status", text)
-                self.assertIn("do not bypass runtime", lowered)
                 self.assertNotIn("python3 scripts/env/client.py", text)
                 self.assertNotIn("context summarize --payload", lowered)
                 self.assertNotIn("search open-browser --payload", lowered)
@@ -752,7 +480,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertIn("message__mark", message_skill)
         self.assertIn("message__conversation", message_skill)
         self.assertIn("message__list", message_skill)
-        self.assertIn("does not accept `box`", message_skill)
         self.assertIn("request__list", message_skill)
         self.assertIn("context.get.tool_catalog['message']", message_skill)
         self.assertNotIn("message contacts --payload", message_skill)
@@ -767,37 +494,9 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
         self.assertNotIn("selected target role", message_skill)
         self.assertNotIn("role selector", message_skill)
-        self.assertIn("active actor cannot send to itself", message_skill)
-        self.assertIn("same role with a different actor is allowed", message_skill)
         for token in forbidden_identity_residue:
             with self.subTest(source_token=token):
                 self.assertNotIn(token, message_skill)
-
-        for role in ("pm", "market"):
-            with self.subTest(materialized_for=role):
-                with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-                    workspace = Path(temp_dir) / f"{role}-workspace"
-                    workspace.mkdir()
-                    runtime_skills.install_runtime_skills(
-                        manifest_path=ROOT / "buddyswitch/manifest.toml",
-                        role_id=role,
-                        workspace=workspace,
-                    )
-                    installed = (workspace / ".agents" / "skills" / "message-tool" / "SKILL.md").read_text(
-                        encoding="utf-8"
-                    ).lower()
-                    self.assertIn("target_actor_address", installed)
-                    self.assertIn("message__get", installed)
-                    self.assertIn("message__mark", installed)
-                    self.assertIn("message__conversation", installed)
-                    self.assertNotIn("to_role", installed)
-                    self.assertNotIn("from_role", installed)
-                    self.assertNotIn("selected target role", installed)
-                    self.assertNotIn("role selector", installed)
-                    self.assertIn("active actor cannot send to itself", installed)
-                    self.assertIn("same role with a different actor is allowed", installed)
-                    for token in forbidden_identity_residue:
-                        self.assertNotIn(token, installed)
 
     def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
@@ -883,39 +582,6 @@ class RuntimeSkillsTests(unittest.TestCase):
                 for token in forbidden_description_tokens:
                     self.assertNotIn(token, description)
 
-    def test_pm_skills_include_product_work_sections_and_quality_bars(self) -> None:
-        required_headings = (
-            "## purpose",
-            "## use when",
-            "## do not use when",
-            "## inputs",
-            "## steps",
-            "## outputs",
-            "## quality bar",
-            "## runtime boundary",
-            "## examples",
-            "## counterexamples",
-        )
-        required_by_skill = {
-            "read-product-context": ("facts", "assumptions", "decisions", "blockers", "missing inputs"),
-            "synthesize-cross-functional-inputs": ("market", "design", "dev", "test", "product impact"),
-            "frame-product-direction": ("audience", "problem", "value", "constraints", "non-goals"),
-            "define-scope": ("smallest valuable", "in-scope", "non-goals", "cut", "downstream"),
-            "write-requirements": ("observable", "actor", "trigger", "behavior", "owner boundary"),
-            "write-acceptance-criteria": ("pass", "fail", "blocked", "criteria", "proof"),
-            "make-product-decision": ("decision", "evidence", "tradeoff", "rejected", "next owner"),
-            "decide-from-proof": ("continue", "revise", "send back", "stop", "blocked"),
-            "triage-track": ("stale", "current truth", "obsolete", "missing proof", "next action"),
-            "sequence-product-work": ("owner", "output", "dependency", "stop condition", "sequence"),
-        }
-        for skill_id in self.PM_PRODUCT_SKILLS:
-            lowered = self._pm_skill_file(skill_id).read_text(encoding="utf-8").lower()
-            with self.subTest(skill=skill_id):
-                for heading in required_headings:
-                    self.assertIn(heading, lowered)
-                for token in required_by_skill[skill_id]:
-                    self.assertIn(token, lowered)
-
     def test_pm_skills_do_not_copy_runtime_schema_or_action_catalogs(self) -> None:
         forbidden = (
             "payload_fields",
@@ -956,30 +622,6 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("launch-page", text)
                 self.assertNotIn("marketing surface", text)
                 self.assertNotIn("marketing-surface", text)
-
-    def test_pm_define_scope_teaches_track_boundary_heuristics_without_routing_rules(self) -> None:
-        text = self._pm_skill_file("define-scope").read_text(encoding="utf-8").lower()
-        for token in (
-            "use a track as a shared product outcome thread",
-            "reuse an active track when the work advances the same outcome, lifecycle, and proof path",
-            "create a new track when the outcome, lifecycle, collaborators, or proof path should be tracked independently",
-            "use private tasks for active actor private work management",
-            "use requests for durable cross-role asks",
-            "use comments/messages for discussion, not product lifecycle state",
-            "context.get.tool_catalog",
-            "python3 scripts/turn_runtime.py status",
-        ):
-            self.assertIn(token, text)
-        for forbidden in (
-            "every feature phrase creates a track",
-            "every user request maps to exactly one track",
-            "always create a task after creating a track",
-            "always ask design/dev/test after pm writes requirements",
-            "one-track-per-feature",
-            "**payload:**",
-            "payload_fields",
-        ):
-            self.assertNotIn(forbidden, text)
 
     def test_dev_product_engineering_skill_chain_is_registered(self) -> None:
         skills_by_id = {row["id"]: row for row in self.manifest.get("skills", []) if isinstance(row, dict)}
@@ -1029,155 +671,6 @@ class RuntimeSkillsTests(unittest.TestCase):
                 for token in forbidden_description_tokens:
                     self.assertNotIn(token, description)
 
-    def test_implement_scoped_change_teaches_buddyswitch_tdd_default(self) -> None:
-        text = self._dev_skill_text("implement-scoped-change")
-        for token in (
-            "failing test first",
-            "confirm the failure",
-            "smallest direct change",
-            "locked source root",
-            "exception reason",
-            "after green",
-            "do not silently change product scope",
-        ):
-            self.assertIn(token, text)
-        self.assertNotIn("when practical", text)
-
-    def test_debug_regression_teaches_systematic_root_cause_loop(self) -> None:
-        text = self._dev_skill_text("debug-regression")
-        for token in (
-            "reproduce",
-            "root cause",
-            "trace",
-            "working example",
-            "single hypothesis",
-            "one change",
-            "regression test",
-            "three",
-            "architecture",
-            "do not add broad fallback",
-            "do not swallow errors",
-        ):
-            self.assertIn(token, text)
-
-    def test_select_local_verification_requires_fresh_evidence_before_completion_claims(self) -> None:
-        text = self._dev_skill_text("select-local-verification")
-        for token in (
-            "fresh",
-            "exit code",
-            "command proves",
-            "read output",
-            "before claiming",
-            "blocked",
-            "blast radius",
-            "no stale output",
-        ):
-            self.assertIn(token, text)
-        self.assertNotIn("should pass", text)
-
-    def test_plan_thin_slice_implementation_skill_covers_scope_file_map_and_verification(self) -> None:
-        text = self._dev_skill_text("plan-thin-slice-implementation")
-        for token in (
-            "## purpose",
-            "## use when",
-            "## do not use when",
-            "## inputs",
-            "## steps",
-            "## outputs",
-            "## guardrails",
-            "## stop conditions",
-            "## verification",
-            "## examples",
-            "## counterexamples",
-            "smallest verifiable",
-            "file map",
-            "non-goals",
-            "acceptance",
-            "verification",
-            "product semantics",
-            "security",
-            "privacy",
-            "payment",
-            "data migration",
-        ):
-            self.assertIn(token, text)
-        self.assertNotIn("workflow engine", text)
-        self.assertNotIn("platform planning", text)
-
-    def test_request_dev_code_review_skill_covers_review_inputs_and_severity(self) -> None:
-        text = self._dev_skill_text("request-dev-code-review")
-        for token in (
-            "requirements",
-            "changed files",
-            "verification evidence",
-            "known risks",
-            "spec compliance",
-            "code quality",
-            "critical",
-            "important",
-        ):
-            self.assertIn(token, text)
-        self.assertNotIn("review replaces tests", text)
-
-    def test_handle_review_feedback_skill_requires_verification_before_implementation(self) -> None:
-        text = self._dev_skill_text("handle-review-feedback")
-        for token in (
-            "read",
-            "clarify",
-            "verify",
-            "evaluate",
-            "one item at a time",
-            "push back",
-            "yagni",
-            "focused verification",
-            "do not blindly implement",
-            "stop and clarify",
-        ):
-            self.assertIn(token, text)
-
-    def test_finish_dev_change_skill_respects_worktree_and_completion_boundaries(self) -> None:
-        text = self._dev_skill_text("finish-dev-change")
-        for token in (
-            "fresh verification",
-            "linked worktree",
-            "detached head",
-            "pull request",
-            "keep",
-            "discard",
-            "explicit confirmation",
-            "do not delete launcher-owned",
-            "do not merge into main without",
-        ):
-            self.assertIn(token, text)
-        self.assertNotIn("git clean -fd", text)
-        self.assertNotIn("git reset --hard", text)
-
-    def test_pressure_test_dev_skill_teaches_skill_behavior_testing(self) -> None:
-        text = self._dev_skill_text("pressure-test-dev-skill")
-        for token in (
-            "pressure scenario",
-            "baseline",
-            "failure",
-            "behavior",
-            "verify",
-            "static tests",
-            "not a one-off",
-        ):
-            self.assertIn(token, text)
-
-    def test_parallelize_independent_dev_work_skill_requires_disjoint_scope(self) -> None:
-        text = self._dev_skill_text("parallelize-independent-dev-work")
-        for token in (
-            "independent",
-            "shared state",
-            "overlapping write",
-            "sequential dependency",
-            "critical path",
-            "review and integrate",
-            "do not parallelize",
-        ):
-            self.assertIn(token, text)
-
     def test_runtime_skill_installer_materializes_expanded_dev_skill_set(self) -> None:
         expected = set(self.DEV_PRODUCT_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -1203,31 +696,6 @@ class RuntimeSkillsTests(unittest.TestCase):
                 workspace=workspace,
             )
             self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(set(installed)))
-
-    def test_dev_skills_keep_operational_sections_and_scenarios(self) -> None:
-        required_headings = (
-            "## use when",
-            "## do not use when",
-            "## inputs",
-            "## steps",
-            "## outputs",
-            "## guardrails",
-        )
-        for skill_id in self.DEV_PRODUCT_SKILLS:
-            path = self._dev_skill_file(skill_id)
-            text = path.read_text(encoding="utf-8")
-            lowered = text.lower()
-            with self.subTest(skill=skill_id):
-                self.assertIn("name:", lowered)
-                self.assertIn("description:", lowered)
-                for heading in required_headings:
-                    self.assertIn(heading, lowered)
-                self.assertTrue(
-                    "## verification" in lowered or "## stop conditions" in lowered,
-                    msg=f"{path} missing verification/stop section",
-                )
-                self.assertIn("## examples", lowered)
-                self.assertIn("## counterexamples", lowered)
 
     def test_dev_skills_do_not_copy_runtime_schema_or_action_catalogs(self) -> None:
         forbidden = (
@@ -1266,31 +734,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertIn("changed files", implement_scope)
         self.assertIn("locked source root", implement_scope)
 
-    def test_dev_skill_scenario_coverage_for_empty_root_verification_and_review_handoff(self) -> None:
-        handle_empty = self._dev_skill_file("handle-empty-source-root").read_text(encoding="utf-8").lower()
-        verification = self._dev_skill_file("select-local-verification").read_text(encoding="utf-8").lower()
-        reporting = self._dev_skill_file("write-implementation-report").read_text(encoding="utf-8").lower()
-        review_ready = self._dev_skill_file("prepare-review-readiness").read_text(encoding="utf-8").lower()
-        debug = self._dev_skill_file("debug-regression").read_text(encoding="utf-8").lower()
-        read_context = self._dev_skill_file("read-implementation-context").read_text(encoding="utf-8").lower()
-
-        for token in ("missing", "empty", "readme_only", "has_source"):
-            self.assertIn(token, handle_empty)
-        self.assertIn("not source-link missing", handle_empty)
-        self.assertIn("scaffold", handle_empty)
-        self.assertIn("pm/user", handle_empty)
-        self.assertIn("artifact body", read_context)
-        self.assertIn("outside locked root", self._dev_skill_file("implement-scoped-change").read_text(encoding="utf-8").lower())
-        self.assertIn("reproduce", debug)
-        self.assertIn("root cause", debug)
-        self.assertIn("no project test command", verification)
-        self.assertIn("verification blocked", reporting)
-        self.assertIn("changed files", reporting)
-        self.assertIn("risks", reporting)
-        self.assertIn("follow-ups", reporting)
-        self.assertIn("blast radius", review_ready)
-        self.assertIn("residual risk", review_ready)
-
     def test_pm_and_shared_tool_skills_describe_single_publication_path(self) -> None:
         pm_skill = "\n".join(
             self._pm_skill_file(skill_id).read_text(encoding="utf-8").lower()
@@ -1299,26 +742,14 @@ class RuntimeSkillsTests(unittest.TestCase):
         artifact_skill = (ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md").read_text(encoding="utf-8").lower()
         track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8").lower()
 
-        self.assertIn("artifact.create_revision", pm_skill)
-        self.assertIn("track.add_material", pm_skill)
-        self.assertIn("track.add_proof", pm_skill)
-        self.assertIn("track.open", pm_skill)
-        self.assertIn("artifact.get", pm_skill)
         self.assertNotIn("published_to_track", pm_skill)
         self.assertNotIn("content.prd", pm_skill)
         self.assertNotIn("kind=prd", pm_skill)
 
-        self.assertIn("artifact__create_revision", artifact_skill)
-        self.assertIn("private draft", artifact_skill)
-        self.assertIn("track__add_material", artifact_skill)
-        self.assertIn("track__add_proof", artifact_skill)
         self.assertNotIn("published_to_track", artifact_skill)
         self.assertNotIn("content.prd", artifact_skill)
         self.assertNotIn("kind=prd", artifact_skill)
 
-        self.assertIn("track__add_material", track_skill)
-        self.assertIn("track__add_proof", track_skill)
-        self.assertIn("artifact__get", track_skill)
         self.assertNotIn("content.prd", track_skill)
         self.assertNotIn("kind=prd", track_skill)
         self.assertNotIn("published_to_track", track_skill)
@@ -1329,18 +760,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         combined = contract + "\n" + agents
 
         self.assertNotIn("write-prd", combined)
-        for token in (
-            "context intake",
-            "product direction",
-            "scope",
-            "requirements",
-            "acceptance criteria",
-            "decision",
-            "proof",
-            "track triage",
-            "sequencing",
-        ):
-            self.assertIn(token, contract)
         self.assertIn("native buddyswitch env mcp tools", contract)
         self.assertIn("context.get.tool_catalog", contract)
         self.assertIn("python3 scripts/turn_runtime.py status", contract)

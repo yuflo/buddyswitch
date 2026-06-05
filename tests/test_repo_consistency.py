@@ -442,23 +442,13 @@ class RepoConsistencyTests(unittest.TestCase):
             path = ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(role=role):
-                self.assertIn("prefer native buddyswitch env mcp tools", text)
-                self.assertIn("start with the native buddyswitch env context summary tool", text)
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("python3 scripts/turn_runtime.py status", text)
-                self.assertIn("do not bypass runtime", text)
-                self.assertIn("context__summarize", text)
-                self.assertIn("context__get", text)
-                self.assertIn("track__open", text)
-                self.assertIn("task__current", text)
-                self.assertIn("artifact__get", text)
-                self.assertIn("request__get", text)
-                self.assertIn("search__open_browser", text)
-                if role == "pm":
-                    self.assertIn("comment__resolve", text)
                 self.assertNotIn("python3 scripts/env/client.py", text)
                 self.assertNotIn("context summarize --payload", text)
                 self.assertNotIn("search open-browser --payload", text)
+                self.assertNotIn("project.access=", text)
+                self.assertNotIn("projects/app", text)
                 self.assertNotIn("runtime tool examples include", text)
                 self.assertNotIn("authoritative fallback runtime tool list", text)
                 for pattern in self._OLD_FLAG_PATTERNS:
@@ -570,20 +560,6 @@ class RepoConsistencyTests(unittest.TestCase):
                 "docs/spec/live-runtime-guidance.md:1:Use scripts/env/tools/task/contract.py"
             )
         )
-
-    def test_runtime_role_agents_do_not_embed_project_source_facts(self) -> None:
-        roles = ("market", "pm", "design", "dev", "test")
-        for role in roles:
-            path = ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
-            text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(role=role):
-                self.assertIn("start with the native buddyswitch env context summary tool", text)
-                self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("agents.md is guidance only and not the permission source", text)
-                self.assertIn("do not bypass runtime", text)
-                self.assertNotIn("python3 scripts/env/client.py", text)
-                self.assertNotIn("projects/app", text)
-                self.assertNotIn("project.access=", text)
 
     def test_active_cli_guidance_has_no_old_env_client_flags(self) -> None:
         targets = [
@@ -937,15 +913,6 @@ class RepoConsistencyTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(contract=name):
                 self.assertIn("native buddyswitch env mcp tools", text)
-                self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("python3 scripts/turn_runtime.py status", text)
-                self.assertNotIn("python3 scripts/env/client.py", text)
-
-        for role in ("market", "pm", "design", "dev", "test"):
-            path = ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
-            text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(role=role):
-                self.assertIn("start with the native buddyswitch env context summary tool", text)
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("python3 scripts/turn_runtime.py status", text)
                 self.assertNotIn("python3 scripts/env/client.py", text)

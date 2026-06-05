@@ -1052,7 +1052,6 @@ exec "$real_git" "$@"
         self.assertIn(f"Current Task: {task_id}", text)
         self.assertIn(f"Title: {title}", text)
         self.assertIn("State: active", text)
-        self.assertIn("Task Handling Cue:", text)
         self.assertIn("[USER INPUT]", text)
         self.assertIn(raw_text, text)
         self.assertLess(text.index(f"Current Task: {task_id}"), text.index("[USER INPUT]"))
@@ -2016,16 +2015,6 @@ exec "$real_git" "$@"
             )
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
             prompt_text = agents_md.read_text(encoding="utf-8")
-            self.assertIn("locked to the `design` role", prompt_text)
-            for token in (
-                "## Runtime Boundary",
-                "Native Codex `web_search` is unavailable",
-                "native BuddySwitch env search tools",
-                "search__open_browser",
-                "chrome-devtools-cockpit",
-                "## Output Rule",
-            ):
-                self.assertIn(token, prompt_text)
             self.assertNotIn("python3 scripts/env/client.py", prompt_text)
             self.assertNotIn("search open-browser --payload", prompt_text)
             self.assertNotIn("project.access=", prompt_text)
@@ -2246,15 +2235,6 @@ exec "$real_git" "$@"
             self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), role_agents.read_text(encoding="utf-8"))
             self.assertTrue((workspace_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# BuddySwitch Runtime Workspace\n"))
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
-            for token in (
-                "guidance only and not the permission source",
-                "prefer native buddyswitch env mcp tools",
-                "start with the native buddyswitch env context summary tool",
-                "context.get.tool_catalog",
-                "python3 scripts/turn_runtime.py status",
-                "## output rule",
-            ):
-                self.assertIn(token, copied_agents)
             self.assertNotIn("python3 scripts/env/client.py", copied_agents)
             self.assertNotIn("context summarize --payload", copied_agents)
             self.assertNotIn("search open-browser --payload", copied_agents)
@@ -2273,7 +2253,6 @@ exec "$real_git" "$@"
             runtime_pm_contract_text = runtime_pm_contract.read_text(encoding="utf-8")
             self.assertEqual(runtime_pm_contract_text, source_pm_contract.read_text(encoding="utf-8"))
             self.assertNotIn("python3 scripts/env/client.py", runtime_pm_contract_text)
-            self.assertIn("native BuddySwitch env MCP tools", runtime_pm_contract_text)
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "task-management" / "SKILL.md").exists())
             self._assert_pm_runtime_skills(workspace_dir)

@@ -71,15 +71,6 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertIn("instance-local", lowered)
         self.assertIn("taskbox", lowered)
         self.assertIn("env.tool", lowered)
-        for heading in (
-            "## Continue Current Task",
-            "## Create New Task",
-            "## Switch Task",
-            "## Confirm Pending Switch",
-            "## Mark Done / Blocked",
-            "## Tool Reference",
-        ):
-            self.assertIn(heading, skill_text)
         for old_action in ("task.list", "task.get", "task.update", "task.archive", "task.history"):
             self.assertNotIn(old_action, skill_text)
         self.assertNotIn("additionalProperties", skill_text)

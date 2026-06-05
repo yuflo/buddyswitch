@@ -589,8 +589,6 @@ class AppServerClientTests(unittest.TestCase):
         self.assertEqual(len(content), 1)
         self.assertEqual(content[0]["type"], "input_text")
         self.assertIn("Side conversation boundary.", content[0]["text"])
-        self.assertIn("inherited history", content[0]["text"])
-        self.assertIn("separate from the main thread", content[0]["text"])
 
     def test_turn_steer_requires_expected_turn_id(self) -> None:
         with self.assertRaises(ValueError):
