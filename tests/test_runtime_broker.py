@@ -1466,7 +1466,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 assert isinstance(response_parent_request, dict)
                 self.assertEqual(response_parent_request["handler_name"], "message_mark")
                 self.assertEqual(response_parent_request["origin_id"], "msg-live-projected-root")
-                self.assertEqual(response_parent_request["interrupt_policy"], "before_submit")
+                self.assertEqual(response_parent_request["interrupt_policy"], "ensure_stopped")
                 stored = json.loads(message_path.read_text(encoding="utf-8"))
                 self.assertEqual(stored["disposition"], "needs_parent")
                 self.assertEqual(stored["disposition_reason"], "This changes the active parent-thread objective.")
@@ -1474,7 +1474,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 parent_request = json.loads(parent_request_path.read_text(encoding="utf-8"))
                 self.assertEqual(parent_request["handler_name"], "message_mark")
                 self.assertEqual(parent_request["origin_id"], "msg-live-projected-root")
-                self.assertEqual(parent_request["interrupt_policy"], "before_submit")
+                self.assertEqual(parent_request["interrupt_policy"], "ensure_stopped")
             finally:
                 self._run_broker_cli(
                     workspace_dir=workspace_dir,

@@ -451,7 +451,7 @@ class DaemonAccess:
             prompt,
             handler_name="message_mark",
             origin_id=message_id,
-            interrupt_policy="before_submit",
+            interrupt_policy="ensure_stopped",
         )
 
 

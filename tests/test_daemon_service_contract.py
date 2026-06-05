@@ -449,6 +449,214 @@ class DaemonServiceContractTests(unittest.TestCase):
             saved = self._saved_state(instance["instance_root"])
             self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
 
+    def test_submit_parent_prompt_ensure_stopped_idle_submits_without_interrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            runtime = self.core.DaemonRuntime(context=context, state=state)
+            submit_calls: list[dict[str, object]] = []
+            interrupt_calls: list[dict[str, object]] = []
+            thread_read_calls: list[dict[str, object]] = []
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
+            original_interrupt_turn = self.core.app_server.interrupt_turn
+            original_thread_read = self.core.app_server.thread_read
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                submit_calls.append({"socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, object]:
+                interrupt_calls.append({"socket_path": socket_path, "thread_id": thread_id})
+                return {"ok": True, "turn_id": "turn-main-1"}
+
+            def fake_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+                thread_read_calls.append({"socket_path": socket_path, "thread_id": thread_id, "include_turns": include_turns})
+                return {"thread": {"id": thread_id, "status": "idle"}}
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.addCleanup(setattr, self.core.app_server, "interrupt_turn", original_interrupt_turn)
+            self.addCleanup(setattr, self.core.app_server, "thread_read", original_thread_read)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+            self.core.app_server.interrupt_turn = fake_interrupt_turn
+            self.core.app_server.thread_read = fake_thread_read
+
+            result = runtime.submit_parent_prompt(
+                "parent prompt",
+                handler_name="message_mark",
+                origin_id="msg-1",
+                interrupt_policy="ensure_stopped",
+            )
+
+            self.assertEqual(result, {"turn_id": "turn-daemon-1"})
+            self.assertEqual(interrupt_calls, [])
+            self.assertEqual(len(thread_read_calls), 1)
+            self.assertEqual(submit_calls[0]["thread_id"], "thr-main")
+            records = self._runtime_records(instance["instance_root"])
+            self.assertEqual([record["runtime_method"] for record in records], ["parent_submit"])
+            self.assertEqual(records[0]["turn_id"], "turn-daemon-1")
+            self.assertEqual(records[0]["handler_name"], "message_mark")
+            self.assertEqual(records[0]["origin_id"], "msg-1")
+            self.assertEqual(records[0]["status"], "succeeded")
+
+    def test_submit_parent_prompt_ensure_stopped_running_interrupts_waits_then_submits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            runtime = self.core.DaemonRuntime(context=context, state=state)
+            submit_calls: list[dict[str, object]] = []
+            interrupt_calls: list[dict[str, object]] = []
+            thread_statuses = iter(("active", "idle"))
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
+            original_interrupt_turn = self.core.app_server.interrupt_turn
+            original_thread_read = self.core.app_server.thread_read
+            original_active_turn_id = self.core.app_server.active_turn_id
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                submit_calls.append({"socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, object]:
+                interrupt_calls.append({"socket_path": socket_path, "thread_id": thread_id})
+                return {"ok": True, "turn_id": "turn-main-1"}
+
+            def fake_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+                return {"thread": {"id": thread_id, "status": next(thread_statuses)}}
+
+            def fake_active_turn_id(socket_path: Path, thread_id: str) -> str | None:
+                return "turn-main-1"
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.addCleanup(setattr, self.core.app_server, "interrupt_turn", original_interrupt_turn)
+            self.addCleanup(setattr, self.core.app_server, "thread_read", original_thread_read)
+            self.addCleanup(setattr, self.core.app_server, "active_turn_id", original_active_turn_id)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+            self.core.app_server.interrupt_turn = fake_interrupt_turn
+            self.core.app_server.thread_read = fake_thread_read
+            self.core.app_server.active_turn_id = fake_active_turn_id
+
+            result = runtime.submit_parent_prompt(
+                "parent prompt",
+                handler_name="message_mark",
+                origin_id="msg-1",
+                interrupt_policy="ensure_stopped",
+            )
+
+            self.assertEqual(result["interrupted_turn_id"], "turn-main-1")
+            self.assertEqual(result["turn_id"], "turn-daemon-1")
+            self.assertEqual(interrupt_calls, [{"socket_path": context.socket_path, "thread_id": "thr-main"}])
+            self.assertEqual(submit_calls[0]["thread_id"], "thr-main")
+            records = self._runtime_records(instance["instance_root"])
+            self.assertEqual([record["runtime_method"] for record in records], ["parent_interrupt", "parent_submit"])
+            self.assertEqual(records[0]["status"], "succeeded")
+            self.assertEqual(records[0]["interrupted_turn_id"], "turn-main-1")
+            self.assertEqual(records[1]["status"], "succeeded")
+            self.assertEqual(records[1]["turn_id"], "turn-daemon-1")
+
+    def test_submit_parent_prompt_ensure_stopped_no_active_turn_race_waits_then_submits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            runtime = self.core.DaemonRuntime(context=context, state=state)
+            submit_calls: list[dict[str, object]] = []
+            thread_statuses = iter(("active", "idle"))
+            active_turn_ids = iter((None, None))
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
+            original_thread_read = self.core.app_server.thread_read
+            original_active_turn_id = self.core.app_server.active_turn_id
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                submit_calls.append({"socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            def fake_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+                return {"thread": {"id": thread_id, "status": next(thread_statuses)}}
+
+            def fake_active_turn_id(socket_path: Path, thread_id: str) -> str | None:
+                return next(active_turn_ids)
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.addCleanup(setattr, self.core.app_server, "thread_read", original_thread_read)
+            self.addCleanup(setattr, self.core.app_server, "active_turn_id", original_active_turn_id)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+            self.core.app_server.thread_read = fake_thread_read
+            self.core.app_server.active_turn_id = fake_active_turn_id
+
+            result = runtime.submit_parent_prompt(
+                "parent prompt",
+                handler_name="message_mark",
+                origin_id="msg-1",
+                interrupt_policy="ensure_stopped",
+            )
+
+            self.assertEqual(result["turn_id"], "turn-daemon-1")
+            self.assertNotIn("interrupted_turn_id", result)
+            self.assertEqual(submit_calls[0]["thread_id"], "thr-main")
+            records = self._runtime_records(instance["instance_root"])
+            self.assertEqual([record["runtime_method"] for record in records], ["parent_interrupt", "parent_submit"])
+            self.assertEqual(records[0]["status"], "failed")
+            self.assertIn("no active in-progress turn", records[0]["error"])
+            self.assertEqual(records[1]["status"], "succeeded")
+            self.assertEqual(records[1]["turn_id"], "turn-daemon-1")
+
+    def test_submit_parent_prompt_ensure_stopped_timeout_fails_without_submit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            runtime = self.core.DaemonRuntime(context=context, state=state)
+            interrupt_calls: list[dict[str, object]] = []
+            submit_calls: list[dict[str, object]] = []
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
+            original_interrupt_turn = self.core.app_server.interrupt_turn
+            original_thread_read = self.core.app_server.thread_read
+            original_active_turn_id = self.core.app_server.active_turn_id
+            original_sleep = self.core.time.sleep
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                submit_calls.append({"socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, object]:
+                interrupt_calls.append({"socket_path": socket_path, "thread_id": thread_id})
+                return {"ok": True, "turn_id": "turn-main-1"}
+
+            def fake_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+                return {"thread": {"id": thread_id, "status": "active"}}
+
+            def fake_active_turn_id(socket_path: Path, thread_id: str) -> str | None:
+                return "turn-main-1"
+
+            def fake_sleep(_seconds: float) -> None:
+                return None
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.addCleanup(setattr, self.core.app_server, "interrupt_turn", original_interrupt_turn)
+            self.addCleanup(setattr, self.core.app_server, "thread_read", original_thread_read)
+            self.addCleanup(setattr, self.core.app_server, "active_turn_id", original_active_turn_id)
+            self.addCleanup(setattr, self.core.time, "sleep", original_sleep)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+            self.core.app_server.interrupt_turn = fake_interrupt_turn
+            self.core.app_server.thread_read = fake_thread_read
+            self.core.app_server.active_turn_id = fake_active_turn_id
+            self.core.time.sleep = fake_sleep
+
+            with self.assertRaisesRegex(RuntimeError, "parent thread .* did not become idle"):
+                runtime.submit_parent_prompt(
+                    "parent prompt",
+                    handler_name="message_mark",
+                    origin_id="msg-1",
+                    interrupt_policy="ensure_stopped",
+                )
+
+            self.assertEqual(interrupt_calls, [{"socket_path": context.socket_path, "thread_id": "thr-main"}])
+            self.assertEqual(submit_calls, [])
+            records = self._runtime_records(instance["instance_root"])
+            self.assertEqual([record["runtime_method"] for record in records], ["parent_interrupt"])
+            self.assertEqual(records[0]["status"], "succeeded")
+
     def test_submit_parent_prompt_rejects_invalid_interrupt_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)

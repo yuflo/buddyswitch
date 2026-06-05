@@ -681,6 +681,66 @@ class DaemonRuntime:
         )
         return {"interrupted_turn_id": interrupted_turn_id}
 
+    def _wait_for_parent_idle(self) -> None:
+        max_polls = max(1, int(1.0 / DAEMON_POLL_SECONDS))
+        last_activity: dict[str, Any] | None = None
+        for poll_index in range(max_polls):
+            activity = self.parent_activity()
+            last_activity = activity
+            if activity.get("status") == "idle":
+                return
+            if activity.get("status") == "unavailable":
+                error = activity.get("error")
+                detail = error if isinstance(error, str) and error else "parent thread became unavailable"
+                raise app_server.AppServerUnavailableError(
+                    f"parent thread {self.context.main_thread_id} became unavailable while waiting to become idle: {detail}"
+                )
+            if poll_index + 1 < max_polls:
+                time.sleep(DAEMON_POLL_SECONDS)
+        detail = "unknown state"
+        if isinstance(last_activity, dict):
+            status = last_activity.get("status")
+            if isinstance(status, str) and status:
+                detail = status
+            error = last_activity.get("error")
+            if isinstance(error, str) and error:
+                detail = error
+        raise app_server.AppServerUnavailableError(
+            f"parent thread {self.context.main_thread_id} did not become idle before submit: {detail}"
+        )
+
+    @staticmethod
+    def _is_no_active_turn_race(exc: Exception) -> bool:
+        return "has no active in-progress turn" in str(exc)
+
+    def _ensure_parent_stopped(self, *, handler_name: str, origin_id: str | None) -> str | None:
+        activity = self.parent_activity()
+        status = activity.get("status")
+        if status == "idle":
+            return None
+        if status == "unavailable":
+            error = activity.get("error")
+            detail = error if isinstance(error, str) and error else "parent thread is unavailable"
+            raise app_server.AppServerUnavailableError(
+                f"parent thread {self.context.main_thread_id} is unavailable for parent handoff: {detail}"
+            )
+        if status != "running":
+            raise app_server.AppServerUnavailableError(
+                f"parent thread {self.context.main_thread_id} returned unexpected activity status: {status}"
+            )
+
+        interrupted_turn_id: str | None = None
+        try:
+            interrupted = self._interrupt_parent(handler_name=handler_name, origin_id=origin_id)
+            value = interrupted.get("interrupted_turn_id")
+            interrupted_turn_id = value if isinstance(value, str) and value else None
+        except Exception as exc:
+            if not self._is_no_active_turn_race(exc):
+                raise
+
+        self._wait_for_parent_idle()
+        return interrupted_turn_id
+
     def submit_parent_prompt(
         self,
         text: str,
@@ -689,13 +749,15 @@ class DaemonRuntime:
         origin_id: str | None,
         interrupt_policy: str = "none",
     ) -> dict[str, Any]:
-        if interrupt_policy not in {"none", "before_submit"}:
+        if interrupt_policy not in {"none", "before_submit", "ensure_stopped"}:
             raise ValueError(f"invalid interrupt_policy: {interrupt_policy}")
         interrupted_turn_id: str | None = None
         if interrupt_policy == "before_submit":
             interrupted = self._interrupt_parent(handler_name=handler_name, origin_id=origin_id)
             value = interrupted.get("interrupted_turn_id")
             interrupted_turn_id = value if isinstance(value, str) and value else None
+        elif interrupt_policy == "ensure_stopped":
+            interrupted_turn_id = self._ensure_parent_stopped(handler_name=handler_name, origin_id=origin_id)
         turn_id = self._submit_parent_once(text, handler_name=handler_name, origin_id=origin_id)
         result: dict[str, Any] = {"turn_id": turn_id}
         if interrupted_turn_id is not None:

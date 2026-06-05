@@ -966,7 +966,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertEqual(result["handler_name"], "message_mark")
         self.assertEqual(result["origin_id"], "msg-projected-parent")
-        self.assertEqual(result["interrupt_policy"], "before_submit")
+        self.assertEqual(result["interrupt_policy"], "ensure_stopped")
         self.assertEqual(result["actor_id"], "act-parent-projected")
 
     def test_message_mark_needs_parent_uses_source_repo_root_when_broker_manifest_is_projected(self) -> None:
@@ -1083,7 +1083,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(response_parent_request, dict)
         self.assertEqual(response_parent_request["handler_name"], "message_mark")
         self.assertEqual(response_parent_request["origin_id"], seed["id"])
-        self.assertEqual(response_parent_request["interrupt_policy"], "before_submit")
+        self.assertEqual(response_parent_request["interrupt_policy"], "ensure_stopped")
         stored = message_repo.get_message(seed["id"])
         self.assertIsNotNone(stored)
         assert stored is not None
@@ -1093,7 +1093,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         parent_request = json.loads(parent_request_path.read_text(encoding="utf-8"))
         self.assertEqual(parent_request["handler_name"], "message_mark")
         self.assertEqual(parent_request["origin_id"], seed["id"])
-        self.assertEqual(parent_request["interrupt_policy"], "before_submit")
+        self.assertEqual(parent_request["interrupt_policy"], "ensure_stopped")
 
     def test_message_mark_needs_parent_submits_parent_prompt_before_saving_disposition(self) -> None:
         operations: list[str] = []
