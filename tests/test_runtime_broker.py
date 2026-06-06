@@ -160,9 +160,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             method="env.tool",
             params={
                 "tool": "task",
-                "action": "propose",
+                "action": "capture",
                 "args": {
-                    "type": "start",
                     "reason": "Broker test.",
                     "evidence": "Broker test starts a task.",
                     "task": {"title": "Broker Task", "summary": "seed", "body": "Broker Task"},
@@ -305,9 +304,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 method="env.tool",
                 params={
                     "tool": "task",
-                    "action": "propose",
+                    "action": "capture",
                     "args": {
-                        "type": "start",
                         "reason": "Broker lock test.",
                         "evidence": "Broker lock test starts a task.",
                         "task": {"title": "Broker Lock Task", "body": "Broker Lock Task"},
@@ -790,7 +788,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
 
     def test_lock_mode_for_mutating_env_tool_is_write(self) -> None:
         for params in (
-            {"tool": "task", "action": "propose", "args": {}},
+            {"tool": "task", "action": "capture", "args": {}},
             {"tool": "track", "action": "update_now", "args": {}},
             {"tool": "track", "action": "add_material", "args": {}},
             {"tool": "track", "action": "add_update", "args": {}},
@@ -1122,7 +1120,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
             with self.assertRaises(client.RuntimeBrokerError):
                 client.request_runtime_broker(
                     "env.tool",
-                    {"tool": "task", "action": "propose", "args": {"type": "start"}},
+                    {"tool": "task", "action": "capture", "args": {"task": {"title": "Broker Task", "body": "Broker Task"}}},
                 )
         self.assertEqual(request_once.call_count, 1)
 

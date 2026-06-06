@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task input context snapshot and TUI rendering tests."""
+"""TaskViewModel and innerTUI rendering tests."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),
             "browser_port": None,
-            "updated_at": "2026-05-27T10:00:00+08:00",
+            "updated_at": "2026-06-06T10:00:00+08:00",
         }
         instance_json = instance_root / "instance.json"
         instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
@@ -64,10 +64,11 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         title: str,
         summary: str,
         body: str,
-        status: str = "active",
+        status: str = "captured",
         priority: str = "normal",
         refs: list[dict[str, object]] | None = None,
-        updated_at: str = "2026-05-27T10:00:00+08:00",
+        progress_summary: str = "",
+        updated_at: str = "2026-06-06T10:00:00+08:00",
     ) -> None:
         self._task_file(instance_root=instance_root, role=role, task_id=task_id).write_text(
             json.dumps(
@@ -79,9 +80,10 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "body": body,
                     "status": status,
                     "priority": priority,
-                    "track_id": None,
+                    "origin": {"type": "manual"},
                     "refs": refs or [],
-                    "created_at": "2026-05-27T09:00:00+08:00",
+                    "progress_summary": progress_summary,
+                    "created_at": "2026-06-06T09:00:00+08:00",
                     "updated_at": updated_at,
                     "closed_at": None,
                 },
@@ -98,7 +100,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for key, value in sorted((fields or {}).items())
         ]
         suffix = f" {' '.join(parts)}" if parts else ""
-        return f"- 2026-05-27T10:00:00+08:00 {event} {task_id}{suffix}"
+        return f"- 2026-06-06T10:00:00+08:00 {event} {task_id}{suffix}"
 
     def _write_history(self, *, instance_root: Path, role: str, lines: list[str]) -> None:
         self._history_file(instance_root=instance_root, role=role).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -107,7 +109,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         tasks_dir = instance_root / "taskbox" / role / "tasks"
         return {path.name: path.read_text(encoding="utf-8") for path in sorted(tasks_dir.glob("*.json"))}
 
-    def test_current_snapshot_empty_state_is_read_only(self) -> None:
+    def test_current_view_empty_state_is_read_only_task_view_model(self) -> None:
         instance = self._make_instance_context()
         instance_root = instance["instance_root"]
         role = str(instance["role"])
@@ -115,42 +117,37 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before_history = self._history_file(instance_root=instance_root, role=role).read_text(encoding="utf-8")
         before_tasks = self._task_files(instance_root=instance_root, role=role)
 
-        snapshot = task_management.current_snapshot(
+        view = task_management.current_view(
             active_role=role,
             active_actor={"actor_id": str(instance["actor_id"]), "role_id": role},
             instance_json=instance["instance_json"],
             instance_payload=instance["instance_payload"],
         )
 
-        self.assertEqual(snapshot["task_state"], "none")
-        self.assertIsNone(snapshot["current_task"])
-        self.assertIsNone(snapshot["pending_confirmation"])
-        self.assertEqual(snapshot["recent_events"], [])
-        self.assertIsNone(snapshot["last_event"])
-        self.assertEqual(snapshot["progress_summary"], "")
+        self.assertEqual(set(view), {
+            "owner_actor",
+            "current_anchor",
+            "task_state",
+            "shelf",
+            "pending_switch",
+            "recent_events",
+            "recent_evidence",
+            "available_actions",
+            "checkout_cue",
+            "warnings",
+        })
+        self.assertEqual(view["task_state"], "none")
+        self.assertIsNone(view["current_anchor"])
+        self.assertEqual(view["shelf"], [])
+        self.assertIsNone(view["pending_switch"])
+        self.assertEqual(view["recent_events"], [])
+        self.assertEqual(view["recent_evidence"], [])
+        self.assertIn("capture", view["available_actions"])
+        self.assertIn("review", view["available_actions"])
         self.assertEqual(self._history_file(instance_root=instance_root, role=role).read_text(encoding="utf-8"), before_history)
         self.assertEqual(self._task_files(instance_root=instance_root, role=role), before_tasks)
 
-    def test_task_tui_empty_state_rendering(self) -> None:
-        snapshot = {
-            "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
-            "task_state": "none",
-            "current_task": None,
-            "pending_confirmation": None,
-            "recent_events": [],
-            "last_event": None,
-            "progress_summary": "",
-        }
-
-        tui = task_tui.render_task_tui(snapshot)
-
-        self.assertIn("[TASK CONTEXT]", tui)
-        self.assertIn("Current Task: none", tui)
-        self.assertIn("State: none", tui)
-        self.assertIn("Pending Confirmation: none", tui)
-        self.assertNotIn("[USER INPUT]", tui)
-
-    def test_current_snapshot_replays_history_before_loading_current_task(self) -> None:
+    def test_current_view_replays_events_into_anchor_shelf_pending_and_evidence(self) -> None:
         instance = self._make_instance_context()
         instance_root = instance["instance_root"]
         role = str(instance["role"])
@@ -160,37 +157,45 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role=role,
             task_id="task-0001-alpha",
             title="Alpha",
-            summary="Older task summary",
-            body="Older task body.",
+            summary="Active task summary",
+            body="Active task body.",
+            status="active",
+            progress_summary="Focused implementation in progress.",
+            refs=[{"type": "track", "id": "track-alpha", "label": "Primary track"}],
         )
         self._write_task_doc(
             instance_root=instance_root,
             role=role,
             task_id="task-0002-beta",
             title="Beta",
-            summary="Refine task input context.",
-            body="Detailed body for beta task with enough text to show an excerpt.",
-            refs=[{"type": "track", "id": "track-alpha", "label": "Primary track"}],
-            updated_at="2026-05-27T10:30:00+08:00",
-        )
-        self._write_task_doc(
-            instance_root=instance_root,
-            role=role,
-            task_id="task-9999-directory-sentinel",
-            title="Directory Sentinel",
-            summary="This task should not be selected.",
-            body="This catches directory-only selection.",
+            summary="Captured task summary",
+            body="Captured body.",
+            status="captured",
         )
         self._write_history(
             instance_root=instance_root,
             role=role,
             lines=[
-                self._history_line(event="task.create", task_id="task-0001-alpha"),
-                self._history_line(event="task.create", task_id="task-0002-beta"),
+                self._history_line(event="task.selected", task_id="task-0001-alpha", fields={"reason": "seed"}),
+                self._history_line(
+                    event="task.progress.appended",
+                    task_id="task-0001-alpha",
+                    fields={"evidence": "Tests cover TaskViewModel", "summary": "Focused implementation in progress."},
+                ),
+                self._history_line(
+                    event="task.switch.requested",
+                    task_id="task-0001-alpha",
+                    fields={
+                        "confirmation_id": "confirm-0001",
+                        "target": {"mode": "existing", "task_id": "task-0002-beta"},
+                        "reason": "switch",
+                        "evidence": "User asked to switch",
+                    },
+                ),
             ],
         )
 
-        snapshot = task_management.current_snapshot(
+        view = task_management.current_view(
             active_role=role,
             active_actor={"actor_id": str(instance["actor_id"]), "role_id": role},
             instance_json=instance["instance_json"],
@@ -198,134 +203,87 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             history_limit=8,
         )
 
-        current_task = snapshot["current_task"]
-        self.assertIsInstance(current_task, dict)
-        assert isinstance(current_task, dict)
-        self.assertEqual(current_task["id"], "task-0002-beta")
-        self.assertEqual(current_task["title"], "Beta")
-        self.assertEqual(current_task["status"], "active")
-        self.assertEqual(current_task["summary"], "Refine task input context.")
-        self.assertIn("Detailed body for beta", current_task["body_excerpt"])
-        self.assertEqual(current_task["refs"][0]["id"], "track-alpha")
-        self.assertEqual(current_task["updated_at"], "2026-05-27T10:30:00+08:00")
-        self.assertEqual(snapshot["task_state"], "active")
-        self.assertEqual(snapshot["progress_summary"], "Refine task input context.")
-        self.assertEqual(
-            [event["event"] for event in snapshot["recent_events"]],
-            ["task.create", "task.create"],
-        )
+        self.assertEqual(view["current_anchor"]["id"], "task-0001-alpha")
+        self.assertEqual(view["current_anchor"]["progress_summary"], "Focused implementation in progress.")
+        self.assertEqual([row["id"] for row in view["shelf"]], ["task-0002-beta"])
+        self.assertEqual(view["pending_switch"]["confirmation_id"], "confirm-0001")
+        self.assertEqual(view["recent_evidence"][-1]["evidence"], "User asked to switch")
+        self.assertIn("switch_confirm", view["available_actions"])
+        self.assertIn("checkout", view["available_actions"])
 
-    def test_task_tui_current_task_and_pending_confirmation_rendering(self) -> None:
-        snapshot = {
+    def test_task_tui_renders_task_view_model_without_old_operation_wording(self) -> None:
+        view = {
             "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
             "task_state": "active",
-            "current_task": {
+            "current_anchor": {
                 "id": "task-0001-clean-runtime-environment",
                 "title": "Clean runtime environment",
                 "status": "active",
                 "summary": "Refine task input context.",
-                "body_excerpt": "Detailed body for the task.",
-                "priority": "normal",
-                "track_id": None,
-                "refs": [],
-                "updated_at": "2026-05-27T10:00:00+08:00",
+                "progress_summary": "Refine task input context.",
             },
-            "pending_confirmation": {
+            "shelf": [{"id": "task-0002-next-task", "title": "Next Task", "status": "captured"}],
+            "pending_switch": {
                 "confirmation_id": "confirm-0001",
-                "type": "task.switch",
                 "from_task_id": "task-0001-clean-runtime-environment",
-                "target": {
-                    "mode": "existing",
-                    "task_id": "task-0002-next-task",
-                    "task": None,
-                },
+                "target": {"mode": "existing", "task_id": "task-0002-next-task"},
                 "reason": "User asked to switch tasks.",
                 "evidence": "Switch request.",
             },
             "recent_events": [
-                {
-                    "event": "task.create",
-                    "task_id": "task-0001-clean-runtime-environment",
-                    "line": "- 2026-05-27T10:00:00+08:00 task.create task-0001-clean-runtime-environment",
-                },
-                {
-                    "event": "task.switch.requested",
-                    "task_id": "task-0001-clean-runtime-environment",
-                    "line": "- 2026-05-27T10:01:00+08:00 task.switch.requested task-0001-clean-runtime-environment confirmation_id=\"confirm-0001\"",
-                },
+                {"event": "task.selected", "task_id": "task-0001-clean-runtime-environment"},
+                {"event": "task.switch.requested", "task_id": "task-0001-clean-runtime-environment"},
             ],
-            "last_event": {
-                "event": "task.switch.requested",
-                "task_id": "task-0001-clean-runtime-environment",
-                "line": "- 2026-05-27T10:01:00+08:00 task.switch.requested task-0001-clean-runtime-environment confirmation_id=\"confirm-0001\"",
-            },
-            "progress_summary": "Refine task input context.",
+            "recent_evidence": [{"task_id": "task-0001-clean-runtime-environment", "evidence": "Switch request."}],
+            "available_actions": ["current", "capture", "switch_confirm", "progress", "checkout", "review"],
+            "checkout_cue": {"choices": ["continue", "finish", "block"], "requires": {"finish": "evidence", "block": "reason"}},
+            "warnings": ["One pending switch requires confirmation."],
         }
 
-        tui = task_tui.render_task_tui(snapshot)
+        tui = task_tui.render_task_tui(view)
 
-        self.assertIn("Current Task: task-0001-clean-runtime-environment", tui)
-        self.assertIn("Title: Clean runtime environment", tui)
-        self.assertIn("State: active", tui)
-        self.assertIn("Progress: Refine task input context.", tui)
-        self.assertIn("Pending Confirmation: confirm-0001", tui)
+        self.assertIn("[TASK CONTEXT]", tui)
+        self.assertIn("Current Anchor: task-0001-clean-runtime-environment", tui)
+        self.assertIn("Shelf:", tui)
         self.assertIn("task-0002-next-task", tui)
-        self.assertIn("$task-management", tui)
-        self.assertIn("task.switch.requested", tui)
-        for forbidden_heading in ("Create New Task", "Switch Task", "Tool Reference"):
-            self.assertNotIn(forbidden_heading, tui)
+        self.assertIn("Pending Switch: confirm-0001", tui)
+        self.assertIn("Available Actions: current, capture, switch_confirm, progress, checkout, review", tui)
+        self.assertIn("Checkout: task.checkout next=continue|finish|block", tui)
+        self.assertIn("Switch request.", tui)
+        for forbidden in ("Task Handling Cue", "task.propose", "task.confirm", "task__propose", "task__confirm"):
+            self.assertNotIn(forbidden, tui)
 
-    def test_stop_task_tui_current_task_rendering(self) -> None:
-        snapshot = {
+    def test_stop_task_tui_renders_checkout_operations_only(self) -> None:
+        view = {
             "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
             "task_state": "active",
-            "current_task": {
+            "current_anchor": {
                 "id": "task-0003-clean-runtime-env",
                 "title": "Clean runtime env",
                 "status": "active",
-                "summary": "task input TUI and task tools are being implemented",
-                "body_excerpt": "Detailed body for the task.",
+                "progress_summary": "task input TUI and task tools are being implemented",
             },
-            "pending_confirmation": None,
-            "recent_events": [],
-            "last_event": {
-                "event": "task.update",
-                "task_id": "task-0003-clean-runtime-env",
-                "line": "- 2026-05-27T10:01:00+08:00 task.update task-0003-clean-runtime-env",
-            },
-            "progress_summary": "task input TUI and task tools are being implemented",
+            "shelf": [],
+            "pending_switch": None,
+            "recent_events": [{"event": "task.progress.appended", "task_id": "task-0003-clean-runtime-env"}],
+            "recent_evidence": [{"task_id": "task-0003-clean-runtime-env", "evidence": "Focused test added."}],
+            "available_actions": ["progress", "checkout"],
+            "checkout_cue": {"choices": ["continue", "finish", "block"], "requires": {"finish": "evidence", "block": "reason"}},
+            "warnings": [],
         }
 
-        tui = task_tui.render_stop_task_tui(snapshot, {"turn_id": "turn_123"})
+        tui = task_tui.render_stop_task_tui(view, {"turn_id": "turn_123"})
 
         self.assertIn("[TASK CHECKOUT]", tui)
         self.assertIn("Previous turn completed: turn_123", tui)
         self.assertIn("Active task", tui)
         self.assertIn("task-0003-clean-runtime-env", tui)
-        self.assertIn("Status: active", tui)
-        self.assertIn("Progress: task input TUI and task tools are being implemented", tui)
-        self.assertIn("Last event: task.update task-0003-clean-runtime-env", tui)
-        self.assertNotIn("[TASK CONTEXT]", tui)
-        self.assertNotIn("[USER INPUT]", tui)
+        self.assertIn("task.checkout next=continue", tui)
+        self.assertIn("task.checkout next=finish", tui)
+        self.assertIn("task.checkout next=block", tui)
+        for forbidden in ("task.propose", "task.confirm", "Task Handling Cue"):
+            self.assertNotIn(forbidden, tui)
 
-    def test_stop_task_tui_empty_state_rendering(self) -> None:
-        snapshot = {
-            "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
-            "task_state": "none",
-            "current_task": None,
-            "pending_confirmation": None,
-            "recent_events": [],
-            "last_event": None,
-            "progress_summary": "",
-        }
-
-        tui = task_tui.render_stop_task_tui(snapshot, {"id": "turn_empty"})
-
-        self.assertIn("[TASK CHECKOUT]", tui)
-        self.assertIn("Previous turn completed: turn_empty", tui)
-        self.assertIn("Active task", tui)
-        self.assertIn("none", tui)
-        self.assertNotIn("[USER INPUT]", tui)
 
 if __name__ == "__main__":
     unittest.main()

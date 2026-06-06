@@ -18,6 +18,8 @@ import env_legacy_store as env_store  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
+TASK_OPERATIONS = {"current", "capture", "select", "switch_request", "switch_confirm", "progress", "checkout", "review"}
+
 
 class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
@@ -62,7 +64,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             return {}
         return {path.name: path.read_text(encoding="utf-8") for path in sorted(root.glob("*.json"))}
 
-    def test_task_management_skill_and_catalog_are_new_surface_only(self) -> None:
+    def test_task_management_skill_and_catalog_are_task_operations_only(self) -> None:
         skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
         self.assertTrue(skill_path.exists(), msg=skill_path)
         self.assertFalse((ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md").exists())
@@ -71,7 +73,19 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertIn("instance-local", lowered)
         self.assertIn("taskbox", lowered)
         self.assertIn("env.tool", lowered)
-        for old_action in ("task.list", "task.get", "task.update", "task.archive", "task.history"):
+        for operation in TASK_OPERATIONS:
+            self.assertIn(operation, lowered)
+        for old_action in (
+            "task.list",
+            "task.get",
+            "task.update",
+            "task.archive",
+            "task.history",
+            "task.propose",
+            "task.confirm",
+            "task__propose",
+            "task__confirm",
+        ):
             self.assertNotIn(old_action, skill_text)
         self.assertNotIn("additionalProperties", skill_text)
         self.assertNotIn('"required"', skill_text)
@@ -87,13 +101,13 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
                 self.assertNotIn("task-tool", skills)
 
         catalog = tool_router.env_tools_description()["task"]
-        self.assertEqual(set(catalog["operations"]), {"current", "propose", "confirm"})
+        self.assertEqual(set(catalog["operations"]), TASK_OPERATIONS)
         self.assertIn("taskbox", str(catalog["object_model"]).lower())
-        propose_schema = tool_router.get_action_definition("task", "propose").input_schema
-        self.assertIn("body", propose_schema["properties"]["task"]["properties"])
-        self.assertIn("target", catalog["payload_fields"]["propose"])
+        self.assertIn("taskviewmodel", json.dumps(catalog, ensure_ascii=True).lower())
+        self.assertIn("body", tool_router.get_action_definition("task", "capture").input_schema["properties"]["task"]["properties"])
+        self.assertIn("target", catalog["payload_fields"]["switch_request"])
 
-    def test_task_propose_start_creates_only_taskbox_state_without_binding_fields(self) -> None:
+    def test_task_capture_creates_only_taskbox_state_without_binding_fields(self) -> None:
         env_store.create_track(
             "track-task-arch",
             "Task Arch",
@@ -108,7 +122,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             created_by="pm",
             body="draft body",
             template="note",
-            summary="artifact should not be touched by task.propose",
+            summary="artifact should not be touched by task.capture",
         )
         before_track = json.loads(env_store.track_file("track-task-arch").read_text(encoding="utf-8"))
         before_artifact = json.loads(env_store.artifact_file("art-pm-task-arch").read_text(encoding="utf-8"))
@@ -116,16 +130,15 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         payload = self._dispatch(
             role="pm",
             tool="task",
-            action="propose",
+            action="capture",
             args={
-                "type": "start",
                 "task": {
                     "title": "Task Arch",
                     "summary": "runless",
                     "body": "Detailed private task body.",
                     "priority": "high",
-                    "track_id": "track-task-arch",
-                    "refs": [],
+                    "origin": {"type": "track", "id": "track-task-arch"},
+                    "refs": [{"type": "track", "id": "track-task-arch"}],
                 },
                 "reason": "User introduced private task work.",
                 "evidence": "User request.",
@@ -139,24 +152,23 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertEqual(after_artifact, before_artifact)
         stored_task = json.loads(self._task_file("task-0001-task-arch").read_text(encoding="utf-8"))
         self.assertEqual(stored_task.get("body"), "Detailed private task body.")
-        self.assertEqual(stored_task.get("track_id"), "track-task-arch")
-        self.assertIn("task.create task-0001-task-arch", self._history_file().read_text(encoding="utf-8"))
+        self.assertEqual(stored_task.get("status"), "captured")
+        self.assertIn("task.captured task-0001-task-arch", self._history_file().read_text(encoding="utf-8"))
         stored_instance = json.loads(self.instance_json.read_text(encoding="utf-8"))
         self.assertNotIn("current_task_id", stored_instance)
         self.assertNotIn("current_track_id", stored_instance)
 
-    def test_context_decision_surface_names_new_task_actions(self) -> None:
+    def test_context_decision_surface_names_task_operations(self) -> None:
         payload = self._dispatch(role="pm", tool="context", action="get", args={})
         self.assertTrue(payload["ok"], msg=payload)
         operation_semantics = payload["operation_semantics"]
-        self.assertIn("task.current", operation_semantics)
-        self.assertIn("task.propose", operation_semantics)
-        self.assertIn("task.confirm", operation_semantics)
-        self.assertNotIn("task.list", operation_semantics)
-        self.assertNotIn("task.update", operation_semantics)
+        for operation in TASK_OPERATIONS:
+            self.assertIn(f"task.{operation}", operation_semantics)
+        self.assertNotIn("task.propose", operation_semantics)
+        self.assertNotIn("task.confirm", operation_semantics)
         self.assertEqual(payload["decision_surface"]["binding_state"]["state"], "runless")
 
-    def test_task_propose_rejects_publication_payload_fields_without_shared_mutation(self) -> None:
+    def test_task_capture_rejects_publication_payload_fields_without_shared_mutation(self) -> None:
         env_store.create_track("track-task-arch-action-reject", "Task arch action reject", owner_role="pm")
         env_store.create_artifact_revision(
             artifact_id="art-pm-task-arch-action-reject",
@@ -175,9 +187,8 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
                 rejected = self._dispatch(
                     role="pm",
                     tool="task",
-                    action="propose",
+                    action="capture",
                     args={
-                        "type": "start",
                         "task": {
                             "title": "Reject publication field",
                             "body": "Body.",
@@ -193,6 +204,24 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
                 self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tracks"), before_tracks)
                 self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/artifacts"), before_artifacts)
                 self.assertEqual(self._history_file().read_text(encoding="utf-8"), before_history)
+
+    def test_live_task_surfaces_do_not_teach_old_task_operations(self) -> None:
+        live_paths = [
+            ROOT / "scripts" / "env" / "domain" / "task_tui.py",
+            ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md",
+            ROOT / "scripts" / "env" / "tools" / "task" / "tool.py",
+            ROOT / "scripts" / "env" / "tools" / "task" / "_impl.py",
+            ROOT / "scripts" / "env" / "tool_runtime" / "context.py",
+            ROOT / "scripts" / "env" / "tool_runtime" / "role_auth.py",
+            ROOT / "scripts" / "env" / "tools" / "context" / "_impl.py",
+            ROOT / "scripts" / "env" / "tools" / "request" / "tool.py",
+        ]
+        forbidden = ("task.propose", "task.confirm", "task__propose", "task__confirm", "Task Handling Cue")
+        for path in live_paths:
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden:
+                with self.subTest(path=path, token=token):
+                    self.assertNotIn(token, text)
 
 
 if __name__ == "__main__":

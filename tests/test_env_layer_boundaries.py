@@ -198,7 +198,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch_dev_task_propose(self, args: dict[str, object]) -> dict[str, object]:
+    def _dispatch_dev_task_capture(self, args: dict[str, object]) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-boundary")
         envelope = runtime_broker.dispatch_runtime_request(
             request={
@@ -209,7 +209,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "actor_id": actor_id,
                     "active_role": "dev",
                     "tool": "task",
-                    "action": "propose",
+                    "action": "capture",
                     "args": args,
                 },
                 "deadline_ms": 35000,
@@ -326,9 +326,8 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         raw_state_path = f"instances/{actor_id}/taskbox/dev/tasks/env-tool-bypass.json"
         raw_probe = self._runtime_path(raw_state_path)
 
-        response = self._dispatch_dev_task_propose(
+        response = self._dispatch_dev_task_capture(
             {
-                "type": "start",
                 "reason": "Boundary test.",
                 "evidence": "Payload includes forbidden path fields.",
                 "task": {

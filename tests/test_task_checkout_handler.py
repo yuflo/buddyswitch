@@ -140,26 +140,31 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
             source_context=source_context,
         )
 
-    def _patch_snapshot_render(self) -> list[tuple[str, object]]:
+    def _patch_view_render(self) -> list[tuple[str, object]]:
         calls: list[tuple[str, object]] = []
-        original_snapshot = self.task_checkout_handler.task_management.current_snapshot
+        original_view = self.task_checkout_handler.task_management.current_view
         original_render = self.task_checkout_handler.task_tui.render_stop_task_tui
 
-        def fake_current_snapshot(**kwargs: object) -> dict[str, object]:
-            calls.append(("snapshot", kwargs))
+        def fake_current_view(**kwargs: object) -> dict[str, object]:
+            calls.append(("view", kwargs))
             return {
-                "current_task": {"id": "task-1", "status": "active", "summary": "summary"},
-                "last_event": None,
-                "progress_summary": "summary",
+                "current_anchor": {"id": "task-1", "status": "active", "progress_summary": "summary"},
+                "shelf": [],
+                "pending_switch": None,
+                "recent_events": [],
+                "recent_evidence": [],
+                "available_actions": ["checkout"],
+                "checkout_cue": {"choices": ["continue", "finish", "block"]},
+                "warnings": [],
             }
 
-        def fake_render_stop_task_tui(snapshot: object, previous_turn: object) -> str:
-            calls.append(("render", {"snapshot": snapshot, "previous_turn": previous_turn}))
-            return "[TASK CHECKOUT]\nContinue -> no task update"
+        def fake_render_stop_task_tui(view: object, previous_turn: object) -> str:
+            calls.append(("render", {"view": view, "previous_turn": previous_turn}))
+            return "[TASK CHECKOUT]\ntask.checkout next=continue"
 
-        self.addCleanup(setattr, self.task_checkout_handler.task_management, "current_snapshot", original_snapshot)
+        self.addCleanup(setattr, self.task_checkout_handler.task_management, "current_view", original_view)
         self.addCleanup(setattr, self.task_checkout_handler.task_tui, "render_stop_task_tui", original_render)
-        self.task_checkout_handler.task_management.current_snapshot = fake_current_snapshot
+        self.task_checkout_handler.task_management.current_view = fake_current_view
         self.task_checkout_handler.task_tui.render_stop_task_tui = fake_render_stop_task_tui
         return calls
 
@@ -288,7 +293,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            calls = self._patch_snapshot_render()
+            calls = self._patch_view_render()
             runtime = FakeDaemonRuntime(result="turn-daemon-1")
 
             result = self.handler.handle(context, state, runtime, self._completed())
@@ -303,10 +308,10 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.assertTrue(prompt.startswith("[TASK CHECKOUT]"))
             self.assertNotIn("[TASK CONTEXT]", prompt)
             self.assertNotIn("[USER INPUT]", prompt)
-            self.assertEqual([name for name, _payload in calls], ["snapshot", "render"])
-            snapshot_payload = calls[0][1]
+            self.assertEqual([name for name, _payload in calls], ["view", "render"])
+            view_payload = calls[0][1]
             self.assertEqual(
-                snapshot_payload.get("active_actor"),
+                view_payload.get("active_actor"),
                 {"actor_id": "act-dev-daed00000001", "role_id": "dev"},
             )
 
@@ -315,7 +320,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            self._patch_snapshot_render()
+            self._patch_view_render()
             runtime = self.daemon_core.DaemonRuntime(context=context, state=state)
             original_submit_turn = self.daemon_core.launcher_submit_turn.submit_turn
 
@@ -341,7 +346,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            self._patch_snapshot_render()
+            self._patch_view_render()
             runtime = self.daemon_core.DaemonRuntime(context=context, state=state)
             original_submit_turn = self.daemon_core.launcher_submit_turn.submit_turn
 
@@ -361,7 +366,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            self._patch_snapshot_render()
+            self._patch_view_render()
             runtime = FakeDaemonRuntime(
                 error=self.task_checkout_handler.launcher_submit_turn.SubmitTurnError("submit_turn failed: active thread"),
             )

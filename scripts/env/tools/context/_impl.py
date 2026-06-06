@@ -727,7 +727,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
         "tasks": {
             "description": "Active actor private task hints and checklists.",
             "scope": "active actor private task state",
-            "source_of_truth": "task.current / task.propose / task.confirm via runtime env tools",
+            "source_of_truth": "task.current / task.capture / task.select / task.switch_request / task.switch_confirm / task.progress / task.checkout / task.review via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",

@@ -27,7 +27,6 @@ _FORBIDDEN_RUNTIME_SURFACES = {
     "insight",
     "experiment",
     "roadmap",
-    "review",
     "approval",
 }
 _DOC_SPEC_CONTEXT_MARKERS = (
@@ -45,6 +44,7 @@ _DOC_SPEC_CONTEXT_MARKERS = (
     "task-split",
     "test-plan",
     "phase-2-prompt",
+    "phase2-prompt",
 )
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task TUI renderer."""
+"""TaskViewModel TUI renderer."""
 
 from __future__ import annotations
 
@@ -27,9 +27,21 @@ def _short_event(event: Any) -> str:
     return "none"
 
 
+def _task_label(task: Mapping[str, Any] | None) -> str:
+    if task is None:
+        return "none"
+    task_id = task.get("id")
+    title = task.get("title")
+    if isinstance(task_id, str) and isinstance(title, str) and title:
+        return f"{task_id} - {title}"
+    if isinstance(task_id, str):
+        return task_id
+    return "unknown"
+
+
 def _pending_line(pending: Mapping[str, Any] | None) -> str:
     if pending is None:
-        return "Pending Confirmation: none"
+        return "Pending Switch: none"
     confirmation_id = pending.get("confirmation_id")
     target = _as_mapping(pending.get("target"))
     target_label = "unknown target"
@@ -42,7 +54,7 @@ def _pending_line(pending: Mapping[str, Any] | None) -> str:
             target_label = task_id
     if not isinstance(confirmation_id, str) or not confirmation_id:
         confirmation_id = "unknown"
-    return f"Pending Confirmation: {confirmation_id} -> {target_label}"
+    return f"Pending Switch: {confirmation_id} -> {target_label}"
 
 
 def _turn_id(previous_turn: Mapping[str, Any]) -> str:
@@ -53,62 +65,76 @@ def _turn_id(previous_turn: Mapping[str, Any]) -> str:
     return "unknown"
 
 
-def render_task_tui(snapshot: Mapping[str, object]) -> str:
-    current_task = _as_mapping(snapshot.get("current_task"))
-    pending_confirmation = _as_mapping(snapshot.get("pending_confirmation"))
-    progress = snapshot.get("progress_summary")
-    if not isinstance(progress, str):
-        progress = ""
+def render_task_tui(view: Mapping[str, object]) -> str:
+    current_anchor = _as_mapping(view.get("current_anchor"))
+    shelf = view.get("shelf")
+    pending_switch = _as_mapping(view.get("pending_switch"))
+    recent_evidence = view.get("recent_evidence")
+    recent_events = view.get("recent_events")
+    available_actions = view.get("available_actions")
+    checkout_cue = _as_mapping(view.get("checkout_cue"))
+    warnings = view.get("warnings")
 
     lines: list[str] = ["[TASK CONTEXT]"]
-    if current_task is None:
-        lines.extend(
-            [
-                "Current Task: none",
-                "Title: none",
-                f"State: {snapshot.get('task_state') or 'none'}",
-                "Progress: none",
-            ]
-        )
+    lines.append(f"Current Anchor: {_task_label(current_anchor)}")
+    if current_anchor is None:
+        lines.append(f"State: {view.get('task_state') or 'none'}")
+        lines.append("Progress: none")
     else:
-        lines.extend(
-            [
-                f"Current Task: {current_task.get('id') or 'unknown'}",
-                f"Title: {current_task.get('title') or 'untitled'}",
-                f"State: {current_task.get('status') or snapshot.get('task_state') or 'none'}",
-                f"Progress: {progress or current_task.get('summary') or current_task.get('body_excerpt') or 'none'}",
-            ]
-        )
+        lines.append(f"State: {current_anchor.get('status') or view.get('task_state') or 'none'}")
+        lines.append(f"Progress: {current_anchor.get('progress_summary') or current_anchor.get('summary') or 'none'}")
 
-    lines.append(f"Last Event: {_short_event(snapshot.get('last_event'))}")
-    lines.append(_pending_line(pending_confirmation))
+    lines.append("")
+    lines.append("Shelf:")
+    if isinstance(shelf, list) and shelf:
+        for task in shelf:
+            label = _task_label(_as_mapping(task))
+            lines.append(f"- {label}")
+    else:
+        lines.append("- none")
+
+    lines.append(_pending_line(pending_switch))
+    if isinstance(available_actions, list) and available_actions:
+        lines.append("Available Actions: " + ", ".join(str(row) for row in available_actions))
+    else:
+        lines.append("Available Actions: none")
+
+    choices = checkout_cue.get("choices") if checkout_cue is not None else None
+    if isinstance(choices, list) and choices:
+        lines.append("Checkout: task.checkout next=" + "|".join(str(row) for row in choices))
+    else:
+        lines.append("Checkout: none")
+
+    lines.append("Recent Evidence:")
+    if isinstance(recent_evidence, list) and recent_evidence:
+        for row in recent_evidence:
+            mapping = _as_mapping(row)
+            if mapping is None:
+                continue
+            evidence = mapping.get("evidence") or mapping.get("reason") or "none"
+            lines.append(f"- {mapping.get('task_id') or 'unknown'}: {evidence}")
+    else:
+        lines.append("- none")
+
+    lines.append("Warnings:")
+    if isinstance(warnings, list) and warnings:
+        for warning in warnings:
+            lines.append(f"- {warning}")
+    else:
+        lines.append("- none")
+
     lines.append("Recent Events:")
-    recent_events = snapshot.get("recent_events")
     if isinstance(recent_events, list) and recent_events:
         for event in recent_events:
             lines.append(f"- {_short_event(event)}")
     else:
         lines.append("- none")
-
-    lines.extend(
-        [
-            "",
-            "Task Handling Cue:",
-            "- Continue current task: no task state change.",
-            "- Clear new task with no active current task: use $task-management and task.propose(start).",
-            "- Clear switch away from current task: use $task-management and task.propose(switch).",
-            "- Pending switch answer: use task.confirm.",
-            "- Unclear: no task mutation.",
-        ]
-    )
     return "\n".join(lines)
 
 
-def render_stop_task_tui(snapshot: Mapping[str, Any], previous_turn: Mapping[str, Any]) -> str:
-    current_task = _as_mapping(snapshot.get("current_task"))
-    progress = snapshot.get("progress_summary")
-    if not isinstance(progress, str):
-        progress = ""
+def render_stop_task_tui(view: Mapping[str, Any], previous_turn: Mapping[str, Any]) -> str:
+    current_anchor = _as_mapping(view.get("current_anchor"))
+    recent_events = view.get("recent_events")
 
     lines: list[str] = [
         "[TASK CHECKOUT]",
@@ -117,34 +143,34 @@ def render_stop_task_tui(snapshot: Mapping[str, Any], previous_turn: Mapping[str
         "Active task",
     ]
 
-    if current_task is None:
+    if current_anchor is None:
         lines.extend(
             [
                 "  none",
-                "  no active task is present; no task update is needed by default.",
+                "  no active task is present; no checkout update is needed by default.",
             ]
         )
     else:
         lines.extend(
             [
-                f"  {current_task.get('id') or 'unknown'}",
-                f"  Status: {current_task.get('status') or snapshot.get('task_state') or 'none'}",
-                f"  Progress: {progress or current_task.get('summary') or current_task.get('body_excerpt') or 'none'}",
-                f"  Last event: {_short_event(snapshot.get('last_event'))}",
+                f"  {current_anchor.get('id') or 'unknown'}",
+                f"  Status: {current_anchor.get('status') or view.get('task_state') or 'none'}",
+                f"  Progress: {current_anchor.get('progress_summary') or current_anchor.get('summary') or 'none'}",
+                f"  Last event: {_short_event(recent_events[-1] if isinstance(recent_events, list) and recent_events else None)}",
             ]
         )
 
     lines.extend(
         [
             "",
-            "Decision",
-            "  Done -> $task-management + task.propose(finish)",
-            "  Blocked -> $task-management + task.propose(block)",
-            "  Continue -> no task update",
+            "Checkout",
+            "  task.checkout next=continue",
+            "  task.checkout next=finish",
+            "  task.checkout next=block",
             "",
             "Limits",
-            "  No start / switch / confirm in checkout.",
-            "  Stay silent if no task update is needed.",
+            "  No capture, select, switch_request, or switch_confirm in checkout.",
+            "  Stay silent if no checkout update is needed.",
         ]
     )
     return "\n".join(lines)

@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
-VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
+VALID_TASK_STATUS = ("captured", "active", "blocked", "done", "archived")
 VALID_TASK_PRIORITY = ("high", "normal", "low")
 PRIORITY_RANK = {"high": 0, "normal": 1, "low": 2}
 _LEGACY_TASK_RUN_IDS = "run" + "_ids"
@@ -43,6 +43,14 @@ def _normalize_refs(value: Any) -> list[dict[str, Any]]:
             raise ValueError("task.refs entries must be objects")
         rows.append(dict(raw))
     return rows
+
+
+def _normalize_origin(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {"type": "manual"}
+    if not isinstance(value, dict):
+        raise ValueError("task.origin must be an object")
+    return dict(value)
 
 
 def _tasks_dir(
@@ -102,6 +110,10 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
     if track_id is not None:
         runtime_files.require_id(track_id, "task.track_id")
 
+    progress_summary = task.get("progress_summary", task.get("summary", ""))
+    if not isinstance(progress_summary, str):
+        raise ValueError("task.progress_summary must be a string")
+
     created_at = _require_non_empty_text(task.get("created_at"), "task.created_at")
     updated_at = _require_non_empty_text(task.get("updated_at"), "task.updated_at")
     closed_at = task.get("closed_at")
@@ -116,8 +128,10 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
         "body": body,
         "status": status,
         "priority": priority,
+        "origin": _normalize_origin(task.get("origin")),
         "track_id": track_id,
         "refs": _normalize_refs(task.get("refs")),
+        "progress_summary": progress_summary,
         "created_at": created_at,
         "updated_at": updated_at,
         "closed_at": closed_at,
@@ -234,6 +248,25 @@ def append_history(
         line = f"{line} {' '.join(parts)}"
     with history_file.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
+
+
+def append_event(
+    *,
+    active_role: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+    event: str,
+    task_id: str,
+    fields: Mapping[str, object],
+) -> None:
+    append_history(
+        active_role=active_role,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+        event=event,
+        task_id=task_id,
+        fields=fields,
+    )
 
 
 def read_history(
@@ -383,6 +416,8 @@ def create_task(
     priority: str,
     summary: str,
     refs: list[dict[str, Any]],
+    origin: dict[str, Any] | None = None,
+    progress_summary: str = "",
     body: str = "",
 ) -> dict[str, Any]:
     runtime_files.require_id(task_id, "task id")
@@ -402,8 +437,10 @@ def create_task(
         "body": body,
         "status": status,
         "priority": priority,
+        "origin": origin or {"type": "manual"},
         "track_id": track_id,
         "refs": refs,
+        "progress_summary": progress_summary or summary,
         "created_at": now,
         "updated_at": now,
         "closed_at": now if status in {"done", "archived"} else None,
@@ -418,7 +455,7 @@ def create_task(
         active_role=active_role,
         instance_json=instance_json,
         instance_payload=instance_payload,
-        event="task.create",
+        event="task.captured" if status == "captured" else "task.selected" if status == "active" else f"task.{status}",
         task_id=task_id,
         fields={"priority": priority, "status": status},
     )

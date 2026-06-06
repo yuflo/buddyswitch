@@ -19,7 +19,7 @@ from env.tool_runtime import role_auth  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
 _EXPECTED_ACTIONS_BY_TOOL = {
-    "task": {"current", "propose", "confirm"},
+    "task": {"current", "capture", "select", "switch_request", "switch_confirm", "progress", "checkout", "review"},
     "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
@@ -132,9 +132,14 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("artifact", "attach_file", ("draft", "actor_private", "attachment")),
             ("artifact", "list_attachments", ("attachment", "summary", "get_attachment")),
             ("artifact", "get_attachment", ("attachment_id", "content_base64", "artifact_id")),
-            ("task", "current", ("current", "snapshot", "history")),
-            ("task", "propose", ("start", "switch", "finish")),
-            ("task", "confirm", ("pending", "switch", "confirmation")),
+            ("task", "current", ("current", "taskviewmodel", "history")),
+            ("task", "capture", ("capture", "shelf", "captured")),
+            ("task", "select", ("select", "captured", "blocked", "active")),
+            ("task", "switch_request", ("pending", "switch", "current")),
+            ("task", "switch_confirm", ("accept", "reject", "confirmation")),
+            ("task", "progress", ("progress", "evidence", "refs")),
+            ("task", "checkout", ("continue", "finish", "block")),
+            ("task", "review", ("captured", "blocked", "review")),
             ("comment", "add", ("discussion", "timeline", "message")),
             ("search", "request", ("target_url", "without opening", "open_browser")),
             ("search", "open_browser", ("browser", "open", "payload")),
@@ -177,7 +182,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         supported_tools = set(catalog.supported_tools())
         self.assertTrue(forbidden_tool_ids.isdisjoint(supported_tools))
 
-        forbidden_action_ids = {"artifact_index", "artifact_search", "relation", "insight", "experiment", "roadmap", "review", "approval"}
+        forbidden_action_ids = {"artifact_index", "artifact_search", "relation", "insight", "experiment", "roadmap", "approval"}
         for tool in sorted(supported_tools):
             actions = set(catalog.supported_actions(tool))
             with self.subTest(tool=tool):
@@ -261,8 +266,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "active role owns",
             "owns message.list permission",
             "owns task.read permission",
-            "owns task.propose permission",
-            "owns task.confirm permission",
+            "owns task.capture permission",
+            "owns task.switch_confirm permission",
             "owns artifact.create permission",
             "owns track.read permission",
         )
@@ -358,7 +363,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertEqual(current["authority"], "task.role_scope")
         self.assertEqual(current["visibility"], "active actor private")
         self.assertEqual(current["durability"], "none")
-        self.assertEqual(current["result_content_level"], "TaskSnapshot")
+        self.assertEqual(current["result_content_level"], "TaskViewModel")
         self.assertIn("instance-local taskbox history", current["reads"])
         self.assertEqual(current["writes"], [])
         self.assertIn("taskbox history", " ".join(current["does_not_write"]).lower())
@@ -368,14 +373,28 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
     def test_task_mutation_operation_semantics_are_taskbox_only(self) -> None:
         op = catalog.operation_semantics()
-        for action in ("task.propose", "task.confirm"):
+        for action in (
+            "task.capture",
+            "task.select",
+            "task.switch_request",
+            "task.switch_confirm",
+            "task.progress",
+            "task.checkout",
+            "task.review",
+        ):
             row = op[action]
             with self.subTest(action=action):
-                self.assertEqual(row["kind"], "write")
-                self.assertEqual(row["mutates"], "runtime_files")
-                self.assertIn(row["required_permission"], {"task.propose", "task.confirm"})
-                self.assertIn("instance-local active-actor taskbox task", row["writes"])
-                self.assertIn("instance-local taskbox history", row["writes"])
+                if action == "task.review":
+                    self.assertIn(row["kind"], {"read", "write"})
+                else:
+                    self.assertEqual(row["kind"], "write")
+                self.assertEqual(row["mutates"], "runtime_files" if action != "task.review" else "none")
+                self.assertTrue(str(row["required_permission"]).startswith("task."))
+                if action not in {"task.review", "task.switch_request"}:
+                    self.assertIn("instance-local active actor taskbox task docs", row["writes"])
+                    self.assertIn("instance-local taskbox history", row["writes"])
+                elif action == "task.switch_request":
+                    self.assertEqual(row["writes"], ["instance-local taskbox history"])
                 self.assertIn("track state", " ".join(row["does_not_write"]).lower())
                 self.assertIn("artifact visibility", " ".join(row["does_not_write"]).lower())
 
@@ -393,8 +412,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("draft", artifact_model)
         self.assertIn("track.add_material", artifact_model)
 
-        task_propose = desc["task"]["action_semantics"]["propose"]
-        task_side_effects = task_propose["side_effects"]
+        task_capture = desc["task"]["action_semantics"]["capture"]
+        task_side_effects = task_capture["side_effects"]
         self.assertIn("track state", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertIn("artifact visibility", " ".join(task_side_effects["does_not_write"]).lower())
 

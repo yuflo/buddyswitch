@@ -55,13 +55,12 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=self.manifest_path,
         )
 
-    def test_task_propose_rejects_payload_owner_fields(self) -> None:
+    def test_task_capture_rejects_payload_owner_fields(self) -> None:
         payload = self._dispatch(
             active_role="pm",
             tool="task",
-            action="propose",
+            action="capture",
             args={
-                "type": "start",
                 "reason": "Identity boundary test.",
                 "evidence": "Payload tries to override owner.",
                 "task": {

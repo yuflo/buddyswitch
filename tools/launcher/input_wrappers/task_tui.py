@@ -41,11 +41,11 @@ def compose(*, raw_text: str, instance_json: Path) -> str:
         raise TaskTuiInputWrapperError("instance JSON is missing role")
     if not isinstance(actor_id, str) or not actor_id.strip():
         raise TaskTuiInputWrapperError("instance JSON is missing actor_id")
-    snapshot = task_management.current_snapshot(
+    view = task_management.current_view(
         active_actor={"actor_id": actor_id.strip(), "role_id": role.strip()},
         active_role=role.strip(),
         instance_json=instance_json,
         instance_payload=payload,
     )
-    tui = task_tui.render_task_tui(snapshot)
+    tui = task_tui.render_task_tui(view)
     return f"{tui}\n\n[USER INPUT]\n{raw_text}"

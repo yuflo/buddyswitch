@@ -57,13 +57,13 @@ def send_checkout_prompt(
 ) -> daemon_core.HandlerResult:
     origin_turn_id = previous_turn["turn_id"]
     try:
-        snapshot = task_management.current_snapshot(
+        view = task_management.current_view(
             active_role=context.role,
             active_actor={"actor_id": context.actor_id, "role_id": context.role},
             instance_json=context.instance_json,
             instance_payload=context.instance_payload,
         )
-        prompt = task_tui.render_stop_task_tui(snapshot, previous_turn)
+        prompt = task_tui.render_stop_task_tui(view, previous_turn)
         runtime.submit_parent_prompt(
             prompt,
             handler_name="task_checkout",

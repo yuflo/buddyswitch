@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task env.tool tests for task.current/propose/confirm behavior."""
+"""Task env.tool tests for actor Task Management System behavior."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.domain import task_management  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -55,7 +54,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "instance_root": str(instance_root),
             "workspace_dir": str(workspace_dir),
             "browser_port": None,
-            "updated_at": "2026-05-27T10:00:00+08:00",
+            "updated_at": "2026-06-06T10:00:00+08:00",
         }
         instance_json = instance_root / "instance.json"
         self._write_json(instance_json, instance_payload)
@@ -129,12 +128,13 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         title: str,
         summary: str = "",
         body: str = "Seed task body.",
-        status: str = "active",
+        status: str = "captured",
         priority: str = "normal",
-        track_id: str | None = None,
+        origin: dict[str, object] | None = None,
         refs: list[dict[str, object]] | None = None,
-        created_at: str = "2026-05-27T09:00:00+08:00",
-        updated_at: str = "2026-05-27T09:00:00+08:00",
+        progress_summary: str = "",
+        created_at: str = "2026-06-06T09:00:00+08:00",
+        updated_at: str = "2026-06-06T09:00:00+08:00",
         closed_at: str | None = None,
     ) -> None:
         if closed_at is None and status in {"done", "archived"}:
@@ -149,8 +149,9 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "body": body,
                 "status": status,
                 "priority": priority,
-                "track_id": track_id,
+                "origin": origin or {"type": "manual"},
                 "refs": refs or [],
+                "progress_summary": progress_summary,
                 "created_at": created_at,
                 "updated_at": updated_at,
                 "closed_at": closed_at,
@@ -163,11 +164,11 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _history_line(self, *, event: str, task_id: str, fields: dict[str, object] | None = None) -> str:
         parts = [f"{key}={self._json_field(value)}" for key, value in sorted((fields or {}).items())]
         suffix = f" {' '.join(parts)}" if parts else ""
-        return f"- 2026-05-27T10:00:00+08:00 {event} {task_id}{suffix}"
+        return f"- 2026-06-06T10:00:00+08:00 {event} {task_id}{suffix}"
 
     def _set_current_task(self, *, instance_root: Path, role: str, task_id: str) -> None:
         self._history_file(instance_root, role).write_text(
-            self._history_line(event="task.create", task_id=task_id) + "\n",
+            self._history_line(event="task.selected", task_id=task_id, fields={"reason": "seed current"}) + "\n",
             encoding="utf-8",
         )
 
@@ -181,54 +182,37 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         }
 
-    def _start_task_args(self, title: str = "Clean runtime environment") -> dict[str, object]:
+    def _task_payload(self, title: str = "Clean runtime environment") -> dict[str, object]:
         return {
-            "type": "start",
-            "task": {
-                "title": title,
-                "summary": "Refine task input context.",
-                "body": "Detailed body for the task.",
-                "priority": "normal",
-                "refs": [],
-            },
-            "reason": "User introduced a new task.",
-            "evidence": "User asked to design task input context.",
+            "title": title,
+            "summary": "Refine task input context.",
+            "body": "Detailed body for the task.",
+            "priority": "normal",
+            "origin": {"type": "user_input", "id": "turn-1"},
+            "refs": [{"type": "track", "id": "track-alpha", "label": "Alpha"}],
         }
 
-    def test_task_current_returns_canonical_snapshot_without_history_mutation(self) -> None:
+    def test_task_current_returns_task_view_model_without_mutation(self) -> None:
         instance = self._make_instance_context(actor_id="instance-current", role="dev")
         self._seed_taskbox_task(
             instance_root=instance["instance_root"],
             role="dev",
             task_id="task-0001-alpha",
             title="Alpha",
-            summary="Older task.",
+            status="active",
+            summary="Current task.",
+            progress_summary="Investigating task context.",
         )
         self._seed_taskbox_task(
             instance_root=instance["instance_root"],
             role="dev",
             task_id="task-0002-beta",
             title="Beta",
-            summary="Current task.",
-            body="Detailed beta body.",
+            status="captured",
+            summary="Shelf task.",
         )
-        self._history_file(instance["instance_root"], "dev").write_text(
-            "\n".join(
-                [
-                    self._history_line(event="task.create", task_id="task-0001-alpha"),
-                    self._history_line(event="task.create", task_id="task-0002-beta"),
-                ]
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        before_history = self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8")
-        expected = task_management.current_snapshot(
-            active_role="dev",
-            active_actor={"actor_id": instance["actor_id"], "role_id": "dev"},
-            instance_json=instance["instance_json"],
-            instance_payload=instance["instance_payload"],
-        )
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-alpha")
+        before = self._taskbox_snapshot(instance["instance_root"], "dev")
 
         payload = self._dispatch(
             instance_json=instance["instance_json"],
@@ -242,329 +226,347 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload.get("action"), "task.current")
         self.assertIs(payload.get("state_changed"), False)
         self.assertEqual(payload.get("durability"), "none")
-        self.assertEqual(payload["snapshot"]["current_task"]["id"], expected["current_task"]["id"])
-        self.assertEqual(self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"), before_history)
+        view = payload["view"]
+        self.assertEqual(view["current_anchor"]["id"], "task-0001-alpha")
+        self.assertEqual(view["task_state"], "active")
+        self.assertEqual([row["id"] for row in view["shelf"]], ["task-0002-beta"])
+        self.assertIn("capture", view["available_actions"])
+        self.assertIn("checkout", view["available_actions"])
+        self.assertEqual(view["checkout_cue"]["choices"], ["continue", "finish", "block"])
+        self.assertEqual(self._taskbox_snapshot(instance["instance_root"], "dev"), before)
 
-    def test_task_propose_start_creates_current_task_with_body(self) -> None:
-        instance = self._make_instance_context(actor_id="instance-start", role="dev")
-
-        payload = self._dispatch(
-            instance_json=instance["instance_json"],
-            actor_id="instance-start",
-            role="dev",
-            action="propose",
-            args=self._start_task_args(),
-        )
-
-        self.assertTrue(payload.get("ok"), msg=payload)
-        self.assertEqual(payload.get("action"), "task.propose")
-        self.assertIs(payload.get("state_changed"), True)
-        task_id = str(payload["task"]["id"])
-        self.assertEqual(task_id, "task-0001-clean-runtime-environment")
-        stored = json.loads(self._task_file(instance["instance_root"], "dev", task_id).read_text(encoding="utf-8"))
-        self.assertEqual(stored["owner_actor"], {"actor_id": instance["actor_id"], "role_id": "dev"})
-        self.assertEqual(stored["body"], "Detailed body for the task.")
-        self.assertEqual(stored["status"], "active")
-        self.assertIn(f"task.create {task_id}", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
-
-        current = self._dispatch(
-            instance_json=instance["instance_json"],
-            actor_id="instance-start",
-            role="dev",
-            action="current",
-            args={},
-        )
-        self.assertEqual(current["snapshot"]["current_task"]["id"], task_id)
-
-    def test_task_propose_start_rejects_when_active_task_exists_without_mutation(self) -> None:
-        instance = self._make_instance_context(actor_id="instance-start-reject", role="dev")
+    def test_task_capture_creates_shelf_task_without_changing_current(self) -> None:
+        instance = self._make_instance_context(actor_id="instance-capture", role="dev")
         self._seed_taskbox_task(
             instance_root=instance["instance_root"],
             role="dev",
-            task_id="task-0001-active",
-            title="Active",
+            task_id="task-0001-current",
+            title="Current",
+            status="active",
         )
-        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-active")
-        before = self._taskbox_snapshot(instance["instance_root"], "dev")
-
-        rejected = self._dispatch(
-            instance_json=instance["instance_json"],
-            actor_id="instance-start-reject",
-            role="dev",
-            action="propose",
-            args=self._start_task_args("Replacement task"),
-        )
-
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertIs(rejected.get("state_changed"), False)
-        self.assertIn("task.propose(type=switch)", json.dumps(rejected, ensure_ascii=True))
-        self.assertEqual(self._taskbox_snapshot(instance["instance_root"], "dev"), before)
-
-    def test_task_propose_switch_creates_pending_confirmation_without_changing_current(self) -> None:
-        instance = self._make_instance_context(actor_id="instance-switch", role="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
         self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
 
         payload = self._dispatch(
             instance_json=instance["instance_json"],
+            actor_id="instance-capture",
+            role="dev",
+            action="capture",
+            args={
+                "task": self._task_payload("Captured Follow Up"),
+                "reason": "User introduced related work for later.",
+                "evidence": "User asked to remember the follow-up.",
+            },
+        )
+
+        self.assertTrue(payload.get("ok"), msg=payload)
+        self.assertEqual(payload.get("action"), "task.capture")
+        self.assertIs(payload.get("state_changed"), True)
+        task_id = str(payload["task"]["id"])
+        self.assertEqual(task_id, "task-0002-captured-follow-up")
+        stored = json.loads(self._task_file(instance["instance_root"], "dev", task_id).read_text(encoding="utf-8"))
+        self.assertEqual(stored["status"], "captured")
+        self.assertEqual(stored["origin"], {"type": "user_input", "id": "turn-1"})
+        self.assertEqual(payload["view"]["current_anchor"]["id"], "task-0001-current")
+        self.assertIn(task_id, [row["id"] for row in payload["view"]["shelf"]])
+        self.assertIn(f"task.captured {task_id}", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
+
+    def test_task_select_only_selects_captured_task_when_no_active_anchor_exists(self) -> None:
+        instance = self._make_instance_context(actor_id="instance-select", role="dev")
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            role="dev",
+            task_id="task-0001-captured",
+            title="Captured",
+            status="captured",
+        )
+
+        selected = self._dispatch(
+            instance_json=instance["instance_json"],
+            actor_id="instance-select",
+            role="dev",
+            action="select",
+            args={"task_id": "task-0001-captured", "reason": "Resume shelf work."},
+        )
+
+        self.assertTrue(selected.get("ok"), msg=selected)
+        self.assertEqual(selected["view"]["current_anchor"]["id"], "task-0001-captured")
+        stored = json.loads(self._task_file(instance["instance_root"], "dev", "task-0001-captured").read_text(encoding="utf-8"))
+        self.assertEqual(stored["status"], "active")
+        self.assertIn("task.selected task-0001-captured", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
+
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            role="dev",
+            task_id="task-0002-other",
+            title="Other",
+            status="captured",
+        )
+        before = self._taskbox_snapshot(instance["instance_root"], "dev")
+        rejected = self._dispatch(
+            instance_json=instance["instance_json"],
+            actor_id="instance-select",
+            role="dev",
+            action="select",
+            args={"task_id": "task-0002-other", "reason": "Cannot skip switch."},
+        )
+
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertIs(rejected.get("state_changed"), False)
+        self.assertIn("active current anchor", str(rejected.get("why_blocked")))
+        self.assertEqual(self._taskbox_snapshot(instance["instance_root"], "dev"), before)
+
+        blocked_instance = self._make_instance_context(actor_id="instance-select-blocked", role="dev")
+        self._seed_taskbox_task(
+            instance_root=blocked_instance["instance_root"],
+            role="dev",
+            task_id="task-0001-blocked",
+            title="Blocked",
+            status="blocked",
+        )
+        resumed = self._dispatch(
+            instance_json=blocked_instance["instance_json"],
+            actor_id="instance-select-blocked",
+            role="dev",
+            action="select",
+            args={"task_id": "task-0001-blocked", "reason": "Blocker cleared."},
+        )
+        self.assertTrue(resumed.get("ok"), msg=resumed)
+        self.assertEqual(resumed["view"]["current_anchor"]["id"], "task-0001-blocked")
+        stored_resumed = json.loads(self._task_file(blocked_instance["instance_root"], "dev", "task-0001-blocked").read_text(encoding="utf-8"))
+        self.assertEqual(stored_resumed["status"], "active")
+
+    def test_task_switch_request_and_confirm_accept_change_current_anchor(self) -> None:
+        instance = self._make_instance_context(actor_id="instance-switch", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target", status="captured")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
+
+        requested = self._dispatch(
+            instance_json=instance["instance_json"],
             actor_id="instance-switch",
             role="dev",
-            action="propose",
+            action="switch_request",
             args={
-                "type": "switch",
                 "target": {"mode": "existing", "task_id": "task-0002-target"},
                 "reason": "User asked to switch.",
                 "evidence": "Switch to target.",
             },
         )
 
-        self.assertTrue(payload.get("ok"), msg=payload)
-        pending = payload["snapshot"]["pending_confirmation"]
-        self.assertEqual(pending["confirmation_id"], "confirm-0001")
-        self.assertEqual(payload["snapshot"]["current_task"]["id"], "task-0001-current")
+        self.assertTrue(requested.get("ok"), msg=requested)
+        self.assertEqual(requested["view"]["current_anchor"]["id"], "task-0001-current")
+        self.assertEqual(requested["view"]["pending_switch"]["confirmation_id"], "confirm-0001")
         self.assertIn("task.switch.requested task-0001-current", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
-        current = self._dispatch(
+        accepted = self._dispatch(
             instance_json=instance["instance_json"],
             actor_id="instance-switch",
             role="dev",
-            action="current",
-            args={},
+            action="switch_confirm",
+            args={
+                "confirmation_id": "confirm-0001",
+                "decision": "accept",
+                "reason": "User confirmed.",
+            },
         )
-        self.assertEqual(current["snapshot"]["current_task"]["id"], "task-0001-current")
-        self.assertEqual(current["snapshot"]["pending_confirmation"]["confirmation_id"], "confirm-0001")
 
-    def test_task_propose_switch_to_new_target_defers_task_creation_until_confirm(self) -> None:
+        self.assertTrue(accepted.get("ok"), msg=accepted)
+        self.assertEqual(accepted["view"]["current_anchor"]["id"], "task-0002-target")
+        self.assertIsNone(accepted["view"]["pending_switch"])
+        current = json.loads(self._task_file(instance["instance_root"], "dev", "task-0001-current").read_text(encoding="utf-8"))
+        target = json.loads(self._task_file(instance["instance_root"], "dev", "task-0002-target").read_text(encoding="utf-8"))
+        self.assertEqual(current["status"], "captured")
+        self.assertEqual(target["status"], "active")
+        self.assertIn("task.switch.confirmed task-0002-target", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
+
+    def test_task_switch_request_to_new_target_defers_creation_until_confirm(self) -> None:
         instance = self._make_instance_context(actor_id="instance-switch-new", role="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
         self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
 
-        payload = self._dispatch(
+        requested = self._dispatch(
             instance_json=instance["instance_json"],
             actor_id="instance-switch-new",
             role="dev",
-            action="propose",
+            action="switch_request",
             args={
-                "type": "switch",
-                "target": {
-                    "mode": "new",
-                    "task": {
-                        "title": "Next Task",
-                        "summary": "Switch later.",
-                        "body": "New task body.",
-                        "priority": "high",
-                        "refs": [],
-                    },
-                },
+                "target": {"mode": "new", "task": self._task_payload("Next Task")},
                 "reason": "User asked for a different task.",
                 "evidence": "Next task request.",
             },
         )
 
-        self.assertTrue(payload.get("ok"), msg=payload)
-        self.assertEqual(payload["snapshot"]["pending_confirmation"]["target"]["mode"], "new")
+        self.assertTrue(requested.get("ok"), msg=requested)
         self.assertFalse(self._task_file(instance["instance_root"], "dev", "task-0002-next-task").exists())
 
-    def test_task_confirm_accepts_existing_pending_switch(self) -> None:
-        instance = self._make_instance_context(actor_id="instance-confirm-existing", role="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
-        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
-        proposed = self._dispatch(
-            instance_json=instance["instance_json"],
-            actor_id="instance-confirm-existing",
-            role="dev",
-            action="propose",
-            args={
-                "type": "switch",
-                "target": {"mode": "existing", "task_id": "task-0002-target"},
-                "reason": "Switch.",
-                "evidence": "Switch.",
-            },
-        )
-
         accepted = self._dispatch(
             instance_json=instance["instance_json"],
-            actor_id="instance-confirm-existing",
+            actor_id="instance-switch-new",
             role="dev",
-            action="confirm",
-            args={
-                "confirmation_id": proposed["snapshot"]["pending_confirmation"]["confirmation_id"],
-                "decision": "accept",
-                "reason": "User confirmed.",
-            },
+            action="switch_confirm",
+            args={"confirmation_id": "confirm-0001", "decision": "accept", "reason": "Confirmed."},
         )
 
         self.assertTrue(accepted.get("ok"), msg=accepted)
-        self.assertEqual(accepted["snapshot"]["current_task"]["id"], "task-0002-target")
-        self.assertIsNone(accepted["snapshot"]["pending_confirmation"])
-        self.assertIn("task.switch.confirmed task-0002-target", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
+        self.assertEqual(accepted["view"]["current_anchor"]["id"], "task-0002-next-task")
+        self.assertTrue(self._task_file(instance["instance_root"], "dev", "task-0002-next-task").exists())
+        self.assertIn("task-0002-next-task", accepted.get("created_ids", []))
 
-    def test_task_confirm_accepts_new_pending_switch_and_creates_target(self) -> None:
-        instance = self._make_instance_context(actor_id="instance-confirm-new", role="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+    def test_task_switch_confirm_reject_keeps_current_anchor(self) -> None:
+        instance = self._make_instance_context(actor_id="instance-switch-reject", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target", status="captured")
         self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
-        proposed = self._dispatch(
+        requested = self._dispatch(
             instance_json=instance["instance_json"],
-            actor_id="instance-confirm-new",
+            actor_id="instance-switch-reject",
             role="dev",
-            action="propose",
-            args={
-                "type": "switch",
-                "target": {
-                    "mode": "new",
-                    "task": {
-                        "title": "Next Task",
-                        "summary": "Switch later.",
-                        "body": "New task body.",
-                        "priority": "high",
-                        "refs": [],
-                    },
-                },
-                "reason": "Switch.",
-                "evidence": "Switch.",
-            },
+            action="switch_request",
+            args={"target": {"mode": "existing", "task_id": "task-0002-target"}, "reason": "Switch.", "evidence": "Switch."},
         )
-
-        accepted = self._dispatch(
-            instance_json=instance["instance_json"],
-            actor_id="instance-confirm-new",
-            role="dev",
-            action="confirm",
-            args={
-                "confirmation_id": proposed["snapshot"]["pending_confirmation"]["confirmation_id"],
-                "decision": "accept",
-                "reason": "User confirmed.",
-            },
-        )
-
-        self.assertTrue(accepted.get("ok"), msg=accepted)
-        self.assertEqual(accepted["snapshot"]["current_task"]["id"], "task-0002-next-task")
-        self.assertEqual(json.loads(self._task_file(instance["instance_root"], "dev", "task-0002-next-task").read_text(encoding="utf-8"))["body"], "New task body.")
-        self.assertIsNone(accepted["snapshot"]["pending_confirmation"])
-        self.assertIn("task.switch.confirmed task-0002-next-task", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
-
-    def test_task_confirm_rejects_pending_switch_without_changing_current(self) -> None:
-        instance = self._make_instance_context(actor_id="instance-confirm-reject", role="dev")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
-        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
-        proposed = self._dispatch(
-            instance_json=instance["instance_json"],
-            actor_id="instance-confirm-reject",
-            role="dev",
-            action="propose",
-            args={
-                "type": "switch",
-                "target": {"mode": "existing", "task_id": "task-0002-target"},
-                "reason": "Switch.",
-                "evidence": "Switch.",
-            },
-        )
+        self.assertTrue(requested.get("ok"), msg=requested)
 
         rejected = self._dispatch(
             instance_json=instance["instance_json"],
-            actor_id="instance-confirm-reject",
+            actor_id="instance-switch-reject",
             role="dev",
-            action="confirm",
-            args={
-                "confirmation_id": proposed["snapshot"]["pending_confirmation"]["confirmation_id"],
-                "decision": "reject",
-                "reason": "Stay focused.",
-            },
+            action="switch_confirm",
+            args={"confirmation_id": "confirm-0001", "decision": "reject", "reason": "Stay focused."},
         )
 
         self.assertTrue(rejected.get("ok"), msg=rejected)
-        self.assertEqual(rejected["snapshot"]["current_task"]["id"], "task-0001-current")
-        self.assertIsNone(rejected["snapshot"]["pending_confirmation"])
+        self.assertIs(rejected.get("state_changed"), True)
+        self.assertEqual(rejected["view"]["current_anchor"]["id"], "task-0001-current")
+        self.assertIsNone(rejected["view"]["pending_switch"])
         self.assertIn("task.switch.rejected task-0001-current", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
-    def test_task_propose_finish_and_block_update_current_task(self) -> None:
+    def test_task_progress_appends_evidence_refs_and_updates_current_task(self) -> None:
+        instance = self._make_instance_context(actor_id="instance-progress", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
+
+        payload = self._dispatch(
+            instance_json=instance["instance_json"],
+            actor_id="instance-progress",
+            role="dev",
+            action="progress",
+            args={
+                "task_id": "task-0001-current",
+                "summary": "Implemented task tests.",
+                "evidence": "Focused tests cover progress.",
+                "refs": [{"type": "artifact", "id": "art-1", "label": "Evidence"}],
+            },
+        )
+
+        self.assertTrue(payload.get("ok"), msg=payload)
+        stored = json.loads(self._task_file(instance["instance_root"], "dev", "task-0001-current").read_text(encoding="utf-8"))
+        self.assertEqual(stored["progress_summary"], "Implemented task tests.")
+        self.assertEqual(stored["refs"], [{"type": "artifact", "id": "art-1", "label": "Evidence"}])
+        self.assertIn("task.progress.appended task-0001-current", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
+        self.assertIn("Focused tests cover progress.", json.dumps(payload["view"]["recent_evidence"], ensure_ascii=True))
+
+    def test_task_checkout_continue_finish_and_block_follow_evidence_rules(self) -> None:
+        continue_instance = self._make_instance_context(actor_id="instance-continue", role="dev")
+        self._seed_taskbox_task(instance_root=continue_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
+        self._set_current_task(instance_root=continue_instance["instance_root"], role="dev", task_id="task-0001-current")
+        continued = self._dispatch(
+            instance_json=continue_instance["instance_json"],
+            actor_id="instance-continue",
+            role="dev",
+            action="checkout",
+            args={"task_id": "task-0001-current", "next": "continue", "summary": "Continue tomorrow."},
+        )
+        self.assertTrue(continued.get("ok"), msg=continued)
+        stored_continue = json.loads(self._task_file(continue_instance["instance_root"], "dev", "task-0001-current").read_text(encoding="utf-8"))
+        self.assertEqual(stored_continue["status"], "active")
+        self.assertIsNone(stored_continue["closed_at"])
+        self.assertIn("task.checkout.continued task-0001-current", self._history_file(continue_instance["instance_root"], "dev").read_text(encoding="utf-8"))
+
         finish_instance = self._make_instance_context(actor_id="instance-finish", role="dev")
-        self._seed_taskbox_task(instance_root=finish_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._seed_taskbox_task(instance_root=finish_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
         self._set_current_task(instance_root=finish_instance["instance_root"], role="dev", task_id="task-0001-current")
+        before_finish = self._taskbox_snapshot(finish_instance["instance_root"], "dev")
+        missing_evidence = self._dispatch(
+            instance_json=finish_instance["instance_json"],
+            actor_id="instance-finish",
+            role="dev",
+            action="checkout",
+            args={"task_id": "task-0001-current", "next": "finish"},
+        )
+        self.assertFalse(missing_evidence.get("ok"), msg=missing_evidence)
+        self.assertEqual(self._taskbox_snapshot(finish_instance["instance_root"], "dev"), before_finish)
 
         finished = self._dispatch(
             instance_json=finish_instance["instance_json"],
             actor_id="instance-finish",
             role="dev",
-            action="propose",
-            args={
-                "type": "finish",
-                "task_id": "task-0001-current",
-                "reason": "Work is complete.",
-                "evidence": "Focused tests pass.",
-            },
+            action="checkout",
+            args={"task_id": "task-0001-current", "next": "finish", "evidence": "Focused tests pass."},
         )
         self.assertTrue(finished.get("ok"), msg=finished)
         stored_finished = json.loads(self._task_file(finish_instance["instance_root"], "dev", "task-0001-current").read_text(encoding="utf-8"))
         self.assertEqual(stored_finished["status"], "done")
         self.assertIsNotNone(stored_finished["closed_at"])
-        self.assertIn("task.close task-0001-current", self._history_file(finish_instance["instance_root"], "dev").read_text(encoding="utf-8"))
+        self.assertIsNone(finished["view"]["current_anchor"])
+        self.assertIn("task.finished task-0001-current", self._history_file(finish_instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
         block_instance = self._make_instance_context(actor_id="instance-block", role="dev")
-        self._seed_taskbox_task(instance_root=block_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
+        self._seed_taskbox_task(instance_root=block_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
         self._set_current_task(instance_root=block_instance["instance_root"], role="dev", task_id="task-0001-current")
         blocked = self._dispatch(
             instance_json=block_instance["instance_json"],
             actor_id="instance-block",
             role="dev",
-            action="propose",
-            args={
-                "type": "block",
-                "task_id": "task-0001-current",
-                "reason": "External input needed.",
-                "evidence": "User decision needed.",
-            },
+            action="checkout",
+            args={"task_id": "task-0001-current", "next": "block", "reason": "Waiting for user decision."},
         )
         self.assertTrue(blocked.get("ok"), msg=blocked)
         stored_blocked = json.loads(self._task_file(block_instance["instance_root"], "dev", "task-0001-current").read_text(encoding="utf-8"))
         self.assertEqual(stored_blocked["status"], "blocked")
         self.assertIsNone(stored_blocked["closed_at"])
-        self.assertIn("task.block task-0001-current", self._history_file(block_instance["instance_root"], "dev").read_text(encoding="utf-8"))
+        self.assertIsNone(blocked["view"]["current_anchor"])
+        self.assertIn("task.blocked task-0001-current", self._history_file(block_instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
-        before = self._taskbox_snapshot(block_instance["instance_root"], "dev")
-        mismatch = self._dispatch(
-            instance_json=block_instance["instance_json"],
-            actor_id="instance-block",
+    def test_task_review_reads_shelf_and_blocked_work_without_mutation(self) -> None:
+        instance = self._make_instance_context(actor_id="instance-review", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-captured", title="Captured", status="captured")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0002-blocked", title="Blocked", status="blocked")
+        before = self._taskbox_snapshot(instance["instance_root"], "dev")
+
+        payload = self._dispatch(
+            instance_json=instance["instance_json"],
+            actor_id="instance-review",
             role="dev",
-            action="propose",
-            args={
-                "type": "finish",
-                "task_id": "task-9999-other",
-                "reason": "Wrong task.",
-                "evidence": "Wrong task.",
-            },
+            action="review",
+            args={},
         )
-        self.assertFalse(mismatch.get("ok"), msg=mismatch)
-        self.assertEqual(self._taskbox_snapshot(block_instance["instance_root"], "dev"), before)
+
+        self.assertTrue(payload.get("ok"), msg=payload)
+        self.assertIs(payload.get("state_changed"), False)
+        self.assertEqual([row["id"] for row in payload["view"]["shelf"]], ["task-0001-captured"])
+        self.assertIn("task-0002-blocked", json.dumps(payload["view"]["warnings"], ensure_ascii=True))
+        self.assertEqual(self._taskbox_snapshot(instance["instance_root"], "dev"), before)
 
     def test_invalid_payloads_do_not_mutate_task_docs_or_history(self) -> None:
-        invalid_instance = self._make_instance_context(actor_id="instance-invalid", role="dev")
-        self._seed_taskbox_task(
-            instance_root=invalid_instance["instance_root"],
-            role="dev",
-            task_id="task-0001-current",
-            title="Current",
-        )
-        self._set_current_task(instance_root=invalid_instance["instance_root"], role="dev", task_id="task-0001-current")
+        instance = self._make_instance_context(actor_id="instance-invalid", role="dev")
+        self._seed_taskbox_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current", title="Current", status="active")
+        self._set_current_task(instance_root=instance["instance_root"], role="dev", task_id="task-0001-current")
 
         cases = (
-            ("propose", {"type": "unknown", "reason": "Bad.", "evidence": "Bad."}),
-            ("propose", {"type": "start", "task": {"body": "Missing title."}, "reason": "Bad.", "evidence": "Bad."}),
-            ("propose", {"type": "start", "task": {"title": "Missing body"}, "reason": "Bad.", "evidence": "Bad."}),
-            ("propose", {"type": "switch", "reason": "Bad.", "evidence": "Bad."}),
-            ("confirm", {"confirmation_id": "confirm-9999", "decision": "accept"}),
-            ("propose", {**self._start_task_args("Visibility"), "visibility": "public"}),
-            ("propose", {**self._start_task_args("Template"), "task": {"title": "Template", "body": "Body", "template": "note"}}),
-            ("propose", {**self._start_task_args("Source refs"), "task": {"title": "Source refs", "body": "Body", "source_refs": []}}),
+            ("capture", {"task": {"body": "Missing title."}}),
+            ("capture", {"task": {"title": "Visibility", "body": "Body.", "visibility": "public"}}),
+            ("capture", {"task": {"title": "Template", "body": "Body.", "template": "note"}}),
+            ("select", {"task_id": "task-9999-missing"}),
+            ("switch_request", {"target": {"mode": "existing", "task_id": "task-9999-missing"}, "reason": "Bad.", "evidence": "Bad."}),
+            ("switch_confirm", {"confirmation_id": "confirm-9999", "decision": "accept"}),
+            ("progress", {"task_id": "task-0001-current", "summary": "No evidence."}),
+            ("checkout", {"task_id": "task-9999-other", "next": "finish", "evidence": "Wrong task."}),
         )
         for action, args in cases:
             with self.subTest(action=action, args=args):
-                before = self._taskbox_snapshot(invalid_instance["instance_root"], "dev")
+                before = self._taskbox_snapshot(instance["instance_root"], "dev")
                 rejected = self._dispatch(
-                    instance_json=invalid_instance["instance_json"],
+                    instance_json=instance["instance_json"],
                     actor_id="instance-invalid",
                     role="dev",
                     action=action,
@@ -572,36 +574,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self.assertFalse(rejected.get("ok"), msg=rejected)
                 self.assertIs(rejected.get("state_changed"), False, msg=rejected)
-                self.assertEqual(self._taskbox_snapshot(invalid_instance["instance_root"], "dev"), before)
-
-        mismatch_instance = self._make_instance_context(actor_id="instance-confirm-mismatch", role="dev")
-        self._seed_taskbox_task(instance_root=mismatch_instance["instance_root"], role="dev", task_id="task-0001-current", title="Current")
-        self._seed_taskbox_task(instance_root=mismatch_instance["instance_root"], role="dev", task_id="task-0002-target", title="Target")
-        self._set_current_task(instance_root=mismatch_instance["instance_root"], role="dev", task_id="task-0001-current")
-        proposed = self._dispatch(
-            instance_json=mismatch_instance["instance_json"],
-            actor_id="instance-confirm-mismatch",
-            role="dev",
-            action="propose",
-            args={
-                "type": "switch",
-                "target": {"mode": "existing", "task_id": "task-0002-target"},
-                "reason": "Switch.",
-                "evidence": "Switch.",
-            },
-        )
-        self.assertTrue(proposed.get("ok"), msg=proposed)
-        before = self._taskbox_snapshot(mismatch_instance["instance_root"], "dev")
-        mismatch = self._dispatch(
-            instance_json=mismatch_instance["instance_json"],
-            actor_id="instance-confirm-mismatch",
-            role="dev",
-            action="confirm",
-            args={"confirmation_id": "confirm-9999", "decision": "accept"},
-        )
-        self.assertFalse(mismatch.get("ok"), msg=mismatch)
-        self.assertIs(mismatch.get("state_changed"), False, msg=mismatch)
-        self.assertEqual(self._taskbox_snapshot(mismatch_instance["instance_root"], "dev"), before)
+                self.assertEqual(self._taskbox_snapshot(instance["instance_root"], "dev"), before)
 
 
 if __name__ == "__main__":
