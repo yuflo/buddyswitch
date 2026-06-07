@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
 
 def _build_definition() -> ToolDefinition:
@@ -47,6 +47,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.contacts',
                 authority='message.actor_contact_discovery',
                 visibility='online actor contact summary',
@@ -129,6 +130,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.send',
                 authority='message.direct_actor_address_channel',
                 visibility='sender and recipient direct message visibility',
@@ -201,6 +203,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.get',
                 authority='message.active_actor_exact_message',
                 visibility='active actor exact processable inbound message',
@@ -274,6 +277,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.mark',
                 authority='message.active_actor_message_disposition',
                 visibility='active actor exact processable inbound message disposition',
@@ -350,6 +354,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.list',
                 authority='message.active_actor_inbox',
                 visibility='active actor inbox',
@@ -432,6 +437,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.conversation',
                 authority='message.active_actor_conversation',
                 visibility='active actor visible direct conversation messages',

@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
 
 def _build_definition() -> ToolDefinition:
@@ -81,6 +81,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='comment.add',
                 authority='target.read_boundary',
                 visibility='readable to roles with target access',
@@ -160,6 +161,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='comment.list',
                 authority='target.read_boundary',
                 visibility='readable to roles with target access',
@@ -228,6 +230,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='comment.resolve',
                 authority='pm.review_closure',
                 visibility='readable to roles with target access',

@@ -15,7 +15,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry as catalog  # noqa: E402
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition  # noqa: E402
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition  # noqa: E402
 
 
 _ENUM_FIELDS = {"status", "state", "health", "kind", "template", "target_type", "backend", "engine", "box", "type"}
@@ -388,6 +388,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             output_schema={"$ref": "ToolResult"},
             kind="read",
             mutates="none",
+            task_requirement=TASK_REQUIREMENT_FREE,
             required_permission="none",
             authority="example.readonly",
             visibility="example reader",

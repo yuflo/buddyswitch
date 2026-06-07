@@ -14,6 +14,9 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
+from env.tool_runtime.definition import ActionDefinition  # noqa: E402
+from env.tool_runtime.definition import ToolDefinition  # noqa: E402
+from env.tool_runtime.definition import validate_definition  # noqa: E402
 from env.tool_runtime import registry as catalog  # noqa: E402
 from env.tool_runtime import role_auth  # noqa: E402
 
@@ -28,6 +31,60 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
     "comment": {"add", "list", "resolve"},
     "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
+}
+_TASK_REQUIREMENT_FREE = "free"
+_TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
+_ALLOWED_TASK_REQUIREMENTS = {_TASK_REQUIREMENT_FREE, _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED}
+_EXPECTED_FREE_ACTIONS = {
+    "artifact.list",
+    "artifact.get",
+    "artifact.list_attachments",
+    "artifact.get_attachment",
+    "comment.list",
+    "context.summarize",
+    "context.get",
+    "context.list_sources",
+    "message.contacts",
+    "message.send",
+    "message.get",
+    "message.mark",
+    "message.list",
+    "message.conversation",
+    "request.list",
+    "request.get",
+    "search.status",
+    "task.current",
+    "task.capture",
+    "task.select",
+    "task.switch_request",
+    "task.switch_confirm",
+    "task.progress",
+    "task.checkout",
+    "task.review",
+    "track.list",
+    "track.open",
+}
+_EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS = {
+    "artifact.create_revision",
+    "artifact.update_metadata",
+    "artifact.attach_file",
+    "comment.add",
+    "comment.resolve",
+    "evidence.issue_browser",
+    "evidence.approve_downgrade",
+    "request.create",
+    "request.accept",
+    "request.block",
+    "request.complete",
+    "request.cancel",
+    "search.request",
+    "search.open_browser",
+    "track.create",
+    "track.update_now",
+    "track.add_material",
+    "track.add_update",
+    "track.add_proof",
+    "track.archive",
 }
 _PLACEHOLDER_SNIPPETS = ("is the intended action", "closer semantic match")
 
@@ -227,6 +284,91 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row["writes"], list)
                 self.assertIsInstance(row["does_not_write"], list)
                 self.assertIn(row["durability"], {"none", "transient", "durable"})
+
+    def test_task_requirement_contract_is_declared_for_every_action(self) -> None:
+        expected_keys = {
+            f"{tool}.{action}"
+            for tool, actions in _EXPECTED_ACTIONS_BY_TOOL.items()
+            for action in actions
+        }
+        expected_classified = _EXPECTED_FREE_ACTIONS | _EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS
+        self.assertEqual(expected_keys, expected_classified)
+        self.assertTrue(_EXPECTED_FREE_ACTIONS.isdisjoint(_EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS))
+
+        actual_free: set[str] = set()
+        actual_active_required: set[str] = set()
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
+                action_key = f"{tool}.{action}"
+                action_definition = catalog.get_action_definition(tool, action)
+                task_requirement = getattr(action_definition, "task_requirement", None)
+                with self.subTest(action=action_key):
+                    self.assertIn(task_requirement, _ALLOWED_TASK_REQUIREMENTS)
+                if task_requirement == _TASK_REQUIREMENT_FREE:
+                    actual_free.add(action_key)
+                elif task_requirement == _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED:
+                    actual_active_required.add(action_key)
+
+        self.assertEqual(actual_free, _EXPECTED_FREE_ACTIONS)
+        self.assertEqual(actual_active_required, _EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS)
+
+    def test_task_requirement_is_exposed_in_operation_and_catalog_semantics(self) -> None:
+        operation_rows = catalog.operation_semantics()
+        description = catalog.env_tools_description()
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
+                action_key = f"{tool}.{action}"
+                expected = getattr(catalog.get_action_definition(tool, action), "task_requirement", None)
+                with self.subTest(action=action_key):
+                    self.assertIn(expected, _ALLOWED_TASK_REQUIREMENTS)
+                    self.assertEqual(operation_rows[action_key].get("task_requirement"), expected)
+                    action_semantics = description[tool]["action_semantics"][action]
+                    self.assertIsInstance(action_semantics, dict)
+                    assert isinstance(action_semantics, dict)
+                    self.assertEqual(action_semantics.get("task_requirement"), expected)
+
+    def test_invalid_task_requirement_fails_definition_validation(self) -> None:
+        valid_action = catalog.get_action_definition("search", "status")
+        if not hasattr(valid_action, "task_requirement"):
+            self.fail("ActionDefinition.task_requirement is required")
+        invalid_action = ActionDefinition(
+            name="invalid_task_requirement",
+            title="invalid task requirement",
+            description="Action with invalid task requirement.",
+            input_schema={"type": "object", "additionalProperties": False, "required": [], "properties": {}},
+            output_schema={"$ref": "ToolResult"},
+            kind=valid_action.kind,
+            mutates=valid_action.mutates,
+            required_permission=valid_action.required_permission,
+            authority=valid_action.authority,
+            visibility=valid_action.visibility,
+            durability=valid_action.durability,
+            result_content_level=valid_action.result_content_level,
+            success_effect=valid_action.success_effect,
+            failure_state_guarantee=valid_action.failure_state_guarantee,
+            reads=valid_action.reads,
+            writes=valid_action.writes,
+            does_not_write=valid_action.does_not_write,
+            task_requirement="invalid",
+            preconditions=valid_action.preconditions,
+            returns=valid_action.returns,
+            use_when=valid_action.use_when,
+            do_not_use_when=valid_action.do_not_use_when,
+            risk_hints=valid_action.risk_hints,
+        )
+        invalid_definition = ToolDefinition(
+            id="invalidtaskrequirement",
+            title="Invalid Task Requirement",
+            description="Definition used only for task requirement validation.",
+            scope="test scope",
+            capability_boundary="test boundary",
+            object_model="test object model",
+            use_when=("testing validation",),
+            do_not_use_when=("runtime use",),
+            actions=(invalid_action,),
+        )
+        with self.assertRaisesRegex(ValueError, "task_requirement"):
+            validate_definition(invalid_definition)
 
     def test_operation_semantics_permissions_are_covered_by_role_policy(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")

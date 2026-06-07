@@ -42,6 +42,12 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        self._seed_active_task_for_instance(
+            instance_json=path,
+            role=role,
+            actor_id=actor_id,
+            task_slug=f"{role}-comment-env",
+        )
         return path
 
     def _dispatch(self, *, instance_json: Path, actor_id: str, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:

@@ -138,7 +138,7 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
                     """
                     from __future__ import annotations
 
-                    from env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, ToolDefinition
+                    from env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, TASK_REQUIREMENT_FREE, ToolDefinition
                     from env.tool_runtime import results
 
                     DEFINITION = ToolDefinition(
@@ -164,6 +164,7 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
                                 output_schema={"$ref": "ToolResult"},
                                 kind="read",
                                 mutates=MUTATES_NONE,
+                                task_requirement=TASK_REQUIREMENT_FREE,
                                 required_permission="none",
                                 authority="probe",
                                 visibility="test-only probe",

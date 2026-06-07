@@ -119,7 +119,7 @@ print(json.dumps({
 
                     from typing import Any
 
-                    from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+                    from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
                     DEFINITION = ToolDefinition(
                         id="probe",
@@ -148,6 +148,7 @@ print(json.dumps({
                                 },
                                 output_schema={"$ref": "ToolResult"},
                                 kind="read",
+                                task_requirement=TASK_REQUIREMENT_FREE,
                                 mutates="none",
                                 required_permission="probe.inspect",
                                 authority="test-only",

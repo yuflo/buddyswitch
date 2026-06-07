@@ -12,6 +12,8 @@ MUTATES_RUNTIME_OBJECTS = "runtime_objects"
 MUTATES_RUNTIME_FILES = "runtime_files"
 MUTATES_BROKER_TOKEN = "broker_token"
 MUTATES_BROWSER_SESSION = "browser_session"
+TASK_REQUIREMENT_FREE = "free"
+TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
 
 _ALLOWED_MUTATION_VALUES = {
     MUTATES_NONE,
@@ -19,6 +21,10 @@ _ALLOWED_MUTATION_VALUES = {
     MUTATES_RUNTIME_FILES,
     MUTATES_BROKER_TOKEN,
     MUTATES_BROWSER_SESSION,
+}
+_ALLOWED_TASK_REQUIREMENT_VALUES = {
+    TASK_REQUIREMENT_FREE,
+    TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
 }
 _ALLOWED_DURABILITY_VALUES = {"none", "transient", "durable"}
 _TOOL_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -35,6 +41,7 @@ class ActionDefinition:
     output_schema: Mapping[str, Any]
     kind: str
     mutates: str
+    task_requirement: str
     required_permission: str
     authority: str
     visibility: str
@@ -249,6 +256,8 @@ def validate_definition(definition: ToolDefinition) -> None:
         )
         if action.mutates not in _ALLOWED_MUTATION_VALUES:
             raise ValueError(f"{tool_id}.{name}.mutates must be one of {_ALLOWED_MUTATION_VALUES}")
+        if action.task_requirement not in _ALLOWED_TASK_REQUIREMENT_VALUES:
+            raise ValueError(f"{tool_id}.{name}.task_requirement must be one of {_ALLOWED_TASK_REQUIREMENT_VALUES}")
 
         _validate_schema_object(action.input_schema, field=f"{tool_id}.{name}.input_schema")
         _validate_output_schema(action.output_schema, field=f"{tool_id}.{name}.output_schema")

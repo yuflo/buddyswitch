@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
 _NOW_SCHEMA = {
     'type': 'object',
@@ -106,6 +106,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='track.create',
                 authority='pm.lifecycle_authority',
                 visibility='shared to roles with track read access',
@@ -175,6 +176,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='track.read',
                 authority='track.lookup',
                 visibility='active-role readable track summaries',
@@ -236,6 +238,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='track.read',
                 authority='track.lookup',
                 visibility='active-role readable track page',
@@ -308,6 +311,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='track.update_now',
                 authority='track.shared_mutation',
                 visibility='shared to roles with track read access',
@@ -384,6 +388,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='track.add_material',
                 authority='track.shared_mutation',
                 visibility='shared to roles with track read access',
@@ -467,6 +472,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='track.add_update',
                 authority='track.shared_mutation',
                 visibility='shared to roles with track read access',
@@ -544,6 +550,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='track.add_proof',
                 authority='track.shared_mutation',
                 visibility='shared to roles with track read access',
@@ -613,6 +620,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='track.archive',
                 authority='pm.lifecycle_authority',
                 visibility='shared to roles with track read access until archived filters hide it',

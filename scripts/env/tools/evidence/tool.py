@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, ToolDefinition, validate_definition
 
 
 def _build_definition() -> ToolDefinition:
@@ -56,6 +56,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='issue',
                 mutates='broker_token',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='evidence.issue',
                 authority='market.evidence_scope',
                 visibility='active-role token response only',
@@ -130,6 +131,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='issue',
                 mutates='broker_token',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='evidence.approve',
                 authority='market.evidence_scope',
                 visibility='active-role token response only',

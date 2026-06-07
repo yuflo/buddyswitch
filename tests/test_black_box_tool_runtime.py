@@ -230,6 +230,7 @@ print(json.dumps({
     def test_definition_validation_rejects_incomplete_input_contracts(self) -> None:
         from env.tool_runtime.definition import ActionDefinition
         from env.tool_runtime.definition import MUTATES_NONE
+        from env.tool_runtime.definition import TASK_REQUIREMENT_FREE
         from env.tool_runtime.definition import ToolDefinition
         from env.tool_runtime.definition import validate_definition
 
@@ -252,6 +253,7 @@ print(json.dumps({
                         output_schema={"$ref": "ToolResult"},
                         kind="read",
                         mutates=MUTATES_NONE,
+                        task_requirement=TASK_REQUIREMENT_FREE,
                         required_permission="none",
                         authority="probe",
                         visibility="test-only probe",
@@ -357,7 +359,7 @@ print(json.dumps({
                     """
                     from __future__ import annotations
 
-                    from env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, ToolDefinition
+                    from env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, TASK_REQUIREMENT_FREE, ToolDefinition
                     from env.tool_runtime import results
 
                     DEFINITION = ToolDefinition(
@@ -388,6 +390,7 @@ print(json.dumps({
                                 output_schema={"$ref": "ToolResult"},
                                 kind="read",
                                 mutates=MUTATES_NONE,
+                                task_requirement=TASK_REQUIREMENT_FREE,
                                 required_permission="none",
                                 authority="probe",
                                 visibility="test-only probe",

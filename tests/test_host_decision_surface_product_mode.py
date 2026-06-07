@@ -72,6 +72,12 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role=role, label="act-market-decision-surface")
+        self._seed_active_task_for_instance(
+            instance_json=self.instance_json,
+            role=role,
+            actor_id=actor_id,
+            task_slug=f"{role}-decision-surface",
+        )
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_role=role,

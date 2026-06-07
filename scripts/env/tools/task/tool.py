@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 from env.tool_runtime.definition import MUTATES_NONE, MUTATES_RUNTIME_FILES
 
 _TASK_PRIORITY = ["high", "normal", "low"]
@@ -125,6 +125,7 @@ def _action(
         output_schema={"$ref": "ToolResult"},
         kind=kind,
         mutates=mutates,
+        task_requirement=TASK_REQUIREMENT_FREE,
         required_permission=required_permission,
         authority="task.role_scope",
         visibility="active actor private",

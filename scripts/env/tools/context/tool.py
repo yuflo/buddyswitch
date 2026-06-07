@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
 
 def _build_definition() -> ToolDefinition:
@@ -56,6 +56,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='none',
                 authority='read-only context discovery',
                 visibility='active-role runtime orientation',
@@ -132,6 +133,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='none',
                 authority='read-only context discovery',
                 visibility='active-role runtime orientation',
@@ -199,6 +201,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='none',
                 authority='read-only context discovery',
                 visibility='active-role runtime orientation',

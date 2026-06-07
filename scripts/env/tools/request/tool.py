@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
 
 _REF_ITEM_SCHEMA = {
@@ -81,6 +81,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={"$ref": "ToolResult"},
                 kind="write",
                 mutates="runtime_objects",
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission="request.create",
                 authority="request.cross_role_scope",
                 visibility='requester, recipient, and PM',
@@ -156,6 +157,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={"$ref": "ToolResult"},
                 kind="read",
                 mutates="none",
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission="request.read",
                 authority="request.visibility_scope",
                 visibility='requester, recipient, and PM filtered visibility',
@@ -212,6 +214,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={"$ref": "ToolResult"},
                 kind="read",
                 mutates="none",
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission="request.read",
                 authority="request.visibility_scope",
                 visibility='requester, recipient, and PM filtered visibility',
@@ -268,6 +271,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={"$ref": "ToolResult"},
                 kind="write",
                 mutates="runtime_objects",
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission="request.accept",
                 authority="request.recipient_scope",
                 visibility='requester, recipient, and PM',
@@ -331,6 +335,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={"$ref": "ToolResult"},
                 kind="write",
                 mutates="runtime_objects",
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission="request.block",
                 authority="request.recipient_scope",
                 visibility='requester, recipient, and PM',
@@ -395,6 +400,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={"$ref": "ToolResult"},
                 kind="write",
                 mutates="runtime_objects",
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission="request.complete",
                 authority="request.recipient_scope",
                 visibility='requester, recipient, and PM',
@@ -456,6 +462,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={"$ref": "ToolResult"},
                 kind="write",
                 mutates="runtime_objects",
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission="request.cancel",
                 authority="request.requester_scope",
                 visibility='requester, recipient, and PM',

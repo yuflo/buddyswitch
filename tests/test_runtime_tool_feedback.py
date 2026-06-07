@@ -77,8 +77,43 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         }
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
+    def _ensure_active_task(self, *, role: str, actor_id: str) -> None:
+        taskbox = self.instance_json.parent / "taskbox" / role
+        tasks_dir = taskbox / "tasks"
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+        task_id = f"task-0001-{role}-feedback"
+        (tasks_dir / f"{task_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": task_id,
+                    "owner_actor": {"actor_id": actor_id, "role_id": role},
+                    "title": "Feedback contract active task",
+                    "summary": "Active task for handler-level feedback contract tests.",
+                    "body": "Active task for handler-level feedback contract tests.",
+                    "status": "active",
+                    "priority": "normal",
+                    "origin": {"type": "manual"},
+                    "track_id": None,
+                    "refs": [],
+                    "progress_summary": "Active task for handler-level feedback contract tests.",
+                    "created_at": "2026-06-07T10:00:00+08:00",
+                    "updated_at": "2026-06-07T10:00:00+08:00",
+                    "closed_at": None,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (taskbox / "history.md").write_text(
+            f"- 2026-06-07T10:00:00+08:00 task.selected {task_id} reason=\"seed feedback active task\"\n",
+            encoding="utf-8",
+        )
+
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role=role, label="act-feedback-runless")
+        self._ensure_active_task(role=role, actor_id=actor_id)
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_role=role,

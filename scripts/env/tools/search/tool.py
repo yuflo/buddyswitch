@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
 
 def _build_definition() -> ToolDefinition:
@@ -42,6 +42,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='none',
                 authority='profile.search_boundary',
                 visibility='active-role runtime orientation',
@@ -111,6 +112,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='request',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='none',
                 authority='profile.search_boundary',
                 visibility='active-role runtime orientation',
@@ -179,6 +181,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='open',
                 mutates='browser_session',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='none',
                 authority='profile.search_boundary',
                 visibility='launcher-managed browser session',

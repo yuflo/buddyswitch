@@ -47,6 +47,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        self._seed_active_task_for_instance(
+            instance_json=path,
+            role=role,
+            actor_id=actor_id,
+            task_slug=f"{role}-artifact-env",
+        )
         return path
 
     def _dispatch(

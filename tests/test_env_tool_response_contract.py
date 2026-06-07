@@ -197,7 +197,42 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             + "\n",
             encoding="utf-8",
         )
+        self._seed_active_task(instance_json=path, role=role, actor_id=actor_id)
         return path
+
+    def _seed_active_task(self, *, instance_json: Path, role: str, actor_id: str) -> None:
+        taskbox = instance_json.parent / "taskbox" / role
+        tasks_dir = taskbox / "tasks"
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+        task_id = f"task-0001-{role}-response-contract"
+        (tasks_dir / f"{task_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": task_id,
+                    "owner_actor": {"actor_id": actor_id, "role_id": role},
+                    "title": "Response contract active task",
+                    "summary": "Active task for handler-level response contract tests.",
+                    "body": "Active task for handler-level response contract tests.",
+                    "status": "active",
+                    "priority": "normal",
+                    "origin": {"type": "manual"},
+                    "track_id": None,
+                    "refs": [],
+                    "progress_summary": "Active task for handler-level response contract tests.",
+                    "created_at": "2026-06-07T10:00:00+08:00",
+                    "updated_at": "2026-06-07T10:00:00+08:00",
+                    "closed_at": None,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (taskbox / "history.md").write_text(
+            f"- 2026-06-07T10:00:00+08:00 task.selected {task_id} reason=\"seed response contract active task\"\n",
+            encoding="utf-8",
+        )
 
     def _dispatch(
         self,

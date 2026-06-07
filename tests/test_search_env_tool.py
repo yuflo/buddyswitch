@@ -164,6 +164,12 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        self._seed_active_task_for_instance(
+            instance_json=instance_json,
+            role=role,
+            actor_id=actor_id,
+            task_slug=f"{role}-search-env",
+        )
         return instance_json
 
     def _dispatch(

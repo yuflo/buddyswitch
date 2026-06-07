@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
-from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
 _SOURCE_REF_ITEMS_SCHEMA = {
     'type': 'object',
@@ -152,6 +152,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
                 visibility='active-role readable artifact summaries',
@@ -216,6 +217,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
                 visibility='active-role readable artifact body',
@@ -309,6 +311,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='artifact.create',
                 authority='artifact.actor_scope',
                 visibility='owner-scoped draft until track publication',
@@ -406,6 +409,7 @@ def _build_definition() -> ToolDefinition:
                 },
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='artifact.update',
                 authority='artifact.actor_scope',
                 visibility='owner-scoped unless already published through track state',
@@ -481,6 +485,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={'$ref': 'ToolResult'},
                 kind='write',
                 mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='artifact.update',
                 authority='artifact.actor_scope',
                 visibility='owner-scoped draft attachment metadata until later publication makes the artifact readable',
@@ -544,6 +549,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={'$ref': 'ToolResult'},
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
                 visibility='attachment summary rows for readable artifacts only',
@@ -601,6 +607,7 @@ def _build_definition() -> ToolDefinition:
                 output_schema={'$ref': 'ToolResult'},
                 kind='read',
                 mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
                 visibility='one attachment body for one readable artifact',

@@ -45,6 +45,12 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _dispatch(self, *, active_role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         actor_id = self._actor_id_for(active_role)
+        self._seed_active_task_for_instance(
+            instance_json=self.instance_json,
+            role=active_role,
+            actor_id=actor_id,
+            task_slug=f"{active_role}-identity",
+        )
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_role=active_role,

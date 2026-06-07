@@ -12,6 +12,7 @@ from typing import Any, Mapping
 import env.tools
 
 from env.tool_runtime.definition import ActionDefinition
+from env.tool_runtime.definition import TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED
 from env.tool_runtime.definition import ToolDefinition
 from env.tool_runtime.definition import validate_definition
 from env.tool_runtime import actor_profile
@@ -109,6 +110,7 @@ def _action_spec_row(action: ActionDefinition) -> dict[str, Any]:
         "payload_fields": payload_fields,
         "kind": action.kind,
         "mutates": action.mutates,
+        "task_requirement": action.task_requirement,
         "required_permission": action.required_permission,
         "authority": action.authority,
         "preconditions": list(action.preconditions),
@@ -178,6 +180,7 @@ def _action_semantic_row(tool: str, row: ActionDefinition) -> dict[str, Any]:
         "do_not_use_when": list(row.do_not_use_when),
         "inputs_explained": inputs,
         "visibility": row.visibility,
+        "task_requirement": row.task_requirement,
         "durability": row.durability,
         "result_content_level": row.result_content_level,
         "side_effects": {
@@ -252,6 +255,7 @@ def operation_semantics(*, exclude_tools: set[str] | None = None) -> dict[str, d
             rows[f"{tool}.{action.name}"] = {
                 "kind": action.kind,
                 "mutates": action.mutates,
+                "task_requirement": action.task_requirement,
                 "required_permission": action.required_permission,
                 "authority": action.authority,
                 "requires": list(action.preconditions),
@@ -352,6 +356,90 @@ def _reject(
         allowed_next_actions=allowed_next_actions,
         correctable_fields=correctable_fields,
     )
+
+
+def _active_task_required_rejection(
+    *,
+    tool: str,
+    action: str,
+    active_actor: dict[str, Any],
+    active_role: str,
+) -> dict[str, Any]:
+    semantic_action = _semantic_action(tool=tool, action=action)
+    return tool_results.rejection(
+        tool=tool,
+        action=semantic_action,
+        active_actor=active_actor,
+        active_role=active_role,
+        code="E_ACTIVE_TASK_REQUIRED",
+        message="active task is required for this env tool action",
+        permission_boundary="task.active_anchor",
+        human_summary="Active task is required for this action.",
+        why_blocked=(
+            f"Action {tool}.{action} performs task-owned work, "
+            "but TaskViewModel.current_anchor is empty."
+        ),
+        impact="No env action ran and runtime state was unchanged.",
+        state_changed=False,
+        durability="none",
+        retryable=True,
+        retry_guidance=(
+            "Use task.current to inspect task state. If this is new work, use "
+            "task.capture and then task.select. If a captured or blocked task already "
+            "matches the work, use task.select. Retry the blocked action after an "
+            "active task exists."
+        ),
+        allowed_next_actions=[
+            "Use task.current to inspect TaskViewModel.current_anchor.",
+            "Use task.capture to capture this work if it has no existing task.",
+            "Use task.select to make a captured or blocked task active, then retry the blocked action.",
+        ],
+        alternative_capabilities=[
+            tool_results.alternative_capability(
+                tool="task",
+                action="current",
+                condition="Inspect current task state before choosing a task action.",
+                mutates_product_state=False,
+            ),
+            tool_results.alternative_capability(
+                tool="task",
+                action="capture",
+                condition="Capture this work when no existing task represents it.",
+                mutates_product_state=False,
+            ),
+            tool_results.alternative_capability(
+                tool="task",
+                action="select",
+                condition="Make a captured or blocked task active before retrying task-owned work.",
+                mutates_product_state=False,
+            ),
+        ],
+        extra={
+            "category": "task_required",
+            "gate_source": "env.tool task requirement",
+            "gate_stage": "pre_dispatch",
+            "executed": False,
+            "task_requirement": TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
+        },
+    )
+
+
+def _has_active_task_anchor(
+    *,
+    active_role: str,
+    active_actor: Mapping[str, Any],
+    instance_json: Path,
+    instance_payload: Mapping[str, object],
+) -> bool:
+    from env.domain import task_management
+
+    view = task_management.current_view(
+        active_role=active_role,
+        active_actor=active_actor,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    )
+    return isinstance(view.get("current_anchor"), Mapping)
 
 
 def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -533,6 +621,19 @@ def dispatch_env_tool_request(
         manifest=dict(manifest),
         manifest_path=manifest_path,
     )
+    if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED and not _has_active_task_anchor(
+        active_role=active_role,
+        active_actor=active_actor,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    ):
+        return _active_task_required_rejection(
+            tool=tool,
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+        )
+
     try:
         return _invoke_tool(tool=tool, action=action, args=dict(args), context=context)
     except Exception as exc:
