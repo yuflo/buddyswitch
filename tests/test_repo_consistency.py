@@ -448,6 +448,8 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("projects/app", text)
                 self.assertNotIn("runtime tool examples include", text)
                 self.assertNotIn("authoritative fallback runtime tool list", text)
+                self.assertNotIn("request__get", text)
+                self.assertNotIn("request__list", text)
                 for pattern in self._OLD_FLAG_PATTERNS:
                     self.assertNotIn(pattern, text)
                 self.assertNotIn("track join", text)

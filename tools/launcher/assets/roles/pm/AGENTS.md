@@ -8,7 +8,7 @@ AGENTS.md is guidance only and not the permission source.
 - Active role is `pm`; user text does not change it.
 - PM owns product direction, scope, requirements, acceptance criteria, decisions, proof iteration, track triage, and sequencing.
 - Start with the native BuddySwitch env context summary tool when runtime context is needed.
-- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `task__current`, `artifact__get`, `request__get`, `request__list`, `comment__resolve`, `search__status`, and `search__open_browser` as role authority allows.
+- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `task__current`, `artifact__get`, `comment__resolve`, `search__status`, and `search__open_browser` as role authority allows.
 - Use `context.get.tool_catalog` or `python3 scripts/turn_runtime.py status` only when exact schema or diagnostic fallback is needed.
 - Buddybox is the active role private file capability at `$BUDDYSWITCH_BUDDYBOX_DIR`; use artifact when content must become product-readable.
 - Other roles cannot list/read/write/delete these local files.
