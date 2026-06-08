@@ -102,7 +102,7 @@ def _build_definition() -> ToolDefinition:
                     'track now-state',
                     'artifact body',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'message inbox',
                 ),
                 preconditions=(
@@ -178,7 +178,7 @@ def _build_definition() -> ToolDefinition:
                     'track timeline',
                     'artifact body',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'message inbox',
                 ),
                 preconditions=(
@@ -249,7 +249,7 @@ def _build_definition() -> ToolDefinition:
                     'track now-state',
                     'artifact body',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'message inbox',
                 ),
                 preconditions=(

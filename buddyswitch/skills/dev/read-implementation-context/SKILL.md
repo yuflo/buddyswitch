@@ -1,6 +1,6 @@
 ---
 name: read-implementation-context
-description: Use when implementation depends on track, task, request, artifact, PRD, design, or test context.
+description: Use when implementation depends on track, task, artifact, PRD, design, or test context.
 ---
 
 # Read Implementation Context
@@ -9,14 +9,14 @@ description: Use when implementation depends on track, task, request, artifact, 
 - Turn upstream product material into an implementation brief without changing product direction.
 
 ## Use when
-- The request references track/task/request ids or artifact ids.
+- The request references track/task ids or artifact ids.
 - Scope, acceptance, or design constraints are not fully explicit in the direct prompt.
 
 ## Do not use when
 - The task is trivial and complete context is already in the direct user request.
 
 ## Inputs
-- Request text, task/request ids, track id.
+- Request text, task ids, track id.
 - Artifact ids and artifact body content from `artifact.get`.
 - Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
 

@@ -107,7 +107,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='summarize',
                 title='context.summarize',
-                description='Return compact runtime context orientation with candidate tracks/requests/artifacts plus read-only source workspace facts, writable_surfaces facts, and first-pass affordances.',
+                description='Return compact runtime context orientation with candidate tracks/tasks/artifacts plus read-only source workspace facts, writable_surfaces facts, and first-pass affordances.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -164,7 +164,7 @@ def _build_definition() -> ToolDefinition:
                     'current_context_summary',
                     'source_workspace',
                     'candidate_tracks',
-                    'candidate_requests',
+                    'candidate_tasks',
                     'candidate_artifacts',
                     'open_comment_threads',
                     'recent_updates',
@@ -172,7 +172,7 @@ def _build_definition() -> ToolDefinition:
                     'writable_surfaces',
                 ),
                 use_when=(
-                    'You need a compact first-pass summary with candidate tracks/requests/artifacts and quick discussion/update attention cues.',
+                    'You need a compact first-pass summary with candidate tracks/tasks/artifacts and quick discussion/update attention cues.',
                 ),
                 do_not_use_when=(
                     'You need full operation semantics/tool catalog details, full comment bodies, or full artifact markdown body; use context.get/comment.list/artifact.get.',

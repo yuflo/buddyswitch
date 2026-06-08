@@ -29,7 +29,6 @@ SHIPPED_TOOLS = {
     "message",
     "comment",
     "search",
-    "request",
 }
 REQUIRED_TOOL_FILES = {"__init__.py", "tool.py", "_impl.py"}
 RETIRED_TOOL_FILES = {"contract.py", "semantics.py", "cli.py", "handlers.py", "service.py"}

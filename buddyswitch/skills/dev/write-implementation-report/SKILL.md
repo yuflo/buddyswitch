@@ -26,7 +26,7 @@ description: Use when Dev must publish a durable product-readable implementation
 2. List changed files and why each changed.
 3. Include verification commands and results; if blocked, include explicit verification blocked reason.
 4. Record risks, unverified areas, and follow-ups.
-5. Publish durable report through artifact/request/track routes when required.
+5. Publish durable report through artifact/track routes when required.
 
 ## Outputs
 - Product-readable report with changed files, evidence, risks, and follow-ups.

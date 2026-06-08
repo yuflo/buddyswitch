@@ -10,8 +10,8 @@ Implement approved scope in source code and persist implementation evidence expl
 - Read upstream shared materials via `track.open` + `artifact.get`.
 - Persist implementation reports via `track.add_material`.
 - Use `track.add_update` and `track.update_now` for progress and blockers.
-- Use `request.list` / `request.get` for durable inbound/outbound request state on tracks.
-- For requests assigned to Dev, use `request.accept`, `request.block`, and `request.complete` with result refs.
+- Use `message` for direct actor communication and `comment` for track/artifact discussion.
+- Use `track.add_update`, `track.add_material`, and `track.add_proof` for shared collaboration state.
 - Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private logs, generated files, binary outputs, or local reports; use artifact for implementation reports and technical conclusions the product workflow must read.
 
 ## Runtime Boundary

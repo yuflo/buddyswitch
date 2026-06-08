@@ -19,7 +19,7 @@ import env_store  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}
 _FORBIDDEN_RUNTIME_SURFACES = {
     "artifact_index",
     "artifact_search",
@@ -219,9 +219,6 @@ class RepoConsistencyTests(unittest.TestCase):
             artifact_actions,
             {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
         )
-        request_actions = set(tool_catalog.supported_actions("request"))
-        self.assertEqual(request_actions, {"create", "list", "get", "accept", "block", "complete", "cancel"})
-
     def test_actor_private_env_tool_package_is_removed(self) -> None:
         self.assertFalse((ROOT / "scripts" / "env" / "tools" / "actor_private").exists())
         self.assertNotIn("actor_private", tool_catalog.supported_tools())

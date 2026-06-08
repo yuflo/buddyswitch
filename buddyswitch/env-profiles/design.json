@@ -36,13 +36,6 @@
       "add_update",
       "add_proof"
     ],
-    "request_effects": [
-      "create",
-      "accept",
-      "block",
-      "complete",
-      "cancel"
-    ],
     "comment_effects": [
     ]
   },

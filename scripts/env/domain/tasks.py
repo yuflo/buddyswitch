@@ -25,7 +25,7 @@ PUBLICATION_STYLE_FIELDS = {
     "visibility",
 }
 VALID_TASK_PRIORITY = task_repo.valid_task_priorities()
-ALLOWED_TASK_REF_ID_TYPES = {"track", "artifact", "message", "comment", "request"}
+ALLOWED_TASK_REF_ID_TYPES = {"track", "artifact", "message", "comment"}
 ALLOWED_TASK_REF_TYPES = set(ALLOWED_TASK_REF_ID_TYPES)
 _STATUS_VALUES = task_repo.valid_task_statuses()
 

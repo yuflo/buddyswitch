@@ -26,7 +26,7 @@ description: Use when current user input may continue, capture, select, switch, 
 - Use task `review` to inspect captured, blocked, pending, or stale task cues.
 
 ## Runtime Boundary
-- Task refs are private context links; task operations do not publish or mutate track, artifact, message, comment, request, browser, or actor private file contents.
+- Task refs are private context links; task operations do not publish or mutate track, artifact, message, comment, browser, or actor private file contents.
 - Capture stores work on the shelf; it does not auto-select.
 - Switching is two-step: request first, then confirm accept or reject.
 - Finish requires evidence. Block requires a reason.

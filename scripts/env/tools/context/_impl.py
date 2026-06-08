@@ -272,35 +272,6 @@ def _candidate_track_row(*, track: dict[str, Any], active_role: str) -> dict[str
     }
 
 
-def _request_from_actor_role(request: dict[str, Any]) -> str | None:
-    from_actor = request.get("from_actor")
-    if not isinstance(from_actor, dict):
-        return None
-    role_id = from_actor.get("role_id")
-    return role_id if isinstance(role_id, str) and role_id else None
-
-
-def _candidate_request_row(*, request: dict[str, Any], active_role: str) -> dict[str, Any]:
-    from_role = _request_from_actor_role(request)
-    direction = "incoming" if request.get("to_role") == active_role else "outgoing"
-    if active_role == "pm" and request.get("to_role") != active_role and from_role != active_role:
-        direction = "pm-visible"
-    result_refs = request.get("result_refs")
-    blocker = request.get("blocker")
-    return {
-        "request_id": request.get("id"),
-        "track_id": request.get("track_id"),
-        "from_actor": request.get("from_actor"),
-        "to_role": request.get("to_role"),
-        "title": request.get("title"),
-        "status": request.get("status"),
-        "direction": direction,
-        "blocker": blocker if isinstance(blocker, str) else None,
-        "result_ref_count": len(result_refs) if isinstance(result_refs, list) else 0,
-        "updated_at": request.get("updated_at"),
-    }
-
-
 def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
     refs = task.get("refs")
     return {
@@ -332,7 +303,6 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
             ]
         ),
         "comment_target_support": str(affordances["comment"]["object_model"]),
-        "request_lifecycle_visibility": str(operation_semantics["request.create"]["visibility"]),
         "search_boundary": str(affordances["search"]["object_model"]),
         "evidence_boundary": str(affordances["evidence"]["object_model"]),
         "writable_file_surface": "$BUDDYSWITCH_ACTOR_PRIVATE_DIR for persistent private files; $BUDDYSWITCH_INSTANCE_TMP for temporary files.",
@@ -543,46 +513,6 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
     }
 
 
-def _visible_requests(
-    *,
-    active_role: str,
-    track_filter: str | None,
-    visible_track_ids: set[str],
-    limit_value: int,
-    context: ContextServiceContext,
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    normalized_track_filter = track_filter.strip() if isinstance(track_filter, str) and track_filter.strip() else None
-    for request in context.repos.request.list_requests():
-        track_id = request.get("track_id")
-        if not isinstance(track_id, str) or not track_id:
-            continue
-        if isinstance(normalized_track_filter, str):
-            if track_id != normalized_track_filter:
-                continue
-        elif visible_track_ids and track_id not in visible_track_ids:
-            continue
-        try:
-            context.rules.comment_target.assert_target_readable(
-                target_type="track",
-                target_id=track_id,
-                active_role=active_role,
-                active_actor=context["active_actor"],
-                action="context.get",
-            )
-            context.rules.request.ensure_visible(request, active_role, context.actor_address)
-        except (
-            context.rules.comment_target.CommentTargetPayloadError,
-            context.rules.comment_target.CommentTargetScopeError,
-            context.rules.request.RequestScopeError,
-        ):
-            continue
-        rows.append(request)
-        if len(rows) >= limit_value:
-            break
-    return rows
-
-
 def _current_context_sections(
     *,
     active_role: str,
@@ -615,13 +545,6 @@ def _current_context_sections(
         limit_value=limit_value,
         context=context,
     )
-    visible_requests = _visible_requests(
-        active_role=active_role,
-        track_filter=track_filter if isinstance(track_filter, str) else None,
-        visible_track_ids=visible_track_ids,
-        limit_value=limit_value,
-        context=context,
-    )
     visible_artifact_ids = {
         row.get("artifact_id")
         for row in visible_artifacts
@@ -648,7 +571,6 @@ def _current_context_sections(
 
     writable_surfaces = _build_writable_surfaces(instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_role=active_role) for row in visible_tracks]
-    candidate_requests = [_candidate_request_row(request=row, active_role=active_role) for row in visible_requests]
     candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {
@@ -658,10 +580,8 @@ def _current_context_sections(
         "tracks": visible_tracks,
         "tasks": visible_tasks,
         "artifact_summaries": visible_artifacts,
-        "requests": visible_requests,
         "writable_surfaces": writable_surfaces,
         "candidate_tracks": candidate_tracks,
-        "candidate_requests": candidate_requests,
         "candidate_tasks": candidate_tasks,
         "candidate_artifacts": visible_artifacts,
         "open_comment_threads": open_comment_threads,
@@ -679,7 +599,6 @@ def _current_context_sections(
                 "has_tracks": bool(visible_tracks),
                 "has_tasks": bool(visible_tasks),
                 "has_artifacts": bool(visible_artifacts),
-                "has_requests": bool(visible_requests),
                 "has_open_comment_threads": bool(open_comment_threads),
                 "has_recent_updates": bool(recent_updates),
                 "has_writable_surfaces": bool(writable_surfaces),
@@ -689,7 +608,6 @@ def _current_context_sections(
             "tracks": len(visible_tracks),
             "tasks": len(visible_tasks),
             "artifacts": len(visible_artifacts),
-            "requests": len(visible_requests),
             "open_comment_threads": len(open_comment_threads),
             "recent_updates": len(recent_updates),
             "messages": int(message_cues.get("count", 0)),
@@ -743,11 +661,6 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "description": "Target-scoped comments on tracks and artifacts, read through comment.list.",
             "scope": "target discussion thread",
             "source_of_truth": "comment.list via runtime env tools",
-        },
-        "requests": {
-            "description": "Cross-role durable collaboration request lifecycle rows.",
-            "scope": "requester-recipient-pm visible request state",
-            "source_of_truth": "request.list / request.get via runtime env tools",
         },
         "writable_surfaces": {
             "description": "Runtime writable filesystem surfaces for host-visible files.",
@@ -834,7 +747,6 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "current_context_summary": sections["current_context_summary"],
         "source_workspace": sections["source_workspace"],
         "candidate_tracks": sections["candidate_tracks"],
-        "candidate_requests": sections["candidate_requests"],
         "candidate_tasks": sections["candidate_tasks"],
         "candidate_artifacts": sections["candidate_artifacts"],
         "open_comment_threads": sections["open_comment_threads"],
@@ -858,7 +770,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         durability="none",
         read_scope="compact read-only orientation with source_workspace facts; not full catalog",
         allowed_next_actions=[
-            "Use explicit ids from candidate_tracks/candidate_tasks/candidate_artifacts/candidate_requests in subsequent tool calls.",
+            "Use explicit ids from candidate_tracks/candidate_tasks/candidate_artifacts in subsequent tool calls.",
             "Use context.get for full sections when needed.",
         ],
         extra=summary,

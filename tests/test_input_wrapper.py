@@ -122,8 +122,7 @@ class LauncherInputWrapperTests(unittest.TestCase):
             )
 
             self.assertTrue(text.startswith("[TASK CONTEXT]"), msg=text)
-            self.assertIn("Current Task: task-0001-launcher-context", text)
-            self.assertIn("Title: Launcher context task", text)
+            self.assertIn("Current Anchor: task-0001-launcher-context - Launcher context task", text)
             self.assertIn("State: active", text)
             self.assertIn("[USER INPUT]", text)
             self.assertIn("Draft brief", text)

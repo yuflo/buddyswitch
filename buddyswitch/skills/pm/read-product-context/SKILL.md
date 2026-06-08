@@ -1,6 +1,6 @@
 ---
 name: read-product-context
-description: Use when PM work depends on track, task, artifact, request, message, comment, or proof context that must be read before deciding.
+description: Use when PM work depends on track, task, artifact, message, comment, or proof context that must be read before deciding.
 ---
 
 # Read Product Context
@@ -11,14 +11,14 @@ description: Use when PM work depends on track, task, artifact, request, message
 
 ## Use when
 - A user asks PM to continue, recover, revise, or decide on work with existing ids.
-- Track, task, artifact, request, message, comment, or proof context may change the next PM action.
+- Track, task, artifact, message, comment, or proof context may change the next PM action.
 
 ## Do not use when
 - The user only asks for a new product direction with no durable context to inspect.
 - Another role owns the primary work and PM only needs to wait for an output.
 
 ## Inputs
-- User request, track id, task id, artifact ids, request/comment/message ids, proof ids, and visible thread context.
+- User request, track id, task id, artifact ids, comment ids, message ids, proof ids, and visible thread context.
 - Full artifact bodies when artifact ids are available.
 - Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
 
@@ -30,7 +30,7 @@ description: Use when PM work depends on track, task, artifact, request, message
 
 ## Outputs
 - Context summary with facts, assumptions, decisions, blockers, missing inputs, and next action.
-- Optional PM-owned follow-up request, task update, or product-readable artifact.
+- Optional PM-owned follow-up task, task update, or product-readable artifact.
 
 ## Quality Bar
 - Do not claim artifact content was read unless `artifact.get` returned the full body.

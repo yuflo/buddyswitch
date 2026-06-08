@@ -214,7 +214,6 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             ROOT / "scripts" / "env" / "tool_runtime" / "context.py",
             ROOT / "scripts" / "env" / "tool_runtime" / "role_auth.py",
             ROOT / "scripts" / "env" / "tools" / "context" / "_impl.py",
-            ROOT / "scripts" / "env" / "tools" / "request" / "tool.py",
         ]
         forbidden = ("task.propose", "task.confirm", "task__propose", "task__confirm", "Task Handling Cue")
         for path in live_paths:

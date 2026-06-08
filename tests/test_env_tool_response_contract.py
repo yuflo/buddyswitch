@@ -721,66 +721,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("proof_added", changes)
         self.assertIn("update_added", changes)
 
-    def test_request_write_and_rejection_paths_follow_canonical_contract(self) -> None:
-        actor_id = "act-request-response"
-        pm_instance = self._instance_json(role="pm", actor_id=actor_id)
-        dev_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev")
-
-        track = self._dispatch(
-            instance_json=pm_instance,
-            actor_id=actor_id,
-            role="pm",
-            tool="track",
-            action="create",
-            args={
-                "track_id": "track-request-response",
-                "title": "Request Response",
-                "outcome": "Validate request response contracts.",
-                "appetite": "1 day",
-                "now": {"next": "seed", "blocker": None},
-            },
-        )
-        self.assertTrue(track.get("ok"), msg=track)
-
-        created = self._dispatch(
-            instance_json=pm_instance,
-            actor_id=actor_id,
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": "track-request-response",
-                "to_role": "dev",
-                "title": "Implement",
-                "summary": "Implement request response coverage.",
-                "target_refs": [{"type": "track", "id": "track-request-response"}],
-            },
-        )
-        self._assert_write_success_contract(created)
-        self.assertIsInstance(created.get("created_ids"), list, msg=created)
-        assert isinstance(created.get("created_ids"), list)
-        request_id = str(created["created_ids"][0])
-
-        unauthorized = self._dispatch(
-            instance_json=pm_instance,
-            actor_id=actor_id,
-            role="pm",
-            tool="request",
-            action="accept",
-            args={"request_id": request_id},
-        )
-        self._assert_rejection_contract(unauthorized)
-
-        accepted = self._dispatch(
-            instance_json=dev_instance,
-            actor_id=f"{actor_id}-dev",
-            role="dev",
-            tool="request",
-            action="accept",
-            args={"request_id": request_id},
-        )
-        self._assert_write_success_contract(accepted)
-
     def test_message_mark_needs_parent_prompt_failure_follows_rejection_contract(self) -> None:
         dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
         pm_actor_id = self._runtime_actor_id(role="pm", label="act-pm-parent-submit-contract")

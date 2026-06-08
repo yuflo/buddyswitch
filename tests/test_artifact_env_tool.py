@@ -1286,12 +1286,12 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "open_comment_count",
                 "resolved_comment_count",
                 "incoming_source_ref_count",
-                "target_request_count",
-                "result_request_count",
                 "track_update_ref_count",
                 "comment_count",
             ):
                 self.assertIn(key, row, msg=row)
+            self.assertNotIn("target_" + "request_count", row, msg=row)
+            self.assertNotIn("result_" + "request_count", row, msg=row)
 
     def test_list_returns_published_material_proof_and_history_summaries(self) -> None:
         instance_pm = self._instance_json(actor_id="act-pm-art-list-published", role="pm")
@@ -2334,65 +2334,6 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(private_source.get("ok"), msg=private_source)
 
         instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
-        request_target = self._dispatch(
-            instance_json=instance_pm,
-            actor_id=shared_actor_id,
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": "track-art-rel-incoming",
-                "to_role": "dev",
-                "title": "Use target",
-                "summary": "Target ref request",
-                "target_refs": [{"type": "artifact", "id": "art-rel-target"}],
-            },
-        )
-        self.assertTrue(request_target.get("ok"), msg=request_target)
-        request_target_id = str(request_target.get("request_id") or "")
-        self.assertTrue(request_target_id)
-
-        request_result = self._dispatch(
-            instance_json=instance_pm,
-            actor_id=shared_actor_id,
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": "track-art-rel-incoming",
-                "to_role": "dev",
-                "title": "Produce result",
-                "summary": "Result ref request",
-                "target_refs": [{"type": "track", "id": "track-art-rel-incoming"}],
-            },
-        )
-        self.assertTrue(request_result.get("ok"), msg=request_result)
-        request_result_id = str(request_result.get("request_id") or "")
-        self.assertTrue(request_result_id)
-        instance_dev = self._instance_json(actor_id=shared_actor_id, role="dev")
-        accepted = self._dispatch(
-            instance_json=instance_dev,
-            actor_id=shared_actor_id,
-            role="dev",
-            tool="request",
-            action="accept",
-            args={"request_id": request_result_id},
-        )
-        self.assertTrue(accepted.get("ok"), msg=accepted)
-        completed = self._dispatch(
-            instance_json=instance_dev,
-            actor_id=shared_actor_id,
-            role="dev",
-            tool="request",
-            action="complete",
-            args={
-                "request_id": request_result_id,
-                "result_refs": [{"type": "artifact", "id": "art-rel-target"}],
-            },
-        )
-        self.assertTrue(completed.get("ok"), msg=completed)
-
-        instance_pm = self._instance_json(actor_id=shared_actor_id, role="pm")
         added_update = self._dispatch(
             instance_json=instance_pm,
             actor_id=shared_actor_id,
@@ -2483,25 +2424,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if isinstance(row, dict):
                 self.assertNotIn("body", row, msg=row)
 
-        target_rows = incoming_refs.get("target_ref_by_requests")
-        self.assertIsInstance(target_rows, list, msg=incoming_refs)
-        assert isinstance(target_rows, list)
-        target_request_ids = {
-            str(row.get("request_id"))
-            for row in target_rows
-            if isinstance(row, dict) and isinstance(row.get("request_id"), str)
-        }
-        self.assertIn(request_target_id, target_request_ids)
-
-        result_rows = incoming_refs.get("result_ref_by_requests")
-        self.assertIsInstance(result_rows, list, msg=incoming_refs)
-        assert isinstance(result_rows, list)
-        result_request_ids = {
-            str(row.get("request_id"))
-            for row in result_rows
-            if isinstance(row, dict) and isinstance(row.get("request_id"), str)
-        }
-        self.assertIn(request_result_id, result_request_ids)
+        self.assertNotIn("target_ref_by_" + "requests", incoming_refs)
+        self.assertNotIn("result_ref_by_" + "requests", incoming_refs)
 
         update_rows = incoming_refs.get("track_update_refs")
         self.assertIsInstance(update_rows, list, msg=incoming_refs)

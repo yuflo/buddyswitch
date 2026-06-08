@@ -28,7 +28,7 @@ description: Use when PM must decide continue, revise, send back, stop, or block
 4. Create/update owner follow-up if needed, or publish the iteration decision through `artifact.create_revision` and `track.add_proof`.
 
 ## Outputs
-- Iteration decision, track update, proof publication, or owner-specific task/request.
+- Iteration decision, track update, proof publication, or owner-specific task.
 
 ## Quality Bar
 - Decision follows evidence rather than optimism or process momentum.

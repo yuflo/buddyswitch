@@ -1049,12 +1049,11 @@ exec "$real_git" "$@"
         title: str = "Launcher context task",
     ) -> None:
         self.assertTrue(text.startswith("[TASK CONTEXT]"), msg=text)
-        self.assertIn(f"Current Task: {task_id}", text)
-        self.assertIn(f"Title: {title}", text)
+        self.assertIn(f"Current Anchor: {task_id} - {title}", text)
         self.assertIn("State: active", text)
         self.assertIn("[USER INPUT]", text)
         self.assertIn(raw_text, text)
-        self.assertLess(text.index(f"Current Task: {task_id}"), text.index("[USER INPUT]"))
+        self.assertLess(text.index(f"Current Anchor: {task_id}"), text.index("[USER INPUT]"))
         self.assertLess(text.index("[USER INPUT]"), text.index(raw_text))
 
     def _assert_raw_input(self, text: str, *, raw_text: str) -> None:

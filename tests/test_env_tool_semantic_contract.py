@@ -20,7 +20,7 @@ from env.tool_runtime.definition import validate_definition  # noqa: E402
 from env.tool_runtime import registry as catalog  # noqa: E402
 from env.tool_runtime import role_auth  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}
 _EXPECTED_ACTIONS_BY_TOOL = {
     "task": {"current", "capture", "select", "switch_request", "switch_confirm", "progress", "checkout", "review"},
     "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
@@ -30,7 +30,6 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "search": {"status", "request", "open_browser"},
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
     "comment": {"add", "list", "resolve"},
-    "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
 }
 _TASK_REQUIREMENT_FREE = "free"
 _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
@@ -50,8 +49,6 @@ _EXPECTED_FREE_ACTIONS = {
     "message.mark",
     "message.list",
     "message.conversation",
-    "request.list",
-    "request.get",
     "search.status",
     "task.current",
     "task.capture",
@@ -72,11 +69,6 @@ _EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS = {
     "comment.resolve",
     "evidence.issue_browser",
     "evidence.approve_downgrade",
-    "request.create",
-    "request.accept",
-    "request.block",
-    "request.complete",
-    "request.cancel",
     "search.request",
     "search.open_browser",
     "track.create",
@@ -211,13 +203,6 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("message", "mark", ("absorbed", "needs_parent", "disposition")),
             ("message", "list", ("inbox", "read", "comment")),
             ("comment", "resolve", ("pm", "thread", "resolved")),
-            ("request", "create", ("track", "request", "recipient")),
-            ("request", "list", ("inbox", "outbox", "status")),
-            ("request", "get", ("request", "visibility", "track")),
-            ("request", "accept", ("recipient", "accepted", "request")),
-            ("request", "block", ("recipient", "blocker", "request")),
-            ("request", "complete", ("recipient", "result", "done")),
-            ("request", "cancel", ("requester", "canceled", "request")),
         ]
         for tool, action, snippets in checks:
             text = self._semantic_text(tool=tool, action=action)

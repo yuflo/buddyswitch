@@ -18,17 +18,17 @@ description: Use when a PM-owned track is stale, cluttered, blocked, missing pro
 - A lower-layer runtime response is unclear; use runtime discovery or stop for the tool defect.
 
 ## Inputs
-- Track state, shared materials, close proof, updates, tasks, requests, comments, current owner, and artifact bodies.
+- Track state, shared materials, close proof, updates, tasks, comments, current owner, and artifact bodies.
 - Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
-1. Use `track.open` to identify current shared state, materials, proof, requests, tasks, and updates.
+1. Use `track.open` to identify current shared state, materials, proof, tasks, and updates.
 2. Read relevant full bodies with `artifact.get`; do not infer content from summaries alone.
-3. Name current truth, obsolete or superseded material, missing proof, blockers, next PM action, and owner requests.
-4. Make the fewest durable mutations needed: track now update, task/request change, or triage note via `artifact.create_revision` and `track.add_material`.
+3. Name current truth, obsolete or superseded material, missing proof, blockers, next PM action, and owner follow-ups.
+4. Make the fewest durable mutations needed: track now update, task change, or triage note via `artifact.create_revision` and `track.add_material`.
 
 ## Outputs
-- Triage note, track now update, or task/request changes tied to the current outcome.
+- Triage note, track now update, or task changes tied to the current outcome.
 
 ## Quality Bar
 - Track becomes easier to act on with minimal durable mutations.

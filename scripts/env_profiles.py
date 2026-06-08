@@ -281,14 +281,6 @@ def validate_env_profile(
             f"expected {expected_track_effects}, got {track_effects}"
         )
 
-    request_effects = _require_string_list(state_capability.get("request_effects"), "state_capability.request_effects")
-    expected_request_effects = ["create", "accept", "block", "complete", "cancel"]
-    if request_effects != expected_request_effects:
-        raise EnvProfileError(
-            "state_capability.request_effects must be exactly "
-            f"{expected_request_effects}; got {request_effects}"
-        )
-
     comment_effects = _require_string_list(state_capability.get("comment_effects"), "state_capability.comment_effects")
     expected_comment_effects = ["resolve"] if role_id == "pm" else []
     if comment_effects != expected_comment_effects:

@@ -18,7 +18,7 @@ def _build_definition() -> ToolDefinition:
         scope='target-scoped browser evidence for market quality gates',
         capability_boundary='Evidence actions are target-scoped and return transient token metadata.',
         object_model=(
-            'Evidence actions issue transient target-scoped token metadata for artifact quality gates. Evidence tokens do not persist product objects and do not replace durable artifact, track, request, or comment state.'
+            'Evidence actions issue transient target-scoped token metadata for artifact quality gates. Evidence tokens do not persist product objects and do not replace durable artifact, track, message, or comment state.'
         ),
         use_when=(
             'You need artifact-scoped evidence token metadata.',
@@ -75,7 +75,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'artifact state',
                     'track state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -150,7 +150,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'artifact state',
                     'track state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(

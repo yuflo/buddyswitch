@@ -6,10 +6,8 @@ from __future__ import annotations
 from typing import Any
 
 from env.domain import artifact_visibility as artifact_visibility_domain
-from env.domain import requests as request_domain
 from env.repos import artifacts as artifact_repo
 from env.repos import comments as comment_repo
-from env.repos import requests as request_repo
 from env.repos import tracks as track_repo
 
 
@@ -42,22 +40,6 @@ def _artifact_ref_matches(refs: Any, artifact_id: str) -> bool:
     return False
 
 
-def _request_is_visible(*, request: dict[str, Any], active_role: str, active_actor_address: dict[str, Any]) -> bool:
-    try:
-        request_domain.ensure_visible(request, active_role, active_actor_address)
-    except request_domain.RequestScopeError:
-        return False
-    track_id = request.get("track_id")
-    if not isinstance(track_id, str) or not track_id:
-        return False
-    track_readable = artifact_visibility_domain.assert_track_readable(
-        track_id,
-        active_role=active_role,
-        action="artifact.get",
-    )
-    return bool(track_readable.get("ok"))
-
-
 def _source_ref_backlinks(*, artifact_id: str, active_role: str, active_actor_address: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for candidate in artifact_repo.list_artifacts():
@@ -80,41 +62,6 @@ def _source_ref_backlinks(*, artifact_id: str, active_role: str, active_actor_ad
             }
         )
     rows.sort(key=lambda row: (str(row.get("_sort_updated_at") or ""), str(row.get("artifact_id") or "")), reverse=True)
-    for row in rows:
-        row.pop("_sort_updated_at", None)
-    return rows
-
-
-def _request_backlinks(
-    *,
-    artifact_id: str,
-    active_role: str,
-    active_actor_address: dict[str, Any],
-    ref_field: str,
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for request in request_repo.list_requests():
-        if not isinstance(request, dict):
-            continue
-        if not _request_is_visible(request=request, active_role=active_role, active_actor_address=active_actor_address):
-            continue
-        if not _artifact_ref_matches(request.get(ref_field), artifact_id):
-            continue
-        request_id = request.get("id")
-        if not isinstance(request_id, str) or not request_id:
-            continue
-        rows.append(
-            {
-                "request_id": request_id,
-                "track_id": request.get("track_id"),
-                "from_actor": request.get("from_actor"),
-                "to_role": request.get("to_role"),
-                "status": request.get("status"),
-                "title": request.get("title"),
-                "_sort_updated_at": str(request.get("updated_at") or ""),
-            }
-        )
-    rows.sort(key=lambda row: (str(row.get("_sort_updated_at") or ""), str(row.get("request_id") or "")), reverse=True)
     for row in rows:
         row.pop("_sort_updated_at", None)
     return rows
@@ -212,8 +159,6 @@ def relation_summary_for_artifact(
             },
             "incoming_refs": {
                 "source_ref_by_artifacts": [],
-                "target_ref_by_requests": [],
-                "result_ref_by_requests": [],
                 "track_update_refs": [],
                 "comment_ids": [],
             },
@@ -244,18 +189,6 @@ def relation_summary_for_artifact(
                 active_role=active_role,
                 active_actor_address=active_actor_address,
             ),
-            "target_ref_by_requests": _request_backlinks(
-                artifact_id=artifact_id,
-                active_role=active_role,
-                active_actor_address=active_actor_address,
-                ref_field="target_refs",
-            ),
-            "result_ref_by_requests": _request_backlinks(
-                artifact_id=artifact_id,
-                active_role=active_role,
-                active_actor_address=active_actor_address,
-                ref_field="result_refs",
-            ),
             "track_update_refs": _track_update_backlinks(artifact_id=artifact_id, active_role=active_role),
             "comment_ids": comment_ids,
         },
@@ -267,8 +200,6 @@ def relation_counts_for_artifact(*, artifact_id: str, active_role: str, active_a
     if not isinstance(artifact, dict):
         return {
             "incoming_source_ref_count": 0,
-            "target_request_count": 0,
-            "result_request_count": 0,
             "track_update_ref_count": 0,
             "comment_count": 0,
         }
@@ -276,8 +207,6 @@ def relation_counts_for_artifact(*, artifact_id: str, active_role: str, active_a
     if not bool(decision.get("allowed")):
         return {
             "incoming_source_ref_count": 0,
-            "target_request_count": 0,
-            "result_request_count": 0,
             "track_update_ref_count": 0,
             "comment_count": 0,
         }
@@ -292,12 +221,6 @@ def relation_counts_for_artifact(*, artifact_id: str, active_role: str, active_a
     return {
         "incoming_source_ref_count": len(incoming.get("source_ref_by_artifacts", []))
         if isinstance(incoming.get("source_ref_by_artifacts"), list)
-        else 0,
-        "target_request_count": len(incoming.get("target_ref_by_requests", []))
-        if isinstance(incoming.get("target_ref_by_requests"), list)
-        else 0,
-        "result_request_count": len(incoming.get("result_ref_by_requests", []))
-        if isinstance(incoming.get("result_ref_by_requests"), list)
         else 0,
         "track_update_ref_count": len(incoming.get("track_update_refs", []))
         if isinstance(incoming.get("track_update_refs"), list)

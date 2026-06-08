@@ -39,7 +39,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
         "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
         "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
-        "request": ROOT / "buddyswitch/skills/shared/request-tool/SKILL.md",
     }
     DEV_PRODUCT_SKILLS = (
         "enter-dev-workspace",
@@ -108,7 +107,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "task-management",
         "message-tool",
         "comment-tool",
-        "request-tool",
     }
     ROLE_AGENT_FILES = (
         ROOT / "tools/launcher/assets/roles/pm/AGENTS.md",
@@ -180,7 +178,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_role_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool", "request-tool"}
+        required = {"track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool"}
         for role in self.manifest.get("roles", []):
             assert isinstance(role, dict)
             skills = set(role.get("skills", []))
@@ -480,7 +478,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertIn("message__mark", message_skill)
         self.assertIn("message__conversation", message_skill)
         self.assertIn("message__list", message_skill)
-        self.assertIn("request__list", message_skill)
+        self.assertNotIn("request__list", message_skill)
         self.assertIn("context.get.tool_catalog['message']", message_skill)
         self.assertNotIn("message contacts --payload", message_skill)
         self.assertNotIn("message send --payload", message_skill)
@@ -772,7 +770,6 @@ class RuntimeSkillsTests(unittest.TestCase):
             "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
             "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
             "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
-            "request": ROOT / "buddyswitch/skills/shared/request-tool/SKILL.md",
         }
         for tool, path in skill_paths.items():
             text = path.read_text(encoding="utf-8").lower()

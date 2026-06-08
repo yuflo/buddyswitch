@@ -24,7 +24,6 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
     "context": {"get", "list_sources", "summarize"},
     "evidence": {"approve_downgrade", "issue_browser"},
     "message": {"contacts", "conversation", "get", "list", "mark", "send"},
-    "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
     "search": {"open_browser", "request", "status"},
     "task": {"current", "capture", "select", "switch_request", "switch_confirm", "progress", "checkout", "review"},
     "track": {"add_material", "add_proof", "add_update", "archive", "create", "list", "open", "update_now"},

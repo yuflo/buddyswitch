@@ -169,7 +169,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact state',
                     'track state',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -233,7 +233,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact state',
                     'track state',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -333,7 +333,7 @@ def _build_definition() -> ToolDefinition:
                     'track.add_material publication path',
                     'track.add_proof publication path',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -428,7 +428,7 @@ def _build_definition() -> ToolDefinition:
                     'track material slot',
                     'track proof slot',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -504,7 +504,7 @@ def _build_definition() -> ToolDefinition:
                 does_not_write=(
                     'track state',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'comments',
                     'messages',
                     'actor_private files',
@@ -563,7 +563,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact state',
                     'track state',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                     'pinned attachment files',
                 ),
@@ -621,7 +621,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact state',
                     'track state',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                     'pinned attachment files',
                 ),

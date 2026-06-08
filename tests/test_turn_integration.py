@@ -43,6 +43,12 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role=role, label="act-runless-integration")
+        self._seed_active_task_for_instance(
+            instance_json=self.instance_json,
+            role=role,
+            actor_id=actor_id,
+            task_slug=f"{role}-turn-integration",
+        )
         instance_payload = {
             "actor_id": actor_id,
             "role": role,
@@ -60,7 +66,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=self.manifest_path,
         )
 
-    def test_pm_product_request_uses_track_artifact_publication_not_project_write(self) -> None:
+    def test_pm_product_publication_uses_track_artifact_publication_not_project_write(self) -> None:
         track = self._dispatch(
             role="pm",
             tool="track",

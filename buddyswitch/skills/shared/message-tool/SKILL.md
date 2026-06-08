@@ -24,7 +24,6 @@ Send direct messages to online runtime actor addresses and read message context 
 - Use `message__mark` to finish an exact inbound message as `absorbed` or to mark `needs_parent` with a reason.
 - Use `message__list` to read active actor inbox rows.
 - Use `message__conversation` to read active actor visible bidirectional context with a selected target actor address.
-- Use `request__list` when you need inbox/outbox request filtering; message state is not request lifecycle state.
 - Runtime response fields are authoritative for effects, rejection reasons, and recovery.
 
 ## Key Boundary Rules

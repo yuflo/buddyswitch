@@ -15,7 +15,7 @@ description: Use when PM must order product, market, design, dev, and test work 
 
 ## Do not use when
 - The task is to build a scheduler, workflow engine, or broad project-management layer.
-- The next owner is already obvious and only needs a request or task update.
+- The next owner is already obvious and only needs a task update.
 
 ## Inputs
 - Scope, requirements, known dependencies, owner constraints, risks, proof needs, current track state, and artifact bodies.
@@ -25,7 +25,7 @@ description: Use when PM must order product, market, design, dev, and test work 
 1. Identify the blocking dependency and the smallest sequence that can move the track forward.
 2. Order owners and define expected output, dependency, stop condition, and current next action for each step.
 3. Keep the sequence short enough to validate; avoid adding a general process layer.
-4. Publish the sequence with `artifact.create_revision` and `track.add_material`, or create owner-specific requests/tasks when action is needed.
+4. Publish the sequence with `artifact.create_revision` and `track.add_material`, or create owner-specific tasks when action is needed.
 
 ## Outputs
 - Short sequence with owner, output, dependency, stop condition, and current next action.

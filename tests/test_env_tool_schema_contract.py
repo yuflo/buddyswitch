@@ -142,9 +142,6 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         message_mark = message_mark_action.input_schema
         message_conversation_action = catalog.get_action_definition("message", "conversation")
         message_conversation = message_conversation_action.input_schema
-        request_create = catalog.get_action_definition("request", "create").input_schema
-        request_list = catalog.get_action_definition("request", "list").input_schema
-        request_complete = catalog.get_action_definition("request", "complete").input_schema
         comment_resolve = catalog.get_action_definition("comment", "resolve").input_schema
 
         create_now = track_create["properties"]["now"]
@@ -222,12 +219,12 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(task_capture["properties"]["task"]["properties"]["priority"].get("enum"), ["high", "normal", "low"])
         self.assertEqual(
             task_capture["properties"]["task"]["properties"]["origin"]["properties"]["type"].get("enum"),
-            ["manual", "user_input", "track", "artifact", "message", "comment", "request"],
+            ["manual", "user_input", "track", "artifact", "message", "comment"],
         )
         self.assertEqual(task_select.get("required"), ["task_id"])
         self.assertEqual(task_switch_request["properties"]["target"]["properties"]["mode"].get("enum"), ["existing", "new"])
         self.assertEqual(task_switch_confirm["properties"]["decision"].get("enum"), ["accept", "reject"])
-        self.assertEqual(task_progress["properties"]["refs"]["items"]["properties"]["type"].get("enum"), ["track", "artifact", "message", "comment", "request"])
+        self.assertEqual(task_progress["properties"]["refs"]["items"]["properties"]["type"].get("enum"), ["track", "artifact", "message", "comment"])
         self.assertEqual(task_checkout["properties"]["next"].get("enum"), ["continue", "finish", "block"])
 
         self.assertEqual(context_get["properties"]["limit"].get("type"), "integer")
@@ -333,22 +330,6 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(set(conversation_target.get("required", [])), {"role_id", "actor_id"})
         self.assertEqual(conversation_target.get("properties", {}).get("role_id", {}).get("type"), "string")
         self.assertEqual(conversation_target.get("properties", {}).get("actor_id", {}).get("type"), "string")
-
-        self.assertIn("track_id", request_create.get("required", []))
-        self.assertIn("to_role", request_create.get("required", []))
-        self.assertIn("title", request_create.get("required", []))
-        self.assertIn("summary", request_create.get("required", []))
-        target_ref = request_create["properties"]["target_refs"]["items"]
-        self.assertEqual(target_ref.get("type"), "object")
-        self.assertIs(target_ref.get("additionalProperties"), False)
-        self.assertEqual(set(target_ref.get("required", [])), {"type", "id"})
-        self.assertEqual(target_ref.get("properties", {}).get("type", {}).get("enum"), ["track", "artifact", "comment"])
-        self.assertEqual(request_list["properties"]["box"].get("enum"), ["all", "inbox", "outbox"])
-        self.assertEqual(request_list["properties"]["status"].get("enum"), ["open", "accepted", "blocked", "done", "canceled"])
-        self.assertEqual(request_complete["properties"]["result_refs"].get("type"), "array")
-        result_ref = request_complete["properties"]["result_refs"]["items"]
-        self.assertEqual(result_ref.get("type"), "object")
-        self.assertEqual(result_ref.get("properties", {}).get("type", {}).get("enum"), ["track", "artifact", "comment"])
 
         self.assertEqual(set(comment_resolve.get("required", [])), {"comment_id", "resolution_summary"})
 

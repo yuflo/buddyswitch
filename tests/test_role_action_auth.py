@@ -66,7 +66,6 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
 
     def test_common_permissions_allow_every_manifest_role(self) -> None:
         for permission in (
-            "request.accept",
             "artifact.create",
             "evidence.approve",
             "track.add_proof",
@@ -113,7 +112,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             self.assertNotIn(old_key, summary)
         self.assertIn("track.list", summary["available_actions"])
         self.assertIn("artifact.create_revision", summary["available_actions"])
-        self.assertIn("request.accept", summary["available_actions"])
+        self.assertIn("message.send", summary["available_actions"])
         self.assertIn("track.create", summary["restricted_actions"])
         self.assertIn("track.archive", summary["restricted_actions"])
         self.assertIn("comment.resolve", summary["restricted_actions"])

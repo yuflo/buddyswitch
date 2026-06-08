@@ -24,7 +24,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -302,13 +302,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         self.assertTrue(payload.get("ok"), msg=payload)
 
-        for key in ("candidate_tracks", "candidate_requests", "candidate_artifacts", "candidate_tasks"):
+        for key in ("candidate_tracks", "candidate_artifacts", "candidate_tasks"):
             self.assertIn(key, payload, msg=payload)
             self.assertIsInstance(payload.get(key), list, msg=payload)
+        removed_candidate_section = "candidate_" + "requests"
+        self.assertNotIn(removed_candidate_section, payload, msg=payload)
 
         key_expectations = {
             "candidate_tracks": "track_id",
-            "candidate_requests": "request_id",
             "candidate_artifacts": "artifact_id",
             "candidate_tasks": "task_id",
         }
@@ -325,7 +326,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             key
             for word, key in (
                 ("tracks", "candidate_tracks"),
-                ("requests", "candidate_requests"),
                 ("artifacts", "candidate_artifacts"),
                 ("tasks", "candidate_tasks"),
             )
@@ -359,7 +359,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIs(preview.get("not_execution_result"), True)
         self.assertIn("track.list", preview.get("available_actions", []))
         self.assertIn("artifact.create_revision", preview.get("available_actions", []))
-        self.assertIn("request.accept", preview.get("available_actions", []))
+        self.assertIn("message.send", preview.get("available_actions", []))
         self.assertIn("track.create", preview.get("restricted_actions", []))
         self.assertIn("track.archive", preview.get("restricted_actions", []))
         self.assertIn("comment.resolve", preview.get("restricted_actions", []))

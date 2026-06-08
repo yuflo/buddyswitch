@@ -19,7 +19,7 @@ _TASK_REF_SCHEMA = {
         "type": {
             "type": "string",
             "description": "Private task reference type.",
-            "enum": ["track", "artifact", "message", "comment", "request"],
+            "enum": ["track", "artifact", "message", "comment"],
         },
         "id": {"type": "string", "description": "Referenced runtime object id."},
         "label": {"type": "string", "description": "Optional short label for the private reference."},
@@ -34,7 +34,7 @@ _TASK_ORIGIN_SCHEMA = {
         "type": {
             "type": "string",
             "description": "Origin category for the captured work demand.",
-            "enum": ["manual", "user_input", "track", "artifact", "message", "comment", "request"],
+            "enum": ["manual", "user_input", "track", "artifact", "message", "comment"],
         },
         "id": {"type": "string", "description": "Optional origin object or turn id."},
         "label": {"type": "string", "description": "Optional origin label."},
@@ -75,7 +75,6 @@ _NO_SIBLING_WRITES = (
     "artifact visibility",
     "message state",
     "comment state",
-    "request state",
     "actor_private file contents",
 )
 _TASK_WRITES = ("instance-local active actor taskbox task docs", "instance-local taskbox history")
@@ -165,11 +164,11 @@ def _build_definition() -> ToolDefinition:
         object_model=(
             "Tasks are active actor private work items stored in taskbox. Task Core owns task facts and history; "
             "Task Operations own capture, select, switch, progress, checkout, and review semantics. "
-            "Task refs are private context links and do not publish, share, or mutate referenced tracks, artifacts, messages, comments, requests, or actor_private files. "
+            "Task refs are private context links and do not publish, share, or mutate referenced tracks, artifacts, messages, comments, or actor_private files. "
             "All reads and writes return a TaskViewModel for innerTUI rendering."
         ),
         use_when=("You need current, shelf, switch, progress, checkout, or review state for active actor private work.",),
-        do_not_use_when=("You need to change shared track/artifact/message/comment/request state rather than private taskbox state.",),
+        do_not_use_when=("You need to change shared track/artifact/message/comment state rather than private taskbox state.",),
         actions=(
             _action(
                 name="current",

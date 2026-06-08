@@ -309,8 +309,6 @@ def artifact_list_row(
         "open_comment_count": int(counts.get("open_comment_count", 0)),
         "resolved_comment_count": int(counts.get("resolved_comment_count", 0)),
         "incoming_source_ref_count": int(backlinks.get("incoming_source_ref_count", 0)),
-        "target_request_count": int(backlinks.get("target_request_count", 0)),
-        "result_request_count": int(backlinks.get("result_request_count", 0)),
         "track_update_ref_count": int(backlinks.get("track_update_ref_count", 0)),
         "comment_count": int(backlinks.get("comment_count", 0)),
         "updated_at": artifact.get("updated_at"),

@@ -47,7 +47,6 @@ def refresh_runtime_root_bindings() -> None:
     global ARTIFACT_OBJECTS_DIR
     global MESSAGES_DIR
     global COMMENTS_DIR
-    global REQUESTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
     global ACTOR_PRIVATE_DIR
@@ -60,7 +59,6 @@ def refresh_runtime_root_bindings() -> None:
     ARTIFACT_OBJECTS_DIR = runtime_files.ARTIFACT_OBJECTS_DIR
     MESSAGES_DIR = runtime_files.MESSAGES_DIR
     COMMENTS_DIR = runtime_files.COMMENTS_DIR
-    REQUESTS_DIR = runtime_files.REQUESTS_DIR
     CONTENT_ROOT = runtime_files.CONTENT_ROOT
     LOCAL_ROOT = runtime_files.LOCAL_ROOT
     ACTOR_PRIVATE_DIR = runtime_files.ACTOR_PRIVATE_DIR

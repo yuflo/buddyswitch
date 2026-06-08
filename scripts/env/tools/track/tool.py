@@ -124,7 +124,7 @@ def _build_definition() -> ToolDefinition:
                 does_not_write=(
                     'artifact body',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -192,7 +192,7 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'artifact state',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -254,7 +254,7 @@ def _build_definition() -> ToolDefinition:
                     'track state',
                     'artifact body',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -330,7 +330,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'artifact publication slot',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -406,7 +406,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 does_not_write=(
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                     'comment threads',
                 ),
@@ -491,7 +491,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'artifact publication slot',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -569,7 +569,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 does_not_write=(
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                     'comment threads',
                 ),
@@ -638,7 +638,7 @@ def _build_definition() -> ToolDefinition:
                     'artifact body',
                     'artifact publication metadata',
                     'task state',
-                    'request lifecycle',
+                    'direct message state',
                     'actor_private files',
                 ),
                 preconditions=(

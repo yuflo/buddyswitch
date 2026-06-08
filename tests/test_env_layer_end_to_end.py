@@ -43,6 +43,12 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "browser_port": 9333,
             }
             instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+            self._seed_active_task_for_instance(
+                instance_json=instance_json,
+                role=role,
+                actor_id=actor_id,
+                task_slug=f"{role}-e2e-runless",
+            )
             self.instances[role] = {
                 "actor_id": actor_id,
                 "instance_root": instance_root,
@@ -412,8 +418,8 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(denied["permission_boundary"], "artifact.actor_scope")
         self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_SCOPE")
 
-    def test_request_lifecycle_and_pm_comment_resolution_flow(self) -> None:
-        track_id = "track-e2e-request-flow"
+    def test_pm_comment_resolution_flow(self) -> None:
+        track_id = "track-e2e-comment-flow"
         created = self._create_track(track_id)
         self.assertTrue(created.get("ok"), msg=created)
 
@@ -441,44 +447,9 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before_messages = list(env_store.list_messages())
         before_tasks = self._instance_task_snapshot()
 
-        request_created = self._dispatch(
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": track_id,
-                "to_role": "dev",
-                "title": "Implement approved scope",
-                "summary": "Build implementation artifact from PM scope.",
-                "target_refs": [{"type": "artifact", "id": "art-pm-scope-r1"}],
-            },
-        )
-        self.assertTrue(request_created.get("ok"), msg=request_created)
-        request_id = str((request_created.get("request") or {}).get("id"))
-        self.assertTrue(request_id.startswith("req-"))
-
-        dev_inbox = self._dispatch(
-            role="dev",
-            tool="request",
-            action="list",
-            args={"box": "inbox", "track_id": track_id},
-        )
-        self.assertTrue(dev_inbox.get("ok"), msg=dev_inbox)
-        inbox_ids = [row.get("id") for row in dev_inbox.get("requests", []) if isinstance(row, dict)]
-        self.assertIn(request_id, inbox_ids)
-
-        accepted = self._dispatch(
-            role="dev",
-            tool="request",
-            action="accept",
-            args={"request_id": request_id},
-        )
-        self.assertTrue(accepted.get("ok"), msg=accepted)
-        self.assertEqual((accepted.get("request") or {}).get("status"), "accepted")
-
         dev_result = self._create_draft(
             role="dev",
-            artifact_id="art-dev-req-r1",
+            artifact_id="art-dev-comment-r1",
             template="note",
             body="# Implementation\n\nDelivered",
             summary="dev implementation",
@@ -490,24 +461,12 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="add_material",
             args={
                 "track_id": track_id,
-                "artifact_id": "art-dev-req-r1",
+                "artifact_id": "art-dev-comment-r1",
                 "label": "Implementation",
                 "summary": "done",
             },
         )
         self.assertTrue(dev_result_pub.get("ok"), msg=dev_result_pub)
-
-        completed = self._dispatch(
-            role="dev",
-            tool="request",
-            action="complete",
-            args={
-                "request_id": request_id,
-                "result_refs": [{"type": "artifact", "id": "art-dev-req-r1"}],
-            },
-        )
-        self.assertTrue(completed.get("ok"), msg=completed)
-        self.assertEqual((completed.get("request") or {}).get("status"), "done")
 
         test_comment = self._dispatch(
             role="test",
@@ -515,7 +474,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="add",
             args={
                 "target_type": "artifact",
-                "target_id": "art-dev-req-r1",
+                "target_id": "art-dev-comment-r1",
                 "content": "Need PM closure review.",
             },
         )
@@ -535,7 +494,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="pm",
             tool="comment",
             action="list",
-            args={"target_type": "artifact", "target_id": "art-dev-req-r1", "status": "resolved"},
+            args={"target_type": "artifact", "target_id": "art-dev-comment-r1", "status": "resolved"},
         )
         self.assertTrue(resolved_list.get("ok"), msg=resolved_list)
         self.assertEqual(len(resolved_list.get("comments", [])), 1)
@@ -548,9 +507,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"track_id": track_id, "limit": 10},
         )
         self.assertTrue(pm_context.get("ok"), msg=pm_context)
-        request_rows = [row for row in pm_context.get("requests", []) if isinstance(row, dict)]
-        request_row = next(row for row in request_rows if row.get("id") == request_id)
-        self.assertEqual(request_row.get("status"), "done")
+        self.assertNotIn("requests", pm_context)
 
         after_messages = list(env_store.list_messages())
         after_tasks = self._instance_task_snapshot()

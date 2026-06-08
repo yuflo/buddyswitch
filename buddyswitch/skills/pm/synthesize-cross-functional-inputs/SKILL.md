@@ -29,7 +29,7 @@ description: Use when PM must combine market, design, dev, test, or stakeholder 
 
 ## Outputs
 - Synthesis table or brief summary with signal, product impact, PM action, owner, and open question.
-- Optional owner-specific request or task update.
+- Optional owner-specific task update.
 
 ## Quality Bar
 - Market, design, dev, and test inputs are not flattened into generic consensus.

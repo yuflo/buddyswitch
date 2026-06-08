@@ -72,9 +72,9 @@ class EnvManifestV2Tests(unittest.TestCase):
         ]
         self.assertEqual(rows, [])
 
-    def test_all_roles_have_message_comment_request_tools(self) -> None:
-        """MCT-MAN-002: Every role has message/comment/request tools."""
-        required_tools = {"message-tool", "comment-tool", "request-tool"}
+    def test_all_roles_have_message_comment_tools(self) -> None:
+        """MCT-MAN-002: Every role has message/comment tools."""
+        required_tools = {"message-tool", "comment-tool"}
         for role in self.manifest.get("roles", []):
             assert isinstance(role, dict)
             role_id = str(role.get("id"))

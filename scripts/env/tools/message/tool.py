@@ -18,7 +18,7 @@ def _build_definition() -> ToolDefinition:
         scope='direct runtime actor inbox messaging',
         capability_boundary='Messages are direct runtime actor-address scope only.',
         object_model=(
-            'Messages are direct actor-address inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, requests, browser state, or actor private files.'
+            'Messages are direct actor-address inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, browser state, or actor private files.'
         ),
         use_when=(
             'You need direct inbox messaging between online runtime actors.',
@@ -65,7 +65,6 @@ def _build_definition() -> ToolDefinition:
                     'tasks',
                     'artifacts',
                     'comments',
-                    'requests',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -151,7 +150,6 @@ def _build_definition() -> ToolDefinition:
                     'tasks',
                     'artifacts',
                     'comments',
-                    'requests',
                     'actor_private files',
                     'browser session',
                 ),
@@ -221,7 +219,6 @@ def _build_definition() -> ToolDefinition:
                     'tasks',
                     'artifacts',
                     'comments',
-                    'requests',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -296,7 +293,6 @@ def _build_definition() -> ToolDefinition:
                     'tasks',
                     'artifacts',
                     'comments',
-                    'requests',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -372,7 +368,6 @@ def _build_definition() -> ToolDefinition:
                     'tasks',
                     'artifacts',
                     'comments',
-                    'requests',
                     'actor_private files',
                 ),
                 preconditions=(
@@ -455,7 +450,6 @@ def _build_definition() -> ToolDefinition:
                     'tasks',
                     'artifacts',
                     'comments',
-                    'requests',
                     'actor_private files',
                 ),
                 preconditions=(

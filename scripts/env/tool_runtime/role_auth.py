@@ -34,12 +34,6 @@ COMMON_ROLE_PERMISSIONS = frozenset(
         "message.conversation",
         "comment.add",
         "comment.list",
-        "request.read",
-        "request.create",
-        "request.accept",
-        "request.block",
-        "request.complete",
-        "request.cancel",
         "evidence.issue",
         "evidence.approve",
     }

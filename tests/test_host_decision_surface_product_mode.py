@@ -98,20 +98,6 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             now={"next": "Scan market", "blocker": None},
         )
         self._seed_taskbox_task(role="market", task_id="task-market-decision", title="Scan market", track_id=str(track["id"]))
-        request_created = self._dispatch(
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": str(track["id"]),
-                "to_role": "market",
-                "title": "Collect market proof",
-                "summary": "Scan competitors and report signal quality.",
-                "target_refs": [{"type": "track", "id": str(track["id"])}],
-            },
-        )
-        self.assertTrue(request_created["ok"], msg=request_created)
-
         response = self._dispatch(role="market", tool="context", action="summarize", args={})
         self.assertTrue(response["ok"], msg=response)
         self.assertEqual(response["decision_surface"]["binding_state"]["state"], "runless")
@@ -119,15 +105,16 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertNotIn("memory_summaries", response)
         self.assertIn("candidate_tracks", response)
         self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_tracks"]))
-        self.assertIn("candidate_requests", response)
-        self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_requests"]))
+        removed_candidate_section = "candidate_" + "requests"
+        self.assertNotIn(removed_candidate_section, response)
         self.assertIn("candidate_tasks", response)
         self.assertTrue(any(row.get("task_id") == "task-market-decision" for row in response["candidate_tasks"]))
-        self.assertGreaterEqual(int((response.get("current_context_summary") or {}).get("requests", 0)), 1)
+        self.assertNotIn("requests", response.get("current_context_summary") or {})
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
-        self.assertTrue({"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}.issubset(set(affordances)))
+        self.assertTrue({"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}.issubset(set(affordances)))
+        self.assertNotIn("request", affordances)
         self.assertNotIn("private", affordances)
         self.assertNotIn("handoff", affordances)
         self.assertNotIn("project_source", affordances)
@@ -185,19 +172,6 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             from_role="pm",
             summary="Proof summary",
         )
-        created_request = self._dispatch(
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": str(track["id"]),
-                "to_role": "market",
-                "title": "Validate entry surface",
-                "summary": "Check entry artifacts and updates.",
-                "target_refs": [{"type": "artifact", "id": str(artifact["id"])}],
-            },
-        )
-        self.assertTrue(created_request.get("ok"), msg=created_request)
         added_comment = self._dispatch(
             role="pm",
             tool="comment",
@@ -225,7 +199,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         summary = self._dispatch(role="market", tool="context", action="summarize", args={})
         self.assertTrue(summary.get("ok"), msg=summary)
         self.assertIn("candidate_artifacts", summary)
-        self.assertIn("candidate_requests", summary)
+        removed_candidate_section = "candidate_" + "requests"
+        self.assertNotIn(removed_candidate_section, summary)
         self.assertIn("open_comment_threads", summary)
         self.assertIn("recent_updates", summary)
         candidate_artifacts = summary.get("candidate_artifacts")
@@ -252,10 +227,11 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
-        for tool_id in ("artifact", "request", "comment", "track", "context"):
+        for tool_id in ("artifact", "comment", "track", "context"):
             self.assertIn(tool_id, affordances)
+        self.assertNotIn("request", affordances)
 
-    def test_context_summarize_track_filter_narrows_artifacts_requests_comments_and_updates(self) -> None:
+    def test_context_summarize_track_filter_narrows_artifacts_comments_and_updates(self) -> None:
         track_a = env_store.create_track(
             "track-context-filter-a",
             "Filter A",
@@ -308,32 +284,6 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             from_role="pm",
             summary="B",
         )
-        request_a = self._dispatch(
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": str(track_a["id"]),
-                "to_role": "market",
-                "title": "Request A",
-                "summary": "A",
-                "target_refs": [{"type": "artifact", "id": str(art_a["id"])}],
-            },
-        )
-        self.assertTrue(request_a.get("ok"), msg=request_a)
-        request_b = self._dispatch(
-            role="pm",
-            tool="request",
-            action="create",
-            args={
-                "track_id": str(track_b["id"]),
-                "to_role": "market",
-                "title": "Request B",
-                "summary": "B",
-                "target_refs": [{"type": "artifact", "id": str(art_b["id"])}],
-            },
-        )
-        self.assertTrue(request_b.get("ok"), msg=request_b)
         comment_a = self._dispatch(
             role="pm",
             tool="comment",
@@ -395,9 +345,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         for row in filtered.get("candidate_artifacts", []):
             if isinstance(row, dict):
                 self.assertEqual(row.get("published_to_track"), "track-context-filter-a", msg=row)
-        for row in filtered.get("candidate_requests", []):
-            if isinstance(row, dict):
-                self.assertEqual(row.get("track_id"), "track-context-filter-a", msg=row)
+        removed_candidate_section = "candidate_" + "requests"
+        self.assertNotIn(removed_candidate_section, filtered)
         for row in filtered.get("open_comment_threads", []):
             if isinstance(row, dict):
                 self.assertEqual(row.get("target_id"), "art-context-filter-a-r1", msg=row)
@@ -414,7 +363,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertTrue(empty.get("ok"), msg=empty)
         self.assertEqual(empty.get("candidate_tracks"), [])
         self.assertEqual(empty.get("candidate_artifacts"), [])
-        self.assertEqual(empty.get("candidate_requests"), [])
+        removed_candidate_section = "candidate_" + "requests"
+        self.assertNotIn(removed_candidate_section, empty)
         self.assertEqual(empty.get("open_comment_threads"), [])
         self.assertEqual(empty.get("recent_updates"), [])
 
