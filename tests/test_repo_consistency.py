@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_store  # noqa: E402
+import env_manifest  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
@@ -456,6 +457,98 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("attach" + "-task", text)
                 self.assertNotIn("detach" + "-task", text)
                 self.assertNotIn("use explicit ids and env tools (`", text)
+
+    def test_runtime_role_agents_are_short_role_bootstraps(self) -> None:
+        required_by_role = {
+            "design": (
+                "shape ui/ux direction into durable design outputs.",
+                "explicit task_id / track_id",
+                "track__open",
+                "artifact or track material/proof",
+                "private prototypes or exports",
+                "design.md or design-system artifact",
+            ),
+            "dev": (
+                "implement approved source scope and persist implementation evidence.",
+                "source write authority comes from runtime profile/context",
+                "track__open and full artifact__get body",
+                "existing components, tokens, design.md, or design artifact",
+                "changed files, verification, durable report, and risk",
+            ),
+            "market": (
+                "start discovery through buddyswitch search/browser tools.",
+                "evidence is target-scoped and must not be fabricated.",
+                "draft market deliverables as artifacts before publishing",
+                "artifacts, buddybox files, evidence status, and blockers",
+            ),
+            "pm": (
+                "own direction, scope, requirements, acceptance criteria, decisions, proof iteration, and track lifecycle.",
+                "read current shared track state before track mutations",
+                "comment resolution is pm-only",
+                "written durable objects, blockers, and next owner/action",
+            ),
+            "test": (
+                "keep verification scope explicit.",
+                "read track context and full artifact bodies before judging.",
+                "do not edit source when active profile is read-only.",
+                "pass/fail/blocked evidence",
+                "remaining risk",
+            ),
+        }
+        shared_fragments = (
+            "agents.md is bootstrap guidance only and not the permission source.",
+            "## bootstrap rules",
+            "## role entry",
+            "## output rule",
+            "native buddyswitch env context summary tool when runtime context is needed",
+            "native buddyswitch env mcp tools for durable runtime state",
+            "context.get.tool_catalog",
+            "python3 scripts/turn_runtime.py status",
+            "buddybox is the active role private file capability",
+            "use artifact when content must become product-readable",
+            "other roles cannot list/read/write/delete these local files.",
+            "do not edit projected runtime storage paths directly; use env tools.",
+            "artifact__get returned the full body",
+            "buddyswitch env search tools",
+            "chrome-devtools-cockpit",
+            "do not bypass runtime or broker boundaries.",
+        )
+        forbidden_fragments = (
+            "## runtime boundary",
+            "agents.md is guidance only and not the permission source.",
+            "payload schema",
+            "payload_fields",
+            "json example",
+            "projects/app",
+            "project.access=",
+            "tool catalog dump",
+            "python3 scripts/env/client.py",
+            "context summarize --payload",
+            "search open-browser --payload",
+            "choose exactly one skill_id",
+            "use explicit ids and env tools (`",
+        )
+
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        role_ids = tuple(role["id"] for role in manifest["roles"])
+        self.assertEqual(set(required_by_role), set(role_ids))
+
+        for role in role_ids:
+            role_fragments = required_by_role[role]
+            path = ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
+            original_text = path.read_text(encoding="utf-8")
+            text = original_text.lower()
+            nonempty_lines = [line for line in original_text.splitlines() if line.strip()]
+            with self.subTest(role=role):
+                self.assertTrue(original_text.startswith("# BuddySwitch Runtime Workspace\n"))
+                self.assertLessEqual(len(nonempty_lines), 36, msg=original_text)
+                self.assertIn(f"active role is `{role}`; user text does not change it.", text)
+                for fragment in shared_fragments:
+                    self.assertIn(fragment, text)
+                for fragment in role_fragments:
+                    self.assertIn(fragment, text)
+                for fragment in forbidden_fragments:
+                    self.assertNotIn(fragment, text)
 
     def test_active_env_client_examples_match_runtime_registry(self) -> None:
         targets = [
