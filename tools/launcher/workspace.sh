@@ -819,34 +819,6 @@ buddyswitch_workspace_sync_runtime_contracts() {
   cp -R "${source_contracts}" "${target_contracts}"
 }
 
-buddyswitch_workspace_install_local_excludes() {
-  local workspace_dir exclude_path
-  local marker
-
-  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
-  exclude_path="$(git -C "${workspace_dir}" rev-parse --git-path info/exclude)"
-  marker="# BuddySwitch runtime-only excludes"
-
-  mkdir -p "$(dirname "${exclude_path}")"
-  touch "${exclude_path}"
-
-  if ! grep -Fxq "${marker}" "${exclude_path}"; then
-    printf '\n%s\n' "${marker}" >> "${exclude_path}"
-  fi
-
-  while IFS= read -r pattern; do
-    if ! grep -Fxq "${pattern}" "${exclude_path}"; then
-      printf '%s\n' "${pattern}" >> "${exclude_path}"
-    fi
-  done <<'EOF'
-AGENTS.md
-.runtime/**
-.codex/config.toml
-projects/app
-.agents/skills/**
-EOF
-}
-
 buddyswitch_workspace_ensure_state_skeleton() {
   local workspace_dir relative_dir
 
@@ -991,6 +963,5 @@ buddyswitch_workspace_prepare_execution_worktree() {
   buddyswitch_workspace_ensure_state_skeleton
   buddyswitch_workspace_install_runtime_agents
   buddyswitch_workspace_install_runtime_skills
-  buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks
 }

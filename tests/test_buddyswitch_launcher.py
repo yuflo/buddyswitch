@@ -1715,75 +1715,6 @@ exec "$real_git" "$@"
             self.assertFalse((workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype").exists())
             self.assertFalse((workspace_dir / "tools" / "launcher" / "assets" / "roles" / "design").exists())
 
-    def test_runtime_local_excludes_cover_generated_runtime_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            temp_root_path = Path(temp_root)
-            source_home_path = Path(source_home)
-            source_codex_home = source_home_path / ".codex"
-            source_codex_home.mkdir(parents=True, exist_ok=True)
-            (source_codex_home / "auth.json").write_text(
-                json.dumps(
-                    {
-                        "auth_mode": "apikey",
-                        "openai_api_key": "test-key",
-                        "tokens": None,
-                        "last_refresh": None,
-                        "agent_identity": None,
-                    },
-                    ensure_ascii=True,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            fake_bin = temp_root_path / "bin"
-            fake_bin.mkdir(parents=True, exist_ok=True)
-            self._write_fake_codex(fake_bin / "codex")
-            self._write_fake_curl(fake_bin / "curl")
-            self._write_fake_chrome(fake_bin / "fake-chrome")
-
-            capture_path = temp_root_path / "capture.json"
-            ready_file = temp_root_path / "browser-ready.flag"
-            env = os.environ.copy()
-            env["HOME"] = str(source_home_path)
-            env.pop("CODEX_HOME", None)
-            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
-            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
-            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
-            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
-            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
-
-            completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--role", "pm"],
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            payload = json.loads(capture_path.read_text(encoding="utf-8"))
-            workspace_dir = Path(payload["cwd"])
-            exclude_path = subprocess.check_output(
-                ["git", "-C", str(workspace_dir), "rev-parse", "--git-path", "info/exclude"],
-                text=True,
-            ).strip()
-            resolved_exclude = Path(exclude_path)
-            if not resolved_exclude.is_absolute():
-                resolved_exclude = workspace_dir / resolved_exclude
-            exclude_lines = {line.strip() for line in resolved_exclude.read_text(encoding="utf-8").splitlines() if line.strip()}
-            expected_lines = {
-                "AGENTS.md",
-                ".agents/skills/**",
-                "projects/app",
-                ".runtime/**",
-                ".codex/config.toml",
-            }
-            for line in expected_lines:
-                self.assertIn(line, exclude_lines)
-
     def test_runtime_broker_starts_from_sparse_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -2312,15 +2243,6 @@ exec "$real_git" "$@"
             for relative in removed_tool_files:
                 with self.subTest(removed_runtime_surface=relative):
                     self.assertFalse((workspace_dir / relative).exists())
-            exclude_path = subprocess.check_output(
-                ["git", "-C", str(workspace_dir), "rev-parse", "--git-path", "info/exclude"],
-                text=True,
-            ).strip()
-            resolved_exclude = Path(exclude_path)
-            if not resolved_exclude.is_absolute():
-                resolved_exclude = workspace_dir / resolved_exclude
-            local_excludes = resolved_exclude.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/**", local_excludes)
             self.assertTrue((instance_root / "browser" / "profile").exists())
             self.assertTrue((instance_root / "browser" / "chrome.pid").exists())
             self.assertTrue((instance_root / "browser" / "chrome.log").exists())
