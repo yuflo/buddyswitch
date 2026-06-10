@@ -20,13 +20,24 @@ if str(SCRIPTS) not in sys.path:
 
 SHIPPED_TOOLS: dict[str, set[str]] = {
     "artifact": {"attach_file", "create_revision", "get", "get_attachment", "list", "list_attachments", "update_metadata"},
-    "comment": {"add", "list", "resolve"},
     "context": {"get", "list_sources", "summarize"},
     "evidence": {"approve_downgrade", "issue_browser"},
     "message": {"contacts", "conversation", "get", "list", "mark", "send"},
     "search": {"open_browser", "request", "status"},
     "task": {"current", "capture", "select", "switch_request", "switch_confirm", "progress", "checkout", "review"},
-    "track": {"add_material", "add_proof", "add_update", "archive", "create", "list", "open", "update_now"},
+    "track": {
+        "add_comment",
+        "add_material",
+        "add_proof",
+        "add_update",
+        "archive",
+        "create",
+        "list",
+        "list_comments",
+        "open",
+        "resolve_comment_thread",
+        "update_now",
+    },
 }
 
 LEGACY_SHARED_RUNTIME_FILES = {

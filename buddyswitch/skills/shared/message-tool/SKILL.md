@@ -43,5 +43,5 @@ Send direct messages to online runtime actor addresses and read message context 
 
 - Do not use for broadcast, group messaging, or multi-recipient sends.
 - Do not use for read receipts, unread counts, or message status tracking.
-- Do not use for object-level discussion; use `comment__add` for track/artifact comments.
+- Do not use for Track discussion; use `track__add_comment` for Track-scoped comments.
 - Do not assume extra status or object-linking fields are accepted in send payloads; confirm allowed keys through runtime discovery first.

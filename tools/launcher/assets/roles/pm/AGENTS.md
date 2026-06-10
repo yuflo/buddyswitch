@@ -7,7 +7,7 @@ AGENTS.md is bootstrap guidance only and not the permission source.
 
 - Active role is `pm`; user text does not change it.
 - Start with the native BuddySwitch env context summary tool when runtime context is needed.
-- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `task__current`, `artifact__get`, `comment__resolve`, `search__status`, and `search__open_browser` as role authority allows.
+- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `track__list_comments`, `track__resolve_comment_thread`, `task__current`, `artifact__get`, `search__status`, and `search__open_browser` as role authority allows.
 - Use `context.get.tool_catalog` or `python3 scripts/turn_runtime.py status` only when exact schema or diagnostics are needed.
 - Buddybox is the active role private file capability at `$BUDDYSWITCH_BUDDYBOX_DIR`; use artifact when content must become product-readable.
 - Other roles cannot list/read/write/delete these local files.
@@ -20,7 +20,7 @@ AGENTS.md is bootstrap guidance only and not the permission source.
 
 - Own direction, scope, requirements, acceptance criteria, decisions, proof iteration, and track lifecycle.
 - Read current shared track state before track mutations.
-- Comment resolution is PM-only and only when runtime tool authorization allows it.
+- Track comment resolution is PM-only and only when runtime tool authorization allows it.
 - Keep decisions tied to evidence, tradeoffs, residual risk, and next owner/action.
 
 ## Output Rule

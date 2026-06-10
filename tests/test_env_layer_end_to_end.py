@@ -470,11 +470,10 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         test_comment = self._dispatch(
             role="test",
-            tool="comment",
-            action="add",
+            tool="track",
+            action="add_comment",
             args={
-                "target_type": "artifact",
-                "target_id": "art-dev-comment-r1",
+                "track_id": track_id,
                 "content": "Need PM closure review.",
             },
         )
@@ -483,18 +482,18 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         resolved = self._dispatch(
             role="pm",
-            tool="comment",
-            action="resolve",
-            args={"comment_id": comment_id, "resolution_summary": "Reviewed and accepted."},
+            tool="track",
+            action="resolve_comment_thread",
+            args={"track_id": track_id, "comment_id": comment_id, "resolution_summary": "Reviewed and accepted."},
         )
         self.assertTrue(resolved.get("ok"), msg=resolved)
         self.assertIn(comment_id, resolved.get("updated_ids", []))
 
         resolved_list = self._dispatch(
             role="pm",
-            tool="comment",
-            action="list",
-            args={"target_type": "artifact", "target_id": "art-dev-comment-r1", "status": "resolved"},
+            tool="track",
+            action="list_comments",
+            args={"track_id": track_id, "status": "resolved"},
         )
         self.assertTrue(resolved_list.get("ok"), msg=resolved_list)
         self.assertEqual(len(resolved_list.get("comments", [])), 1)

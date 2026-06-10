@@ -39,7 +39,7 @@ def _runtime_relative_path(path: Path) -> str:
 TRACK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACKS_DIR)
 ARTIFACT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.ARTIFACT_OBJECTS_DIR)
 MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
-COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.COMMENTS_DIR)
+COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACK_COMMENTS_DIR)
 ACTOR_PRIVATE_RELATIVE_DIR = "private"
 
 
@@ -367,10 +367,12 @@ def discover_comment_objects(root: Path) -> tuple[list[dict[str, Any]], list[dic
         cmt_id = payload.get("id")
         by_actor = payload.get("by_actor")
         author_role = by_actor.get("role_id") if isinstance(by_actor, dict) else None
-        target_type = payload.get("target_type")
-        target_id = payload.get("target_id")
+        track_id = payload.get("track_id")
         if not isinstance(cmt_id, str) or not cmt_id:
             invalid.append({"path": relative, "reason": "comment object is missing id"})
+            continue
+        if not isinstance(track_id, str) or not track_id:
+            invalid.append({"path": relative, "reason": f"comment '{cmt_id}' is missing track_id"})
             continue
         if not isinstance(author_role, str) or not author_role:
             invalid.append({"path": relative, "reason": f"comment '{cmt_id}' is missing by_actor.role_id"})
@@ -379,8 +381,7 @@ def discover_comment_objects(root: Path) -> tuple[list[dict[str, Any]], list[dic
         valid.append({
             "id": cmt_id,
             "author_role": author_role,
-            "target_type": target_type,
-            "target_id": target_id,
+            "track_id": track_id,
             "object_path": relative,
         })
     return valid, invalid
@@ -628,11 +629,11 @@ def add_indexed_comment(plan: dict[str, Any], record: dict[str, Any]) -> None:
         plan["comment_object_ids"].append(record["id"])
         plan["comment_records"].append(record)
 
-    object_path, blocked_reason = owner_object_json_path(root, category="comment_objects", object_id=str(record["id"]))
-    if object_path is None:
-        if blocked_reason is not None:
-            add_warning(plan, f"Skipping comment cleanup for '{record['id']}': {blocked_reason}")
+    relative_path = record.get("object_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        add_warning(plan, f"Skipping comment cleanup for '{record['id']}': missing object path")
         return
+    object_path = root / relative_path
     add_path(plan, object_path, "comment_objects")
 
 
@@ -840,10 +841,14 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
             object_id = record.get("id")
             if not isinstance(object_id, str) or not object_id:
                 continue
-            owner_path, _ = owner_object_json_path(root, category=category, object_id=object_id)
-            if owner_path is None:
-                continue
-            relative_path = rel(root, owner_path)
+            raw_object_path = record.get("object_path")
+            if isinstance(raw_object_path, str) and raw_object_path:
+                relative_path = raw_object_path
+            else:
+                owner_path, _ = owner_object_json_path(root, category=category, object_id=object_id)
+                if owner_path is None:
+                    continue
+                relative_path = rel(root, owner_path)
             if relative_path in deleted_set:
                 continue
             delete_relative_path(root, relative_path)

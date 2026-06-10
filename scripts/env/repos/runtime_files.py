@@ -39,7 +39,7 @@ def _recompute_runtime_roots() -> None:
     global ARTIFACT_OBJECTS_DIR
     global ARTIFACT_ATTACHMENTS_DIR
     global MESSAGES_DIR
-    global COMMENTS_DIR
+    global TRACK_COMMENTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
     global ACTOR_PRIVATE_DIR
@@ -57,7 +57,7 @@ def _recompute_runtime_roots() -> None:
     ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
     ARTIFACT_ATTACHMENTS_DIR = OBJECTS_ROOT / "artifact-attachments"
     MESSAGES_DIR = OBJECTS_ROOT / "messages"
-    COMMENTS_DIR = OBJECTS_ROOT / "comments"
+    TRACK_COMMENTS_DIR = OBJECTS_ROOT / "track-comments"
     CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
     LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
     ACTOR_PRIVATE_DIR = runtime_workspace_root(None) / "private"
@@ -230,7 +230,7 @@ def ensure_runtime_dirs() -> None:
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     MESSAGES_DIR.mkdir(parents=True, exist_ok=True)
-    COMMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    TRACK_COMMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def require_id(value: str, label: str) -> str:

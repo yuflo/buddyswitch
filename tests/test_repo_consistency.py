@@ -20,7 +20,7 @@ import env_manifest  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message"}
 _FORBIDDEN_RUNTIME_SURFACES = {
     "artifact_index",
     "artifact_search",
@@ -213,7 +213,19 @@ class RepoConsistencyTests(unittest.TestCase):
         track_actions = set(tool_catalog.supported_actions("track"))
         self.assertEqual(
             track_actions,
-            {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
+            {
+                "create",
+                "list",
+                "open",
+                "add_comment",
+                "list_comments",
+                "resolve_comment_thread",
+                "update_now",
+                "add_material",
+                "add_update",
+                "add_proof",
+                "archive",
+            },
         )
         artifact_actions = set(tool_catalog.supported_actions("artifact"))
         self.assertEqual(
@@ -247,10 +259,10 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_actor_identity_live_surfaces_do_not_reintroduce_role_as_actor_residue(self) -> None:
         live_paths = [
             ROOT / "scripts/env/tools/message/tool.py",
-            ROOT / "scripts/env/tools/comment/tool.py",
+            ROOT / "scripts/env/tools/track/tool.py",
             ROOT / "scripts/env/tools/task/tool.py",
             ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             ROOT / "buddyswitch/skills/pm/define-scope/SKILL.md",
             ROOT / "README.md",
             ROOT / "tools/launcher/assets/web-management/index.html",

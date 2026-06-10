@@ -54,7 +54,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             role_auth.authorize("none", "pm", self.manifest)  # type: ignore[arg-type]
 
     def test_pm_only_permissions_allow_only_pm(self) -> None:
-        for permission in ("track.create", "track.archive", "comment.resolve"):
+        for permission in ("track.create", "track.archive", "track.resolve_comment_thread"):
             with self.subTest(permission=permission):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), frozenset({"pm"}))
                 self.assertTrue(role_auth.authorize(permission, self._subject("pm"), self.manifest).allowed)
@@ -115,7 +115,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertIn("message.send", summary["available_actions"])
         self.assertIn("track.create", summary["restricted_actions"])
         self.assertIn("track.archive", summary["restricted_actions"])
-        self.assertIn("comment.resolve", summary["restricted_actions"])
+        self.assertIn("track.resolve_comment_thread", summary["restricted_actions"])
         details = summary["restricted_action_details"]
         self.assertEqual(details.get("track.create", {}).get("required_permission"), "track.create")
         self.assertEqual(details.get("track.create", {}).get("restricted_to_roles"), ["pm"])
@@ -124,10 +124,10 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         summary = role_auth.role_action_summary(self._subject("pm"), self.manifest, self.operation_semantics)
         self.assertNotIn("track.create", summary["restricted_actions"])
         self.assertNotIn("track.archive", summary["restricted_actions"])
-        self.assertNotIn("comment.resolve", summary["restricted_actions"])
+        self.assertNotIn("track.resolve_comment_thread", summary["restricted_actions"])
         self.assertIn("track.create", summary["available_actions"])
         self.assertIn("track.archive", summary["available_actions"])
-        self.assertIn("comment.resolve", summary["available_actions"])
+        self.assertIn("track.resolve_comment_thread", summary["available_actions"])
 
 
 if __name__ == "__main__":

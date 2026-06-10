@@ -113,7 +113,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
-        self.assertTrue({"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}.issubset(set(affordances)))
+        self.assertTrue({"task", "track", "artifact", "context", "evidence", "search", "message"}.issubset(set(affordances)))
         self.assertNotIn("request", affordances)
         self.assertNotIn("private", affordances)
         self.assertNotIn("handoff", affordances)
@@ -174,11 +174,10 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         added_comment = self._dispatch(
             role="pm",
-            tool="comment",
-            action="add",
+            tool="track",
+            action="add_comment",
             args={
-                "target_type": "artifact",
-                "target_id": str(artifact["id"]),
+                "track_id": str(track["id"]),
                 "content": "Open discussion",
             },
         )
@@ -213,7 +212,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         open_threads = summary.get("open_comment_threads")
         self.assertIsInstance(open_threads, list, msg=summary)
         assert isinstance(open_threads, list)
-        self.assertTrue(any(isinstance(row, dict) and row.get("target_id") == "art-context-entry-r1" for row in open_threads))
+        self.assertTrue(any(isinstance(row, dict) and row.get("track_id") == "track-context-entry-surface" for row in open_threads))
         recent_updates = summary.get("recent_updates")
         self.assertIsInstance(recent_updates, list, msg=summary)
         assert isinstance(recent_updates, list)
@@ -227,7 +226,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
-        for tool_id in ("artifact", "comment", "track", "context"):
+        for tool_id in ("artifact", "track", "context"):
             self.assertIn(tool_id, affordances)
         self.assertNotIn("request", affordances)
 
@@ -286,22 +285,20 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         comment_a = self._dispatch(
             role="pm",
-            tool="comment",
-            action="add",
+            tool="track",
+            action="add_comment",
             args={
-                "target_type": "artifact",
-                "target_id": str(art_a["id"]),
+                "track_id": str(track_a["id"]),
                 "content": "A comment",
             },
         )
         self.assertTrue(comment_a.get("ok"), msg=comment_a)
         comment_b = self._dispatch(
             role="pm",
-            tool="comment",
-            action="add",
+            tool="track",
+            action="add_comment",
             args={
-                "target_type": "artifact",
-                "target_id": str(art_b["id"]),
+                "track_id": str(track_b["id"]),
                 "content": "B comment",
             },
         )
@@ -349,7 +346,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertNotIn(removed_candidate_section, filtered)
         for row in filtered.get("open_comment_threads", []):
             if isinstance(row, dict):
-                self.assertEqual(row.get("target_id"), "art-context-filter-a-r1", msg=row)
+                self.assertEqual(row.get("track_id"), "track-context-filter-a", msg=row)
         for row in filtered.get("recent_updates", []):
             if isinstance(row, dict):
                 self.assertEqual(row.get("track_id"), "track-context-filter-a", msg=row)

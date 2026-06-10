@@ -34,13 +34,12 @@ PERMISSION_PROFILE = "buddyswitch-runtime"
 class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     _DOMAIN_CROSS_OBJECT_ALLOWLIST = {
         "publication",
-        "comment_targets",
         "artifact_visibility",
         "tasks",
         "source_refs",
         "actor_private_workspace",
     }
-    _SHIPPED_TOOLS = {"task", "track", "artifact", "context", "evidence", "message", "comment", "search"}
+    _SHIPPED_TOOLS = {"task", "track", "artifact", "context", "evidence", "message", "search"}
 
     def _legacy_store_import_violations(self, roots: list[Path]) -> list[str]:
         violations: list[str] = []
@@ -385,8 +384,8 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     )
         self.assertEqual(violations, [], msg="\n".join(violations))
 
-    def test_comment_repo_owns_only_comment_storage(self) -> None:
-        path = ROOT / "scripts/env/repos/comments.py"
+    def test_track_comment_repo_owns_only_track_comment_storage(self) -> None:
+        path = ROOT / "scripts/env/repos/track_comments.py"
         source = path.read_text(encoding="utf-8")
         self.assertNotIn("env_legacy_store", source)
         self.assertNotIn("artifact_revision_chain", source)
@@ -397,7 +396,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 imported_modules.extend(alias.name for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported_modules.append(node.module)
-        forbidden = [name for name in imported_modules if "artifacts" in name or "tracks" in name or "tasks" in name]
+        forbidden = [name for name in imported_modules if "artifacts" in name or name.endswith(".tracks") or "tasks" in name]
         self.assertEqual(forbidden, [], msg=", ".join(forbidden))
 
     def test_active_object_repos_do_not_import_env_legacy_store(self) -> None:

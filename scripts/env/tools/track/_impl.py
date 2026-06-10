@@ -188,6 +188,65 @@ def _reject_refs(
     )
 
 
+def _reject_track_comment_payload(
+    *,
+    action: str,
+    active_actor: dict[str, Any],
+    active_role: str,
+    message: str,
+    correctable_fields: list[str] | None = None,
+    field_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return tool_results.rejection(
+        tool="track",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        code="E_TRACK_COMMENT_PAYLOAD",
+        message=message,
+        permission_boundary="request-payload",
+        human_summary="Track comment request payload is invalid.",
+        why_blocked=message,
+        impact="No Track comments were created or changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Fix Track comment payload fields and retry.",
+        allowed_next_actions=["Use track.list_comments to inspect current Track discussion."],
+        correctable_fields=correctable_fields,
+        field_errors=field_errors,
+    )
+
+
+def _reject_track_comment_scope(
+    *,
+    action: str,
+    active_actor: dict[str, Any],
+    active_role: str,
+    code: str,
+    boundary: str,
+    message: str,
+    retryable: bool = False,
+    correctable_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    return tool_results.rejection(
+        tool="track",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        code=code,
+        message=message,
+        permission_boundary=boundary,
+        human_summary="Track comment scope denied.",
+        why_blocked=message,
+        impact="No Track comments were created or changed.",
+        state_changed=False,
+        retryable=retryable,
+        retry_guidance="Fix Track comment scope and retry." if retryable else "This action cannot be retried as-is.",
+        allowed_next_actions=["Use track.open or track.list_comments to verify Track comment scope first."],
+        correctable_fields=correctable_fields,
+    )
+
+
 def _reject_artifact_scope(*, action: str, active_actor: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
     return tool_results.rejection(
         tool="track",
@@ -228,6 +287,100 @@ def _require_track_id(action: str, args: dict[str, Any], active_actor: dict[str,
     if not isinstance(track_id, str) or not track_id.strip():
         return None, _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="track_id is required")
     return track_id.strip(), None
+
+
+def _manifest_roles(manifest: dict[str, Any]) -> set[str]:
+    roles = manifest.get("roles")
+    if isinstance(roles, dict):
+        return {key for key in roles if isinstance(key, str) and key}
+    if isinstance(roles, list):
+        ids: set[str] = set()
+        for row in roles:
+            if not isinstance(row, dict):
+                continue
+            role_id = row.get("id")
+            if isinstance(role_id, str) and role_id:
+                ids.add(role_id)
+        return ids
+    return set()
+
+
+def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} must be an object")
+    unknown = sorted(key for key in value if key not in {"actor_id", "role_id"})
+    if unknown:
+        raise ValueError(f"{field} contains unsupported fields: {', '.join(unknown)}")
+    actor_id = value.get("actor_id")
+    role_id = value.get("role_id")
+    if not isinstance(actor_id, str) or not actor_id.strip():
+        raise ValueError(f"{field}.actor_id must be a non-empty string")
+    if not isinstance(role_id, str) or not role_id.strip():
+        raise ValueError(f"{field}.role_id must be a non-empty string")
+    return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
+
+
+def _normalize_mentioned_actors(
+    *,
+    mentioned_actors: Any,
+    active_actor: dict[str, Any],
+    active_role: str,
+    action: str,
+    manifest: dict[str, Any],
+) -> list[dict[str, str]] | dict[str, Any]:
+    if mentioned_actors is None:
+        return []
+    if not isinstance(mentioned_actors, list):
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message="mentioned_actors must be a list",
+            correctable_fields=["mentioned_actors"],
+            field_errors=[
+                {
+                    "path": "mentioned_actors",
+                    "message": "mentioned_actors must be a list of actor address payloads",
+                    "expected": [{"actor_id": "act-pm-example", "role_id": "pm"}],
+                    "example": [{"actor_id": "act-pm-example", "role_id": "pm"}],
+                }
+            ],
+        )
+    roles = _manifest_roles(manifest)
+    normalized: list[dict[str, str]] = []
+    seen_actor_ids: set[str] = set()
+    for row in mentioned_actors:
+        try:
+            actor = _actor_address_payload(row, "mentioned_actors entry")
+        except ValueError as exc:
+            return _reject_track_comment_payload(
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                message=f"mentioned_actors entries must be actor address payloads: {exc}",
+                correctable_fields=["mentioned_actors"],
+            )
+        role = actor["role_id"]
+        if role not in roles:
+            return _reject_track_comment_payload(
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                message=f"unknown mentioned actor role: {role}",
+                correctable_fields=["mentioned_actors"],
+                field_errors=[
+                    {
+                        "path": "mentioned_actors",
+                        "message": f"unknown mentioned actor role: {role}",
+                        "allowed_values": sorted(roles),
+                        "example": [{"actor_id": f"act-{sorted(roles)[0]}-example", "role_id": sorted(roles)[0]}],
+                    }
+                ],
+            )
+        if actor["actor_id"] not in seen_actor_ids:
+            seen_actor_ids.add(actor["actor_id"])
+            normalized.append(actor)
+    return normalized
 
 
 def _attachment_projection_for_ref(
@@ -271,6 +424,57 @@ def _project_track_artifact_ref(
     return projected
 
 
+def _track_comment_cues(
+    *,
+    track_id: str,
+    active_actor: dict[str, Any],
+    context: TrackServiceContext,
+) -> dict[str, Any]:
+    comments = context.repos.track_comment.comments_for_track(track_id)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in comments:
+        thread_id = row.get("thread_id")
+        if isinstance(thread_id, str) and thread_id:
+            grouped.setdefault(thread_id, []).append(row)
+
+    open_thread_count = 0
+    for rows in grouped.values():
+        if any(row.get("status") == "open" for row in rows):
+            open_thread_count += 1
+
+    recent = sorted(
+        comments,
+        key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")),
+        reverse=True,
+    )[:3]
+    active_actor_id = active_actor.get("actor_id")
+    mentioned_comment_ids: list[str] = []
+    for row in comments:
+        mentions = row.get("mentioned_actors")
+        if not isinstance(mentions, list):
+            continue
+        if any(isinstance(item, dict) and item.get("actor_id") == active_actor_id for item in mentions):
+            comment_id = row.get("id")
+            if isinstance(comment_id, str):
+                mentioned_comment_ids.append(comment_id)
+
+    return {
+        "open_thread_count": open_thread_count,
+        "recent_comments": [
+            {
+                "comment_id": row.get("id"),
+                "thread_id": row.get("thread_id"),
+                "by_actor": row.get("by_actor"),
+                "status": row.get("status"),
+                "created_at": row.get("created_at"),
+            }
+            for row in recent
+        ],
+        "mentioned_comment_ids": mentioned_comment_ids,
+        "source_of_truth": "track.list_comments",
+    }
+
+
 def _track_page(
     track: dict[str, Any],
     *,
@@ -290,6 +494,9 @@ def _track_page(
         for row in track.get("close_proof", [])
         if isinstance(row, dict) and bool(row.get("current", True))
     ]
+    track_id = track.get("id")
+    if isinstance(track_id, str) and track_id:
+        page["comment_cues"] = _track_comment_cues(track_id=track_id, active_actor=active_actor, context=context)
     return page
 
 
@@ -376,6 +583,280 @@ def open_track_for_active_role(*, args: dict[str, Any], context: TrackServiceCon
             "Use track.add_material/add_update/add_proof/update_now to update the page.",
         ],
         extra={"track_id": track_id, "track": page},
+    )
+
+
+def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+    action = "track.add_comment"
+    active_role = context["active_role"]
+    active_actor = context["active_actor"]
+    payload_error = _require_fields(action, args, active_actor, active_role)
+    if payload_error is not None:
+        return payload_error
+
+    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    if error is not None:
+        return error
+    assert isinstance(track_id, str)
+
+    _, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    if track_error is not None:
+        return track_error
+
+    content = args.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message="content must be a non-empty string",
+            correctable_fields=["content"],
+        )
+
+    reply_to = args.get("reply_to")
+    if reply_to is not None and (not isinstance(reply_to, str) or not reply_to.strip()):
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message="reply_to must be a non-empty string when provided",
+            correctable_fields=["reply_to"],
+        )
+
+    mentioned_actors = _normalize_mentioned_actors(
+        mentioned_actors=args.get("mentioned_actors"),
+        active_actor=active_actor,
+        active_role=active_role,
+        action=action,
+        manifest=context["manifest"],
+    )
+    if isinstance(mentioned_actors, dict):
+        return mentioned_actors
+
+    try:
+        if isinstance(reply_to, str):
+            comment = context.repos.track_comment.reply_to_track_comment(
+                track_id=track_id,
+                reply_to=reply_to.strip(),
+                by_actor=active_actor,
+                content=content.strip(),
+                mentioned_actors=mentioned_actors,
+            )
+        else:
+            comment = context.repos.track_comment.create_track_comment(
+                track_id=track_id,
+                by_actor=active_actor,
+                content=content.strip(),
+                mentioned_actors=mentioned_actors,
+            )
+    except ValueError as exc:
+        message = str(exc)
+        if "reply_to comment" in message:
+            return _reject_track_comment_scope(
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                code="E_TRACK_COMMENT_REPLY_SCOPE",
+                boundary="track_comment.reply_to_scope",
+                message=message,
+                retryable=True,
+                correctable_fields=["reply_to"],
+            )
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message=message,
+        )
+
+    return tool_results.success(
+        tool="track",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Added one durable Track comment on track '{track_id}'.",
+        state_changed=True,
+        durability="durable",
+        created_ids=[comment["id"]],
+        state_changes=[{"object_type": "track_comment", "change": "added", "track_id": track_id, "comment_id": comment["id"]}],
+        allowed_next_actions=["Use track.list_comments for full discussion rows.", "Use track.add_comment to continue the thread."],
+        extra={"track_id": track_id, "comment_id": comment["id"], "comment": comment},
+    )
+
+
+def list_comments_on_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+    action = "track.list_comments"
+    active_role = context["active_role"]
+    active_actor = context["active_actor"]
+    payload_error = _require_fields(action, args, active_actor, active_role)
+    if payload_error is not None:
+        return payload_error
+
+    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    if error is not None:
+        return error
+    assert isinstance(track_id, str)
+
+    _, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    if track_error is not None:
+        return track_error
+
+    status_filter = args.get("status", "all")
+    if not isinstance(status_filter, str) or status_filter not in {"open", "resolved", "all"}:
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message="status must be one of open|resolved|all",
+            correctable_fields=["status"],
+        )
+
+    matched = context.repos.track_comment.comments_for_track(track_id)
+    if status_filter != "all":
+        matched = [row for row in matched if row.get("status") == status_filter]
+    matched.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
+
+    threads_map: dict[str, list[dict[str, Any]]] = {}
+    for row in matched:
+        thread_id = row.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            thread_id = str(row.get("id") or "")
+        threads_map.setdefault(thread_id, []).append(row)
+
+    threads: list[dict[str, Any]] = []
+    open_count = 0
+    resolved_count = 0
+    for thread_id, rows in threads_map.items():
+        rows.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
+        statuses = {row.get("status") for row in rows}
+        thread_status = "resolved" if statuses == {"resolved"} else "open"
+        if thread_status == "resolved":
+            resolved_count += len(rows)
+        else:
+            open_count += len(rows)
+        threads.append(
+            {
+                "thread_id": thread_id,
+                "track_id": track_id,
+                "status": thread_status,
+                "comments": rows,
+            }
+        )
+    threads.sort(key=lambda row: row.get("thread_id") or "")
+
+    return tool_results.success(
+        tool="track",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Returned {len(matched)} Track comment(s) for track '{track_id}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="Track comment threads for one Track",
+        allowed_next_actions=["Use track.add_comment to continue Track discussion."],
+        extra={
+            "track_id": track_id,
+            "comments": matched,
+            "threads": threads,
+            "status_counts": {"open": open_count, "resolved": resolved_count},
+        },
+    )
+
+
+def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+    action = "track.resolve_comment_thread"
+    active_role = context["active_role"]
+    active_actor = context["active_actor"]
+    payload_error = _require_fields(action, args, active_actor, active_role)
+    if payload_error is not None:
+        return payload_error
+
+    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    if error is not None:
+        return error
+    assert isinstance(track_id, str)
+
+    _, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    if track_error is not None:
+        return track_error
+
+    comment_id = args.get("comment_id")
+    if not isinstance(comment_id, str) or not comment_id.strip():
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message="comment_id must be a non-empty string",
+            correctable_fields=["comment_id"],
+        )
+
+    resolution_summary = args.get("resolution_summary")
+    if not isinstance(resolution_summary, str) or not resolution_summary.strip():
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message="resolution_summary must be a non-empty string",
+            correctable_fields=["resolution_summary"],
+        )
+
+    try:
+        resolved_rows = context.repos.track_comment.resolve_track_comment_thread(
+            track_id=track_id,
+            comment_id=comment_id.strip(),
+            resolved_by_actor=active_actor,
+            resolution_summary=resolution_summary.strip(),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "already resolved" in message:
+            return _reject_track_comment_scope(
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                code="E_TRACK_COMMENT_STATE",
+                boundary="track_comment.state",
+                message=message,
+                retryable=False,
+                correctable_fields=["comment_id"],
+            )
+        if "different track" in message or "not found" in message:
+            return _reject_track_comment_scope(
+                action=action,
+                active_actor=active_actor,
+                active_role=active_role,
+                code="E_TRACK_COMMENT_THREAD_SCOPE",
+                boundary="track_comment.thread_scope",
+                message=message,
+                retryable=True,
+                correctable_fields=["track_id", "comment_id"],
+            )
+        return _reject_track_comment_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message=message,
+        )
+
+    updated_ids = [row.get("id") for row in resolved_rows if isinstance(row.get("id"), str)]
+    return tool_results.success(
+        tool="track",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Resolved Track comment thread containing comment '{comment_id.strip()}' with {len(updated_ids)} durable row update(s).",
+        state_changed=True,
+        durability="durable",
+        updated_ids=updated_ids,
+        state_changes=[
+            {"object_type": "track_comment", "change": "resolved", "track_id": track_id, "comment_id": row_id}
+            for row_id in updated_ids
+        ],
+        allowed_next_actions=[
+            "Use track.list_comments with status='resolved' to verify closure output.",
+            "Use track.add_comment to open new Track discussion if unresolved issues remain.",
+        ],
+        extra={"track_id": track_id, "comment_id": comment_id.strip(), "comments": resolved_rows},
     )
 
 
@@ -926,13 +1407,16 @@ def archive_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) 
 
 
 _ACTION_HANDLERS = {
+    'add_comment': add_comment_to_track,
     'add_material': add_material_to_track,
     'add_proof': add_proof_to_track,
     'add_update': add_update_to_track,
     'archive': archive_track_for_pm,
     'create': create_track_for_pm,
     'list': list_tracks_for_active_role,
+    'list_comments': list_comments_on_track,
     'open': open_track_for_active_role,
+    'resolve_comment_thread': resolve_comment_thread_on_track,
     'update_now': update_now_for_active_role,
 }
 

@@ -260,36 +260,25 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
 
 class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_legacy_author_comment_normalizes_to_actor_author(self) -> None:
-        raw = {
-            "id": "comment-legacy-author",
-            "target_type": "track",
-            "target_id": "track-legacy-comments",
-            "author_role": "pm",
-            "content": "legacy",
-            "reply_to": None,
-            "created_at": "2026-05-18T10:00:00+08:00",
-        }
-        env_store.comment_file("comment-legacy-author").parent.mkdir(parents=True, exist_ok=True)
-        env_store.comment_file("comment-legacy-author").write_text(
-            json.dumps(raw, ensure_ascii=True, indent=2) + "\n",
-            encoding="utf-8",
+    def test_track_comment_helper_normalizes_role_author_to_actor_address(self) -> None:
+        created = env_store.create_track_comment(
+            track_id="track-helper-comments",
+            by_role="pm",
+            content="track scoped",
         )
 
-        normalized = env_store.get_comment("comment-legacy-author")
-        self.assertIsNotNone(normalized)
-        assert isinstance(normalized, dict)
-        self.assertEqual(normalized["by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
-        self.assertNotIn("by_role", normalized)
-        self.assertEqual(normalized["thread_id"], "comment-legacy-author")
-        self.assertEqual(normalized["status"], "open")
-        self.assertEqual(normalized["mentioned_actors"], [])
+        self.assertEqual(created["track_id"], "track-helper-comments")
+        self.assertEqual(created["by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
+        self.assertNotIn("target_type", created)
+        self.assertNotIn("target_id", created)
+        self.assertEqual(created["thread_id"], created["id"])
+        self.assertEqual(created["status"], "open")
+        self.assertEqual(created["mentioned_actors"], [])
 
-        saved = env_store.save_comment(normalized)
-        self.assertEqual(saved["by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
-        persisted = json.loads(env_store.comment_file("comment-legacy-author").read_text(encoding="utf-8"))
-        self.assertNotIn("author_role", persisted)
-        self.assertNotIn("by_role", persisted)
+        persisted = env_store.get_track_comment("track-helper-comments", created["id"])
+        self.assertEqual(persisted, created)
+        path = env_store.track_comment_file("track-helper-comments", created["id"])
+        self.assertTrue(path.exists(), msg=path)
 
 
 if __name__ == "__main__":

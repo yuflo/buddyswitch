@@ -38,7 +38,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
         "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
         "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-        "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
     }
     DEV_PRODUCT_SKILLS = (
         "enter-dev-workspace",
@@ -106,7 +105,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "artifact-tool",
         "task-management",
         "message-tool",
-        "comment-tool",
     }
     ROLE_AGENT_FILES = (
         ROOT / "tools/launcher/assets/roles/pm/AGENTS.md",
@@ -178,7 +176,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_role_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool"}
+        required = {"track-tool", "artifact-tool", "task-management", "message-tool"}
         for role in self.manifest.get("roles", []):
             assert isinstance(role, dict)
             skills = set(role.get("skills", []))
@@ -384,13 +382,16 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("authoritative fallback runtime tool list", lowered)
                 self.assertNotIn("Use explicit ids and env tools (`", text)
 
-    def test_shared_comment_skill_target_support_matches_runtime_semantics(self) -> None:
-        comment_skill = self.SHARED_TOOL_SKILLS["comment"].read_text(encoding="utf-8").lower()
-        comment_model = tool_registry.compact_tool_affordances()["comment"]["object_model"].lower()
-        self.assertIn("artifact_section", comment_model)
-        self.assertIn("artifact_section", comment_skill)
-        self.assertNotIn("only `track` and `artifact`", comment_skill)
-        self.assertNotIn("only track and artifact", comment_skill)
+    def test_track_skill_comment_support_matches_runtime_semantics(self) -> None:
+        track_skill = self.SHARED_TOOL_SKILLS["track"].read_text(encoding="utf-8").lower()
+        track_actions = tool_registry.supported_actions("track")
+        self.assertIn("add_comment", track_actions)
+        self.assertIn("list_comments", track_actions)
+        self.assertIn("resolve_comment_thread", track_actions)
+        self.assertIn("track__add_comment", track_skill)
+        self.assertIn("track__list_comments", track_skill)
+        self.assertIn("track__resolve_comment_thread", track_skill)
+        self.assertNotIn("artifact_section", track_skill)
 
     def test_shared_skills_do_not_name_stale_actions_or_internal_contract_surfaces(self) -> None:
         forbidden = (
@@ -446,7 +447,7 @@ class RuntimeSkillsTests(unittest.TestCase):
     def test_shared_tool_skills_do_not_embed_payload_or_return_schema_blocks(self) -> None:
         skill_paths = [
             ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
         ]
         for path in skill_paths:
             text = path.read_text(encoding="utf-8").lower()
@@ -496,12 +497,12 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(source_token=token):
                 self.assertNotIn(token, message_skill)
 
-    def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
-        """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
+    def test_message_track_shared_tool_skills_stay_atomic(self) -> None:
+        """MCT-SURF-006: Message/Track skills don't teach non-goal features."""
         msg_skill = (ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md").read_text(encoding="utf-8").lower()
-        cmt_skill = (ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md").read_text(encoding="utf-8").lower()
+        track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8").lower()
         non_goals = ["broadcast", "read receipt", "read_receipt", "handoff", "edit", "delete", "reopen", "task comment", "whiteboard"]
-        for skill_text, label in [(msg_skill, "message-tool"), (cmt_skill, "comment-tool")]:
+        for skill_text, label in [(msg_skill, "message-tool"), (track_skill, "track-tool")]:
             with self.subTest(skill=label):
                 self.assertIn("env.tool", skill_text)
                 self.assertIn("context.get.tool_catalog", skill_text)
@@ -769,7 +770,6 @@ class RuntimeSkillsTests(unittest.TestCase):
             "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
             "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-            "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
         }
         for tool, path in skill_paths.items():
             text = path.read_text(encoding="utf-8").lower()
@@ -784,8 +784,8 @@ class RuntimeSkillsTests(unittest.TestCase):
         from env.tool_runtime import registry as catalog
 
         self.assertNotIn("advance", catalog.supported_actions("track"))
-        self.assertIn("resolve", catalog.supported_actions("comment"))
-        self.assertNotIn("reopen", catalog.supported_actions("comment"))
+        self.assertIn("resolve_comment_thread", catalog.supported_actions("track"))
+        self.assertNotIn("reopen_comment_thread", catalog.supported_actions("track"))
 
 
 if __name__ == "__main__":

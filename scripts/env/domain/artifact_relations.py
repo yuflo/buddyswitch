@@ -7,7 +7,6 @@ from typing import Any
 
 from env.domain import artifact_visibility as artifact_visibility_domain
 from env.repos import artifacts as artifact_repo
-from env.repos import comments as comment_repo
 from env.repos import tracks as track_repo
 
 
@@ -126,16 +125,10 @@ def _visible_superseded_by_ids(*, artifact_id: str, active_role: str, active_act
 
 
 def comment_counts_for_artifact(artifact_id: str) -> dict[str, int]:
-    open_count = 0
-    resolved_count = 0
-    for comment in comment_repo.comments_for_target("artifact", artifact_id):
-        if comment.get("status") == "resolved":
-            resolved_count += 1
-        else:
-            open_count += 1
+    del artifact_id
     return {
-        "open_comment_count": open_count,
-        "resolved_comment_count": resolved_count,
+        "open_comment_count": 0,
+        "resolved_comment_count": 0,
     }
 
 
@@ -160,14 +153,11 @@ def relation_summary_for_artifact(
             "incoming_refs": {
                 "source_ref_by_artifacts": [],
                 "track_update_refs": [],
-                "comment_ids": [],
             },
         }
 
     decision = artifact_visibility_domain.artifact_read_decision(artifact, active_actor_address)
     relation, currentness = _relation_and_currentness(artifact=artifact, decision=decision)
-    comments = comment_repo.comments_for_target("artifact", artifact_id)
-    comment_ids = [row.get("id") for row in comments if isinstance(row.get("id"), str)]
 
     return {
         "publication": {
@@ -190,7 +180,6 @@ def relation_summary_for_artifact(
                 active_actor_address=active_actor_address,
             ),
             "track_update_refs": _track_update_backlinks(artifact_id=artifact_id, active_role=active_role),
-            "comment_ids": comment_ids,
         },
     }
 
@@ -201,14 +190,12 @@ def relation_counts_for_artifact(*, artifact_id: str, active_role: str, active_a
         return {
             "incoming_source_ref_count": 0,
             "track_update_ref_count": 0,
-            "comment_count": 0,
         }
     decision = artifact_visibility_domain.artifact_read_decision(artifact, active_actor_address)
     if not bool(decision.get("allowed")):
         return {
             "incoming_source_ref_count": 0,
             "track_update_ref_count": 0,
-            "comment_count": 0,
         }
     summary = relation_summary_for_artifact(
         artifact=artifact,
@@ -225,5 +212,4 @@ def relation_counts_for_artifact(*, artifact_id: str, active_role: str, active_a
         "track_update_ref_count": len(incoming.get("track_update_refs", []))
         if isinstance(incoming.get("track_update_refs"), list)
         else 0,
-        "comment_count": len(incoming.get("comment_ids", [])) if isinstance(incoming.get("comment_ids"), list) else 0,
     }

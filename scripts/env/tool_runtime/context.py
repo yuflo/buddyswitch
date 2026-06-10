@@ -15,7 +15,6 @@ import uuid
 from env.domain import artifact_relations as _artifact_relations_domain
 from env.domain import artifact_visibility as _artifact_visibility_domain
 from env.domain import actor_private_workspace as _actor_private_workspace_domain
-from env.domain import comment_targets as _comment_target_domain
 from env.domain import messages as _message_domain
 from env.domain import publication as _publication_domain
 from env.domain import source_refs as _source_ref_domain
@@ -24,10 +23,10 @@ import env_profiles
 from env_manifest import DEFAULT_MANIFEST
 from env.repos import artifacts as _artifact_repo
 from env.repos import actor_private_files as _actor_private_repo
-from env.repos import comments as _comment_repo
 from env.repos import messages as _message_repo
 from env.repos import runtime_files
 from env.repos import tasks as _task_repo
+from env.repos import track_comments as _track_comment_repo
 from env.repos import tracks as _track_repo
 from env.tool_runtime.actor_profile import Actor
 from env.tool_runtime.actor_profile import ActorAddress
@@ -152,29 +151,23 @@ class RuntimeObjectAccess:
             patch["source_refs"] = source_refs
         return _artifact_repo.update_artifact(artifact_id, patch)
 
-    def add_comment(
+    def add_track_comment(
         self,
-        target_type: str,
-        target_id: str,
+        track_id: str,
         content: str,
         reply_to: str | None,
-        artifact_revision_id: str | None,
-        anchor: str | None,
         mentioned_actors: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        return _comment_repo.create_comment(
-            target_type=target_type,
-            target_id=target_id,
+        return _track_comment_repo.create_track_comment(
+            track_id=track_id,
             by_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             content=content,
             reply_to=reply_to,
-            artifact_revision_id=artifact_revision_id,
-            anchor=anchor,
             mentioned_actors=mentioned_actors,
         )
 
-    def list_comments(self, target_type: str, target_id: str, status: str | None) -> list[dict[str, Any]]:
-        rows = _comment_repo.comments_for_target(target_type, target_id)
+    def list_track_comments(self, track_id: str, status: str | None) -> list[dict[str, Any]]:
+        rows = _track_comment_repo.comments_for_track(track_id)
         if isinstance(status, str) and status.strip():
             rows = [row for row in rows if row.get("status") == status]
         return rows
@@ -210,7 +203,7 @@ class RuntimeObjectAccess:
             "tasks": "task.current / task.capture / task.select / task.switch_request / task.switch_confirm / task.progress / task.checkout / task.review",
             "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
-            "comments": "comment.list",
+            "track_comments": "track.list_comments",
             "writable_surfaces": "context.get / context.summarize",
         }
 
@@ -459,7 +452,6 @@ class DomainAccess:
     artifact_relations: Any = field(default_factory=lambda: _artifact_relations_domain)
     artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
     actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
-    comment_target: Any = field(default_factory=lambda: _comment_target_domain)
     message: Any = field(default_factory=lambda: _message_domain)
     publication: Any = field(default_factory=lambda: _publication_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
@@ -472,10 +464,10 @@ class RepoAccess:
 
     artifact: Any = field(default_factory=lambda: _artifact_repo)
     actor_private: Any = field(default_factory=lambda: _actor_private_repo)
-    comment: Any = field(default_factory=lambda: _comment_repo)
     message: Any = field(default_factory=lambda: _message_repo)
     runtime_files: Any = field(default_factory=lambda: runtime_files)
     task: Any = field(default_factory=lambda: _task_repo)
+    track_comment: Any = field(default_factory=lambda: _track_comment_repo)
     track: Any = field(default_factory=lambda: _track_repo)
 
 
