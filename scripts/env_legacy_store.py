@@ -10,6 +10,7 @@ from typing import Any
 from env.repos import artifacts as artifact_repo
 from env.repos import runtime_files
 from env.repos import tracks as track_repo
+from env.repos import track_comments as track_comment_repo
 from env.domain import track_artifact_relations as track_artifact_relations_domain
 from env.tool_runtime.actor_profile import ActorAddress
 
@@ -47,7 +48,7 @@ def refresh_runtime_root_bindings() -> None:
     global TRACKS_DIR
     global ARTIFACT_OBJECTS_DIR
     global MESSAGES_DIR
-    global COMMENTS_DIR
+    global TRACK_COMMENTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
     global ACTOR_PRIVATE_DIR
@@ -59,7 +60,7 @@ def refresh_runtime_root_bindings() -> None:
     TRACKS_DIR = runtime_files.TRACKS_DIR
     ARTIFACT_OBJECTS_DIR = runtime_files.ARTIFACT_OBJECTS_DIR
     MESSAGES_DIR = runtime_files.MESSAGES_DIR
-    COMMENTS_DIR = runtime_files.COMMENTS_DIR
+    TRACK_COMMENTS_DIR = runtime_files.TRACK_COMMENTS_DIR
     CONTENT_ROOT = runtime_files.CONTENT_ROOT
     LOCAL_ROOT = runtime_files.LOCAL_ROOT
     ACTOR_PRIVATE_DIR = runtime_files.ACTOR_PRIVATE_DIR
@@ -111,8 +112,8 @@ def message_file(message_id: str) -> Path:
     return MESSAGES_DIR / f"{require_id(message_id, 'message id')}.json"
 
 
-def comment_file(comment_id: str) -> Path:
-    return COMMENTS_DIR / f"{require_id(comment_id, 'comment id')}.json"
+def track_comment_file(track_id: str, comment_id: str) -> Path:
+    return track_comment_repo.track_comment_file(track_id, comment_id)
 
 
 def _validate_actor_private_ref_logical_name(logical_name: Any, *, active_role: str | None = None) -> str:
@@ -331,103 +332,6 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
         "disposition_reason": disposition_reason,
         "disposition_updated_at": disposition_updated_at,
         "processed_by_actor_address": processed_by_actor_address,
-    }
-
-
-def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
-    forbidden_fields = {"resolved", "task_id", "edit_history", "attachment"}
-    forbidden = sorted(key for key in comment if key in forbidden_fields)
-    if forbidden:
-        raise ValueError(f"unsupported comment fields: {', '.join(forbidden)}")
-
-    comment_id = require_id(comment.get("id", ""), "comment.id")
-    target_type = comment.get("target_type")
-    if target_type not in {"track", "artifact", "artifact_section"}:
-        raise ValueError("comment.target_type must be one of 'track'|'artifact'|'artifact_section'")
-    target_id = require_id(comment.get("target_id"), "comment.target_id")
-    if isinstance(comment.get("by_actor"), dict):
-        by_actor = _message_actor_payload(comment.get("by_actor"), "comment.by_actor")
-    else:
-        by_actor = _actor_address_for_role(
-            _require_non_empty_text(comment.get("by_role") or comment.get("author_role"), "comment.by_role")
-        )
-    content = _require_non_empty_text(comment.get("content"), "comment.content")
-
-    thread_id_raw = comment.get("thread_id")
-    if thread_id_raw is None:
-        thread_id = comment_id
-    else:
-        thread_id = require_id(_require_non_empty_text(thread_id_raw, "comment.thread_id"), "comment.thread_id")
-
-    status = _require_non_empty_text(comment.get("status", "open"), "comment.status")
-    if status not in {"open", "resolved"}:
-        raise ValueError("comment.status must be one of open|resolved")
-
-    resolved_by_actor = comment.get("resolved_by_actor")
-    resolved_at = comment.get("resolved_at")
-    resolution_summary = comment.get("resolution_summary")
-    if status == "resolved":
-        if isinstance(resolved_by_actor, dict):
-            resolved_by_actor = _message_actor_payload(resolved_by_actor, "comment.resolved_by_actor")
-        else:
-            resolved_by_actor = _actor_address_for_role(
-                _require_non_empty_text(comment.get("resolved_by"), "comment.resolved_by")
-            )
-        resolved_at = _require_non_empty_text(resolved_at, "comment.resolved_at")
-        resolution_summary = _require_non_empty_text(resolution_summary, "comment.resolution_summary")
-    else:
-        resolved_by_actor = None
-        resolved_at = None
-        resolution_summary = None
-
-    mentions_raw = comment.get("mentioned_actors", [])
-    if mentions_raw is None:
-        mentions: list[dict[str, str]] = []
-    else:
-        if not isinstance(mentions_raw, list):
-            raise ValueError("comment.mentioned_actors must be a list when provided")
-        mentions = []
-        seen: set[str] = set()
-        for idx, row in enumerate(mentions_raw):
-            actor = _message_actor_payload(row, f"comment.mentioned_actors[{idx}]")
-            actor_id = actor["actor_id"]
-            if actor_id in seen:
-                continue
-            seen.add(actor_id)
-            mentions.append(actor)
-
-    anchor = comment.get("anchor")
-    if anchor is not None:
-        anchor = _require_non_empty_text(anchor, "comment.anchor")
-
-    artifact_revision_id = comment.get("artifact_revision_id")
-    if artifact_revision_id is not None:
-        artifact_revision_id = require_id(
-            _require_non_empty_text(artifact_revision_id, "comment.artifact_revision_id"),
-            "comment.artifact_revision_id",
-        )
-
-    reply_to = comment.get("reply_to")
-    if reply_to is not None:
-        require_id(reply_to, "comment.reply_to")
-    created_at = _require_non_empty_text(comment.get("created_at"), "comment.created_at")
-
-    return {
-        "id": comment_id,
-        "target_type": target_type,
-        "target_id": target_id,
-        "by_actor": by_actor,
-        "content": content,
-        "thread_id": thread_id,
-        "status": status,
-        "mentioned_actors": mentions,
-        "anchor": anchor,
-        "artifact_revision_id": artifact_revision_id,
-        "reply_to": reply_to,
-        "created_at": created_at,
-        "resolved_by_actor": resolved_by_actor,
-        "resolved_at": resolved_at,
-        "resolution_summary": resolution_summary,
     }
 
 
@@ -773,33 +677,18 @@ def create_message(
 # ---------------------------------------------------------------------------
 
 
-def list_comments() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    if COMMENTS_DIR.is_dir():
-        for path in COMMENTS_DIR.glob("*.json"):
-            rows.append(validate_comment(_read_json(path)))
-    rows.sort(key=lambda row: (row.get("created_at", ""), row["id"]))
-    return rows
+validate_track_comment = track_comment_repo.validate_track_comment
+list_track_comments = track_comment_repo.list_track_comments
+get_track_comment = track_comment_repo.get_track_comment
+save_track_comment = track_comment_repo.save_track_comment
+comments_for_track = track_comment_repo.comments_for_track
+comments_for_track_thread = track_comment_repo.comments_for_track_thread
+resolve_track_comment_thread = track_comment_repo.resolve_track_comment_thread
 
 
-def get_comment(comment_id: str) -> dict[str, Any] | None:
-    path = comment_file(comment_id)
-    if not path.exists():
-        return None
-    return validate_comment(_read_json(path))
-
-
-def save_comment(comment: dict[str, Any]) -> dict[str, Any]:
-    normalized_comment = validate_comment(comment)
-    ensure_runtime_dirs()
-    _write_json(comment_file(normalized_comment["id"]), normalized_comment)
-    return normalized_comment
-
-
-def create_comment(
+def create_track_comment(
     *,
-    target_type: str,
-    target_id: str,
+    track_id: str,
     by_role: str | None = None,
     by_actor: dict[str, Any] | None = None,
     author_role: str | None = None,
@@ -808,12 +697,7 @@ def create_comment(
     mentioned_actors: list[dict[str, Any]] | None = None,
     thread_id: str | None = None,
     status: str = "open",
-    anchor: str | None = None,
-    artifact_revision_id: str | None = None,
 ) -> dict[str, Any]:
-    if target_type not in {"track", "artifact", "artifact_section"}:
-        raise ValueError("target_type must be one of 'track'|'artifact'|'artifact_section'")
-    require_id(target_id, "target_id")
     if isinstance(by_actor, dict):
         author_actor = _message_actor_payload(by_actor, "by_actor")
     else:
@@ -821,98 +705,19 @@ def create_comment(
         if not isinstance(author, str) or not author.strip():
             raise ValueError("by_actor must be an ActorAddress payload")
         author_actor = _actor_address_for_role(author)
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError("content must be a non-empty string")
-    if reply_to is not None:
-        require_id(reply_to, "reply_to")
-    if thread_id is not None:
-        require_id(thread_id, "thread_id")
-    if status not in {"open", "resolved"}:
-        raise ValueError("status must be one of open|resolved")
-    if anchor is not None and (not isinstance(anchor, str) or not anchor.strip()):
-        raise ValueError("anchor must be a non-empty string when provided")
-    if artifact_revision_id is not None:
-        require_id(artifact_revision_id, "artifact_revision_id")
-    normalized_mentions: list[dict[str, str]] = []
-    if mentioned_actors is not None:
-        if not isinstance(mentioned_actors, list):
-            raise ValueError("mentioned_actors must be a list when provided")
-        seen_mentions: set[str] = set()
-        for idx, row in enumerate(mentioned_actors):
-            actor = _message_actor_payload(row, f"mentioned_actors[{idx}]")
-            actor_id = actor["actor_id"]
-            if actor_id in seen_mentions:
-                continue
-            seen_mentions.add(actor_id)
-            normalized_mentions.append(actor)
-
-    comment_id = f"comment-{uuid.uuid4().hex[:12]}"
-    require_id(comment_id, "comment id")
-    comment = {
-        "id": comment_id,
-        "target_type": target_type,
-        "target_id": target_id,
-        "by_actor": author_actor,
-        "content": content.strip(),
-        "thread_id": thread_id or comment_id,
-        "status": status,
-        "mentioned_actors": normalized_mentions,
-        "anchor": anchor.strip() if isinstance(anchor, str) else None,
-        "artifact_revision_id": artifact_revision_id,
-        "reply_to": reply_to,
-        "created_at": now_iso(),
-        "resolved_by_actor": None,
-        "resolved_at": None,
-        "resolution_summary": None,
-    }
-    return save_comment(comment)
-
-
-def comments_for_target(target_type: str, target_id: str) -> list[dict[str, Any]]:
-    if target_type not in {"track", "artifact", "artifact_section"}:
-        raise ValueError("target_type must be one of 'track'|'artifact'|'artifact_section'")
-    require_id(target_id, "target_id")
-
-    matched: list[dict[str, Any]] = []
-    for row in list_comments():
-        row_type = row.get("target_type")
-        row_target_id = row.get("target_id")
-        if row_target_id != target_id:
-            continue
-        if row_type == target_type:
-            matched.append(row)
-            continue
-        if target_type == "artifact" and row_type == "artifact_section":
-            matched.append(row)
-    matched.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
-    return matched
-
-
-def update_comment_thread_status(thread_id: str, status: str) -> list[dict[str, Any]]:
-    require_id(thread_id, "thread_id")
-    if status not in {"open", "resolved"}:
-        raise ValueError("status must be one of open|resolved")
-
-    rows = list_comments()
-    now = now_iso()
-    updated: list[dict[str, Any]] = []
-    for row in rows:
-        row_thread_id = row.get("thread_id")
-        if row_thread_id != thread_id:
-            continue
-        patched = dict(row)
-        patched["status"] = status
-        if status == "resolved":
-            patched["resolved_by_actor"] = row.get("by_actor")
-            patched["resolved_at"] = now
-            patched["resolution_summary"] = str(row.get("resolution_summary") or "resolved")
-        else:
-            patched["resolved_by_actor"] = None
-            patched["resolved_at"] = None
-            patched["resolution_summary"] = None
-        patched = save_comment(patched)
-        updated.append(patched)
-    if not updated:
-        raise ValueError(f"thread not found: {thread_id}")
-    updated.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
-    return updated
+    if isinstance(reply_to, str) and reply_to.strip():
+        return track_comment_repo.reply_to_track_comment(
+            track_id=track_id,
+            reply_to=reply_to.strip(),
+            by_actor=author_actor,
+            content=content,
+            mentioned_actors=mentioned_actors,
+        )
+    return track_comment_repo.create_track_comment(
+        track_id=track_id,
+        by_actor=author_actor,
+        content=content,
+        mentioned_actors=mentioned_actors,
+        thread_id=thread_id,
+        status=status,
+    )

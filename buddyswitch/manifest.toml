@@ -184,10 +184,6 @@ path = "buddyswitch/skills/shared/task-management"
 id = "message-tool"
 path = "buddyswitch/skills/shared/message-tool"
 
-[[skills]]
-id = "comment-tool"
-path = "buddyswitch/skills/shared/comment-tool"
-
 [[roles]]
 id = "market"
 label = "Market"
@@ -212,7 +208,6 @@ skills = [
   "artifact-tool",
   "task-management",
   "message-tool",
-  "comment-tool",
 ]
 artifact_templates = ["brief"]
 
@@ -235,7 +230,6 @@ skills = [
   "artifact-tool",
   "task-management",
   "message-tool",
-  "comment-tool",
 ]
 artifact_templates = ["brief", "decision", "note"]
 
@@ -243,7 +237,7 @@ artifact_templates = ["brief", "decision", "note"]
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design artifact outcomes."
-skills = ["shape-prototype", "track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool"]
+skills = ["shape-prototype", "track-tool", "artifact-tool", "task-management", "message-tool"]
 artifact_templates = ["design", "brief"]
 
 [[roles]]
@@ -269,7 +263,6 @@ skills = [
   "artifact-tool",
   "task-management",
   "message-tool",
-  "comment-tool",
 ]
 artifact_templates = ["brief", "note"]
 
@@ -277,5 +270,5 @@ artifact_templates = ["brief", "note"]
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test", "track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool"]
+skills = ["smoke-test", "track-tool", "artifact-tool", "task-management", "message-tool"]
 artifact_templates = ["proof"]

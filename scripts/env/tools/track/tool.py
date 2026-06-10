@@ -45,6 +45,20 @@ _REFS_ITEM_SCHEMA = {
     },
 }
 
+_MENTIONED_ACTORS_SCHEMA = {
+    'type': 'array',
+    'description': 'Optional list of concrete ActorAddress payloads to mention in the Track comment.',
+    'items': {
+        'type': 'object',
+        'additionalProperties': False,
+        'required': ['actor_id', 'role_id'],
+        'properties': {
+            'actor_id': {'type': 'string', 'description': 'Mentioned actor id.'},
+            'role_id': {'type': 'string', 'description': 'Mentioned actor role id.'},
+        },
+    },
+}
+
 
 def _build_definition() -> ToolDefinition:
     return ToolDefinition(
@@ -275,6 +289,233 @@ def _build_definition() -> ToolDefinition:
                     'read_only': True,
                     'destructive': False,
                     'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='add_comment',
+                title='track.add_comment',
+                description='Add one Track-scoped collaboration comment row.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['track_id', 'content'],
+                    'properties': {
+                        'track_id': {
+                            'type': 'string',
+                            'description': 'Existing non-archived Track id that owns the comment.',
+                        },
+                        'content': {
+                            'type': 'string',
+                            'description': 'Track comment body text.',
+                        },
+                        'reply_to': {
+                            'type': 'string',
+                            'description': 'Optional parent Track comment id in the same Track.',
+                        },
+                        'mentioned_actors': _MENTIONED_ACTORS_SCHEMA,
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='write',
+                mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
+                required_permission='track.add_comment',
+                authority='track.shared_mutation',
+                visibility='shared to roles with track read access',
+                durability='durable',
+                result_content_level='track comment row and id',
+                success_effect='Adds one durable Track-scoped collaboration comment row.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the payload, lifecycle, or Track-local reply boundary.',
+                reads=(
+                    'one non-archived track page',
+                    'optional parent Track comment',
+                    'manifest role ids',
+                ),
+                writes=(
+                    'track comment row',
+                ),
+                does_not_write=(
+                    'artifact body',
+                    'artifact comments',
+                    'track timeline',
+                    'track now-state',
+                    'task state',
+                    'direct message state',
+                    'message inbox',
+                ),
+                preconditions=(
+                    'track_id references an existing non-archived track',
+                    'reply_to, when provided, references a comment in the same track',
+                ),
+                returns=(
+                    'comment_id',
+                    'comment',
+                ),
+                use_when=(
+                    'You need Track-scoped threaded discussion inside one Track collaboration page.',
+                    'You need to reply to or mention actors in Track collaboration without sending a direct message.',
+                ),
+                do_not_use_when=(
+                    'You need direct actor-address inbox communication; use message.send.',
+                    'You need Artifact body or annotation behavior; use artifact tools or a future Artifact review model.',
+                ),
+                risk_hints={
+                    'read_only': False,
+                    'destructive': False,
+                    'idempotent': False,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='list_comments',
+                title='track.list_comments',
+                description='List full Track comment rows for one Track.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['track_id'],
+                    'properties': {
+                        'track_id': {
+                            'type': 'string',
+                            'description': 'Existing non-archived Track id that owns the comments.',
+                        },
+                        'status': {
+                            'type': 'string',
+                            'description': 'Optional Track comment status filter.',
+                            'enum': ['open', 'resolved', 'all'],
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='read',
+                mutates='none',
+                task_requirement=TASK_REQUIREMENT_FREE,
+                required_permission='track.list_comments',
+                authority='track.lookup',
+                visibility='shared to roles with track read access',
+                durability='none',
+                result_content_level='full Track comment rows',
+                success_effect='Lists Track-scoped comment rows for one Track, optionally filtered by status.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'one non-archived track page',
+                    'Track comment rows for the track',
+                ),
+                writes=(),
+                does_not_write=(
+                    'track comment state',
+                    'track timeline',
+                    'artifact body',
+                    'task state',
+                    'direct message state',
+                    'message inbox',
+                ),
+                preconditions=(
+                    'track_id references an existing non-archived track',
+                ),
+                returns=(
+                    'comments',
+                    'threads',
+                    'status_counts',
+                ),
+                use_when=(
+                    'You need full Track collaboration comment history for one Track.',
+                    'You need open/resolved comment rows before replying or resolving.',
+                ),
+                do_not_use_when=(
+                    'You only need compact Track page cues; use track.open.',
+                    'You need direct actor-address inbox history; use message.list or message.conversation.',
+                ),
+                risk_hints={
+                    'read_only': True,
+                    'destructive': False,
+                    'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='resolve_comment_thread',
+                title='track.resolve_comment_thread',
+                description='PM-only resolution for one Track-local comment thread.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['track_id', 'comment_id', 'resolution_summary'],
+                    'properties': {
+                        'track_id': {
+                            'type': 'string',
+                            'description': 'Existing non-archived Track id that owns the comment thread.',
+                        },
+                        'comment_id': {
+                            'type': 'string',
+                            'description': 'Track comment id inside the thread PM reviewed.',
+                        },
+                        'resolution_summary': {
+                            'type': 'string',
+                            'description': 'PM review closure summary.',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='write',
+                mutates='runtime_objects',
+                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
+                required_permission='track.resolve_comment_thread',
+                authority='pm.review_closure',
+                visibility='shared to roles with track read access',
+                durability='durable',
+                result_content_level='resolved Track comment rows',
+                success_effect='PM marks all open rows in one Track-local comment thread as resolved with a closure summary.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the payload, lifecycle, Track-local thread, or state boundary.',
+                reads=(
+                    'one non-archived track page',
+                    'one Track-local comment thread',
+                ),
+                writes=(
+                    'track comment thread status',
+                ),
+                does_not_write=(
+                    'track timeline',
+                    'track now-state',
+                    'artifact body',
+                    'task state',
+                    'direct message state',
+                    'message inbox',
+                ),
+                preconditions=(
+                    'active role is pm',
+                    'track_id references an existing non-archived track',
+                    'comment_id references a comment in that Track',
+                    'thread has at least one open comment row',
+                ),
+                returns=(
+                    'comments',
+                    'updated_ids',
+                ),
+                use_when=(
+                    'PM reviewed a Track discussion thread and wants durable resolved closure state for all rows in that thread.',
+                ),
+                do_not_use_when=(
+                    'You need to continue discussion; use track.add_comment.',
+                    'You need direct actor-address messaging; use message.send.',
+                ),
+                risk_hints={
+                    'read_only': False,
+                    'destructive': False,
+                    'idempotent': False,
                     'open_world': False,
                     'requires_human_approval': False,
                     'external_effect': False,

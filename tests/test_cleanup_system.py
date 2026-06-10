@@ -182,7 +182,7 @@ class CleanupSystemTests(unittest.TestCase):
             "buddyswitch/objects/tracks",
             "buddyswitch/objects/artifacts",
             "buddyswitch/objects/messages",
-            "buddyswitch/objects/comments",
+            "buddyswitch/objects/track-comments",
         ):
             self.assertTrue(self._path(directory).is_dir(), f"missing recreated dir: {directory}")
         self.assertFalse(self._path("buddyswitch/objects" + "/tasks").exists())
@@ -201,15 +201,20 @@ class CleanupSystemTests(unittest.TestCase):
             },
         )
         self._write_json(
-            "buddyswitch/objects/comments/comment-test.json",
+            "buddyswitch/objects/track-comments/track-demo/comment-test.json",
             {
                 "id": "comment-test",
-                "target_type": "track",
-                "target_id": "track-demo",
+                "track_id": "track-demo",
+                "thread_id": "comment-test",
                 "by_actor": {"actor_id": "act-design-clean", "role_id": "design"},
                 "content": "looks good",
                 "reply_to": None,
+                "mentioned_actors": [],
+                "status": "open",
                 "created_at": "2026-05-17T00:00:00+08:00",
+                "resolved_by_actor": None,
+                "resolved_at": None,
+                "resolution_summary": None,
             },
         )
         plan = env_cleanup.build_cleanup_plan(
@@ -243,27 +248,37 @@ class CleanupSystemTests(unittest.TestCase):
         }
         self._write_json("buddyswitch/objects/tracks/track-clean-comment.json", track_payload)
         self._write_json(
-            "buddyswitch/objects/comments/comment-dev-clean.json",
+            "buddyswitch/objects/track-comments/track-clean-comment/comment-dev-clean.json",
             {
                 "id": "comment-dev-clean",
-                "target_type": "track",
-                "target_id": "track-clean-comment",
+                "track_id": "track-clean-comment",
+                "thread_id": "comment-dev-clean",
                 "by_actor": {"actor_id": "act-dev-clean", "role_id": "dev"},
                 "content": "delete me",
                 "reply_to": None,
+                "mentioned_actors": [],
+                "status": "open",
                 "created_at": "2026-05-17T00:00:00+08:00",
+                "resolved_by_actor": None,
+                "resolved_at": None,
+                "resolution_summary": None,
             },
         )
         self._write_json(
-            "buddyswitch/objects/comments/comment-design-keep.json",
+            "buddyswitch/objects/track-comments/track-clean-comment/comment-design-keep.json",
             {
                 "id": "comment-design-keep",
-                "target_type": "track",
-                "target_id": "track-clean-comment",
+                "track_id": "track-clean-comment",
+                "thread_id": "comment-design-keep",
                 "by_actor": {"actor_id": "act-design-clean", "role_id": "design"},
                 "content": "keep me",
                 "reply_to": None,
+                "mentioned_actors": [],
+                "status": "open",
                 "created_at": "2026-05-17T00:00:01+08:00",
+                "resolved_by_actor": None,
+                "resolved_at": None,
+                "resolution_summary": None,
             },
         )
 
@@ -276,8 +291,8 @@ class CleanupSystemTests(unittest.TestCase):
         result = env_cleanup.execute_cleanup_plan(plan)
 
         self.assertTrue(result["ok"], msg=result)
-        self.assertFalse(self._path("buddyswitch/objects/comments/comment-dev-clean.json").exists())
-        self.assertTrue(self._path("buddyswitch/objects/comments/comment-design-keep.json").exists())
+        self.assertFalse(self._path("buddyswitch/objects/track-comments/track-clean-comment/comment-dev-clean.json").exists())
+        self.assertTrue(self._path("buddyswitch/objects/track-comments/track-clean-comment/comment-design-keep.json").exists())
         self.assertEqual(json.loads(track_path.read_text(encoding="utf-8")), track_payload)
 
     def test_cleanup_cli_json_reports_active_categories(self) -> None:

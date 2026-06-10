@@ -118,8 +118,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_create = catalog.get_action_definition("track", "create").input_schema
         track_update_now = catalog.get_action_definition("track", "update_now").input_schema
         track_add_update = catalog.get_action_definition("track", "add_update").input_schema
+        track_add_comment = catalog.get_action_definition("track", "add_comment").input_schema
+        track_list_comments = catalog.get_action_definition("track", "list_comments").input_schema
+        track_resolve_comment = catalog.get_action_definition("track", "resolve_comment_thread").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
-        comment_add = catalog.get_action_definition("comment", "add").input_schema
         task_current = catalog.get_action_definition("task", "current").input_schema
         task_capture = catalog.get_action_definition("task", "capture").input_schema
         task_select = catalog.get_action_definition("task", "select").input_schema
@@ -142,7 +144,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         message_mark = message_mark_action.input_schema
         message_conversation_action = catalog.get_action_definition("message", "conversation")
         message_conversation = message_conversation_action.input_schema
-        comment_resolve = catalog.get_action_definition("comment", "resolve").input_schema
+        self.assertNotIn("comment", catalog.supported_tools())
 
         create_now = track_create["properties"]["now"]
         update_now = track_update_now["properties"]["now"]
@@ -204,13 +206,16 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(set(variant_by_type["note"]["required"]), {"type", "label"})
         self.assertEqual(artifact_create["properties"]["read_claim"].get("type"), "string")
 
-        mentions = comment_add["properties"]["mentioned_actors"]
+        mentions = track_add_comment["properties"]["mentioned_actors"]
         self.assertEqual(mentions.get("type"), "array")
         self.assertEqual(mentions.get("items", {}).get("type"), "object")
         self.assertEqual(set(mentions.get("items", {}).get("required", [])), {"actor_id", "role_id"})
-        self.assertEqual(comment_add["properties"]["target_type"].get("enum"), ["track", "artifact", "artifact_section"])
-        comment_list = catalog.get_action_definition("comment", "list").input_schema
-        self.assertEqual(comment_list["properties"]["status"].get("enum"), ["open", "resolved", "all"])
+        self.assertEqual(set(track_add_comment.get("required", [])), {"track_id", "content"})
+        self.assertNotIn("target_type", track_add_comment["properties"])
+        self.assertNotIn("target_id", track_add_comment["properties"])
+        self.assertNotIn("anchor", track_add_comment["properties"])
+        self.assertNotIn("artifact_revision_id", track_add_comment["properties"])
+        self.assertEqual(track_list_comments["properties"]["status"].get("enum"), ["open", "resolved", "all"])
 
         self.assertEqual(task_current["properties"]["history_limit"].get("type"), "integer")
         self.assertEqual(task_current["properties"]["history_limit"].get("minimum"), 1)
@@ -331,7 +336,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(conversation_target.get("properties", {}).get("role_id", {}).get("type"), "string")
         self.assertEqual(conversation_target.get("properties", {}).get("actor_id", {}).get("type"), "string")
 
-        self.assertEqual(set(comment_resolve.get("required", [])), {"comment_id", "resolution_summary"})
+        self.assertEqual(set(track_resolve_comment.get("required", [])), {"track_id", "comment_id", "resolution_summary"})
 
     def test_artifact_list_schema_is_simple_and_bounded(self) -> None:
         artifact_list = catalog.get_action_definition("artifact", "list").input_schema

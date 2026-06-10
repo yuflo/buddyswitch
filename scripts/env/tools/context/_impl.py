@@ -302,7 +302,7 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
                 ", ".join(str(row) for row in artifact_create["does_not_write"]),
             ]
         ),
-        "comment_target_support": str(affordances["comment"]["object_model"]),
+        "track_comment_support": "Track comments are Track-scoped collaboration rows; use track.add_comment, track.list_comments, and track.resolve_comment_thread.",
         "search_boundary": str(affordances["search"]["object_model"]),
         "evidence_boundary": str(affordances["evidence"]["object_model"]),
         "writable_file_surface": "$BUDDYSWITCH_ACTOR_PRIVATE_DIR for persistent private files; $BUDDYSWITCH_INSTANCE_TMP for temporary files.",
@@ -404,24 +404,15 @@ def _context_artifact_row_allowed(
 def _open_comment_thread_rows(
     *,
     visible_track_ids: set[str],
-    visible_artifact_ids: set[str],
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
-    for comment in context.repos.comment.list_comments():
-        target_type = comment.get("target_type")
-        target_id = comment.get("target_id")
-        if not isinstance(target_type, str) or not isinstance(target_id, str):
+    for comment in context.repos.track_comment.list_track_comments():
+        track_id = comment.get("track_id")
+        if not isinstance(track_id, str):
             continue
-        normalized_target_type = "artifact" if target_type == "artifact_section" else target_type
-        if normalized_target_type == "track":
-            if target_id not in visible_track_ids:
-                continue
-        elif normalized_target_type == "artifact":
-            if target_id not in visible_artifact_ids:
-                continue
-        else:
+        if track_id not in visible_track_ids:
             continue
         thread_id = comment.get("thread_id")
         if not isinstance(thread_id, str) or not thread_id:
@@ -437,14 +428,10 @@ def _open_comment_thread_rows(
             thread_comments,
             key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")),
         )
-        target_type = latest.get("target_type")
-        if target_type == "artifact_section":
-            target_type = "artifact"
         rows.append(
             {
                 "thread_id": thread_id,
-                "target_type": target_type,
-                "target_id": latest.get("target_id"),
+                "track_id": latest.get("track_id"),
                 "latest_comment_id": latest.get("id"),
                 "latest_by_actor": latest.get("by_actor"),
                 "open_comment_count": open_count,
@@ -552,7 +539,6 @@ def _current_context_sections(
     }
     open_comment_threads = _open_comment_thread_rows(
         visible_track_ids=visible_track_ids,
-        visible_artifact_ids={str(row) for row in visible_artifact_ids if isinstance(row, str)},
         limit_value=limit_value,
         context=context,
     )
@@ -658,9 +644,9 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "message.list and message.conversation via runtime env tools",
         },
         "comments": {
-            "description": "Target-scoped comments on tracks and artifacts, read through comment.list.",
-            "scope": "target discussion thread",
-            "source_of_truth": "comment.list via runtime env tools",
+            "description": "Track collaboration comments scoped to exactly one Track.",
+            "scope": "Track discussion threads",
+            "source_of_truth": "track.list_comments via runtime env tools",
         },
         "writable_surfaces": {
             "description": "Runtime writable filesystem surfaces for host-visible files.",

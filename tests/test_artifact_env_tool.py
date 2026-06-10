@@ -2360,39 +2360,6 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             update_id = str(updates[-1].get("id") or "")
         self.assertTrue(update_id)
 
-        comment_root = self._dispatch(
-            instance_json=instance_pm,
-            actor_id=shared_actor_id,
-            role="pm",
-            tool="comment",
-            action="add",
-            args={
-                "target_type": "artifact",
-                "target_id": "art-rel-target",
-                "content": "root comment",
-            },
-        )
-        self.assertTrue(comment_root.get("ok"), msg=comment_root)
-        root_comment_id = str(comment_root.get("comment_id") or "")
-        self.assertTrue(root_comment_id)
-
-        comment_section = self._dispatch(
-            instance_json=instance_pm,
-            actor_id=shared_actor_id,
-            role="pm",
-            tool="comment",
-            action="add",
-            args={
-                "target_type": "artifact_section",
-                "target_id": "art-rel-target",
-                "content": "section comment",
-                "anchor": "#section-1",
-            },
-        )
-        self.assertTrue(comment_section.get("ok"), msg=comment_section)
-        section_comment_id = str(comment_section.get("comment_id") or "")
-        self.assertTrue(section_comment_id)
-
         fetched = self._dispatch(
             instance_json=instance_pm,
             actor_id=shared_actor_id,
@@ -2439,12 +2406,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         }
         self.assertIn(update_id, update_ids)
 
-        comment_ids = incoming_refs.get("comment_ids")
-        self.assertIsInstance(comment_ids, list, msg=incoming_refs)
-        assert isinstance(comment_ids, list)
-        self.assertIn(root_comment_id, comment_ids)
-        self.assertIn(section_comment_id, comment_ids)
-        self.assertTrue(all(isinstance(row, str) for row in comment_ids))
+        self.assertNotIn("comment_ids", incoming_refs)
 
 
 if __name__ == "__main__":

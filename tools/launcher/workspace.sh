@@ -837,7 +837,7 @@ buddyswitch_workspace_ensure_state_skeleton() {
 buddyswitch/objects/tracks
 buddyswitch/objects/artifacts
 buddyswitch/objects/messages
-buddyswitch/objects/comments
+buddyswitch/objects/track-comments
 EOF
 }
 

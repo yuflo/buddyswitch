@@ -20,16 +20,27 @@ from env.tool_runtime.definition import validate_definition  # noqa: E402
 from env.tool_runtime import registry as catalog  # noqa: E402
 from env.tool_runtime import role_auth  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message"}
 _EXPECTED_ACTIONS_BY_TOOL = {
     "task": {"current", "capture", "select", "switch_request", "switch_confirm", "progress", "checkout", "review"},
-    "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
+    "track": {
+        "create",
+        "list",
+        "open",
+        "add_comment",
+        "list_comments",
+        "resolve_comment_thread",
+        "update_now",
+        "add_material",
+        "add_update",
+        "add_proof",
+        "archive",
+    },
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request", "open_browser"},
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
-    "comment": {"add", "list", "resolve"},
 }
 _TASK_REQUIREMENT_FREE = "free"
 _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
@@ -39,7 +50,6 @@ _EXPECTED_FREE_ACTIONS = {
     "artifact.get",
     "artifact.list_attachments",
     "artifact.get_attachment",
-    "comment.list",
     "context.summarize",
     "context.get",
     "context.list_sources",
@@ -59,19 +69,20 @@ _EXPECTED_FREE_ACTIONS = {
     "task.checkout",
     "task.review",
     "track.list",
+    "track.list_comments",
     "track.open",
 }
 _EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS = {
     "artifact.create_revision",
     "artifact.update_metadata",
     "artifact.attach_file",
-    "comment.add",
-    "comment.resolve",
     "evidence.issue_browser",
     "evidence.approve_downgrade",
     "search.request",
     "search.open_browser",
     "track.create",
+    "track.add_comment",
+    "track.resolve_comment_thread",
     "track.update_now",
     "track.add_material",
     "track.add_update",
@@ -189,7 +200,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("task", "progress", ("progress", "evidence", "refs")),
             ("task", "checkout", ("continue", "finish", "block")),
             ("task", "review", ("captured", "blocked", "review")),
-            ("comment", "add", ("discussion", "timeline", "message")),
+            ("track", "add_comment", ("discussion", "track", "message")),
             ("search", "request", ("target_url", "without opening", "open_browser")),
             ("search", "open_browser", ("browser", "open", "payload")),
             ("evidence", "issue_browser", ("artifact", "token", "downgrade")),
@@ -198,11 +209,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "summarize", ("compact", "summary", "get")),
             ("context", "list_sources", ("source", "descriptor", "catalog")),
             ("message", "contacts", ("contact", "actor", "send")),
-            ("message", "send", ("inbox", "actor address", "comment")),
+            ("message", "send", ("inbox", "actor address", "track")),
             ("message", "get", ("exact", "message_id", "disposition")),
             ("message", "mark", ("absorbed", "needs_parent", "disposition")),
-            ("message", "list", ("inbox", "read", "comment")),
-            ("comment", "resolve", ("pm", "thread", "resolved")),
+            ("message", "list", ("inbox", "read", "track")),
+            ("track", "resolve_comment_thread", ("pm", "thread", "resolved")),
         ]
         for tool, action, snippets in checks:
             text = self._semantic_text(tool=tool, action=action)
@@ -469,17 +480,17 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
     def test_adjacent_catalog_surfaces_do_not_teach_direct_role_inbox_or_role_taskbox(self) -> None:
         desc = self._desc()
-        comment_text = json.dumps(desc["comment"], ensure_ascii=True, sort_keys=True).lower()
+        track_text = json.dumps(desc["track"], ensure_ascii=True, sort_keys=True).lower()
         task_text = json.dumps(desc["task"], ensure_ascii=True, sort_keys=True).lower()
 
         for token in ("direct role inbox", "direct role messaging"):
-            with self.subTest(surface="comment", token=token):
-                self.assertNotIn(token, comment_text)
+            with self.subTest(surface="track", token=token):
+                self.assertNotIn(token, track_text)
         for token in ("active-role taskbox", "active-role tasksnapshot", "current active-role taskbox task"):
             with self.subTest(surface="task", token=token):
                 self.assertNotIn(token, task_text)
 
-        self.assertIn("active-role readability", comment_text)
+        self.assertIn("track-scoped", track_text)
         self.assertIn("env.tool role-action policy allows this action for the active role", task_text)
 
     def test_task_current_operation_semantics_are_read_only(self) -> None:

@@ -32,15 +32,15 @@ COMMON_ROLE_PERMISSIONS = frozenset(
         "message.mark",
         "message.list",
         "message.conversation",
-        "comment.add",
-        "comment.list",
+        "track.add_comment",
+        "track.list_comments",
         "evidence.issue",
         "evidence.approve",
     }
 )
 
 ROLE_PERMISSION_ADDITIONS = {
-    "pm": frozenset({"track.create", "track.archive", "comment.resolve"}),
+    "pm": frozenset({"track.create", "track.archive", "track.resolve_comment_thread"}),
 }
 
 

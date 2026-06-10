@@ -168,7 +168,7 @@ def _build_definition() -> ToolDefinition:
                     'You need to reply to one processable inbound message and mark the original replied after delivery.',
                 ),
                 do_not_use_when=(
-                    'You only have a role id but no actor address (use message.contacts) or need target-scoped track/artifact discussion (use comment.add).',
+                    'You only have a role id but no actor address (use message.contacts) or need Track discussion (use track.add_comment).',
                     'Use message.mark(absorbed) when no reply is needed.',
                     'Use message.mark(needs_parent) when side triage needs parent handling.',
                 ),
@@ -380,7 +380,7 @@ def _build_definition() -> ToolDefinition:
                     'You need to read active actor inbox messages, optionally filtered by sender role, keyword, or bounded count.',
                 ),
                 do_not_use_when=(
-                    'You need to create a new direct message (use message.send) or discuss a track/artifact target thread (use comment.add).',
+                    'You need to create a new direct message (use message.send) or discuss a Track thread (use track.add_comment).',
                 ),
                 risk_hints={
                     'read_only': True,

@@ -27,7 +27,6 @@ SHIPPED_TOOLS = {
     "context",
     "evidence",
     "message",
-    "comment",
     "search",
 }
 REQUIRED_TOOL_FILES = {"__init__.py", "tool.py", "_impl.py"}

@@ -20,7 +20,7 @@ from env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}
+EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message"}
 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -31,7 +31,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ("context", "list_sources", {}, "dev"),
         ("evidence", "issue_browser", {}, "dev"),
         ("message", "list", {}, "dev"),
-        ("comment", "list", {}, "dev"),
+        ("track", "list_comments", {"track_id": "missing-track"}, "dev"),
         ("search", "status", {}, "dev"),
     )
 

@@ -175,7 +175,7 @@ def _build_definition() -> ToolDefinition:
                     'You need a compact first-pass summary with candidate tracks/tasks/artifacts and quick discussion/update attention cues.',
                 ),
                 do_not_use_when=(
-                    'You need full operation semantics/tool catalog details, full comment bodies, or full artifact markdown body; use context.get/comment.list/artifact.get.',
+                    'You need full operation semantics/tool catalog details, full Track comment rows, or full artifact markdown body; use context.get/track.list_comments/artifact.get.',
                 ),
                 risk_hints={
                     'read_only': True,

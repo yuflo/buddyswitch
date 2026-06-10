@@ -19,7 +19,7 @@ OBJECTS_ROOT: Path
 TRACKS_DIR: Path
 ARTIFACT_OBJECTS_DIR: Path
 MESSAGES_DIR: Path
-COMMENTS_DIR: Path
+TRACK_COMMENTS_DIR: Path
 CONTENT_ROOT: Path
 LOCAL_ROOT: Path
 ACTOR_PRIVATE_DIR: Path
@@ -35,7 +35,7 @@ def refresh_runtime_root_bindings() -> None:
     global TRACKS_DIR
     global ARTIFACT_OBJECTS_DIR
     global MESSAGES_DIR
-    global COMMENTS_DIR
+    global TRACK_COMMENTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
     global ACTOR_PRIVATE_DIR
@@ -47,7 +47,7 @@ def refresh_runtime_root_bindings() -> None:
     TRACKS_DIR = runtime_files.TRACKS_DIR
     ARTIFACT_OBJECTS_DIR = runtime_files.ARTIFACT_OBJECTS_DIR
     MESSAGES_DIR = runtime_files.MESSAGES_DIR
-    COMMENTS_DIR = runtime_files.COMMENTS_DIR
+    TRACK_COMMENTS_DIR = runtime_files.TRACK_COMMENTS_DIR
     CONTENT_ROOT = runtime_files.CONTENT_ROOT
     LOCAL_ROOT = runtime_files.LOCAL_ROOT
     ACTOR_PRIVATE_DIR = runtime_files.ACTOR_PRIVATE_DIR
@@ -93,11 +93,11 @@ _RETIRED_OBJECT_APIS = frozenset(
         "track_file",
         "artifact_file",
         "message_file",
-        "comment_file",
+        "track_comment_file",
         "validate_track",
         "validate_artifact",
         "validate_message",
-        "validate_comment",
+        "validate_track_comment",
         "list_tracks",
         "list_artifacts",
         "artifact_revision_chain",
@@ -120,12 +120,13 @@ _RETIRED_OBJECT_APIS = frozenset(
         "get_message",
         "save_message",
         "create_message",
-        "list_comments",
-        "get_comment",
-        "save_comment",
-        "create_comment",
-        "comments_for_target",
-        "update_comment_thread_status",
+        "list_track_comments",
+        "get_track_comment",
+        "save_track_comment",
+        "create_track_comment",
+        "comments_for_track",
+        "comments_for_track_thread",
+        "resolve_track_comment_thread",
     }
 )
 
@@ -150,7 +151,7 @@ __all__ = [
     "TRACKS_DIR",
     "ARTIFACT_OBJECTS_DIR",
     "MESSAGES_DIR",
-    "COMMENTS_DIR",
+    "TRACK_COMMENTS_DIR",
     "CONTENT_ROOT",
     "LOCAL_ROOT",
     "ACTOR_PRIVATE_DIR",

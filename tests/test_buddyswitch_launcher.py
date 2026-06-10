@@ -2206,6 +2206,7 @@ exec "$real_git" "$@"
                 "scripts/env/services/context.py",
                 "scripts/env/services/private.py",
                 "scripts/env/services/evidence.py",
+                "scripts/env/repos/track_comments.py",
                 "scripts/env/tools/task/tool.py",
                 "scripts/env/tools/task/_impl.py",
                 "scripts/env/tools/track/tool.py",
@@ -2218,21 +2219,13 @@ exec "$real_git" "$@"
                 "scripts/env/tools/evidence/_impl.py",
                 "scripts/env/tools/message/tool.py",
                 "scripts/env/tools/message/_impl.py",
-                "scripts/env/tools/comment/tool.py",
-                "scripts/env/tools/comment/_impl.py",
                 "scripts/env/tools/search/tool.py",
                 "scripts/env/tools/search/_impl.py",
                 "scripts/env/domain/source_refs.py",
                 "scripts/env/domain/private_workspace.py",
             )
             for relative in runtime_surface_candidates:
-                tracked = subprocess.run(
-                    ["git", "-C", str(ROOT), "cat-file", "-e", f"HEAD:{relative}"],
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
-                if tracked.returncode != 0:
+                if not (ROOT / relative).exists():
                     continue
                 with self.subTest(runtime_surface=relative):
                     self.assertTrue((workspace_dir / relative).exists())

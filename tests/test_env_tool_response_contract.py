@@ -409,8 +409,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertNotIn('"properties":', dumped)
         self.assertNotIn('"required":', dumped)
         self.assertNotIn('"additionalProperties":', dumped)
-        self.assertIn("comment.resolve", full.get("operation_semantics", {}))
-        self.assertNotIn("comment.reopen", full.get("operation_semantics", {}))
+        self.assertIn("track.resolve_comment_thread", full.get("operation_semantics", {}))
+        self.assertNotIn("comment.resolve", full.get("operation_semantics", {}))
 
     def test_unknown_tool_rejection_contract(self) -> None:
         actor_id = "act-pm-reject"
@@ -990,16 +990,15 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "source_path",
             ),
             (
-                "comment.add.mentioned_actors",
+                "track.add_comment.mentioned_actors",
                 self._dispatch(
                     instance_json=pm_instance_json,
                     actor_id=pm_actor_id,
                     role="pm",
-                    tool="comment",
-                    action="add",
+                    tool="track",
+                    action="add_comment",
                     args={
-                        "target_type": "track",
-                        "target_id": "track-field-errors",
+                        "track_id": "track-field-errors",
                         "content": "check mentions",
                         "mentioned_actors": "pm",
                     },

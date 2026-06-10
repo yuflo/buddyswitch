@@ -24,7 +24,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message"}
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -362,7 +362,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("message.send", preview.get("available_actions", []))
         self.assertIn("track.create", preview.get("restricted_actions", []))
         self.assertIn("track.archive", preview.get("restricted_actions", []))
-        self.assertIn("comment.resolve", preview.get("restricted_actions", []))
+        self.assertIn("track.resolve_comment_thread", preview.get("restricted_actions", []))
         details = preview.get("restricted_action_details")
         self.assertIsInstance(details, dict, msg=preview)
         assert isinstance(details, dict)
@@ -382,7 +382,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ),
         )
         self.assertIn("track.add_material", str(snapshot.get("artifact_publication_path")))
-        self.assertIn("artifact_section", str(snapshot.get("comment_target_support")))
+        self.assertIn("track-scoped", str(snapshot.get("track_comment_support")).lower())
         self.assertIn("browser", str(snapshot.get("search_boundary")).lower())
 
     def test_context_candidate_tracks_use_owner_role_and_actor_creator(self) -> None:
@@ -843,8 +843,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         details = preview.get("restricted_action_details")
         self.assertIsInstance(details, dict, msg=preview)
         assert isinstance(details, dict)
-        self.assertEqual(details.get("comment.resolve", {}).get("required_permission"), "comment.resolve")
-        self.assertEqual(details.get("comment.resolve", {}).get("restricted_to_roles"), ["pm"])
+        self.assertEqual(details.get("track.resolve_comment_thread", {}).get("required_permission"), "track.resolve_comment_thread")
+        self.assertEqual(details.get("track.resolve_comment_thread", {}).get("restricted_to_roles"), ["pm"])
         self.assertNotIn("object_" + "permissions", json.dumps(payload, ensure_ascii=True))
         self.assertIn("source_workspace", operation_semantics["context.get"]["returns"])
         self.assertIn("writable_surfaces", operation_semantics["context.get"]["returns"])
