@@ -63,9 +63,9 @@ python -m pytest \
   tests/test_artifact_env_tool.py \
   tests/test_env_store_v2.py \
   tests/test_env_layer_boundaries.py \
-  tests/test_env_tool_response_contract.py \
-  tests/test_env_tool_schema_contract.py \
-  tests/test_env_tool_semantic_contract.py
+  tests/test_env_tool_response_*.py \
+  tests/test_env_tool_schema_*.py \
+  tests/test_env_tool_semantic_*.py
 ```
 
 Then run integration-adjacent checks:
