@@ -14,10 +14,21 @@ from typing import Any
 from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
-VALID_ARTIFACT_STATUS = ("draft", "published", "archived")
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
-_LEGACY_ARTIFACT_FIELDS = {"task_id", "kind", "content", "publication_role", "asset", "media", "material", "blocks", "figma_file"}
+_LEGACY_ARTIFACT_FIELDS = {
+    "task_id",
+    "kind",
+    "content",
+    "status",
+    "published_to_track",
+    "publication_role",
+    "asset",
+    "media",
+    "material",
+    "blocks",
+    "figma_file",
+}
 _KNOWN_ROLE_IDS = {"pm", "design", "dev", "market", "test"}
 _SHA256_HEX_LENGTH = 64
 
@@ -245,24 +256,14 @@ def create_artifact_revision(
         if not bool(previous.get("is_current")):
             raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
 
-        previous_status = previous.get("status")
-        previous_owner = previous.get("created_by_actor")
         revision = int(previous.get("revision", 1)) + 1
         supersedes_id = supersedes_artifact_id
 
-        if previous_status == "draft":
-            if previous_owner != creator:
-                raise ValueError("supersedes_artifact_id must reference an active-actor-owned current draft")
-            new_is_current = True
-            previous_patch = dict(previous)
-            previous_patch["is_current"] = False
-            previous_patch["updated_at"] = now_iso()
-            validate_artifact(previous_patch)
-            demote_previous = previous_patch
-        elif previous_status == "published":
-            new_is_current = False
-        else:
-            raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
+        previous_patch = dict(previous)
+        previous_patch["is_current"] = False
+        previous_patch["updated_at"] = now_iso()
+        validate_artifact(previous_patch)
+        demote_previous = previous_patch
 
     author_rows = [creator]
     if isinstance(author_actors, list):
@@ -279,8 +280,6 @@ def create_artifact_revision(
         "summary": summary,
         "body": body,
         "template": template,
-        "status": "draft",
-        "published_to_track": None,
         "revision": revision,
         "is_current": new_is_current,
         "supersedes_artifact_id": supersedes_id,
@@ -304,7 +303,7 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     if _LEGACY_SOURCE_RUN in patch:
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
 
-    retired = sorted(key for key in patch if key in {"kind", "content", "publication_role", "task_id"})
+    retired = sorted(key for key in patch if key in _LEGACY_ARTIFACT_FIELDS)
     if retired:
         raise ValueError(f"retired artifact fields are unsupported: {', '.join(retired)}")
 
@@ -313,9 +312,7 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         "summary",
         "body",
         "template",
-        "status",
         "source_refs",
-        "published_to_track",
         "supersedes_artifact_id",
         "is_current",
         "revision",
@@ -408,18 +405,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if _LEGACY_SOURCE_RUN in artifact:
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
     forbidden = sorted(field for field in artifact if field in _LEGACY_ARTIFACT_FIELDS)
-    legacy_fields_present = any(field in artifact for field in ("task_id", "kind", "content", "role"))
-    canonical_fields_present = any(
-        field in artifact for field in ("body", "template", "status", "published_to_track", "author_actors")
-    )
-    allow_legacy = legacy_fields_present and not canonical_fields_present
     if forbidden:
-        if not allow_legacy:
-            raise ValueError(f"legacy artifact fields are retired: {', '.join(forbidden)}")
-        legacy_normalizable = {"task_id", "kind", "content"}
-        unsupported_legacy = [field for field in forbidden if field not in legacy_normalizable]
-        if unsupported_legacy:
-            raise ValueError(f"legacy artifact fields are retired: {', '.join(unsupported_legacy)}")
+        raise ValueError(f"legacy artifact fields are retired: {', '.join(forbidden)}")
 
     artifact_id = runtime_files.require_id(artifact.get("id", ""), "artifact.id")
     title = _require_non_empty_text(artifact.get("title"), "artifact.title")
@@ -431,38 +418,12 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
 
     body = artifact.get("body")
     if not isinstance(body, str) or not body.strip():
-        if allow_legacy:
-            content = artifact.get("content")
-            if isinstance(content, dict):
-                legacy_body = content.get("body")
-                if isinstance(legacy_body, str) and legacy_body.strip():
-                    body = legacy_body
         if not isinstance(body, str) or not body.strip():
             raise ValueError("artifact.body must be a non-empty string")
 
     template = artifact.get("template")
-    if not isinstance(template, str) or not template.strip():
-        if allow_legacy:
-            kind = artifact.get("kind")
-            if isinstance(kind, str) and kind.strip():
-                template = _template_from_legacy_kind(kind)
     if not isinstance(template, str) or template not in VALID_ARTIFACT_TEMPLATES:
         raise ValueError(f"artifact.template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
-
-    published_to_track = artifact.get("published_to_track")
-    if published_to_track is not None:
-        runtime_files.require_id(published_to_track, "artifact.published_to_track")
-
-    status = artifact.get("status")
-    if not isinstance(status, str):
-        if allow_legacy:
-            status = "draft" if published_to_track is None else "published"
-    if status not in VALID_ARTIFACT_STATUS:
-        raise ValueError(f"artifact.status must be one of {', '.join(VALID_ARTIFACT_STATUS)}")
-    if status == "draft" and published_to_track is not None:
-        raise ValueError("artifact.published_to_track must be null for draft artifacts")
-    if status in {"published", "archived"} and published_to_track is None:
-        raise ValueError("artifact.published_to_track is required for published/archived artifacts")
 
     summary = artifact.get("summary", "")
     if not isinstance(summary, str):
@@ -503,8 +464,6 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "summary": summary,
         "body": body,
         "template": template,
-        "status": status,
-        "published_to_track": published_to_track,
         "revision": revision,
         "is_current": is_current,
         "supersedes_artifact_id": supersedes_artifact_id,

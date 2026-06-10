@@ -50,11 +50,11 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='track',
         title='Track Pages',
-        description='Operate shared progress pages and shared material/proof publication.',
-        scope='shared track progress pages and publication timeline',
+        description='Operate shared progress pages and Track-owned artifact relations.',
+        scope='shared track progress pages, artifact relations, and timeline',
         capability_boundary='Only PM can create/archive tracks; shared mutation requires readable track scope.',
         object_model=(
-            'Track pages are shared product outcome threads. A track can cover a feature iteration, decision thread, delivery slice, or other coherent shared outcome; not every feature mention requires a new track. PM owns create/archive lifecycle; shared mutation publishes material, proof, timeline, or now-state on the track.'
+            'Track pages are shared product outcome threads. A track can cover a feature iteration, decision thread, delivery slice, or other coherent shared outcome; not every feature mention requires a new track. PM owns create/archive lifecycle; shared mutation writes material relations, proof relations, timeline, or now-state on the track.'
         ),
         use_when=(
             'You need to operate shared collaboration on a non-archived track.',
@@ -207,7 +207,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You already have track_id and need full page details; use track.open.',
-                    'You need to mutate track state or publication timeline; use a write track action.',
+                    'You need to mutate track state, artifact relations, or timeline; use a write track action.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -269,7 +269,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need to discover candidate track ids first; use track.list.',
-                    'You need to change now/state/health or append publications/updates; use write track actions.',
+                    'You need to change now/state/health or append relations/updates; use write track actions.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -328,7 +328,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 does_not_write=(
                     'artifact body',
-                    'artifact publication slot',
+                    'artifact relation rows',
                     'task state',
                     'direct message state',
                     'actor_private files',
@@ -345,7 +345,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need a narrative event row in the timeline; use track.add_update.',
-                    'You need artifact publication into material/proof slots; use track.add_material or track.add_proof.',
+                    'You need to relate an artifact as material/proof; use track.add_material or track.add_proof.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -359,7 +359,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='add_material',
                 title='track.add_material',
-                description='Publish one draft artifact as current shared material.',
+                description='Relate one artifact as current shared material on the track.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -371,15 +371,15 @@ def _build_definition() -> ToolDefinition:
                         },
                         'artifact_id': {
                             'type': 'string',
-                            'description': 'Active-role-owned draft artifact id to publish.',
+                            'description': 'Readable artifact id to relate as material.',
                         },
                         'label': {
                             'type': 'string',
-                            'description': 'Human label for published material entry.',
+                            'description': 'Human label for the material relation.',
                         },
                         'summary': {
                             'type': 'string',
-                            'description': 'Summary shown on the published material entry.',
+                            'description': 'Summary shown on the material relation.',
                         },
                     },
                 },
@@ -394,15 +394,14 @@ def _build_definition() -> ToolDefinition:
                 visibility='shared to roles with track read access',
                 durability='durable',
                 result_content_level='track page plus artifact id',
-                success_effect='Publishes one draft artifact as current shared material on the track.',
+                success_effect='Adds one current material relation on the track without mutating the Artifact row.',
                 failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
                 reads=(
                     'one non-archived track page',
-                    'one publishable artifact',
+                    'one readable artifact',
                 ),
                 writes=(
-                    'track shared_materials',
-                    'artifact publication metadata',
+                    'track artifact_relations',
                 ),
                 does_not_write=(
                     'task state',
@@ -412,8 +411,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=(
                     'track_id references an existing non-archived track',
-                    'artifact_id references an active-actor-owned draft artifact',
-                    'artifact is not already published to another track',
+                    'artifact_id references a readable artifact',
                 ),
                 returns=(
                     'artifact_id',
@@ -421,12 +419,12 @@ def _build_definition() -> ToolDefinition:
                     'state_changes',
                 ),
                 use_when=(
-                    'You need to publish a draft artifact as current shared material on a track.',
+                    'You need to relate an artifact as current shared material on a track.',
                     'The artifact should appear in track materials state (not as a standalone narrative-only update).',
                 ),
                 do_not_use_when=(
-                    'You need a plain timeline note without material publication; use track.add_update.',
-                    'You are publishing close proof rather than working material; use track.add_proof.',
+                    'You need a plain timeline note without a material/proof relation; use track.add_update.',
+                    'You are adding close proof rather than working material; use track.add_proof.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -489,7 +487,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 does_not_write=(
                     'artifact body',
-                    'artifact publication slot',
+                    'artifact relation rows',
                     'task state',
                     'direct message state',
                     'actor_private files',
@@ -506,7 +504,7 @@ def _build_definition() -> ToolDefinition:
                     'You need narrative status communication on the track without publishing a new material/proof artifact.',
                 ),
                 do_not_use_when=(
-                    'You are publishing an artifact into current material/proof slots; use track.add_material or track.add_proof.',
+                    'You are relating an artifact as current material/proof; use track.add_material or track.add_proof.',
                     'You only need to patch now/state/health fields; use track.update_now.',
                 ),
                 risk_hints={
@@ -521,7 +519,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='add_proof',
                 title='track.add_proof',
-                description='Publish one draft artifact as current close proof.',
+                description='Relate one artifact as current close proof.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -533,15 +531,15 @@ def _build_definition() -> ToolDefinition:
                         },
                         'artifact_id': {
                             'type': 'string',
-                            'description': 'Active-role-owned draft artifact id to publish as proof.',
+                            'description': 'Readable artifact id to relate as proof.',
                         },
                         'label': {
                             'type': 'string',
-                            'description': 'Human label for published proof entry.',
+                            'description': 'Human label for the proof relation.',
                         },
                         'summary': {
                             'type': 'string',
-                            'description': 'Summary shown on track timeline and close proof.',
+                            'description': 'Summary shown on track timeline and proof relation.',
                         },
                     },
                 },
@@ -556,16 +554,15 @@ def _build_definition() -> ToolDefinition:
                 visibility='shared to roles with track read access',
                 durability='durable',
                 result_content_level='track page plus artifact id and update id',
-                success_effect='Publishes one draft artifact as current close proof and records the proof event on the track timeline.',
+                success_effect='Adds one current proof relation on the track and records the proof event on the timeline without mutating the Artifact row.',
                 failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
                 reads=(
                     'one non-archived track page',
-                    'one publishable artifact',
+                    'one readable artifact',
                 ),
                 writes=(
-                    'track close_proof',
+                    'track artifact_relations',
                     'track timeline update row',
-                    'artifact publication metadata',
                 ),
                 does_not_write=(
                     'task state',
@@ -575,8 +572,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=(
                     'track_id references an existing non-archived track',
-                    'artifact_id references an active-actor-owned draft artifact',
-                    'artifact is not already published to another track',
+                    'artifact_id references a readable artifact',
                 ),
                 returns=(
                     'artifact_id',
@@ -584,11 +580,11 @@ def _build_definition() -> ToolDefinition:
                     'state_changes',
                 ),
                 use_when=(
-                    'You need to publish a draft artifact as track close proof for outcome validation.',
-                    'You are recording evidence in the dedicated proof slot, not general working material.',
+                    'You need to relate an artifact as track close proof for outcome validation.',
+                    'You are recording evidence as a proof relation, not general working material.',
                 ),
                 do_not_use_when=(
-                    'You are publishing ongoing working artifacts; use track.add_material.',
+                    'You are adding ongoing working material; use track.add_material.',
                     'You only need a timeline narrative update with optional refs; use track.add_update.',
                 ),
                 risk_hints={
@@ -636,7 +632,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 does_not_write=(
                     'artifact body',
-                    'artifact publication metadata',
+                    'artifact relation rows',
                     'task state',
                     'direct message state',
                     'actor_private files',

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic artifact selection for track-published Artifact V1 inputs."""
+"""Deterministic artifact selection for Track-related Artifact inputs."""
 
 from __future__ import annotations
 
@@ -59,7 +59,10 @@ def _extract_artifacts(track_artifact_index: dict[str, Any] | None) -> list[dict
     if not isinstance(track_artifact_index, dict):
         return []
     rows = []
-    for artifact in _as_list(track_artifact_index.get("artifacts")):
+    source_rows = _as_list(track_artifact_index.get("artifacts"))
+    if not source_rows:
+        source_rows = _as_list(track_artifact_index.get("artifact_relations"))
+    for artifact in source_rows:
         if isinstance(artifact, dict):
             rows.append(artifact)
     rows.sort(
@@ -78,9 +81,7 @@ def _select_template_rows(
         for artifact in artifacts:
             if _as_str(artifact.get("template")) != template:
                 continue
-            if not bool(artifact.get("is_current")):
-                continue
-            if _as_str(artifact.get("status")) != "published":
+            if not bool(artifact.get("is_current", artifact.get("current"))):
                 continue
             selected[template] = artifact
             break
@@ -131,11 +132,11 @@ def select_artifacts_for_run(
                 "template": template,
                 "artifact_id": artifact_id,
                 "revision": _as_int(artifact.get("revision")),
-                "selection_reason": "current published artifact for required upstream template",
+                "selection_reason": "current track-related artifact for required upstream template",
                 "created_by_actor": _as_actor(artifact.get("created_by_actor")),
             }
         )
-        reasons.append(f"Selected current published artifact for required template '{template}': {artifact_id}")
+        reasons.append(f"Selected current track-related artifact for required template '{template}': {artifact_id}")
 
     if len(selected_inputs) > max_items:
         selected_inputs = selected_inputs[:max_items]

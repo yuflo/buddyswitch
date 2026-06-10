@@ -703,7 +703,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"target_type": "artifact", "target_id": "art-cmt-draft-private", "content": "no access"},
         )
         self.assertFalse(add.get("ok"), msg=add)
-        self.assertEqual(add.get("permission_boundary"), "artifact.status")
+        self.assertEqual(add.get("permission_boundary"), "artifact.relation_scope")
         self.assertEqual(self._snapshot_artifact_json("art-cmt-draft-private"), before)
 
         listed = self._dispatch(
@@ -715,7 +715,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"target_type": "artifact", "target_id": "art-cmt-draft-private", "status": "all"},
         )
         self.assertFalse(listed.get("ok"), msg=listed)
-        self.assertEqual(listed.get("permission_boundary"), "artifact.status")
+        self.assertEqual(listed.get("permission_boundary"), "artifact.relation_scope")
         self.assertEqual(self._snapshot_artifact_json("art-cmt-draft-private"), before)
 
     def test_same_role_different_actor_cannot_comment_on_private_draft(self) -> None:

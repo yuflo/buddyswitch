@@ -398,7 +398,7 @@ def _context_artifact_row_allowed(
         return relation in {"track_material", "track_proof"}
     if relation in {"track_material", "track_proof"}:
         return True
-    return artifact.get("status") == "draft" and relation == "owner"
+    return relation == "owner"
 
 
 def _open_comment_thread_rows(

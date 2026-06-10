@@ -25,7 +25,7 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _artifact_path(self, artifact_id: str) -> Path:
         return self._runtime_path(f"buddyswitch/objects/artifacts/{artifact_id}.json")
 
-    def test_create_artifact_uses_canonical_markdown_page_shape(self) -> None:
+    def test_create_artifact_uses_independent_content_carrier_shape(self) -> None:
         artifact = env_store.create_artifact_revision(
             artifact_id="art-pm-canonical-r1",
             title="Artifact canonical contract",
@@ -44,8 +44,6 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "summary",
             "body",
             "template",
-            "status",
-            "published_to_track",
             "revision",
             "is_current",
             "supersedes_artifact_id",
@@ -58,8 +56,6 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         }
         self.assertEqual(set(artifact.keys()), expected_keys)
         self.assertEqual(artifact["template"], "brief")
-        self.assertEqual(artifact["status"], "draft")
-        self.assertIsNone(artifact["published_to_track"])
         self.assertEqual(artifact["created_by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
         self.assertEqual(artifact["author_actors"], [{"actor_id": "act-pm-legacy", "role_id": "pm"}])
         self.assertEqual(artifact["attachments"], [])
@@ -67,34 +63,89 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         stored = json.loads(self._artifact_path("art-pm-canonical-r1").read_text(encoding="utf-8"))
         self.assertEqual(set(stored.keys()), expected_keys)
+        self.assertNotIn("status", stored)
+        self.assertNotIn("published_to_track", stored)
+        self.assertNotIn("publication_role", stored)
         self.assertNotIn("kind", stored)
         self.assertNotIn("content", stored)
         self.assertNotIn("task_id", stored)
 
-    def test_new_artifact_shape_rejects_retired_fields(self) -> None:
+    def test_artifact_validation_rejects_retired_and_publication_lifecycle_fields(self) -> None:
         base = {
             "id": "art-pm-reject-r1",
             "title": "Reject retired fields",
             "summary": "x",
             "body": "body",
             "template": "note",
-            "status": "draft",
-            "published_to_track": None,
             "revision": 1,
             "is_current": True,
             "supersedes_artifact_id": None,
             "created_by_actor": {"actor_id": "act-pm-reject", "role_id": "pm"},
             "author_actors": [{"actor_id": "act-pm-reject", "role_id": "pm"}],
+            "attachments": [],
             "source_refs": [{"type": "note", "label": "seed"}],
             "created_at": "2026-05-18T10:00:00+08:00",
             "updated_at": "2026-05-18T10:00:00+08:00",
         }
-        for retired_field in ("task_id", "kind", "content", "asset", "media", "material", "blocks", "figma_file"):
+        for retired_field in (
+            "status",
+            "published_to_track",
+            "publication_role",
+            "task_id",
+            "kind",
+            "content",
+            "asset",
+            "media",
+            "material",
+            "blocks",
+            "figma_file",
+        ):
             payload = dict(base)
-            payload[retired_field] = "x"
+            payload[retired_field] = "published" if retired_field == "status" else "x"
             with self.subTest(field=retired_field):
                 with self.assertRaises(ValueError):
                     env_store.validate_artifact(payload)
+
+    def test_superseding_artifact_is_artifact_local_currentness(self) -> None:
+        r1 = env_store.create_artifact_revision(
+            artifact_id="art-pm-lineage-r1",
+            title="Artifact lineage r1",
+            summary="r1",
+            body="body r1",
+            template="brief",
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        self.assertTrue(r1["is_current"], msg=r1)
+
+        r2 = env_store.create_artifact_revision(
+            artifact_id="art-pm-lineage-r2",
+            title="Artifact lineage r2",
+            summary="r2",
+            body="body r2",
+            template="brief",
+            supersedes_artifact_id="art-pm-lineage-r1",
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "artifact", "id": "art-pm-lineage-r1"}],
+        )
+
+        stored_r1 = env_store.get_artifact("art-pm-lineage-r1")
+        stored_r2 = env_store.get_artifact("art-pm-lineage-r2")
+        self.assertIsInstance(stored_r1, dict)
+        self.assertIsInstance(stored_r2, dict)
+        assert isinstance(stored_r1, dict)
+        assert isinstance(stored_r2, dict)
+        self.assertFalse(stored_r1["is_current"], msg=stored_r1)
+        self.assertTrue(stored_r2["is_current"], msg=stored_r2)
+        self.assertEqual(r2["revision"], 2)
+        self.assertEqual(r2["supersedes_artifact_id"], "art-pm-lineage-r1")
+        for row in (stored_r1, stored_r2):
+            self.assertNotIn("status", row)
+            self.assertNotIn("published_to_track", row)
+            self.assertNotIn("publication_role", row)
 
 
 class RuntimeRootFoundationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -245,6 +296,117 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
 
 class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_create_track_uses_artifact_relations_not_publication_slots(self) -> None:
+        track = env_store.create_track("track-relation-shape", "Relation Shape", owner_role="pm")
+
+        self.assertIn("artifact_relations", track)
+        self.assertEqual(track["artifact_relations"], [])
+        self.assertNotIn("shared_materials", track)
+        self.assertNotIn("close_proof", track)
+
+        stored = env_store.get_track("track-relation-shape")
+        self.assertIsInstance(stored, dict)
+        assert isinstance(stored, dict)
+        self.assertIn("artifact_relations", stored)
+        self.assertNotIn("shared_materials", stored)
+        self.assertNotIn("close_proof", stored)
+
+    def test_validate_track_rejects_publication_slot_fields(self) -> None:
+        base = {
+            "id": "track-reject-publication-slots",
+            "title": "Reject publication slots",
+            "outcome": "outcome",
+            "owner_role": "pm",
+            "created_by_actor": {"actor_id": "act-pm-reject-track", "role_id": "pm"},
+            "state": "active",
+            "health": "ok",
+            "appetite": "1 day",
+            "now": {"next": "next", "blocker": None},
+            "artifact_relations": [],
+            "updates": [],
+            "created_at": "2026-05-18T10:00:00+08:00",
+            "updated_at": "2026-05-18T10:00:00+08:00",
+            "archived_at": None,
+        }
+        for stale_field in ("shared_materials", "close_proof"):
+            payload = dict(base)
+            payload[stale_field] = []
+            with self.subTest(field=stale_field):
+                with self.assertRaisesRegex(ValueError, "legacy track fields are retired"):
+                    env_store.validate_track(payload)
+
+    def test_validate_track_normalizes_artifact_relations(self) -> None:
+        track = env_store.validate_track(
+            {
+                "id": "track-relation-normalize",
+                "title": "Relation Normalize",
+                "outcome": "outcome",
+                "owner_role": "pm",
+                "created_by_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+                "state": "active",
+                "health": "ok",
+                "appetite": "1 day",
+                "now": {"next": "next", "blocker": None},
+                "artifact_relations": [
+                    {
+                        "relation_id": "rel-material-r1",
+                        "type": "artifact",
+                        "artifact_id": "art-material-r1",
+                        "role": "material",
+                        "label": "Brief",
+                        "template": "brief",
+                        "from_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+                        "summary": "Shared brief",
+                        "current": True,
+                        "created_at": "2026-05-18T10:00:00+08:00",
+                    }
+                ],
+                "updates": [],
+                "created_at": "2026-05-18T10:00:00+08:00",
+                "updated_at": "2026-05-18T10:00:00+08:00",
+                "archived_at": None,
+            }
+        )
+
+        self.assertEqual(len(track["artifact_relations"]), 1)
+        relation = track["artifact_relations"][0]
+        self.assertEqual(relation["role"], "material")
+        self.assertEqual(relation["template"], "brief")
+        self.assertTrue(relation["current"])
+
+    def test_validate_track_rejects_invalid_artifact_relation_role(self) -> None:
+        payload = {
+            "id": "track-relation-invalid-role",
+            "title": "Relation Invalid",
+            "outcome": "outcome",
+            "owner_role": "pm",
+            "created_by_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+            "state": "active",
+            "health": "ok",
+            "appetite": "1 day",
+            "now": {"next": "next", "blocker": None},
+            "artifact_relations": [
+                {
+                    "relation_id": "rel-invalid",
+                    "type": "artifact",
+                    "artifact_id": "art-invalid",
+                    "role": "publication",
+                    "label": "Invalid",
+                    "template": "brief",
+                    "from_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+                    "summary": "Invalid",
+                    "current": True,
+                    "created_at": "2026-05-18T10:00:00+08:00",
+                }
+            ],
+            "updates": [],
+            "created_at": "2026-05-18T10:00:00+08:00",
+            "updated_at": "2026-05-18T10:00:00+08:00",
+            "archived_at": None,
+        }
+        with self.assertRaisesRegex(ValueError, "track.artifact_relations\\[\\].role"):
+            env_store.validate_track(payload)
+
     def test_validate_track_rejects_legacy_task_ids(self) -> None:
         payload = {
             "id": "track-pm-legacy",

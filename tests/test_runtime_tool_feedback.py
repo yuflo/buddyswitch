@@ -252,7 +252,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload["permission_boundary"], "request-payload")
         self.assertIn("backend", payload["why_blocked"].lower())
 
-    def test_publish_rejections_have_actionable_feedback_and_no_state_change(self) -> None:
+    def test_relation_rejections_have_actionable_feedback_and_no_unintended_state_change(self) -> None:
         track_a = self._dispatch(
             role="pm",
             tool="track",
@@ -320,8 +320,12 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="add_material",
             args={"track_id": "track-feedback-b", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "cross"},
         )
-        self._assert_rejection_contract(cross_track)
-        self.assertIn("track_id", cross_track.get("correctable_fields", []))
+        self.assertTrue(cross_track.get("ok"), msg=cross_track)
+        self.assertEqual(set(cross_track.get("updated_ids", [])), {"track-feedback-b"})
+        self.assertEqual(env_store.get_track("track-feedback-a"), before_track_a)
+        self.assertNotEqual(env_store.get_track("track-feedback-b"), before_track_b)
+        self.assertEqual(env_store.get_artifact("art-feedback-r1"), before_artifact)
+        before_track_b = deepcopy(env_store.get_track("track-feedback-b"))
 
         wrong_owner = self._dispatch(
             role="design",

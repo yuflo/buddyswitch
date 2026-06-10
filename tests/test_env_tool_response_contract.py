@@ -462,8 +462,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         self._assert_write_success_contract(artifact)
         self.assertTrue((artifact.get("artifact") or {}).get("id"))
-        self.assertEqual((artifact.get("artifact") or {}).get("status"), "draft")
-        self.assertIsNone((artifact.get("artifact") or {}).get("published_to_track"))
+        self.assertNotIn("status", artifact.get("artifact") or {})
+        self.assertNotIn("published_to_track", artifact.get("artifact") or {})
         self.assertEqual((artifact.get("artifact") or {}).get("currentness"), "draft")
         self.assertIn("track.add_material", "\n".join(str(x) for x in artifact.get("allowed_next_actions", [])))
         self.assertIn("track.add_proof", "\n".join(str(x) for x in artifact.get("allowed_next_actions", [])))
@@ -482,10 +482,9 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             },
         )
         self._assert_write_success_contract(published)
-        self.assertEqual(set(published.get("updated_ids", [])), {"track-response", "art-response-r1"})
+        self.assertEqual(set(published.get("updated_ids", [])), {"track-response"})
         changes = {row.get("change") for row in published.get("state_changes", []) if isinstance(row, dict)}
-        self.assertIn("published_material", changes)
-        self.assertIn("material_added", changes)
+        self.assertIn("material_relation_added", changes)
 
     def test_artifact_template_permission_rejection_uses_structured_contract(self) -> None:
         actor_id = "act-pm-template-contract"
@@ -665,7 +664,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self._assert_rejection_contract(browser_rejection)
         self.assertIn("browser", str(browser_rejection.get("why_blocked", "")).lower())
 
-    def test_publication_success_responses_describe_object_mutations(self) -> None:
+    def test_relation_success_responses_describe_object_mutations(self) -> None:
         actor_id = "act-pm-mutation-response"
         pm_instance = self._instance_json(role="pm", actor_id=actor_id)
         track = self._dispatch(
@@ -715,10 +714,9 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             },
         )
         self._assert_write_success_contract(proof)
-        self.assertEqual(set(proof.get("updated_ids", [])), {"track-mutation-response", "art-proof-response-r1"})
+        self.assertEqual(set(proof.get("updated_ids", [])), {"track-mutation-response"})
         changes = {row.get("change") for row in proof.get("state_changes", []) if isinstance(row, dict)}
-        self.assertIn("published_proof", changes)
-        self.assertIn("proof_added", changes)
+        self.assertIn("proof_relation_added", changes)
         self.assertIn("update_added", changes)
 
     def test_message_mark_needs_parent_prompt_failure_follows_rejection_contract(self) -> None:

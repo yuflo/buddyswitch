@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integration tests for PM/product publication route."""
+"""Integration tests for PM/product artifact relation route."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=self.manifest_path,
         )
 
-    def test_pm_product_publication_uses_track_artifact_publication_not_project_write(self) -> None:
+    def test_pm_product_relation_uses_track_artifact_relation_not_project_write(self) -> None:
         track = self._dispatch(
             role="pm",
             tool="track",
@@ -96,7 +96,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(draft["ok"], msg=draft)
-        self.assertEqual((draft.get("artifact") or {}).get("status"), "draft")
+        self.assertNotIn("status", draft.get("artifact") or {})
 
         publish = self._dispatch(
             role="pm",
@@ -115,8 +115,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(state_changes, list, msg=publish)
         assert isinstance(state_changes, list)
         changes = {row.get("change") for row in state_changes if isinstance(row, dict)}
-        self.assertIn("published_material", changes)
-        self.assertIn("material_added", changes)
+        self.assertIn("material_relation_added", changes)
 
         context_summary = self._dispatch(
             role="pm",
@@ -139,8 +138,13 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"track_id": "track-runless-flow"},
         )
         self.assertTrue(opened["ok"], msg=opened)
+        current_materials = [
+            row
+            for row in (opened.get("track") or {}).get("artifact_relations", [])
+            if isinstance(row, dict) and row.get("role") == "material" and bool(row.get("current"))
+        ]
         self.assertEqual(
-            [row.get("artifact_id") for row in (opened.get("track") or {}).get("shared_materials", [])],
+            [row.get("artifact_id") for row in current_materials],
             ["art-runless-prd-r1"],
         )
 

@@ -420,7 +420,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         violations = self._legacy_store_import_violations(roots)
         self.assertEqual(violations, [], msg="\n".join(violations))
 
-    def test_track_artifact_publication_writes_only_live_in_publication_domain(self) -> None:
+    def test_retired_publication_fields_only_live_in_explicit_guards(self) -> None:
         publication_terms = (
             "published_to_track",
             '"status": "published"',
@@ -429,10 +429,8 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "close_proof",
         )
         allowed_paths = {
-            "scripts/env/domain/publication.py",
             "scripts/env/repos/artifacts.py",
             "scripts/env/repos/tracks.py",
-            "scripts/env/domain/artifact_visibility.py",
             "scripts/env/domain/task_management.py",
             "scripts/env/domain/tasks.py",
         }
