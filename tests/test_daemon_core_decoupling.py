@@ -21,6 +21,7 @@ TASK_CHECKOUT_HANDLER_PATH = ROOT / "tools" / "launcher" / "task_checkout_handle
 CENTRAL_DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
 MESSAGE_AVAILABLE_HANDLER_PATH = ROOT / "tools" / "launcher" / "message_available_handler.py"
 DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
+NOTIFICATION_CENTER_PATH = ROOT / "tools" / "launcher" / "notification_center.py"
 MODULE_COUNTER = count()
 TASK_DOMAIN_IMPORTS = {"env.domain.task_management", "env.domain.task_tui"}
 TASK_DOMAIN_SYMBOLS = {"task_management", "task_tui"}
@@ -206,6 +207,67 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         self.assertNotIn("message_available_handler", daemon_core_imports)
         self.assertNotIn("env.domain.message", daemon_core_imports)
         self.assertNotIn("env.domain.messages", daemon_core_imports)
+
+    def test_notification_center_does_not_import_message_handler_domain_or_repo(self) -> None:
+        imports = _imported_modules(NOTIFICATION_CENTER_PATH)
+        source = NOTIFICATION_CENTER_PATH.read_text(encoding="utf-8")
+
+        self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("env.domain.messages", imports)
+        self.assertNotIn("env.repos.messages", imports)
+        self.assertNotIn("MessageAvailableHandler", source)
+        self.assertNotIn("message_id", source)
+        self.assertNotIn("needs_parent", source)
+
+    def test_daemon_core_registers_notify_subscriptions_in_mailbox_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            daemon_core = _load_module(DAEMON_CORE_PATH)
+            instance = self._instance(temp_root)
+            context = daemon_core.load_daemon_context(instance["instance_json"])
+            actor_address = daemon_core.actor_address_for_context(context)
+            recorded: dict[str, object] = {}
+            original_register_actor = daemon_core.daemon_client.register_actor
+
+            def fake_register_actor(
+                *,
+                actor_address: dict[str, str],
+                endpoint: dict[str, object],
+                heartbeat: dict[str, object],
+                socket_path: Path,
+            ) -> dict[str, object]:
+                recorded["actor_address"] = actor_address
+                recorded["endpoint"] = endpoint
+                recorded["heartbeat"] = heartbeat
+                recorded["socket_path"] = socket_path
+                return {"record": {"actor_address": actor_address, "endpoint": endpoint}}
+
+            self.addCleanup(setattr, daemon_core.daemon_client, "register_actor", original_register_actor)
+            daemon_core.daemon_client.register_actor = fake_register_actor
+
+            result = daemon_core.register_daemon_actor(
+                context,
+                actor_address,
+                notify_subscriptions=["message.available", "message.available", " "],
+            )
+
+            endpoint = recorded["endpoint"]
+            assert isinstance(endpoint, dict)
+            self.assertEqual(endpoint["kind"], "daemon_mailbox_socket")
+            self.assertEqual(endpoint["subscriptions"], ["message.available"])
+            self.assertEqual(result["record"]["endpoint"]["subscriptions"], ["message.available"])
+
+    def test_daemon_status_reports_notify_subscriptions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            daemon_core = _load_module(DAEMON_CORE_PATH)
+            instance = self._instance(temp_root)
+
+            status = daemon_core.daemon_status(
+                instance["instance_json"],
+                handlers=[],
+                notify_subscriptions=["message.available", "message.available"],
+            )
+
+            self.assertEqual(status["notify"], {"subscriptions": ["message.available"]})
 
     def test_central_daemon_remains_reachability_only_without_thread_activity_imports(self) -> None:
         imports = _imported_modules(CENTRAL_DAEMON_CORE_PATH)

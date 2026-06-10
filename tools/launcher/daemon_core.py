@@ -182,6 +182,17 @@ def _handler_names(handlers: list[Any] | tuple[Any, ...] | None) -> list[str]:
     return names
 
 
+def _notify_subscriptions_payload(notify_subscriptions: list[str] | tuple[str, ...] | None) -> list[str]:
+    names: list[str] = []
+    for value in notify_subscriptions or []:
+        if not isinstance(value, str):
+            raise ValueError("notify subscription event types must be strings")
+        name = value.strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 class HandlerResult:
     def __init__(self, status: str, message: str | None = None) -> None:
         if status not in {"ignored", "handled", "failed"}:
@@ -971,13 +982,19 @@ def central_daemon_socket_path(context: DaemonContext) -> Path:
 def register_daemon_actor(
     context: DaemonContext,
     actor_address: actor_profile.ActorAddress,
+    *,
+    notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
+    endpoint: dict[str, Any] = {
+        "kind": "daemon_mailbox_socket",
+        "socket_path": str(daemon_mailbox.mailbox_socket_path(context.instance_root)),
+    }
+    subscriptions = _notify_subscriptions_payload(notify_subscriptions)
+    if subscriptions:
+        endpoint["subscriptions"] = subscriptions
     return daemon_client.register_actor(
         actor_address=actor_address.to_payload(),
-        endpoint={
-            "kind": "daemon_mailbox_socket",
-            "socket_path": str(daemon_mailbox.mailbox_socket_path(context.instance_root)),
-        },
+        endpoint=endpoint,
         heartbeat={"kind": "central_daemon_rpc"},
         socket_path=central_daemon_socket_path(context),
     )
@@ -1231,6 +1248,7 @@ def daemon_status(
     instance_json: Path,
     *,
     handlers: list[Any] | tuple[Any, ...] | None = None,
+    notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
     runtime = daemon_runtime_dir(context.instance_root)
@@ -1263,10 +1281,16 @@ def daemon_status(
         "last_error": state.payload.get("last_error"),
         "runtime": _runtime_status_payload(state),
         "handlers": _handler_status_payload(state, handlers),
+        "notify": {"subscriptions": _notify_subscriptions_payload(notify_subscriptions)},
     }
 
 
-def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] | None = None) -> dict[str, Any]:
+def start_daemon(
+    instance_json: Path,
+    *,
+    handlers: list[Any] | tuple[Any, ...] | None = None,
+    notify_subscriptions: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
     runtime = daemon_runtime_dir(context.instance_root)
     pid_path = daemon_pid_file(context.instance_root)
@@ -1284,7 +1308,7 @@ def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] |
     pid = _read_pid(pid_path)
     if pid is not None and _pid_is_live(pid):
         if state.ready_for(pid, context.main_thread_id):
-            status = daemon_status(instance_json, handlers=handlers)
+            status = daemon_status(instance_json, handlers=handlers, notify_subscriptions=notify_subscriptions)
             status["started"] = False
             return status
         _terminate_pid(pid)
@@ -1319,7 +1343,7 @@ def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] |
             main_thread_id=context.main_thread_id,
         )
         if wait_state.ready_for(process.pid, context.main_thread_id):
-            status = daemon_status(instance_json, handlers=handlers)
+            status = daemon_status(instance_json, handlers=handlers, notify_subscriptions=notify_subscriptions)
             status["started"] = True
             status["pid"] = process.pid
             status["pid_live"] = _pid_is_live(process.pid)
@@ -1363,6 +1387,7 @@ def run_daemon(
     instance_json: Path,
     *,
     handlers: list[Any] | None = None,
+    notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> int:
     context = load_daemon_context(instance_json)
     actor_address = actor_address_for_context(context)
@@ -1391,7 +1416,10 @@ def run_daemon(
                 actor_address=actor_address,
                 handlers=daemon_handlers,
             )
-            register_daemon_actor(context, actor_address)
+            if notify_subscriptions is None:
+                register_daemon_actor(context, actor_address)
+            else:
+                register_daemon_actor(context, actor_address, notify_subscriptions=notify_subscriptions)
             registered = True
             while True:
                 try:

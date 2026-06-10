@@ -7,6 +7,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import ast
 import unittest
 from itertools import count
 from pathlib import Path
@@ -32,9 +33,34 @@ def load_instance_daemon() -> Any:
     return module
 
 
+def imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            if module_name:
+                imports.add(module_name)
+            for alias in node.names:
+                imports.add(f"{module_name}.{alias.name}" if module_name else alias.name)
+    return imports
+
+
 class InstanceDaemonEntrypointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.instance_daemon = load_instance_daemon()
+
+    def test_default_daemon_handlers_are_built_through_notification_center(self) -> None:
+        imports = imported_modules(INSTANCE_DAEMON_PATH)
+
+        self.assertIn("notification_center", imports)
+        self.assertIn("message_inbound", imports)
+        self.assertNotIn("message_available_handler", imports)
+        self.assertEqual(self.instance_daemon.default_notify_subscriptions(), ["message.available"])
+        handlers = self.instance_daemon.default_daemon_handlers()
+        self.assertEqual([type(handler).__name__ for handler in handlers], ["TaskCheckoutHandler", "MessageAvailableHandler"])
 
     def test_run_passes_unified_daemon_handler_list_to_daemon_core(self) -> None:
         recorded: dict[str, object] = {}
@@ -44,9 +70,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             instance_json: Path,
             *,
             handlers: list[object] | None = None,
+            notify_subscriptions: list[str] | None = None,
         ) -> int:
             recorded["instance_json"] = instance_json
             recorded["handlers"] = handlers or []
+            recorded["notify_subscriptions"] = notify_subscriptions or []
             return 0
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "run_daemon", original_run)
@@ -62,14 +90,21 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
         self.assertEqual(getattr(handlers[1], "name", None), "message_available")
         self.assertEqual(recorded["instance_json"], Path("/tmp/inst.json"))
+        self.assertEqual(recorded["notify_subscriptions"], ["message.available"])
 
     def test_start_prints_json_from_daemon_core(self) -> None:
         original_start = self.instance_daemon.daemon_core.start_daemon
         recorded: dict[str, object] = {}
 
-        def fake_start(instance_json: Path, *, handlers: list[object] | None = None) -> dict[str, object]:
+        def fake_start(
+            instance_json: Path,
+            *,
+            handlers: list[object] | None = None,
+            notify_subscriptions: list[str] | None = None,
+        ) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
             recorded["handlers"] = handlers or []
+            recorded["notify_subscriptions"] = notify_subscriptions or []
             return {"started": True, "pid": 4321}
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "start_daemon", original_start)
@@ -84,6 +119,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         assert isinstance(handlers, list)
         self.assertEqual([getattr(handler, "name", None) for handler in handlers], ["task_checkout", "message_available"])
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
+        self.assertEqual(recorded["notify_subscriptions"], ["message.available"])
 
     def test_stop_prints_json_from_daemon_core(self) -> None:
         original_stop = self.instance_daemon.daemon_core.stop_daemon
@@ -109,9 +145,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             instance_json: Path,
             *,
             handlers: list[object] | None = None,
+            notify_subscriptions: list[str] | None = None,
         ) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
             recorded["handlers"] = handlers or []
+            recorded["notify_subscriptions"] = notify_subscriptions or []
             return {"live": True, "ready": True}
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "daemon_status", original_status)
@@ -125,6 +163,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
         self.assertEqual([getattr(handler, "name", None) for handler in handlers], ["task_checkout", "message_available"])
+        self.assertEqual(recorded["notify_subscriptions"], ["message.available"])
 
     def test_daemon_shell_still_calls_instance_daemon_entrypoint(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")
