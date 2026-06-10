@@ -16,14 +16,24 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
-import message_available_handler  # noqa: E402
+import message_inbound  # noqa: E402
+import notification_center  # noqa: E402
 import task_checkout_handler  # noqa: E402
 
 
+def default_notification_registrations() -> list[notification_center.InboundSourceRegistration]:
+    return message_inbound.inbound_registrations()
+
+
+def default_notify_subscriptions() -> list[str]:
+    return notification_center.subscriptions_from_registrations(default_notification_registrations())
+
+
 def default_daemon_handlers() -> list[object]:
+    registrations = default_notification_registrations()
     return [
         task_checkout_handler.TaskCheckoutHandler(),
-        message_available_handler.MessageAvailableHandler(),
+        *notification_center.handlers_from_registrations(registrations),
     ]
 
 
@@ -47,9 +57,19 @@ def main(argv: list[str] | None = None) -> int:
             return daemon_core.run_daemon(
                 instance_json,
                 handlers=default_daemon_handlers(),
+                notify_subscriptions=default_notify_subscriptions(),
             )
         if args.command == "start":
-            print(json.dumps(daemon_core.start_daemon(instance_json, handlers=default_daemon_handlers()), ensure_ascii=True))
+            print(
+                json.dumps(
+                    daemon_core.start_daemon(
+                        instance_json,
+                        handlers=default_daemon_handlers(),
+                        notify_subscriptions=default_notify_subscriptions(),
+                    ),
+                    ensure_ascii=True,
+                )
+            )
             return 0
         if args.command == "stop":
             print(json.dumps(daemon_core.stop_daemon(instance_json), ensure_ascii=True))
@@ -60,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
                     daemon_core.daemon_status(
                         instance_json,
                         handlers=default_daemon_handlers(),
+                        notify_subscriptions=default_notify_subscriptions(),
                     ),
                     ensure_ascii=True,
                 )

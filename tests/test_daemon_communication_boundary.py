@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DAEMON_OWNED_FILES = [
     ROOT / "tools" / "launcher" / "daemon_core.py",
     ROOT / "tools" / "launcher" / "instance_daemon.py",
+    ROOT / "tools" / "launcher" / "notification_center.py",
+    ROOT / "tools" / "launcher" / "message_inbound.py",
     ROOT / "tools" / "launcher" / "central_daemon.py",
     ROOT / "tools" / "launcher" / "central_daemon_core.py",
     ROOT / "tools" / "launcher" / "daemon_mailbox.py",
@@ -104,7 +106,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         base_files = [
             path
             for path in _existing_sources()
-            if path.name not in {"message_available_handler.py", "context.py"}
+            if path.name not in {"message_available_handler.py", "message_inbound.py", "context.py"}
         ]
         chunks = []
         for path in base_files:
@@ -139,6 +141,28 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn("mailbox.parent_required", mailbox_source)
         self.assertNotIn("_dispatch_parent_required", mailbox_source)
         self.assertNotIn("_validate_parent_required_request", mailbox_source)
+
+    def test_no_actor_facing_notification_lifecycle_or_nc_wrapper_event(self) -> None:
+        production_files = [
+            path
+            for base in (ROOT / "tools", ROOT / "scripts")
+            for path in base.rglob("*.py")
+            if "__pycache__" not in path.parts
+        ]
+        source = "\n".join(path.read_text(encoding="utf-8") for path in production_files)
+
+        forbidden = [
+            "notification.mark",
+            "notification.archive",
+            "notification.needs_parent",
+            "notification__mark",
+            "notification__archive",
+            "notification__needs_parent",
+            "nc.notification",
+        ]
+        for token in forbidden:
+            with self.subTest(token=token):
+                self.assertNotIn(token, source)
 
 
 if __name__ == "__main__":
