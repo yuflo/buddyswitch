@@ -90,15 +90,6 @@ def assert_target_readable(
             correctable_fields=["target_id"],
         )
 
-    if artifact.get("status") == "archived":
-        raise CommentTargetScopeError(
-            message=f"artifact '{target_id}' is archived and does not accept new comments",
-            permission_boundary="artifact.status",
-            code="E_COMMENT_TARGET_SCOPE",
-            retryable=False,
-            correctable_fields=["target_id"],
-        )
-
     return artifact
 
 

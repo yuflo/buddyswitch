@@ -25,23 +25,21 @@ class ArtifactSelectionTests(unittest.TestCase):
                     "template": "brief",
                     "created_by_actor": {"actor_id": "act-pm-selection", "role_id": "pm"},
                     "revision": 1,
-                    "status": "published",
                     "updated_at": "2026-05-15T10:00:00+00:00",
-                    "is_current": True,
+                    "current": True,
                 },
                 {
                     "artifact_id": "art-proof-r1",
                     "template": "proof",
                     "created_by_actor": {"actor_id": "act-test-selection", "role_id": "test"},
                     "revision": 1,
-                    "status": "published",
                     "updated_at": "2026-05-15T11:00:00+00:00",
-                    "is_current": True,
+                    "current": True,
                 },
             ],
         }
 
-    def test_selection_uses_required_templates_and_current_published_artifacts(self) -> None:
+    def test_selection_uses_required_templates_and_current_track_relations(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
             active_role="dev",
             demand="Implement onboarding",

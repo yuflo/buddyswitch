@@ -176,8 +176,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("track", "add_update", ("timeline", "material", "proof")),
             ("track", "add_proof", ("proof", "material", "timeline")),
             ("artifact", "get", ("full", "body", "draft")),
-            ("artifact", "create_revision", ("draft", "publish", "update")),
-            ("artifact", "update_metadata", ("patch", "publish", "revision")),
+            ("artifact", "create_revision", ("draft", "relate", "update")),
+            ("artifact", "update_metadata", ("patch", "relate", "revision")),
             ("artifact", "attach_file", ("draft", "actor_private", "attachment")),
             ("artifact", "list_attachments", ("attachment", "summary", "get_attachment")),
             ("artifact", "get_attachment", ("attachment_id", "content_base64", "artifact_id")),
@@ -546,7 +546,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
         artifact_create = desc["artifact"]["action_semantics"]["create_revision"]
         self.assertIn("draft", artifact_create["success_means"].lower())
-        self.assertIn("track.add_material", " ".join(artifact_create["side_effects"]["does_not_write"]))
+        self.assertIn("track artifact_relations", " ".join(artifact_create["side_effects"]["does_not_write"]))
 
         search_request = desc["search"]["action_semantics"]["request"]
         self.assertIn("does not fetch", search_request["success_means"].lower())

@@ -9,13 +9,14 @@ from typing import Any
 
 from env.repos import artifacts as artifact_repo
 from env.repos import runtime_files
+from env.repos import tracks as track_repo
+from env.domain import track_artifact_relations as track_artifact_relations_domain
 from env.tool_runtime.actor_profile import ActorAddress
 
 VALID_TRACK_STATE = ("active", "blocked", "review", "done")
 VALID_TRACK_HEALTH = ("ok", "risk", "blocked", "stale")
 VALID_UPDATE_KIND = ("progress", "decision", "blocker", "proof")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
-VALID_ARTIFACT_STATUS = ("draft", "published", "archived")
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 VALID_MESSAGE_DISPOSITIONS = ("unseen", "absorbed", "replied", "needs_parent")
 
@@ -197,43 +198,6 @@ def _normalize_now(value: Any) -> dict[str, Any]:
     return {"next": next_value, "blocker": blocker_text}
 
 
-def _normalize_material_ref(row: Any) -> dict[str, Any]:
-    if not isinstance(row, dict):
-        raise ValueError("track.shared_materials[] must be an object")
-    if row.get("type") != "artifact":
-        raise ValueError("track.shared_materials[].type must be 'artifact'")
-    published_at = _require_non_empty_text(row.get("published_at"), "track.shared_materials[].published_at")
-    normalized = {
-        "type": "artifact",
-        "artifact_id": require_id(row.get("artifact_id"), "track.shared_materials[].artifact_id"),
-        "label": _require_non_empty_text(row.get("label"), "track.shared_materials[].label"),
-        "kind": _require_non_empty_text(row.get("kind"), "track.shared_materials[].kind"),
-        "from_actor": _message_actor_payload(row.get("from_actor"), "track.shared_materials[].from_actor"),
-        "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
-        "current": bool(row.get("current", False)),
-        "published_at": published_at,
-    }
-    return normalized
-
-
-def _normalize_proof_ref(row: Any) -> dict[str, Any]:
-    if not isinstance(row, dict):
-        raise ValueError("track.close_proof[] must be an object")
-    if row.get("type") != "artifact":
-        raise ValueError("track.close_proof[].type must be 'artifact'")
-    published_at = _require_non_empty_text(row.get("published_at"), "track.close_proof[].published_at")
-    return {
-        "type": "artifact",
-        "artifact_id": require_id(row.get("artifact_id"), "track.close_proof[].artifact_id"),
-        "label": _require_non_empty_text(row.get("label"), "track.close_proof[].label"),
-        "kind": _require_non_empty_text(row.get("kind"), "track.close_proof[].kind"),
-        "from_actor": _message_actor_payload(row.get("from_actor"), "track.close_proof[].from_actor"),
-        "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
-        "current": bool(row.get("current", True)),
-        "published_at": published_at,
-    }
-
-
 def _normalize_update_ref(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ValueError("track.updates[].refs[] must be an object")
@@ -264,61 +228,7 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
 
 
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
-    for field in _LEGACY_TRACK_ROLE_FIELDS:
-        if field in track:
-            raise ValueError("legacy track role-routing fields are retired; use immutable owner_role")
-    forbidden = sorted(field for field in track if field in _LEGACY_TRACK_FIELDS)
-    if forbidden:
-        raise ValueError(f"legacy track fields are retired: {', '.join(forbidden)}")
-
-    track_id = require_id(track.get("id", ""), "track.id")
-    title = _require_non_empty_text(track.get("title"), "track.title")
-    outcome = _require_non_empty_text(track.get("outcome"), "track.outcome")
-    owner_role = _require_non_empty_text(track.get("owner_role"), "track.owner_role")
-    created_by_actor = _message_actor_payload(track.get("created_by_actor"), "track.created_by_actor")
-    state = track.get("state")
-    health = track.get("health")
-    if state not in VALID_TRACK_STATE:
-        raise ValueError(f"track.state must be one of {', '.join(VALID_TRACK_STATE)}")
-    if health not in VALID_TRACK_HEALTH:
-        raise ValueError(f"track.health must be one of {', '.join(VALID_TRACK_HEALTH)}")
-
-    appetite = _require_non_empty_text(track.get("appetite"), "track.appetite")
-    now = _normalize_now(track.get("now"))
-
-    shared_materials = track.get("shared_materials")
-    if not isinstance(shared_materials, list):
-        raise ValueError("track.shared_materials must be a list")
-    updates = track.get("updates")
-    if not isinstance(updates, list):
-        raise ValueError("track.updates must be a list")
-    close_proof = track.get("close_proof")
-    if not isinstance(close_proof, list):
-        raise ValueError("track.close_proof must be a list")
-
-    created_at = _require_non_empty_text(track.get("created_at"), "track.created_at")
-    updated_at = _require_non_empty_text(track.get("updated_at"), "track.updated_at")
-    archived_at = track.get("archived_at")
-    if archived_at is not None and not isinstance(archived_at, str):
-        raise ValueError("track.archived_at must be a string or null")
-
-    return {
-        "id": track_id,
-        "title": title,
-        "outcome": outcome,
-        "owner_role": owner_role,
-        "created_by_actor": created_by_actor,
-        "state": state,
-        "health": health,
-        "appetite": appetite,
-        "now": now,
-        "shared_materials": [_normalize_material_ref(row) for row in shared_materials],
-        "updates": [_normalize_update_row(row) for row in updates],
-        "close_proof": [_normalize_proof_ref(row) for row in close_proof],
-        "created_at": created_at,
-        "updated_at": updated_at,
-        "archived_at": archived_at,
-    }
+    return track_repo.validate_track(track)
 
 
 def validate_task(task: dict[str, Any]) -> dict[str, Any]:
@@ -358,11 +268,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
-    normalized = artifact_repo.validate_artifact(artifact)
-    published_to_track = normalized.get("published_to_track")
-    if published_to_track is not None and get_track(published_to_track) is None:
-        raise ValueError(f"track not found: {published_to_track}")
-    return normalized
+    return artifact_repo.validate_artifact(artifact)
 
 
 def _actor_address_for_role(role_id: str) -> dict[str, str]:
@@ -582,8 +488,7 @@ def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
         "track_id": track["id"],
         "track_title": track["title"],
         "outcome": track["outcome"],
-        "shared_materials": [row for row in track.get("shared_materials", []) if isinstance(row, dict)],
-        "close_proof": [row for row in track.get("close_proof", []) if isinstance(row, dict)],
+        "artifact_relations": [row for row in track.get("artifact_relations", []) if isinstance(row, dict)],
         "updated_at": track.get("updated_at", ""),
     }
 
@@ -627,41 +532,21 @@ def create_track(
     state: str = "active",
     health: str = "ok",
 ) -> dict[str, Any]:
-    require_id(track_id, "track id")
-    if get_track(track_id):
-        raise ValueError(f"track already exists: {track_id}")
-    timestamp = now_iso()
-    track = {
-        "id": track_id,
-        "title": title,
-        "outcome": outcome or "unspecified outcome",
-        "owner_role": owner_role,
-        "created_by_actor": _actor_address_for_role(owner_role),
-        "state": state,
-        "health": health,
-        "appetite": appetite,
-        "now": now or {"next": "unspecified", "blocker": None},
-        "shared_materials": [],
-        "updates": [],
-        "close_proof": [],
-        "created_at": timestamp,
-        "updated_at": timestamp,
-        "archived_at": None,
-    }
-    return save_track(track)
+    return track_repo.create_track(
+        track_id,
+        title,
+        owner_role=owner_role,
+        created_by_actor=_actor_address_for_role(owner_role),
+        outcome=outcome,
+        appetite=appetite,
+        now=now,
+        state=state,
+        health=health,
+    )
 
 
 def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    track = get_track(track_id)
-    if track is None:
-        raise ValueError(f"track not found: {track_id}")
-    allowed = {"title", "outcome", "state", "health", "appetite", "now", "shared_materials", "updates", "close_proof", "archived_at"}
-    for key, value in patch.items():
-        if key not in allowed:
-            raise ValueError(f"unsupported track field: {key}")
-        track[key] = value
-    track["updated_at"] = now_iso()
-    return save_track(track)
+    return track_repo.update_track(track_id, patch)
 
 
 def create_artifact_revision(
@@ -679,139 +564,31 @@ def create_artifact_revision(
 ) -> dict[str, Any]:
     if legacy_source_run is not None:
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
-
-    resolved_id = artifact_id or f"art-{uuid.uuid4().hex[:10]}"
-    require_id(resolved_id, "artifact id")
-    if get_artifact(resolved_id):
-        raise ValueError(f"artifact already exists: {resolved_id}")
-
     if created_by not in _KNOWN_ROLE_IDS:
         raise ValueError("created_by must be one of known role ids")
-    if not isinstance(body, str) or not body.strip():
-        raise ValueError("body must be a non-empty string")
-    if template not in VALID_ARTIFACT_TEMPLATES:
-        raise ValueError(f"template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
-    if not isinstance(summary, str):
-        raise ValueError("summary must be a string")
-    normalized_refs = _normalize_source_refs(source_refs, active_role=created_by)
-
-    revision = 1
-    supersedes_id: str | None = None
-    new_is_current = False
-    demote_previous: dict[str, Any] | None = None
-    if supersedes_artifact_id is not None:
-        require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
-        previous = get_artifact(supersedes_artifact_id)
-        if previous is None:
-            raise ValueError(f"artifact not found: {supersedes_artifact_id}")
-        if not bool(previous.get("is_current")):
-            raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
-
-        previous_status = previous.get("status")
-        previous_owner = previous.get("created_by_actor")
-        previous_track_id = previous.get("published_to_track")
-        revision = int(previous.get("revision", 1)) + 1
-        supersedes_id = supersedes_artifact_id
-
-        if previous_status == "draft":
-            if previous_owner != _actor_address_for_role(created_by):
-                raise ValueError("supersedes_artifact_id must reference an active-actor-owned current draft")
-            new_is_current = True
-            previous_patch = dict(previous)
-            previous_patch["is_current"] = False
-            previous_patch["updated_at"] = now_iso()
-            # Validate before any write so rejects never mutate prior artifacts.
-            validate_artifact(previous_patch)
-            demote_previous = previous_patch
-        elif previous_status == "published":
-            if not isinstance(previous_track_id, str) or not previous_track_id:
-                raise ValueError("supersedes published artifact is missing track publication id")
-            track = get_track(previous_track_id)
-            if track is None:
-                raise ValueError(f"track not found: {previous_track_id}")
-            if track.get("archived_at") is not None:
-                raise ValueError("supersedes published artifact belongs to an archived track")
-            in_shared = any(
-                isinstance(row, dict)
-                and row.get("type") == "artifact"
-                and row.get("artifact_id") == supersedes_artifact_id
-                for row in track.get("shared_materials", [])
-            )
-            in_proof = any(
-                isinstance(row, dict)
-                and row.get("type") == "artifact"
-                and row.get("artifact_id") == supersedes_artifact_id
-                for row in track.get("close_proof", [])
-            )
-            if not (in_shared or in_proof):
-                raise ValueError("supersedes_artifact_id must reference current published material/proof on a readable track")
-            new_is_current = False
-        else:
-            raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
-
     creator_actor = _actor_address_for_role(created_by)
-    author_rows = [creator_actor]
+    author_rows: list[dict[str, str]] = [creator_actor]
     if isinstance(authors, list):
         for row in authors:
             if isinstance(row, str) and row in _KNOWN_ROLE_IDS:
                 actor = _actor_address_for_role(row)
                 if actor not in author_rows:
                     author_rows.append(actor)
-
-    timestamp = now_iso()
-    artifact = {
-        "id": resolved_id,
-        "title": _require_non_empty_text(title, "artifact.title"),
-        "summary": summary,
-        "body": body,
-        "template": template,
-        "status": "draft",
-        "published_to_track": None,
-        "revision": revision,
-        "is_current": new_is_current,
-        "supersedes_artifact_id": supersedes_id,
-        "created_by_actor": creator_actor,
-        "author_actors": author_rows,
-        "source_refs": normalized_refs,
-        "created_at": timestamp,
-        "updated_at": timestamp,
-    }
-    created = save_artifact(artifact)
-    if demote_previous is not None:
-        save_artifact(demote_previous)
-    return created
+    return artifact_repo.create_artifact_revision(
+        artifact_id=artifact_id,
+        title=title,
+        created_by_actor=creator_actor,
+        body=body,
+        template=template,
+        summary=summary,
+        source_refs=source_refs,
+        supersedes_artifact_id=supersedes_artifact_id,
+        author_actors=author_rows,
+    )
 
 
 def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    artifact = get_artifact(artifact_id)
-    if artifact is None:
-        raise ValueError(f"artifact not found: {artifact_id}")
-    if _LEGACY_SOURCE_RUN in patch:
-        raise ValueError("legacy artifact run lineage field is retired; use source_refs")
-
-    retired = sorted(key for key in patch if key in {"kind", "content", "publication_role", "task_id"})
-    if retired:
-        raise ValueError(f"retired artifact fields are unsupported: {', '.join(retired)}")
-
-    allowed = {
-        "title",
-        "summary",
-        "body",
-        "template",
-        "status",
-        "source_refs",
-        "published_to_track",
-        "supersedes_artifact_id",
-        "is_current",
-        "revision",
-        "author_actors",
-    }
-    for key, value in patch.items():
-        if key not in allowed:
-            raise ValueError(f"unsupported artifact field: {key}")
-        artifact[key] = value
-    artifact["updated_at"] = now_iso()
-    return save_artifact(artifact)
+    return artifact_repo.update_artifact(artifact_id, patch)
 
 
 def publish_track_material(
@@ -822,141 +599,14 @@ def publish_track_material(
     from_role: str,
     summary: str,
 ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
-    from_actor = _actor_address_for_role(from_role)
-    track = get_track(track_id)
-    if track is None:
-        raise ValueError(f"track not found: {track_id}")
-    if track.get("archived_at") is not None:
-        raise ValueError(f"track '{track_id}' is archived and cannot accept material publication")
-    artifact = get_artifact(artifact_id)
-    if artifact is None:
-        raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_actor") != from_actor:
-        raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
-
-    kind = str(artifact.get("template") or "")
-    if not kind:
-        raise ValueError("artifact.template is required for track publication")
-
-    status = artifact.get("status")
-    published_to_track = artifact.get("published_to_track")
-    if status != "draft":
-        if published_to_track is None:
-            raise ValueError(f"artifact '{artifact_id}' is not a publishable draft")
-        if published_to_track != track_id:
-            raise ValueError(
-                f"artifact '{artifact_id}' is already published to track '{published_to_track}' and cannot be republished to '{track_id}'"
-            )
-        if any(
-            isinstance(row, dict)
-            and row.get("type") == "artifact"
-            and row.get("artifact_id") == artifact_id
-            and bool(row.get("current"))
-            for row in track.get("shared_materials", [])
-        ):
-            raise ValueError(f"artifact '{artifact_id}' is already current material on track '{track_id}'")
-        if any(
-            isinstance(row, dict)
-            and row.get("type") == "artifact"
-            and row.get("artifact_id") == artifact_id
-            and bool(row.get("current", True))
-            for row in track.get("close_proof", [])
-        ):
-            raise ValueError(f"artifact '{artifact_id}' is already bound as close proof on track '{track_id}'")
-        raise ValueError(
-            f"artifact '{artifact_id}' is already bound to track '{track_id}' but not as current material; create a new revision instead"
-        )
-
-    supersedes: str | None = None
-    replaced_artifact_id: str | None = None
-    next_refs: list[dict[str, Any]] = []
-    for row in track.get("shared_materials", []):
-        if not isinstance(row, dict):
-            continue
-        row_actor_id = None
-        if isinstance(row.get("from_actor"), dict):
-            row_actor_id = _message_actor_payload(row.get("from_actor"), "track.shared_materials[].from_actor").get("actor_id")
-        same_slot = row.get("kind") == kind and row.get("label") == label and row_actor_id == from_actor.get("actor_id")
-        if same_slot and bool(row.get("current")):
-            replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
-        next_row = dict(row)
-        if same_slot:
-            next_row["current"] = False
-        next_refs.append(next_row)
-
-    history_ids = {
-        str(row.get("artifact_id"))
-        for row in track.get("shared_materials", [])
-        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
-    }
-    history_ids.update(
-        str(row.get("artifact_id"))
-        for row in track.get("close_proof", [])
-        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+    result = track_artifact_relations_domain.add_material_relation(
+        track_id=track_id,
+        artifact_id=artifact_id,
+        label=label,
+        from_actor=_actor_address_for_role(from_role),
+        summary=summary,
     )
-    existing_supersedes = artifact.get("supersedes_artifact_id")
-    if isinstance(existing_supersedes, str) and existing_supersedes:
-        if replaced_artifact_id is not None and existing_supersedes == replaced_artifact_id:
-            supersedes = existing_supersedes
-        elif existing_supersedes in history_ids:
-            supersedes = existing_supersedes
-        else:
-            raise ValueError(
-                f"artifact '{artifact_id}' supersedes_artifact_id '{existing_supersedes}' does not match readable history on track '{track_id}'"
-            )
-    else:
-        supersedes = replaced_artifact_id
-
-    old_artifact_patch: dict[str, Any] | None = None
-    if replaced_artifact_id is not None:
-        old_artifact = get_artifact(replaced_artifact_id)
-        if isinstance(old_artifact, dict):
-            old_artifact_patch = dict(old_artifact)
-            old_artifact_patch["is_current"] = False
-            old_artifact_patch["updated_at"] = now_iso()
-            validate_artifact(old_artifact_patch)
-
-    artifact_revision = int(artifact.get("revision", 1))
-    if replaced_artifact_id:
-        previous = get_artifact(replaced_artifact_id)
-        if previous is not None:
-            artifact_revision = max(int(previous.get("revision", 1)) + 1, artifact_revision)
-
-    artifact_patch = dict(artifact)
-    artifact_patch.update(
-        {
-            "published_to_track": track_id,
-            "status": "published",
-            "supersedes_artifact_id": supersedes,
-            "is_current": True,
-            "revision": artifact_revision,
-            "updated_at": now_iso(),
-        }
-    )
-    validate_artifact(artifact_patch)
-
-    ref = {
-        "type": "artifact",
-        "artifact_id": artifact_id,
-        "label": label,
-        "kind": kind,
-        "from_actor": from_actor,
-        "summary": summary,
-        "current": True,
-        "published_at": now_iso(),
-    }
-    next_refs.append(ref)
-
-    track_patch = dict(track)
-    track_patch["shared_materials"] = next_refs
-    track_patch["updated_at"] = now_iso()
-    validate_track(track_patch)
-
-    if old_artifact_patch is not None:
-        save_artifact(old_artifact_patch)
-    saved_artifact = save_artifact(artifact_patch)
-    saved_track = save_track(track_patch)
-    return saved_track, saved_artifact, replaced_artifact_id
+    return result["track"], result["artifact"], result["superseded_artifact_id"]
 
 
 def publish_track_proof(
@@ -967,131 +617,15 @@ def publish_track_proof(
     from_role: str,
     summary: str,
 ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
-    from_actor = _actor_address_for_role(from_role)
-    track = get_track(track_id)
-    if track is None:
-        raise ValueError(f"track not found: {track_id}")
-    if track.get("archived_at") is not None:
-        raise ValueError(f"track '{track_id}' is archived and cannot accept proof publication")
-    artifact = get_artifact(artifact_id)
-    if artifact is None:
-        raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_actor") != from_actor:
-        raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
-
-    kind = str(artifact.get("template") or "")
-    if not kind:
-        raise ValueError("artifact.template is required for track proof publication")
-
-    status = artifact.get("status")
-    published_to_track = artifact.get("published_to_track")
-    if status != "draft":
-        if published_to_track is None:
-            raise ValueError(f"artifact '{artifact_id}' is not a publishable draft")
-        if published_to_track != track_id:
-            raise ValueError(
-                f"artifact '{artifact_id}' is already published to track '{published_to_track}' and cannot be republished to '{track_id}'"
-            )
-        if any(
-            isinstance(row, dict)
-            and row.get("type") == "artifact"
-            and row.get("artifact_id") == artifact_id
-            and bool(row.get("current", True))
-            for row in track.get("close_proof", [])
-        ):
-            raise ValueError(f"artifact '{artifact_id}' is already current close proof on track '{track_id}'")
-        if any(
-            isinstance(row, dict)
-            and row.get("type") == "artifact"
-            and row.get("artifact_id") == artifact_id
-            and bool(row.get("current"))
-            for row in track.get("shared_materials", [])
-        ):
-            raise ValueError(f"artifact '{artifact_id}' is already bound as shared material on track '{track_id}'")
-        raise ValueError(
-            f"artifact '{artifact_id}' is already bound to track '{track_id}' but missing close_proof current ref; create a new proof artifact instead"
-        )
-
-    replaced_artifact_id: str | None = None
-    next_proof_rows: list[dict[str, Any]] = []
-    for row in track.get("close_proof", []):
-        if not isinstance(row, dict):
-            continue
-        row_actor_id = None
-        if isinstance(row.get("from_actor"), dict):
-            row_actor_id = _message_actor_payload(row.get("from_actor"), "track.close_proof[].from_actor").get("actor_id")
-        same_slot = row.get("kind") == kind and row.get("label") == label and row_actor_id == from_actor.get("actor_id")
-        if same_slot and bool(row.get("current", True)):
-            replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
-        next_row = dict(row)
-        if same_slot:
-            next_row["current"] = False
-        next_proof_rows.append(next_row)
-
-    history_ids = {
-        str(row.get("artifact_id"))
-        for row in track.get("shared_materials", [])
-        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
-    }
-    history_ids.update(
-        str(row.get("artifact_id"))
-        for row in track.get("close_proof", [])
-        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+    result = track_artifact_relations_domain.add_proof_relation(
+        track_id=track_id,
+        artifact_id=artifact_id,
+        label=label,
+        from_actor=_actor_address_for_role(from_role),
+        summary=summary,
+        update_summary=summary,
     )
-    supersedes: str | None = replaced_artifact_id
-    existing_supersedes = artifact.get("supersedes_artifact_id")
-    if isinstance(existing_supersedes, str) and existing_supersedes:
-        if replaced_artifact_id is not None and existing_supersedes == replaced_artifact_id:
-            supersedes = existing_supersedes
-        elif existing_supersedes in history_ids:
-            supersedes = existing_supersedes
-        else:
-            raise ValueError(
-                f"artifact '{artifact_id}' supersedes_artifact_id '{existing_supersedes}' does not match readable history on track '{track_id}'"
-            )
-
-    old_artifact_patch: dict[str, Any] | None = None
-    if replaced_artifact_id is not None:
-        old_artifact = get_artifact(replaced_artifact_id)
-        if isinstance(old_artifact, dict):
-            old_artifact_patch = dict(old_artifact)
-            old_artifact_patch["is_current"] = False
-            old_artifact_patch["updated_at"] = now_iso()
-            validate_artifact(old_artifact_patch)
-
-    artifact_patch = dict(artifact)
-    artifact_patch.update(
-        {
-            "published_to_track": track_id,
-            "status": "published",
-            "supersedes_artifact_id": supersedes,
-            "is_current": True,
-            "updated_at": now_iso(),
-        }
-    )
-    validate_artifact(artifact_patch)
-
-    proof_ref = {
-        "type": "artifact",
-        "artifact_id": artifact_id,
-        "label": label,
-        "kind": kind,
-        "from_actor": from_actor,
-        "summary": summary,
-        "current": True,
-        "published_at": now_iso(),
-    }
-    next_proof_rows.append(proof_ref)
-    track_patch = dict(track)
-    track_patch["close_proof"] = next_proof_rows
-    track_patch["updated_at"] = now_iso()
-    validate_track(track_patch)
-
-    if old_artifact_patch is not None:
-        save_artifact(old_artifact_patch)
-    saved_artifact = save_artifact(artifact_patch)
-    saved_track = save_track(track_patch)
-    return saved_track, saved_artifact, replaced_artifact_id
+    return result["track"], result["artifact"], result["superseded_artifact_id"]
 
 
 def append_track_update(

@@ -16,42 +16,30 @@ def _active_actor_id(active_actor: dict[str, Any]) -> str | None:
     return actor_id if isinstance(actor_id, str) and actor_id else None
 
 
-def _track_current_material_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
-    for row in track.get("shared_materials", []):
+def _track_history_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
+    for row in track.get("artifact_relations", []):
         if not isinstance(row, dict):
             continue
         if row.get("type") != "artifact":
             continue
         if row.get("artifact_id") != artifact_id:
             continue
-        if not bool(row.get("current")):
-            continue
         return row
     return None
 
 
-def _track_proof_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
-    for row in track.get("close_proof", []):
+def _track_relation_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
+    history_ref: dict[str, Any] | None = None
+    for row in track.get("artifact_relations", []):
         if not isinstance(row, dict):
             continue
-        if row.get("type") != "artifact":
+        if row.get("type") != "artifact" or row.get("artifact_id") != artifact_id:
             continue
-        if row.get("artifact_id") == artifact_id and bool(row.get("current", True)):
+        if history_ref is None:
+            history_ref = row
+        if bool(row.get("current")):
             return row
-    return None
-
-
-def _track_history_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
-    for key in ("shared_materials", "close_proof"):
-        for row in track.get(key, []):
-            if not isinstance(row, dict):
-                continue
-            if row.get("type") != "artifact":
-                continue
-            if row.get("artifact_id") != artifact_id:
-                continue
-            return row
-    return None
+    return history_ref
 
 
 def assert_supersedes_target_for_revision(
@@ -64,37 +52,9 @@ def assert_supersedes_target_for_revision(
         raise ValueError(f"artifact not found: {supersedes_artifact_id}")
     if not bool(artifact.get("is_current")):
         raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
-    if artifact.get("status") == "draft":
-        created_by_actor = artifact.get("created_by_actor") if isinstance(artifact.get("created_by_actor"), dict) else {}
-        if created_by_actor.get("actor_id") != _active_actor_id(active_actor):
-            raise ValueError("supersedes_artifact_id must reference an active-actor-owned current draft")
-        return artifact
-    if artifact.get("status") != "published":
-        raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
-    track_id = artifact.get("published_to_track")
-    if not isinstance(track_id, str) or not track_id:
-        raise ValueError("supersedes published artifact is missing track publication id")
-    track = track_repo.get_track(track_id)
-    if track is None:
-        raise ValueError(f"track not found: {track_id}")
-    if track.get("archived_at") is not None:
-        raise ValueError("supersedes published artifact belongs to an archived track")
-    in_shared = any(
-        isinstance(row, dict)
-        and row.get("type") == "artifact"
-        and row.get("artifact_id") == supersedes_artifact_id
-        and bool(row.get("current"))
-        for row in track.get("shared_materials", [])
-    )
-    in_proof = any(
-        isinstance(row, dict)
-        and row.get("type") == "artifact"
-        and row.get("artifact_id") == supersedes_artifact_id
-        and bool(row.get("current", True))
-        for row in track.get("close_proof", [])
-    )
-    if not (in_shared or in_proof):
-        raise ValueError("supersedes_artifact_id must reference current published material/proof on a readable track")
+    decision = artifact_read_decision(artifact, active_actor)
+    if not bool(decision.get("allowed")):
+        raise ValueError("supersedes_artifact_id must reference a current readable artifact")
     return artifact
 
 
@@ -103,109 +63,125 @@ def artifact_read_decision(artifact: dict[str, Any], active_actor: dict[str, Any
     created_by_actor = artifact.get("created_by_actor") if isinstance(artifact.get("created_by_actor"), dict) else {}
     owner_actor_id = created_by_actor.get("actor_id")
     active_actor_id = _active_actor_id(active_actor)
-    published_track_id = artifact.get("published_to_track")
-    status = artifact.get("status")
 
-    if status == "draft":
-        if isinstance(owner_actor_id, str) and owner_actor_id == active_actor_id:
-            return {
-                "allowed": True,
-                "artifact_id": artifact_id,
-                "track_id": None,
-                "relation": "owner",
-                "permission_boundary": "none",
-                "why": "active actor owns private draft artifact",
-            }
+    if isinstance(owner_actor_id, str) and owner_actor_id == active_actor_id:
         return {
-            "allowed": False,
+            "allowed": True,
             "artifact_id": artifact_id,
             "track_id": None,
-            "relation": "none",
-            "permission_boundary": "artifact.status",
-            "why": "artifact is private draft and readable by owner only",
+            "track_ids": [],
+            "relation": "owner",
+            "permission_boundary": "none",
+            "why": "active actor owns artifact content",
         }
 
-    if published_track_id is None:
+    relation_track_ids: list[str] = []
+    archived_relation_track_id: str | None = None
+    history_decision: dict[str, Any] | None = None
+    for track in track_repo.list_tracks():
+        track_id = track.get("id")
+        if not isinstance(track_id, str) or not track_id:
+            continue
+        ref = _track_relation_ref(track, str(artifact_id or ""))
+        if not isinstance(ref, dict):
+            continue
+        if track.get("archived_at") is not None:
+            if archived_relation_track_id is None:
+                archived_relation_track_id = track_id
+            continue
+        relation_track_ids.append(track_id)
+        role = ref.get("role")
+        relation = "track_proof" if role == "proof" else "track_material" if role == "material" else "track_history"
+        decision = {
+            "allowed": True,
+            "artifact_id": artifact_id,
+            "track_id": track_id,
+            "track_ids": relation_track_ids,
+            "relation": relation if bool(ref.get("current")) else "track_history",
+            "permission_boundary": "none",
+            "why": "artifact is referenced by a readable track relation",
+        }
+        if bool(ref.get("current")):
+            return decision
+        if history_decision is None:
+            history_decision = decision
+
+    if history_decision is not None:
+        history_decision["track_ids"] = relation_track_ids
+        return history_decision
+
+    if archived_relation_track_id is not None:
         return {
             "allowed": False,
             "artifact_id": artifact_id,
-            "track_id": None,
-            "relation": "none",
-            "permission_boundary": "artifact.publication",
-            "why": "artifact is private draft and not published to a readable track",
-        }
-
-    if not isinstance(published_track_id, str) or not published_track_id:
-        return {
-            "allowed": False,
-            "artifact_id": artifact_id,
-            "track_id": None,
-            "relation": "none",
-            "permission_boundary": "artifact.publication",
-            "why": "artifact publication track id is invalid",
-        }
-
-    track = track_repo.get_track(published_track_id)
-    if not isinstance(track, dict):
-        return {
-            "allowed": False,
-            "artifact_id": artifact_id,
-            "track_id": published_track_id,
-            "relation": "none",
-            "permission_boundary": "artifact.publication",
-            "why": "published track cannot be loaded",
-        }
-
-    if track.get("archived_at") is not None:
-        return {
-            "allowed": False,
-            "artifact_id": artifact_id,
-            "track_id": published_track_id,
+            "track_id": archived_relation_track_id,
+            "track_ids": [],
             "relation": "none",
             "permission_boundary": "track.lifecycle_status",
-            "why": "archived tracks are hard read boundaries",
-        }
-
-    current_ref = _track_current_material_ref(track, str(artifact_id or ""))
-    if isinstance(current_ref, dict):
-        return {
-            "allowed": True,
-            "artifact_id": artifact_id,
-            "track_id": published_track_id,
-            "relation": "track_material",
-            "permission_boundary": "none",
-            "why": "artifact is a current published track material",
-        }
-
-    proof_ref = _track_proof_ref(track, str(artifact_id or ""))
-    if isinstance(proof_ref, dict):
-        return {
-            "allowed": True,
-            "artifact_id": artifact_id,
-            "track_id": published_track_id,
-            "relation": "track_proof",
-            "permission_boundary": "none",
-            "why": "artifact is published as close proof on readable track",
-        }
-
-    history_ref = _track_history_ref(track, str(artifact_id or ""))
-    if isinstance(history_ref, dict):
-        return {
-            "allowed": True,
-            "artifact_id": artifact_id,
-            "track_id": published_track_id,
-            "relation": "track_history",
-            "permission_boundary": "none",
-            "why": "artifact is readable as historical published material/proof on readable track",
+            "why": "artifact is related only through archived tracks",
         }
 
     return {
         "allowed": False,
         "artifact_id": artifact_id,
-        "track_id": published_track_id,
+        "track_id": None,
+        "track_ids": [],
         "relation": "none",
-        "permission_boundary": "artifact.currentness",
-        "why": "foreign artifact is not a current material and not listed in close proof",
+        "permission_boundary": "artifact.relation_scope",
+        "why": "artifact is readable only by owner or through a non-archived track relation",
+    }
+
+
+def artifact_read_decision_for_track(
+    artifact: dict[str, Any],
+    active_actor: dict[str, Any],
+    *,
+    track_id: str,
+) -> dict[str, Any]:
+    del active_actor
+    artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
+    track = track_repo.get_track(track_id)
+    if not isinstance(track, dict):
+        return {
+            "allowed": False,
+            "artifact_id": artifact_id,
+            "track_id": track_id,
+            "track_ids": [],
+            "relation": "none",
+            "permission_boundary": "request-payload",
+            "why": f"track not found: {track_id}",
+        }
+    if track.get("archived_at") is not None:
+        return {
+            "allowed": False,
+            "artifact_id": artifact_id,
+            "track_id": track_id,
+            "track_ids": [],
+            "relation": "none",
+            "permission_boundary": "track.lifecycle_status",
+            "why": "archived tracks are hard read boundaries",
+        }
+    ref = _track_relation_ref(track, str(artifact_id or ""))
+    if not isinstance(ref, dict):
+        return {
+            "allowed": False,
+            "artifact_id": artifact_id,
+            "track_id": track_id,
+            "track_ids": [],
+            "relation": "none",
+            "permission_boundary": "artifact.relation_scope",
+            "why": "artifact is not related to the requested track",
+        }
+    role = ref.get("role")
+    relation = "track_proof" if role == "proof" else "track_material" if role == "material" else "track_history"
+    return {
+        "allowed": True,
+        "artifact_id": artifact_id,
+        "track_id": track_id,
+        "track_ids": [track_id],
+        "relation": relation if bool(ref.get("current")) else "track_history",
+        "permission_boundary": "none",
+        "why": "artifact is referenced by the requested track relation",
     }
 
 
@@ -218,13 +194,13 @@ def artifact_summary_row(
     return {
         "id": artifact.get("id"),
         "artifact_id": artifact.get("id"),
-        "track_id": artifact.get("published_to_track"),
+        "track_id": decision.get("track_id"),
+        "track_ids": decision.get("track_ids", []),
         "relation": relation,
         "title": artifact.get("title"),
         "summary": artifact.get("summary", ""),
         "body": artifact.get("body"),
         "template": artifact.get("template"),
-        "status": artifact.get("status"),
         "from_role": (artifact.get("created_by_actor") or {}).get("role_id") if isinstance(artifact.get("created_by_actor"), dict) else None,
         "created_by_actor": artifact.get("created_by_actor"),
         "author_actors": artifact.get("author_actors"),
@@ -234,7 +210,6 @@ def artifact_summary_row(
         "currentness": currentness,
         "readable_by_active_actor": bool(decision.get("allowed")),
         "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
-        "published_to_track": artifact.get("published_to_track"),
         "updated_at": artifact.get("updated_at"),
         "created_at": artifact.get("created_at"),
     }
@@ -245,11 +220,11 @@ def _relation_and_currentness_for_decision(
     artifact: dict[str, Any],
     decision: dict[str, Any],
 ) -> tuple[str, str]:
+    del artifact
     relation = decision.get("relation")
     if relation not in {"owner", "track_material", "track_proof", "track_history"}:
         relation = "none"
-    status = artifact.get("status")
-    if status == "draft":
+    if relation == "owner":
         currentness = "draft"
     elif relation == "track_material":
         currentness = "current"
@@ -297,12 +272,12 @@ def artifact_list_row(
         "title": artifact.get("title"),
         "summary": artifact.get("summary", ""),
         "template": artifact.get("template"),
-        "status": artifact.get("status"),
         "currentness": currentness,
         "relation": relation,
+        "track_id": decision.get("track_id"),
+        "track_ids": decision.get("track_ids", []),
         "created_by_actor": artifact.get("created_by_actor"),
         "author_actors": artifact.get("author_actors"),
-        "published_to_track": artifact.get("published_to_track"),
         "revision": artifact.get("revision"),
         "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
         "source_refs_summary": source_refs_domain.source_ref_summary(artifact.get("source_refs")),
@@ -321,10 +296,10 @@ def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any])
         return []
 
     rows: list[dict[str, Any]] = []
-    for ref in track.get("shared_materials", []):
+    for ref in track.get("artifact_relations", []):
         if not isinstance(ref, dict):
             continue
-        if ref.get("type") != "artifact" or not bool(ref.get("current")):
+        if ref.get("type") != "artifact" or ref.get("role") != "material" or not bool(ref.get("current")):
             continue
         artifact_id = ref.get("artifact_id")
         if not isinstance(artifact_id, str) or not artifact_id:
@@ -334,18 +309,18 @@ def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any])
         rows.append(
             {
                 "artifact_id": artifact_id,
-                "kind": ref.get("kind"),
+                "template": ref.get("template"),
                 "label": ref.get("label"),
                 "from_actor": ref.get("from_actor"),
                 "summary": ref.get("summary", ""),
                 "currentness": "current",
-                "published_at": ref.get("published_at"),
+                "created_at": ref.get("created_at"),
                 "readable_by_active_actor": bool(decision.get("allowed")),
                 "relation": "track_material" if bool(decision.get("allowed")) else "none",
             }
         )
 
-    rows.sort(key=lambda row: (str(row.get("kind") or ""), str(row.get("artifact_id") or "")))
+    rows.sort(key=lambda row: (str(row.get("template") or ""), str(row.get("artifact_id") or "")))
     return rows
 
 
@@ -355,12 +330,10 @@ def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[di
         return []
 
     rows: list[dict[str, Any]] = []
-    for ref in track.get("close_proof", []):
+    for ref in track.get("artifact_relations", []):
         if not isinstance(ref, dict):
             continue
-        if ref.get("type") != "artifact":
-            continue
-        if not bool(ref.get("current", True)):
+        if ref.get("type") != "artifact" or ref.get("role") != "proof" or not bool(ref.get("current")):
             continue
         artifact_id = ref.get("artifact_id")
         if not isinstance(artifact_id, str) or not artifact_id:
@@ -370,18 +343,18 @@ def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[di
         rows.append(
             {
                 "artifact_id": artifact_id,
-                "kind": ref.get("kind"),
+                "template": ref.get("template"),
                 "label": ref.get("label"),
                 "from_actor": ref.get("from_actor"),
                 "summary": ref.get("summary", ""),
                 "currentness": "proof",
-                "published_at": ref.get("published_at"),
+                "created_at": ref.get("created_at"),
                 "readable_by_active_actor": bool(decision.get("allowed")),
                 "relation": "track_proof" if bool(decision.get("allowed")) else "none",
             }
         )
 
-    rows.sort(key=lambda row: (str(row.get("kind") or ""), str(row.get("artifact_id") or "")))
+    rows.sort(key=lambda row: (str(row.get("template") or ""), str(row.get("artifact_id") or "")))
     return rows
 
 
@@ -406,19 +379,27 @@ def artifact_ref_decision_for_track_update(
             "message": f"artifact '{artifact_id}' cannot be used in refs: {why}",
         }
 
-    if decision.get("track_id") != track_id:
+    track = track_repo.get_track(track_id)
+    if not isinstance(track, dict) or track.get("archived_at") is not None:
         return {
             "ok": False,
-            "message": (
-                f"artifact '{artifact_id}' belongs to track '{decision.get('track_id')}' "
-                f"and cannot be referenced from track '{track_id}'"
-            ),
+            "message": f"track not found or archived: {track_id}",
         }
 
-    if decision.get("relation") not in {"track_material", "track_proof"}:
+    relation_ref: dict[str, Any] | None = None
+    for row in track.get("artifact_relations", []):
+        if not isinstance(row, dict):
+            continue
+        if row.get("type") != "artifact" or row.get("artifact_id") != artifact_id:
+            continue
+        if row.get("role") in {"material", "proof"} and bool(row.get("current")):
+            relation_ref = row
+            break
+
+    if relation_ref is None:
         return {
             "ok": False,
-            "message": f"artifact '{artifact_id}' is not a current material or close proof on track '{track_id}'",
+            "message": f"artifact '{artifact_id}' is not a current material/proof relation on track '{track_id}'",
         }
 
     return {"ok": True}

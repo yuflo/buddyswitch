@@ -342,15 +342,11 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         assert isinstance(properties, dict)
         self.assertEqual(
             set(properties),
-            {"track_id", "created_by_role", "template", "status", "q", "limit"},
+            {"track_id", "created_by_role", "template", "q", "limit"},
         )
         self.assertEqual(
             properties["template"].get("enum"),
             ["brief", "proposal", "design", "decision", "proof", "note"],
-        )
-        self.assertEqual(
-            properties["status"].get("enum"),
-            ["draft", "published", "archived"],
         )
         self.assertEqual(properties["limit"].get("type"), "integer")
         self.assertEqual(properties["limit"].get("minimum"), 1)

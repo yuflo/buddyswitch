@@ -181,8 +181,6 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "summary": "seed",
                 "body": "body",
                 "template": "brief",
-                "status": "draft",
-                "published_to_track": None,
                 "revision": 1,
                 "is_current": True,
                 "supersedes_artifact_id": None,
@@ -202,8 +200,6 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "summary": "seed",
             "body": "body",
             "template": "brief",
-            "status": "draft",
-            "published_to_track": None,
             "revision": 1,
             "is_current": True,
             "supersedes_artifact_id": None,
@@ -264,8 +260,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = opened.get("track")
         self.assertIsInstance(track, dict, msg=opened)
         assert isinstance(track, dict)
-        self.assertEqual(track.get("shared_materials"), [])
-        self.assertEqual(track.get("close_proof"), [])
+        self.assertEqual(track.get("artifact_relations"), [])
+        self.assertNotIn("shared_materials", track)
+        self.assertNotIn("close_proof", track)
 
     def test_create_revision_rejects_status_published_without_mutation(self) -> None:
         instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
@@ -314,8 +311,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact = payload.get("artifact")
         self.assertIsInstance(artifact, dict, msg=payload)
         assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("status"), "draft")
-        self.assertIsNone(artifact.get("published_to_track"))
+        self.assertNotIn("status", artifact)
+        self.assertNotIn("published_to_track", artifact)
         self.assertEqual(artifact.get("template"), "brief")
         self.assertIn("body", artifact)
         self.assertEqual(artifact.get("currentness"), "draft")
@@ -471,7 +468,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(non_owner.get("ok"), msg=non_owner)
         self.assertEqual((non_owner.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
-        self.assertEqual(non_owner.get("permission_boundary"), "artifact.status")
+        self.assertEqual(non_owner.get("permission_boundary"), "artifact.relation_scope")
 
     def test_same_role_different_actor_cannot_access_private_draft_surfaces(self) -> None:
         owner_actor = "act-pm-draft-owner"
@@ -521,7 +518,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="pm",
             tool="artifact",
             action="list",
-            args={"status": "draft"},
+            args={},
         )
         self.assertTrue(owner_list.get("ok"), msg=owner_list)
         owner_ids = {
@@ -558,7 +555,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="pm",
             tool="artifact",
             action="list",
-            args={"status": "draft"},
+            args={},
         )
         self.assertTrue(other_list.get("ok"), msg=other_list)
         other_ids = {
@@ -698,17 +695,17 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         r2_artifact = r2.get("artifact")
         self.assertIsInstance(r2_artifact, dict, msg=r2)
         assert isinstance(r2_artifact, dict)
-        self.assertEqual(r2_artifact.get("status"), "draft")
-        self.assertIsNone(r2_artifact.get("published_to_track"))
+        self.assertNotIn("status", r2_artifact)
+        self.assertNotIn("published_to_track", r2_artifact)
         self.assertEqual(r2_artifact.get("supersedes_artifact_id"), "art-revision-r1")
         self.assertEqual(r2_artifact.get("currentness"), "draft")
 
         r1_store = env_store.get_artifact("art-revision-r1")
         self.assertIsInstance(r1_store, dict)
         assert isinstance(r1_store, dict)
-        self.assertEqual(r1_store.get("status"), "published")
-        self.assertEqual(r1_store.get("published_to_track"), "track-revision-draft")
-        self.assertTrue(bool(r1_store.get("is_current")), msg=r1_store)
+        self.assertNotIn("status", r1_store)
+        self.assertNotIn("published_to_track", r1_store)
+        self.assertFalse(bool(r1_store.get("is_current")), msg=r1_store)
 
         opened = self._dispatch(
             instance_json=instance_pm,
@@ -722,7 +719,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = opened.get("track")
         self.assertIsInstance(track, dict, msg=opened)
         assert isinstance(track, dict)
-        self.assertEqual([row.get("artifact_id") for row in track.get("shared_materials", [])], ["art-revision-r1"])
+        self.assertEqual([row.get("artifact_id") for row in track.get("artifact_relations", [])], ["art-revision-r1"])
 
         instance_dev = self._instance_json(actor_id="act-dev-art", role="dev")
         denied = self._dispatch(
@@ -783,8 +780,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact = readable.get("artifact")
         self.assertIsInstance(artifact, dict, msg=readable)
         assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("status"), "published")
-        self.assertEqual(artifact.get("published_to_track"), "track-art-pub")
+        self.assertNotIn("status", artifact)
+        self.assertNotIn("published_to_track", artifact)
+        self.assertEqual(artifact.get("track_id"), "track-art-pub")
         self.assertEqual(artifact.get("currentness"), "current")
 
     def test_source_ref_invalid_artifact_id_rejects_without_artifact(self) -> None:
@@ -930,7 +928,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact = derived.get("artifact")
         self.assertIsInstance(artifact, dict, msg=derived)
         assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("status"), "draft")
+        self.assertNotIn("status", artifact)
         self.assertIn({"type": "artifact", "id": "art-source-readable-r1"}, artifact.get("source_refs") or [])
 
         persisted = env_store.get_artifact("art-source-derived-r1")
@@ -1037,7 +1035,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(state_changes, list, msg=publish_r2)
         assert isinstance(state_changes, list)
         changes = {row.get("change") for row in state_changes if isinstance(row, dict)}
-        self.assertIn("superseded", changes)
+        self.assertIn("material_relation_superseded", changes)
 
         opened = self._dispatch(
             instance_json=instance_pm,
@@ -1051,12 +1049,17 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = opened.get("track")
         self.assertIsInstance(track, dict, msg=opened)
         assert isinstance(track, dict)
-        self.assertEqual([row.get("artifact_id") for row in track.get("shared_materials", [])], ["art-trace-r2"])
+        current_materials = [
+            row
+            for row in track.get("artifact_relations", [])
+            if isinstance(row, dict) and row.get("role") == "material" and bool(row.get("current"))
+        ]
+        self.assertEqual([row.get("artifact_id") for row in current_materials], ["art-trace-r2"])
 
         track_store = env_store.get_track("track-revision-trace")
         self.assertIsInstance(track_store, dict)
         assert isinstance(track_store, dict)
-        refs = [row for row in track_store.get("shared_materials", []) if isinstance(row, dict)]
+        refs = [row for row in track_store.get("artifact_relations", []) if isinstance(row, dict) and row.get("role") == "material"]
         self.assertEqual(len(refs), 2)
         current_map = {str(row.get("artifact_id")): bool(row.get("current")) for row in refs}
         self.assertFalse(current_map["art-trace-r1"])
@@ -1185,8 +1188,19 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(track_open.get("ok"), msg=track_open)
         self.assertEqual(track_open.get("permission_boundary"), "track.lifecycle_status")
 
-        for role, actor_id in (("pm", "act-pm-art"), ("dev", "act-dev-art")):
-            instance_json = instance_pm if role == "pm" else self._instance_json(actor_id=actor_id, role=role)
+        owner_read = self._dispatch(
+            instance_json=instance_pm,
+            actor_id="act-pm-art",
+            role="pm",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-pm-archive-r1"},
+        )
+        self.assertTrue(owner_read.get("ok"), msg=owner_read)
+        self.assertEqual((owner_read.get("artifact") or {}).get("relation"), "owner")
+
+        for role, actor_id in (("dev", "act-dev-art"),):
+            instance_json = self._instance_json(actor_id=actor_id, role=role)
             denied = self._dispatch(
                 instance_json=instance_json,
                 actor_id=actor_id,
@@ -1277,7 +1291,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("art-list-dev-private", rows_by_id)
         for artifact_id in ("art-list-pm-brief", "art-list-pm-note"):
             row = rows_by_id[artifact_id]
-            self.assertEqual(row.get("status"), "draft", msg=row)
+            self.assertNotIn("status", row, msg=row)
             self.assertEqual(row.get("currentness"), "draft", msg=row)
             self.assertEqual(row.get("relation"), "owner", msg=row)
             self.assertNotIn("body", row, msg=row)
@@ -1593,22 +1607,6 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if isinstance(row, dict):
                 self.assertEqual(row.get("template"), "brief", msg=row)
 
-        published_only = self._dispatch(
-            instance_json=instance_pm,
-            actor_id=shared_actor_id,
-            role="pm",
-            tool="artifact",
-            action="list",
-            args={"status": "published"},
-        )
-        self.assertTrue(published_only.get("ok"), msg=published_only)
-        published_ids = {
-            str(row.get("artifact_id"))
-            for row in (published_only.get("artifacts") or [])
-            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
-        }
-        self.assertNotIn("art-filter-draft", published_ids)
-
         limited = self._dispatch(
             instance_json=instance_pm,
             actor_id=shared_actor_id,
@@ -1634,7 +1632,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(track_scoped.get("ok"), msg=track_scoped)
         for row in track_scoped.get("artifacts", []):
             if isinstance(row, dict):
-                self.assertEqual(row.get("published_to_track"), "track-art-list-filter", msg=row)
+                self.assertEqual(row.get("track_id"), "track-art-list-filter", msg=row)
+                self.assertNotIn("published_to_track", row, msg=row)
 
         default_limit = self._dispatch(
             instance_json=instance_pm,
@@ -1745,7 +1744,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for row in (listed.get("artifacts") or [])
             if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
         }
-        self.assertNotIn("art-list-archived-r1", listed_ids)
+        self.assertIn("art-list-archived-r1", listed_ids)
 
         track_filtered = self._dispatch(
             instance_json=instance_pm,
@@ -2188,7 +2187,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "summary": "private",
                 "template": "brief",
                 "body": "private",
-                "supersedes_artifact_id": "art-lineage-r1",
+                "source_refs": [{"type": "artifact", "id": "art-lineage-r1"}],
+                "read_claim": "summarized-full-content",
             },
         )
         self.assertTrue(created_dev_private.get("ok"), msg=created_dev_private)
@@ -2241,12 +2241,14 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         relation_summary = artifact.get("relation_summary")
         self.assertIsInstance(relation_summary, dict, msg=artifact)
         assert isinstance(relation_summary, dict)
-        publication = relation_summary.get("publication")
-        self.assertIsInstance(publication, dict, msg=relation_summary)
-        assert isinstance(publication, dict)
-        self.assertEqual(publication.get("track_id"), "track-art-rel-lineage")
-        self.assertEqual(publication.get("relation"), "track_history")
-        self.assertEqual(publication.get("currentness"), "superseded")
+        track_relations = relation_summary.get("track_relations")
+        self.assertIsInstance(track_relations, list, msg=relation_summary)
+        assert isinstance(track_relations, list)
+        self.assertEqual(len(track_relations), 1)
+        self.assertEqual(track_relations[0].get("track_id"), "track-art-rel-lineage")
+        self.assertEqual(track_relations[0].get("relation"), "track_history")
+        self.assertEqual(track_relations[0].get("currentness"), "superseded")
+        self.assertNotIn("publication", relation_summary)
         lineage = relation_summary.get("lineage")
         self.assertIsInstance(lineage, dict, msg=relation_summary)
         assert isinstance(lineage, dict)

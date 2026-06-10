@@ -38,7 +38,7 @@ description: Use when Dev must publish a durable product-readable implementation
 
 ## Verification
 - Report contains changed files, command evidence, risks, and follow-ups.
-- Durable publication path is explicit when used.
+- Durable artifact/track relation path is explicit when used.
 
 ## Examples
 - Report references `src/App.tsx` behavior change and `src/App.test.tsx` proof.

@@ -171,9 +171,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(track.get("state"), "active")
         self.assertEqual(track.get("health"), "ok")
-        self.assertEqual(track.get("shared_materials"), [])
+        self.assertEqual(track.get("artifact_relations"), [])
         self.assertEqual(track.get("updates"), [])
-        self.assertEqual(track.get("close_proof"), [])
+        self.assertNotIn("shared_materials", track)
+        self.assertNotIn("close_proof", track)
 
     def test_non_pm_cannot_create_track(self) -> None:
         instance_json = self._instance_json(actor_id="act-design-track", role="design")
@@ -369,9 +370,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertTrue(after.get("ok"), msg=after)
                 self.assertEqual(after.get("track"), baseline_copy)
 
-    def test_add_material_publishes_existing_draft_and_track_ref(self) -> None:
+    def test_add_material_creates_track_relation_without_artifact_mutation(self) -> None:
         instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-publish").get("ok"))
+        self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-relation").get("ok"))
         draft = self._create_draft(
             instance_json=instance_json,
             actor_id="act-pm-track",
@@ -381,57 +382,57 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             body="material body",
         )
         self.assertTrue(draft.get("ok"), msg=draft)
+        before_artifact = deepcopy(env_store.get_artifact("art-material-r1"))
 
-        published = self._dispatch(
+        related = self._dispatch(
             instance_json=instance_json,
             actor_id="act-pm-track",
             role="pm",
             tool="track",
             action="add_material",
             args={
-                "track_id": "track-material-publish",
+                "track_id": "track-material-relation",
                 "artifact_id": "art-material-r1",
                 "label": "Brief",
-                "summary": "Published PM brief",
+                "summary": "Shared PM brief",
             },
         )
-        self.assertTrue(published.get("ok"), msg=published)
-        self.assertTrue(bool(published.get("state_changed")), msg=published)
-        self.assertEqual(published.get("durability"), "durable")
-        state_changes = published.get("state_changes")
-        self.assertIsInstance(state_changes, list, msg=published)
+        self.assertTrue(related.get("ok"), msg=related)
+        self.assertTrue(bool(related.get("state_changed")), msg=related)
+        self.assertEqual(related.get("durability"), "durable")
+        state_changes = related.get("state_changes")
+        self.assertIsInstance(state_changes, list, msg=related)
         assert isinstance(state_changes, list)
         changes = {row.get("change") for row in state_changes if isinstance(row, dict)}
-        self.assertIn("published_material", changes)
-        self.assertIn("material_added", changes)
+        self.assertNotIn("published_material", changes)
+        self.assertIn("material_relation_added", changes)
 
         artifact = env_store.get_artifact("art-material-r1")
-        self.assertIsInstance(artifact, dict)
-        assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("status"), "published")
-        self.assertEqual(artifact.get("published_to_track"), "track-material-publish")
-        self.assertEqual(artifact.get("template"), "brief")
-        self.assertEqual(artifact.get("body"), "material body")
-        self.assertTrue(bool(artifact.get("is_current")), msg=artifact)
+        self.assertEqual(artifact, before_artifact)
 
-        track_store = env_store.get_track("track-material-publish")
+        track_store = env_store.get_track("track-material-relation")
         self.assertIsInstance(track_store, dict)
         assert isinstance(track_store, dict)
-        refs = [row for row in track_store.get("shared_materials", []) if isinstance(row, dict)]
-        self.assertEqual(len(refs), 1)
-        self.assertEqual(refs[0].get("artifact_id"), "art-material-r1")
-        self.assertEqual(refs[0].get("kind"), "brief")
-        self.assertEqual(refs[0].get("label"), "Brief")
+        relations = [row for row in track_store.get("artifact_relations", []) if isinstance(row, dict)]
+        self.assertEqual(len(relations), 1)
+        relation = relations[0]
+        self.assertEqual(relation.get("type"), "artifact")
+        self.assertIsInstance(relation.get("relation_id"), str)
+        self.assertEqual(relation.get("artifact_id"), "art-material-r1")
+        self.assertEqual(relation.get("role"), "material")
+        self.assertEqual(relation.get("template"), "brief")
+        self.assertEqual(relation.get("label"), "Brief")
         self.assertEqual(
-            refs[0].get("from_actor"),
+            relation.get("from_actor"),
             {"actor_id": self._runtime_actor_id(role="pm", label="act-pm-track"), "role_id": "pm"},
         )
-        self.assertNotIn("from_role", refs[0])
-        self.assertEqual(refs[0].get("summary"), "Published PM brief")
-        self.assertTrue(bool(refs[0].get("current")), msg=refs[0])
-        self.assertEqual(track_store.get("close_proof"), [])
+        self.assertNotIn("from_role", relation)
+        self.assertEqual(relation.get("summary"), "Shared PM brief")
+        self.assertTrue(bool(relation.get("current")), msg=relation)
+        self.assertNotIn("shared_materials", track_store)
+        self.assertNotIn("close_proof", track_store)
 
-    def test_add_material_replaces_current_only_after_successful_publish(self) -> None:
+    def test_relation_replacement_demotes_only_track_relation_currentness(self) -> None:
         instance_json = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-main").get("ok"))
         self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-other").get("ok"))
@@ -480,15 +481,19 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         baseline_track = env_store.get_track("track-material-main")
         baseline_r1 = env_store.get_artifact("art-replace-r1")
         baseline_r2 = env_store.get_artifact("art-replace-r2")
+        baseline_other = env_store.get_track("track-material-other")
         self.assertIsInstance(baseline_track, dict)
         self.assertIsInstance(baseline_r1, dict)
         self.assertIsInstance(baseline_r2, dict)
+        self.assertIsInstance(baseline_other, dict)
         assert isinstance(baseline_track, dict)
         assert isinstance(baseline_r1, dict)
         assert isinstance(baseline_r2, dict)
+        assert isinstance(baseline_other, dict)
         baseline_track = deepcopy(baseline_track)
         baseline_r1 = deepcopy(baseline_r1)
         baseline_r2 = deepcopy(baseline_r2)
+        baseline_other = deepcopy(baseline_other)
 
         cross_track = self._dispatch(
             instance_json=instance_json,
@@ -498,12 +503,16 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="add_material",
             args={"track_id": "track-material-other", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
         )
-        self.assertFalse(cross_track.get("ok"), msg=cross_track)
-        self.assertFalse(bool(cross_track.get("state_changed")), msg=cross_track)
-        self.assertEqual(cross_track.get("durability"), "none")
+        self.assertTrue(cross_track.get("ok"), msg=cross_track)
         self.assertEqual(env_store.get_track("track-material-main"), baseline_track)
         self.assertEqual(env_store.get_artifact("art-replace-r1"), baseline_r1)
         self.assertEqual(env_store.get_artifact("art-replace-r2"), baseline_r2)
+        other_after = env_store.get_track("track-material-other")
+        self.assertIsInstance(other_after, dict)
+        assert isinstance(other_after, dict)
+        other_relations = [row for row in other_after.get("artifact_relations", []) if isinstance(row, dict)]
+        self.assertEqual([row.get("artifact_id") for row in other_relations], ["art-replace-r2"])
+        self.assertNotEqual(other_after, baseline_other)
 
         archived_reject = self._dispatch(
             instance_json=instance_json,
@@ -539,14 +548,14 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(track, dict)
         assert isinstance(r1_store, dict)
         assert isinstance(r2_store, dict)
-        refs = [row for row in track.get("shared_materials", []) if isinstance(row, dict)]
-        self.assertEqual(len(refs), 2)
-        by_id = {str(row.get("artifact_id")): bool(row.get("current")) for row in refs}
+        relations = [row for row in track.get("artifact_relations", []) if isinstance(row, dict)]
+        self.assertEqual(len(relations), 2)
+        by_id = {str(row.get("artifact_id")): bool(row.get("current")) for row in relations}
         self.assertFalse(by_id["art-replace-r1"])
         self.assertTrue(by_id["art-replace-r2"])
         self.assertFalse(bool(r1_store.get("is_current")), msg=r1_store)
         self.assertTrue(bool(r2_store.get("is_current")), msg=r2_store)
-        self.assertEqual(r2_store.get("published_to_track"), "track-material-main")
+        self.assertNotIn("published_to_track", r2_store)
 
     def test_track_open_exposes_attachment_summaries_for_readable_material_and_proof(self) -> None:
         pm_instance = self._pm_instance()
@@ -667,11 +676,12 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(track, dict, msg=opened)
         assert isinstance(track, dict)
 
-        shared_materials = track.get("shared_materials")
-        self.assertIsInstance(shared_materials, list, msg=track)
-        assert isinstance(shared_materials, list)
-        self.assertEqual(len(shared_materials), 1)
-        material_ref = shared_materials[0]
+        relations = track.get("artifact_relations")
+        self.assertIsInstance(relations, list, msg=track)
+        assert isinstance(relations, list)
+        self.assertEqual(len(relations), 2)
+        by_role = {str(row.get("role")): row for row in relations if isinstance(row, dict)}
+        material_ref = by_role["material"]
         self.assertEqual(material_ref.get("attachment_count"), 1)
         material_attachments = material_ref.get("attachments")
         self.assertIsInstance(material_attachments, list, msg=material_ref)
@@ -680,11 +690,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("content_base64", material_attachments[0])
         self.assertNotIn("path", material_attachments[0])
 
-        close_proof = track.get("close_proof")
-        self.assertIsInstance(close_proof, list, msg=track)
-        assert isinstance(close_proof, list)
-        self.assertEqual(len(close_proof), 1)
-        proof_ref = close_proof[0]
+        proof_ref = by_role["proof"]
         self.assertEqual(proof_ref.get("attachment_count"), 1)
         proof_attachments = proof_ref.get("attachments")
         self.assertIsInstance(proof_attachments, list, msg=proof_ref)
@@ -692,8 +698,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual([row.get("attachment_id") for row in proof_attachments], [proof_attachment_id])
         self.assertNotIn("content_base64", proof_attachments[0])
         self.assertNotIn("path", proof_attachments[0])
+        self.assertNotIn("shared_materials", track)
+        self.assertNotIn("close_proof", track)
 
-    def test_add_material_rejects_duplicate_already_bound_and_cross_track_without_state_pollution(self) -> None:
+    def test_same_artifact_can_be_related_to_multiple_tracks_without_republication(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-material-a").get("ok"))
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-material-b").get("ok"))
@@ -707,7 +715,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             body="draft",
         )
         self.assertTrue(draft.get("ok"), msg=draft)
-        first_publish = self._dispatch(
+        first_relation = self._dispatch(
             instance_json=pm_instance,
             actor_id="act-pm-track",
             role="pm",
@@ -715,7 +723,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="add_material",
             args={"track_id": "track-material-a", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "published-a"},
         )
-        self.assertTrue(first_publish.get("ok"), msg=first_publish)
+        self.assertTrue(first_relation.get("ok"), msg=first_relation)
 
         before_track_a = deepcopy(env_store.get_track("track-material-a"))
         before_track_b = deepcopy(env_store.get_track("track-material-b"))
@@ -741,9 +749,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="add_material",
             args={"track_id": "track-material-b", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "published-b"},
         )
-        self.assertFalse(cross_track.get("ok"), msg=cross_track)
-        self.assertFalse(bool(cross_track.get("state_changed")), msg=cross_track)
-        self.assertEqual(cross_track.get("durability"), "none")
+        self.assertTrue(cross_track.get("ok"), msg=cross_track)
+        self.assertTrue(bool(cross_track.get("state_changed")), msg=cross_track)
+        self.assertEqual(cross_track.get("durability"), "durable")
 
         design_instance = self._instance_json(actor_id="act-design-track", role="design")
         wrong_owner = self._dispatch(
@@ -758,9 +766,17 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((wrong_owner.get("error") or {}).get("code"), "E_TRACK_ARTIFACT_SCOPE")
         self.assertFalse(bool(wrong_owner.get("state_changed")), msg=wrong_owner)
 
-        self.assertEqual(env_store.get_track("track-material-a"), before_track_a)
-        self.assertEqual(env_store.get_track("track-material-b"), before_track_b)
         self.assertEqual(env_store.get_artifact("art-cross-track-material-r1"), before_artifact)
+        track_a = env_store.get_track("track-material-a")
+        track_b = env_store.get_track("track-material-b")
+        self.assertIsInstance(track_a, dict)
+        self.assertIsInstance(track_b, dict)
+        assert isinstance(track_a, dict)
+        assert isinstance(track_b, dict)
+        self.assertEqual(env_store.get_track("track-material-a"), before_track_a)
+        self.assertNotEqual(env_store.get_track("track-material-b"), before_track_b)
+        self.assertEqual([row.get("artifact_id") for row in track_a.get("artifact_relations", [])], ["art-cross-track-material-r1"])
+        self.assertEqual([row.get("artifact_id") for row in track_b.get("artifact_relations", [])], ["art-cross-track-material-r1"])
 
     def test_add_material_write_failure_rejects_without_track_or_artifact_mutation(self) -> None:
         pm_instance = self._pm_instance()
@@ -810,9 +826,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(env_store.get_track(track_id), before_track)
         self.assertEqual(env_store.get_artifact(artifact_id), before_artifact)
 
-    def test_add_proof_publishes_existing_draft_updates_close_proof_and_update(self) -> None:
+    def test_add_proof_creates_relation_and_timeline_update_without_artifact_mutation(self) -> None:
         pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-publish").get("ok"))
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-relation").get("ok"))
 
         test_instance = self._instance_json(actor_id="act-test-track", role="test")
         draft = self._create_draft(
@@ -824,6 +840,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             body="pass",
         )
         self.assertTrue(draft.get("ok"), msg=draft)
+        before_artifact = deepcopy(env_store.get_artifact("art-proof-r1"))
 
         proof = self._dispatch(
             instance_json=test_instance,
@@ -831,31 +848,30 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="test",
             tool="track",
             action="add_proof",
-            args={"track_id": "track-proof-publish", "artifact_id": "art-proof-r1", "label": "Smoke", "summary": "Pass"},
+            args={"track_id": "track-proof-relation", "artifact_id": "art-proof-r1", "label": "Smoke", "summary": "Pass"},
         )
         self.assertTrue(proof.get("ok"), msg=proof)
         self.assertTrue(bool(proof.get("state_changed")), msg=proof)
         self.assertEqual(proof.get("durability"), "durable")
         changes = {row.get("change") for row in proof.get("state_changes", []) if isinstance(row, dict)}
-        self.assertIn("published_proof", changes)
-        self.assertIn("proof_added", changes)
+        self.assertNotIn("published_proof", changes)
+        self.assertIn("proof_relation_added", changes)
         self.assertIn("update_added", changes)
 
         artifact = env_store.get_artifact("art-proof-r1")
-        self.assertIsInstance(artifact, dict)
-        assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("status"), "published")
-        self.assertEqual(artifact.get("published_to_track"), "track-proof-publish")
-        self.assertEqual(artifact.get("template"), "proof")
-        self.assertTrue(bool(artifact.get("is_current")), msg=artifact)
+        self.assertEqual(artifact, before_artifact)
 
-        track = env_store.get_track("track-proof-publish")
+        track = env_store.get_track("track-proof-relation")
         self.assertIsInstance(track, dict)
         assert isinstance(track, dict)
-        close = [row for row in track.get("close_proof", []) if isinstance(row, dict)]
-        self.assertEqual(len(close), 1)
-        self.assertEqual(close[0].get("artifact_id"), "art-proof-r1")
-        self.assertTrue(bool(close[0].get("current")), msg=close[0])
+        relations = [row for row in track.get("artifact_relations", []) if isinstance(row, dict)]
+        self.assertEqual(len(relations), 1)
+        self.assertEqual(relations[0].get("artifact_id"), "art-proof-r1")
+        self.assertEqual(relations[0].get("role"), "proof")
+        self.assertEqual(relations[0].get("template"), "proof")
+        self.assertTrue(bool(relations[0].get("current")), msg=relations[0])
+        self.assertNotIn("shared_materials", track)
+        self.assertNotIn("close_proof", track)
         updates = [row for row in track.get("updates", []) if isinstance(row, dict)]
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].get("kind"), "proof")
@@ -864,7 +880,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(refs, list)
         self.assertEqual(refs[0].get("id"), "art-proof-r1")
 
-    def test_add_proof_replaces_current_proof_only_after_successful_publish(self) -> None:
+    def test_add_proof_replaces_current_relation_without_artifact_mutation(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-main").get("ok"))
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-archived").get("ok"))
@@ -940,11 +956,12 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = env_store.get_track("track-proof-main")
         self.assertIsInstance(track, dict)
         assert isinstance(track, dict)
-        close = [row for row in track.get("close_proof", []) if isinstance(row, dict)]
-        self.assertEqual(len(close), 2)
-        by_id = {str(row.get("artifact_id")): bool(row.get("current")) for row in close}
+        relations = [row for row in track.get("artifact_relations", []) if isinstance(row, dict)]
+        self.assertEqual(len(relations), 2)
+        by_id = {str(row.get("artifact_id")): bool(row.get("current")) for row in relations}
         self.assertFalse(by_id["art-proof-replace-r1"])
         self.assertTrue(by_id["art-proof-replace-r2"])
+        self.assertTrue(all(row.get("role") == "proof" for row in relations), msg=relations)
 
         r1_store = env_store.get_artifact("art-proof-replace-r1")
         r2_store = env_store.get_artifact("art-proof-replace-r2")
@@ -954,6 +971,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(r2_store, dict)
         self.assertFalse(bool(r1_store.get("is_current")), msg=r1_store)
         self.assertTrue(bool(r2_store.get("is_current")), msg=r2_store)
+        self.assertNotIn("published_to_track", r1_store)
+        self.assertNotIn("published_to_track", r2_store)
 
     def test_archive_boundaries(self) -> None:
         pm_instance = self._pm_instance()

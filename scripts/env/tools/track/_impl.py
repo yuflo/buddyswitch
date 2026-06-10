@@ -279,17 +279,12 @@ def _track_page(
 ) -> dict[str, Any]:
     page = dict(track)
     active_actor = context["active_actor"]
-    page["shared_materials"] = [
+    page["artifact_relations"] = [
         _project_track_artifact_ref(ref=row, active_actor=active_actor, active_role=active_role, context=context)
-        for row in track.get("shared_materials", [])
-        if isinstance(row, dict) and bool(row.get("current"))
+        for row in track.get("artifact_relations", [])
+        if isinstance(row, dict)
     ]
     page["updates"] = [row for row in track.get("updates", []) if isinstance(row, dict)]
-    page["close_proof"] = [
-        _project_track_artifact_ref(ref=row, active_actor=active_actor, active_role=active_role, context=context)
-        for row in track.get("close_proof", [])
-        if isinstance(row, dict) and bool(row.get("current", True))
-    ]
     return page
 
 
@@ -634,7 +629,7 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="summary must be a string")
 
     try:
-        publication = context.rules.publication.publish_material(
+        relation_result = context.rules.track_artifact_relations.add_material_relation(
             track_id=track_id,
             artifact_id=artifact_id.strip(),
             label=label.strip(),
@@ -646,19 +641,18 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
         if "owned by another actor" in message:
             return _reject_artifact_scope(action=action, active_actor=active_actor, active_role=active_role, message=message)
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=message)
-    updated_track = publication["track"]
-    updated_artifact = publication["artifact"]
-    superseded_artifact_id = publication["superseded_artifact_id"]
+    updated_track = relation_result["track"]
+    related_artifact = relation_result["artifact"]
+    superseded_artifact_id = relation_result["superseded_artifact_id"]
 
     changes: list[dict[str, Any]] = [
-        {"object_type": "artifact", "change": "published_material", "artifact_id": updated_artifact["id"], "track_id": track_id},
-        {"object_type": "track", "change": "material_added", "track_id": track_id, "artifact_id": updated_artifact["id"]},
+        {"object_type": "track", "change": "material_relation_added", "track_id": track_id, "artifact_id": related_artifact["id"]},
     ]
     if isinstance(superseded_artifact_id, str) and superseded_artifact_id:
         changes.append(
             {
-                "object_type": "artifact",
-                "change": "superseded",
+                "object_type": "track",
+                "change": "material_relation_superseded",
                 "artifact_id": superseded_artifact_id,
                 "track_id": track_id,
             }
@@ -670,20 +664,19 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
         active_actor=active_actor,
         active_role=active_role,
         effect_summary=(
-            f"Published artifact '{updated_artifact['id']}' as current shared material on track '{track_id}' "
-            f"and appended the track material ref."
+            f"Related artifact '{related_artifact['id']}' as current material on track '{track_id}'."
         ),
         state_changed=True,
         durability="durable",
-        updated_ids=[track_id, updated_artifact["id"]],
+        updated_ids=[track_id],
         state_changes=changes,
         allowed_next_actions=[
-            "Use track.open to inspect current shared materials.",
+            "Use track.open to inspect artifact relations.",
             "Use artifact.get to read full artifact body.",
         ],
         extra={
             "track_id": track_id,
-            "artifact_id": updated_artifact["id"],
+            "artifact_id": related_artifact["id"],
             "track": _track_page(updated_track, active_role=active_role, context=context),
         },
     )
@@ -824,7 +817,7 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="summary must be a string")
 
     try:
-        publication = context.rules.publication.publish_proof(
+        relation_result = context.rules.track_artifact_relations.add_proof_relation(
             track_id=track_id,
             artifact_id=artifact_id.strip(),
             label=label.strip(),
@@ -837,21 +830,20 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
         if "owned by another actor" in message:
             return _reject_artifact_scope(action=action, active_actor=active_actor, active_role=active_role, message=message)
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=message)
-    updated_track = publication["track"]
-    updated_artifact = publication["artifact"]
-    superseded_artifact_id = publication["superseded_artifact_id"]
-    update = publication["update"]
+    updated_track = relation_result["track"]
+    related_artifact = relation_result["artifact"]
+    superseded_artifact_id = relation_result["superseded_artifact_id"]
+    update = relation_result["update"]
 
     changes: list[dict[str, Any]] = [
-        {"object_type": "artifact", "change": "published_proof", "artifact_id": updated_artifact["id"], "track_id": track_id},
-        {"object_type": "track", "change": "proof_added", "track_id": track_id, "artifact_id": updated_artifact["id"]},
+        {"object_type": "track", "change": "proof_relation_added", "track_id": track_id, "artifact_id": related_artifact["id"]},
         {"object_type": "track", "change": "update_added", "track_id": track_id, "update_id": update["id"]},
     ]
     if isinstance(superseded_artifact_id, str) and superseded_artifact_id:
         changes.append(
             {
-                "object_type": "artifact",
-                "change": "superseded",
+                "object_type": "track",
+                "change": "proof_relation_superseded",
                 "artifact_id": superseded_artifact_id,
                 "track_id": track_id,
             }
@@ -863,21 +855,21 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
         active_actor=active_actor,
         active_role=active_role,
         effect_summary=(
-            f"Published artifact '{updated_artifact['id']}' as current close proof on track '{track_id}', "
-            f"appended close_proof ref, and recorded proof update '{update['id']}'."
+            f"Related artifact '{related_artifact['id']}' as current proof on track '{track_id}' "
+            f"and recorded proof update '{update['id']}'."
         ),
         state_changed=True,
         durability="durable",
-        updated_ids=[track_id, updated_artifact["id"]],
+        updated_ids=[track_id],
         state_changes=changes,
         allowed_next_actions=[
-            "Use track.open to verify close_proof and timeline updates.",
+            "Use track.open to verify artifact relations and timeline updates.",
             "Use artifact.get to read proof body.",
             "Use track.update_now when proof changes track close readiness.",
         ],
         extra={
             "track_id": track_id,
-            "artifact_id": updated_artifact["id"],
+            "artifact_id": related_artifact["id"],
             "update_id": update["id"],
             "track": _track_page(updated_track, active_role=active_role, context=context),
         },

@@ -385,18 +385,6 @@ def _normalize_list_filters(
             )
         template = raw_template
 
-    status: str | None = None
-    if "status" in args:
-        raw_status = args.get("status")
-        if not isinstance(raw_status, str) or raw_status not in context.repos.artifact.VALID_ARTIFACT_STATUS:
-            return None, _reject_payload(
-                action=action,
-                active_actor=context["active_actor"],
-                active_role=active_role,
-                message=f"status must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_STATUS)}",
-            )
-        status = raw_status
-
     q: str | None = None
     if "q" in args:
         raw_q = args.get("q")
@@ -423,7 +411,6 @@ def _normalize_list_filters(
             "track_id": track_id,
             "created_by_role": created_by_role,
             "template": template,
-            "status": status,
             "q": q,
             "limit": limit,
         },
@@ -446,17 +433,20 @@ def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactSe
 
     rows: list[dict[str, Any]] = []
     for artifact in context.repos.artifact.list_artifacts():
-        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
+        if isinstance(filters.get("track_id"), str):
+            decision = context.rules.artifact_visibility.artifact_read_decision_for_track(
+                artifact,
+                active_actor,
+                track_id=str(filters["track_id"]),
+            )
+        else:
+            decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
         if not bool(decision.get("allowed")):
-            continue
-        if isinstance(filters.get("track_id"), str) and decision.get("track_id") != filters.get("track_id"):
             continue
         created_by_actor = artifact.get("created_by_actor") if isinstance(artifact.get("created_by_actor"), dict) else {}
         if isinstance(filters.get("created_by_role"), str) and created_by_actor.get("role_id") != filters.get("created_by_role"):
             continue
         if isinstance(filters.get("template"), str) and artifact.get("template") != filters.get("template"):
-            continue
-        if isinstance(filters.get("status"), str) and artifact.get("status") != filters.get("status"):
             continue
         query = filters.get("q")
         if isinstance(query, str) and query:
@@ -476,14 +466,24 @@ def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactSe
             if artifact_id
             else {}
         )
-        rows.append(
-            context.rules.artifact_visibility.artifact_list_row(
-                artifact,
-                active_actor,
-                comment_counts=comment_counts,
-                relation_counts=relation_counts,
-            )
+        row = context.rules.artifact_visibility.artifact_list_row(
+            artifact,
+            active_actor,
+            comment_counts=comment_counts,
+            relation_counts=relation_counts,
         )
+        if isinstance(filters.get("track_id"), str):
+            relation = str(decision.get("relation") or "none")
+            row["relation"] = relation
+            row["track_id"] = decision.get("track_id")
+            row["track_ids"] = decision.get("track_ids", [])
+            if relation == "track_material":
+                row["currentness"] = "current"
+            elif relation == "track_proof":
+                row["currentness"] = "proof"
+            elif relation == "track_history":
+                row["currentness"] = "superseded"
+        rows.append(row)
 
     rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("artifact_id") or "")), reverse=True)
     limited_rows = rows[: int(filters.get("limit", 20))]
@@ -869,16 +869,6 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
             message=f"artifact '{artifact_id}' is owned by another actor",
             code="E_ARTIFACT_SCOPE",
         )
-    if artifact.get("status") != "draft":
-        return _reject_scope(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            boundary="artifact.lifecycle_status",
-            message=f"artifact '{artifact_id}' is {artifact.get('status')} and attachments can only be added to drafts",
-            code="E_ARTIFACT_SCOPE",
-        )
-
     try:
         updated_artifact, attachment = context.repos.artifact.adopt_local_attachment(
             artifact_id=artifact_id,

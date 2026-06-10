@@ -344,7 +344,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         for row in filtered.get("candidate_artifacts", []):
             if isinstance(row, dict):
-                self.assertEqual(row.get("published_to_track"), "track-context-filter-a", msg=row)
+                self.assertEqual(row.get("track_id"), "track-context-filter-a", msg=row)
+                self.assertIn("track-context-filter-a", row.get("track_ids", []), msg=row)
         removed_candidate_section = "candidate_" + "requests"
         self.assertNotIn(removed_candidate_section, filtered)
         for row in filtered.get("open_comment_threads", []):

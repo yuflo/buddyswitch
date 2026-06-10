@@ -14,6 +14,7 @@ from . import runtime_files
 VALID_TRACK_STATE = ("active", "blocked", "review", "done")
 VALID_TRACK_HEALTH = ("ok", "risk", "blocked", "stale")
 VALID_UPDATE_KIND = ("progress", "decision", "blocker", "proof")
+VALID_ARTIFACT_RELATION_ROLE = ("material", "proof", "input", "deliverable")
 _LEGACY_TRACK_ROLE_FIELDS = ("current" + "_role", "next" + "_role")
 _LEGACY_TRACK_FIELDS = {
     "status",
@@ -22,6 +23,8 @@ _LEGACY_TRACK_FIELDS = {
     "artifact_ids",
     "tasks",
     "missing_task_ids",
+    "shared_materials",
+    "close_proof",
 }
 
 
@@ -56,39 +59,25 @@ def _normalize_now(value: Any) -> dict[str, Any]:
     return {"next": next_value, "blocker": blocker_text}
 
 
-def _normalize_material_ref(row: Any) -> dict[str, Any]:
+def _normalize_artifact_relation(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
-        raise ValueError("track.shared_materials[] must be an object")
+        raise ValueError("track.artifact_relations[] must be an object")
     if row.get("type") != "artifact":
-        raise ValueError("track.shared_materials[].type must be 'artifact'")
-    published_at = _require_non_empty_text(row.get("published_at"), "track.shared_materials[].published_at")
+        raise ValueError("track.artifact_relations[].type must be 'artifact'")
+    role = row.get("role")
+    if role not in VALID_ARTIFACT_RELATION_ROLE:
+        raise ValueError(f"track.artifact_relations[].role must be one of {', '.join(VALID_ARTIFACT_RELATION_ROLE)}")
     return {
         "type": "artifact",
-        "artifact_id": runtime_files.require_id(row.get("artifact_id"), "track.shared_materials[].artifact_id"),
-        "label": _require_non_empty_text(row.get("label"), "track.shared_materials[].label"),
-        "kind": _require_non_empty_text(row.get("kind"), "track.shared_materials[].kind"),
-        "from_actor": _normalize_actor(row.get("from_actor"), "track.shared_materials[].from_actor"),
+        "relation_id": runtime_files.require_id(row.get("relation_id"), "track.artifact_relations[].relation_id"),
+        "artifact_id": runtime_files.require_id(row.get("artifact_id"), "track.artifact_relations[].artifact_id"),
+        "role": role,
+        "label": _require_non_empty_text(row.get("label"), "track.artifact_relations[].label"),
+        "template": _require_non_empty_text(row.get("template"), "track.artifact_relations[].template"),
+        "from_actor": _normalize_actor(row.get("from_actor"), "track.artifact_relations[].from_actor"),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
         "current": bool(row.get("current", False)),
-        "published_at": published_at,
-    }
-
-
-def _normalize_proof_ref(row: Any) -> dict[str, Any]:
-    if not isinstance(row, dict):
-        raise ValueError("track.close_proof[] must be an object")
-    if row.get("type") != "artifact":
-        raise ValueError("track.close_proof[].type must be 'artifact'")
-    published_at = _require_non_empty_text(row.get("published_at"), "track.close_proof[].published_at")
-    return {
-        "type": "artifact",
-        "artifact_id": runtime_files.require_id(row.get("artifact_id"), "track.close_proof[].artifact_id"),
-        "label": _require_non_empty_text(row.get("label"), "track.close_proof[].label"),
-        "kind": _require_non_empty_text(row.get("kind"), "track.close_proof[].kind"),
-        "from_actor": _normalize_actor(row.get("from_actor"), "track.close_proof[].from_actor"),
-        "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
-        "current": bool(row.get("current", True)),
-        "published_at": published_at,
+        "created_at": _require_non_empty_text(row.get("created_at"), "track.artifact_relations[].created_at"),
     }
 
 
@@ -195,9 +184,8 @@ def create_track(
         "health": health,
         "appetite": appetite,
         "now": now or {"next": "unspecified", "blocker": None},
-        "shared_materials": [],
+        "artifact_relations": [],
         "updates": [],
-        "close_proof": [],
         "created_at": timestamp,
         "updated_at": timestamp,
         "archived_at": None,
@@ -209,7 +197,7 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
-    allowed = {"title", "outcome", "state", "health", "appetite", "now", "shared_materials", "updates", "close_proof", "archived_at"}
+    allowed = {"title", "outcome", "state", "health", "appetite", "now", "artifact_relations", "updates", "archived_at"}
     for key, value in patch.items():
         if key not in allowed:
             raise ValueError(f"unsupported track field: {key}")
@@ -272,15 +260,12 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     appetite = _require_non_empty_text(track.get("appetite"), "track.appetite")
     now = _normalize_now(track.get("now"))
 
-    shared_materials = track.get("shared_materials")
-    if not isinstance(shared_materials, list):
-        raise ValueError("track.shared_materials must be a list")
+    artifact_relations = track.get("artifact_relations")
+    if not isinstance(artifact_relations, list):
+        raise ValueError("track.artifact_relations must be a list")
     updates = track.get("updates")
     if not isinstance(updates, list):
         raise ValueError("track.updates must be a list")
-    close_proof = track.get("close_proof")
-    if not isinstance(close_proof, list):
-        raise ValueError("track.close_proof must be a list")
 
     created_at = _require_non_empty_text(track.get("created_at"), "track.created_at")
     updated_at = _require_non_empty_text(track.get("updated_at"), "track.updated_at")
@@ -298,9 +283,8 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "health": health,
         "appetite": appetite,
         "now": now,
-        "shared_materials": [_normalize_material_ref(row) for row in shared_materials],
+        "artifact_relations": [_normalize_artifact_relation(row) for row in artifact_relations],
         "updates": [_normalize_update_row(row) for row in updates],
-        "close_proof": [_normalize_proof_ref(row) for row in close_proof],
         "created_at": created_at,
         "updated_at": updated_at,
         "archived_at": archived_at,

@@ -11,22 +11,6 @@ from env.repos import comments as comment_repo
 from env.repos import tracks as track_repo
 
 
-def _relation_and_currentness(*, artifact: dict[str, Any], decision: dict[str, Any]) -> tuple[str, str]:
-    relation = str(decision.get("relation") or "none")
-    if relation not in {"owner", "track_material", "track_proof", "track_history"}:
-        relation = "none"
-    status = artifact.get("status")
-    if status == "draft":
-        currentness = "draft"
-    elif relation == "track_material":
-        currentness = "current"
-    elif relation == "track_proof":
-        currentness = "proof"
-    else:
-        currentness = "superseded"
-    return relation, currentness
-
-
 def _artifact_ref_matches(refs: Any, artifact_id: str) -> bool:
     if not isinstance(refs, list):
         return False
@@ -148,11 +132,7 @@ def relation_summary_for_artifact(
     artifact_id = artifact.get("id")
     if not isinstance(artifact_id, str) or not artifact_id:
         return {
-            "publication": {
-                "track_id": None,
-                "relation": "none",
-                "currentness": "superseded",
-            },
+            "track_relations": [],
             "lineage": {
                 "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
                 "superseded_by_artifact_ids": [],
@@ -164,17 +144,41 @@ def relation_summary_for_artifact(
             },
         }
 
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_actor_address)
-    relation, currentness = _relation_and_currentness(artifact=artifact, decision=decision)
     comments = comment_repo.comments_for_target("artifact", artifact_id)
     comment_ids = [row.get("id") for row in comments if isinstance(row.get("id"), str)]
+    track_relations: list[dict[str, Any]] = []
+    for track in track_repo.list_tracks():
+        track_id = track.get("id")
+        if not isinstance(track_id, str) or not track_id:
+            continue
+        if track.get("archived_at") is not None:
+            continue
+        for row in track.get("artifact_relations", []):
+            if not isinstance(row, dict):
+                continue
+            if row.get("type") != "artifact" or row.get("artifact_id") != artifact_id:
+                continue
+            role = row.get("role")
+            row_relation = "track_proof" if role == "proof" else "track_material" if role == "material" else "track_history"
+            if not bool(row.get("current")):
+                row_relation = "track_history"
+            row_currentness = "proof" if row_relation == "track_proof" else "current" if row_relation == "track_material" else "superseded"
+            track_relations.append(
+                {
+                    "track_id": track_id,
+                    "relation_id": row.get("relation_id"),
+                    "role": role,
+                    "relation": row_relation,
+                    "currentness": row_currentness,
+                    "label": row.get("label"),
+                    "summary": row.get("summary", ""),
+                    "current": bool(row.get("current")),
+                    "created_at": row.get("created_at"),
+                }
+            )
 
     return {
-        "publication": {
-            "track_id": decision.get("track_id"),
-            "relation": relation,
-            "currentness": currentness,
-        },
+        "track_relations": track_relations,
         "lineage": {
             "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
             "superseded_by_artifact_ids": _visible_superseded_by_ids(

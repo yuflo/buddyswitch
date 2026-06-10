@@ -17,9 +17,9 @@ from env.domain import artifact_visibility as _artifact_visibility_domain
 from env.domain import actor_private_workspace as _actor_private_workspace_domain
 from env.domain import comment_targets as _comment_target_domain
 from env.domain import messages as _message_domain
-from env.domain import publication as _publication_domain
 from env.domain import source_refs as _source_ref_domain
 from env.domain import tasks as _task_domain
+from env.domain import track_artifact_relations as _track_artifact_relations_domain
 import env_profiles
 from env_manifest import DEFAULT_MANIFEST
 from env.repos import artifacts as _artifact_repo
@@ -72,13 +72,14 @@ class RuntimeObjectAccess:
         return _track_repo.update_track(track_id, patch)
 
     def add_track_material(self, track_id: str, artifact_id: str, label: str, summary: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        return _track_repo.publish_track_material(
+        result = _track_artifact_relations_domain.add_material_relation(
             track_id=track_id,
             artifact_id=artifact_id,
             label=label,
             from_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             summary=summary,
         )
+        return result["track"], result["artifact"]
 
     def add_track_update(self, track_id: str, summary: str, kind: str, refs: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
         return _track_repo.append_track_update(
@@ -90,13 +91,15 @@ class RuntimeObjectAccess:
         )
 
     def add_track_proof(self, track_id: str, artifact_id: str, label: str, summary: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        return _track_repo.publish_track_proof(
+        result = _track_artifact_relations_domain.add_proof_relation(
             track_id=track_id,
             artifact_id=artifact_id,
             label=label,
             from_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             summary=summary,
+            update_summary=summary,
         )
+        return result["track"], result["artifact"]
 
     def archive_track(self, track_id: str) -> dict[str, Any]:
         return _track_repo.update_track(track_id, {"archived_at": runtime_files.now_iso()})
@@ -461,9 +464,9 @@ class DomainAccess:
     actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
     comment_target: Any = field(default_factory=lambda: _comment_target_domain)
     message: Any = field(default_factory=lambda: _message_domain)
-    publication: Any = field(default_factory=lambda: _publication_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
     task: Any = field(default_factory=lambda: _task_domain)
+    track_artifact_relations: Any = field(default_factory=lambda: _track_artifact_relations_domain)
 
 
 @dataclass(frozen=True)

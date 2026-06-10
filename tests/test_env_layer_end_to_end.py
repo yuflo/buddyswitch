@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runless end-to-end env layer coverage for track/artifact publication path."""
+"""Runless end-to-end env layer coverage for track/artifact relation path."""
 
 from __future__ import annotations
 
@@ -117,6 +117,20 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args["supersedes_artifact_id"] = supersedes_artifact_id
         return self._dispatch(role=role, tool="artifact", action="create_revision", args=args)
 
+    def _current_relation_ids(self, track: dict[str, object], role: str) -> list[object]:
+        return [
+            row.get("artifact_id")
+            for row in track.get("artifact_relations", [])
+            if isinstance(row, dict) and row.get("role") == role and bool(row.get("current"))
+        ]
+
+    def _relations_for_role(self, track: dict[str, object], role: str) -> list[dict[str, object]]:
+        return [
+            row
+            for row in track.get("artifact_relations", [])
+            if isinstance(row, dict) and row.get("role") == role
+        ]
+
     def _instance_task_snapshot(self) -> dict[str, str]:
         instances_root = self.runtime_root / "instances"
         if not instances_root.exists():
@@ -178,7 +192,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         design_open = self._dispatch(role="design", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(design_open.get("ok"), msg=design_open)
-        current_material_ids = [row.get("artifact_id") for row in (design_open.get("track") or {}).get("shared_materials", [])]
+        current_material_ids = self._current_relation_ids(design_open.get("track") or {}, "material")
         self.assertEqual(current_material_ids, ["art-pm-brief-r2"])
 
         design_read_pm = self._dispatch(
@@ -208,7 +222,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         dev_open = self._dispatch(role="dev", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(dev_open.get("ok"), msg=dev_open)
-        current_material_ids = [row.get("artifact_id") for row in (dev_open.get("track") or {}).get("shared_materials", [])]
+        current_material_ids = self._current_relation_ids(dev_open.get("track") or {}, "material")
         self.assertEqual(current_material_ids, ["art-pm-brief-r2", "art-design-r1"])
         dev_read_pm = self._dispatch(role="dev", tool="artifact", action="get", args={"artifact_id": "art-pm-brief-r2"})
         dev_read_design = self._dispatch(role="dev", tool="artifact", action="get", args={"artifact_id": "art-design-r1"})
@@ -233,7 +247,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         test_open = self._dispatch(role="test", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(test_open.get("ok"), msg=test_open)
-        material_ids = [row.get("artifact_id") for row in (test_open.get("track") or {}).get("shared_materials", [])]
+        material_ids = self._current_relation_ids(test_open.get("track") or {}, "material")
         self.assertEqual(material_ids, ["art-pm-brief-r2", "art-design-r1", "art-dev-r1"])
 
         test_proof_draft = self._create_draft(
@@ -252,8 +266,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(test_proof_pub.get("ok"), msg=test_proof_pub)
         proof_changes = {row.get("change") for row in test_proof_pub.get("state_changes", []) if isinstance(row, dict)}
-        self.assertIn("published_proof", proof_changes)
-        self.assertIn("proof_added", proof_changes)
+        self.assertIn("proof_relation_added", proof_changes)
         self.assertIn("update_added", proof_changes)
 
         pm_open = self._dispatch(role="pm", tool="track", action="open", args={"track_id": track_id})
@@ -261,8 +274,8 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track_page = pm_open.get("track")
         self.assertIsInstance(track_page, dict, msg=pm_open)
         assert isinstance(track_page, dict)
-        self.assertEqual([row.get("artifact_id") for row in track_page.get("shared_materials", [])], ["art-pm-brief-r2", "art-design-r1", "art-dev-r1"])
-        self.assertEqual([row.get("artifact_id") for row in track_page.get("close_proof", [])], ["art-test-proof-r1"])
+        self.assertEqual(self._current_relation_ids(track_page, "material"), ["art-pm-brief-r2", "art-design-r1", "art-dev-r1"])
+        self.assertEqual(self._current_relation_ids(track_page, "proof"), ["art-test-proof-r1"])
 
         pm_update = self._dispatch(
             role="pm",
@@ -275,7 +288,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         persisted_track = env_store.get_track(track_id)
         self.assertIsInstance(persisted_track, dict)
         assert isinstance(persisted_track, dict)
-        persisted_rows = [row for row in persisted_track.get("shared_materials", []) if isinstance(row, dict)]
+        persisted_rows = self._relations_for_role(persisted_track, "material")
         self.assertEqual(len(persisted_rows), 4)
         current_map = {str(row.get("artifact_id")): bool(row.get("current")) for row in persisted_rows}
         self.assertFalse(current_map["art-pm-brief-r1"])
@@ -374,11 +387,9 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = opened.get("track")
         self.assertIsInstance(track, dict, msg=opened)
         assert isinstance(track, dict)
-        shared_materials = track.get("shared_materials")
-        self.assertIsInstance(shared_materials, list, msg=track)
-        assert isinstance(shared_materials, list)
-        self.assertEqual(len(shared_materials), 1)
-        material_ref = shared_materials[0]
+        material_refs = self._relations_for_role(track, "material")
+        self.assertEqual(len(material_refs), 1)
+        material_ref = material_refs[0]
         self.assertEqual(material_ref.get("attachment_count"), 1)
         ref_attachments = material_ref.get("attachments")
         self.assertIsInstance(ref_attachments, list, msg=material_ref)

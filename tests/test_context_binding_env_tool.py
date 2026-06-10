@@ -474,7 +474,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             authors=["dev"],
             source_refs=[{"type": "note", "label": "private"}],
         )
-        self.assertEqual(draft.get("status"), "draft")
+        self.assertNotIn("status", draft)
 
         instance_json = self._instance_json()
         payload = self._dispatch(
