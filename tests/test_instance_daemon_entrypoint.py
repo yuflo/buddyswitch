@@ -19,6 +19,9 @@ INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
 DAEMON_SH_PATH = ROOT / "tools" / "launcher" / "daemon.sh"
 CENTRAL_DAEMON_PATH = ROOT / "tools" / "launcher" / "central_daemon.py"
 MODULE_COUNTER = count()
+EXPECTED_SUBSCRIPTIONS = ["message.available", "track.comment.added"]
+EXPECTED_HANDLER_TYPES = ["TaskCheckoutHandler", "MessageAvailableHandler", "TrackCommentAddedHandler"]
+EXPECTED_HANDLER_NAMES = ["task_checkout", "message_available", "track_comment_added"]
 
 
 def load_instance_daemon() -> Any:
@@ -57,10 +60,12 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
         self.assertIn("notification_center", imports)
         self.assertIn("message_inbound", imports)
+        self.assertIn("track_comment_inbound", imports)
         self.assertNotIn("message_available_handler", imports)
-        self.assertEqual(self.instance_daemon.default_notify_subscriptions(), ["message.available"])
+        self.assertNotIn("track_comment_added_handler", imports)
+        self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
         handlers = self.instance_daemon.default_daemon_handlers()
-        self.assertEqual([type(handler).__name__ for handler in handlers], ["TaskCheckoutHandler", "MessageAvailableHandler"])
+        self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
 
     def test_run_passes_unified_daemon_handler_list_to_daemon_core(self) -> None:
         recorded: dict[str, object] = {}
@@ -85,12 +90,13 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
-        self.assertEqual([type(handler).__name__ for handler in handlers], ["TaskCheckoutHandler", "MessageAvailableHandler"])
+        self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
         self.assertEqual(type(handlers[0]).__name__, "TaskCheckoutHandler")
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
         self.assertEqual(getattr(handlers[1], "name", None), "message_available")
+        self.assertEqual(getattr(handlers[2], "name", None), "track_comment_added")
         self.assertEqual(recorded["instance_json"], Path("/tmp/inst.json"))
-        self.assertEqual(recorded["notify_subscriptions"], ["message.available"])
+        self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
 
     def test_start_prints_json_from_daemon_core(self) -> None:
         original_start = self.instance_daemon.daemon_core.start_daemon
@@ -117,9 +123,9 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {"started": True, "pid": 4321})
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
-        self.assertEqual([getattr(handler, "name", None) for handler in handlers], ["task_checkout", "message_available"])
+        self.assertEqual([getattr(handler, "name", None) for handler in handlers], EXPECTED_HANDLER_NAMES)
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
-        self.assertEqual(recorded["notify_subscriptions"], ["message.available"])
+        self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
 
     def test_stop_prints_json_from_daemon_core(self) -> None:
         original_stop = self.instance_daemon.daemon_core.stop_daemon
@@ -162,8 +168,8 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {"live": True, "ready": True})
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
-        self.assertEqual([getattr(handler, "name", None) for handler in handlers], ["task_checkout", "message_available"])
-        self.assertEqual(recorded["notify_subscriptions"], ["message.available"])
+        self.assertEqual([getattr(handler, "name", None) for handler in handlers], EXPECTED_HANDLER_NAMES)
+        self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
 
     def test_daemon_shell_still_calls_instance_daemon_entrypoint(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")

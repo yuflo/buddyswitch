@@ -247,6 +247,72 @@ def _reject_track_comment_scope(
     )
 
 
+def _delivery_row_from_result(target_actor: dict[str, str], result: dict[str, Any]) -> dict[str, Any]:
+    status = result.get("delivery_status") if isinstance(result.get("delivery_status"), str) else "delivery_failed"
+    row: dict[str, Any] = {
+        "target_actor_address": dict(target_actor),
+        "delivery_status": status,
+    }
+    for key in ("handling_status", "reachability_status", "signal_error"):
+        value = result.get(key)
+        if isinstance(value, str):
+            row[key] = value
+    return row
+
+
+def _delivery_metadata(results: list[dict[str, Any]]) -> dict[str, Any]:
+    target_count = len(results)
+    delivered_count = sum(1 for row in results if row.get("delivery_status") == "delivered")
+    failed_count = target_count - delivered_count
+    if target_count == 0:
+        delivery_status = "no_targets"
+    elif failed_count == 0:
+        delivery_status = "delivered"
+    elif delivered_count > 0:
+        delivery_status = "partial"
+    else:
+        delivery_status = "failed"
+    return {
+        "delivery_status": delivery_status,
+        "delivery_summary": {
+            "target_count": target_count,
+            "delivered_count": delivered_count,
+            "failed_count": failed_count,
+        },
+        "delivery_results": results,
+    }
+
+
+def _deliver_track_comment_added(
+    *,
+    comment: dict[str, Any],
+    reply_to_comment: dict[str, Any] | None,
+    context: TrackServiceContext,
+) -> dict[str, Any]:
+    payload = context.rules.track_comment.track_comment_added_payload(comment)
+    targets = context.rules.track_comment.track_comment_targets(comment, reply_to_comment=reply_to_comment)
+    results: list[dict[str, Any]] = []
+    for target in targets:
+        try:
+            result = context.daemon.deliver_track_comment_added(
+                track_id=payload["track_id"],
+                comment_id=payload["comment_id"],
+                thread_id=payload["thread_id"],
+                target_actor_address=target,
+            )
+            results.append(_delivery_row_from_result(target, result))
+        except Exception as exc:
+            results.append(
+                {
+                    "target_actor_address": dict(target),
+                    "delivery_status": "delivery_failed",
+                    "handling_status": "ignored",
+                    "signal_error": str(exc),
+                }
+            )
+    return _delivery_metadata(results)
+
+
 def _reject_artifact_scope(*, action: str, active_actor: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
     return tool_results.rejection(
         tool="track",
@@ -348,7 +414,7 @@ def _normalize_mentioned_actors(
         )
     roles = _manifest_roles(manifest)
     normalized: list[dict[str, str]] = []
-    seen_actor_ids: set[str] = set()
+    seen_actor_addresses: set[tuple[str, str]] = set()
     for row in mentioned_actors:
         try:
             actor = _actor_address_payload(row, "mentioned_actors entry")
@@ -377,8 +443,9 @@ def _normalize_mentioned_actors(
                     }
                 ],
             )
-        if actor["actor_id"] not in seen_actor_ids:
-            seen_actor_ids.add(actor["actor_id"])
+        actor_key = (actor["actor_id"], actor["role_id"])
+        if actor_key not in seen_actor_addresses:
+            seen_actor_addresses.add(actor_key)
             normalized.append(actor)
     return normalized
 
@@ -628,6 +695,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     if isinstance(mentioned_actors, dict):
         return mentioned_actors
 
+    reply_to_comment: dict[str, Any] | None = None
     try:
         if isinstance(reply_to, str):
             comment = context.repos.track_comment.reply_to_track_comment(
@@ -637,6 +705,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
                 content=content.strip(),
                 mentioned_actors=mentioned_actors,
             )
+            reply_to_comment = context.repos.track_comment.get_track_comment(track_id, reply_to.strip())
         else:
             comment = context.repos.track_comment.create_track_comment(
                 track_id=track_id,
@@ -664,6 +733,12 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
             message=message,
         )
 
+    delivery_metadata = _deliver_track_comment_added(
+        comment=comment,
+        reply_to_comment=reply_to_comment,
+        context=context,
+    )
+
     return tool_results.success(
         tool="track",
         action=action,
@@ -675,7 +750,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
         created_ids=[comment["id"]],
         state_changes=[{"object_type": "track_comment", "change": "added", "track_id": track_id, "comment_id": comment["id"]}],
         allowed_next_actions=["Use track.list_comments for full discussion rows.", "Use track.add_comment to continue the thread."],
-        extra={"track_id": track_id, "comment_id": comment["id"], "comment": comment},
+        extra={"track_id": track_id, "comment_id": comment["id"], "comment": comment, **delivery_metadata},
     )
 
 

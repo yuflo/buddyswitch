@@ -13,10 +13,12 @@ DAEMON_OWNED_FILES = [
     ROOT / "tools" / "launcher" / "instance_daemon.py",
     ROOT / "tools" / "launcher" / "notification_center.py",
     ROOT / "tools" / "launcher" / "message_inbound.py",
+    ROOT / "tools" / "launcher" / "track_comment_inbound.py",
     ROOT / "tools" / "launcher" / "central_daemon.py",
     ROOT / "tools" / "launcher" / "central_daemon_core.py",
     ROOT / "tools" / "launcher" / "daemon_mailbox.py",
     ROOT / "tools" / "launcher" / "message_available_handler.py",
+    ROOT / "tools" / "launcher" / "track_comment_added_handler.py",
     ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py",
     ROOT / "scripts" / "env" / "tool_runtime" / "context.py",
 ]
@@ -106,7 +108,14 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         base_files = [
             path
             for path in _existing_sources()
-            if path.name not in {"message_available_handler.py", "message_inbound.py", "context.py"}
+            if path.name
+            not in {
+                "message_available_handler.py",
+                "message_inbound.py",
+                "track_comment_added_handler.py",
+                "track_comment_inbound.py",
+                "context.py",
+            }
         ]
         chunks = []
         for path in base_files:
@@ -125,6 +134,8 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn("from_actor_address", source)
         self.assertNotIn("to_actor_address", source)
         self.assertNotIn('"message_id"', source)
+        self.assertNotIn('"track_id"', source)
+        self.assertNotIn('"comment_id"', source)
 
     def test_message_available_handler_owns_message_signal_payload_semantics(self) -> None:
         handler_source = (ROOT / "tools" / "launcher" / "message_available_handler.py").read_text(encoding="utf-8")
@@ -133,6 +144,19 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertIn("message_id", handler_source)
         self.assertIn("def handle(", handler_source)
         self.assertNotIn("def handle_signal(", handler_source)
+
+    def test_track_comment_handler_owns_track_signal_payload_semantics(self) -> None:
+        handler_source = (ROOT / "tools" / "launcher" / "track_comment_added_handler.py").read_text(encoding="utf-8")
+        nc_source = (ROOT / "tools" / "launcher" / "notification_center.py").read_text(encoding="utf-8")
+
+        self.assertIn("track.comment.added", handler_source)
+        self.assertIn("track_id", handler_source)
+        self.assertIn("comment_id", handler_source)
+        self.assertIn("thread_id", handler_source)
+        self.assertIn("def handle(", handler_source)
+        self.assertNotIn("track_id", nc_source)
+        self.assertNotIn("comment_id", nc_source)
+        self.assertNotIn("env.repos.track_comments", nc_source)
 
     def test_mailbox_exposes_local_trigger_not_business_specific_parent_required_method(self) -> None:
         mailbox_source = (ROOT / "tools" / "launcher" / "daemon_mailbox.py").read_text(encoding="utf-8")
@@ -160,6 +184,20 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
             "notification__needs_parent",
             "nc.notification",
         ]
+        for token in forbidden:
+            with self.subTest(token=token):
+                self.assertNotIn(token, source)
+
+    def test_no_artifact_inbound_is_implemented_for_this_task(self) -> None:
+        production_files = [
+            path
+            for base in (ROOT / "tools", ROOT / "scripts")
+            for path in base.rglob("*.py")
+            if "__pycache__" not in path.parts
+        ]
+        source = "\n".join(path.read_text(encoding="utf-8") for path in production_files)
+
+        forbidden = ["artifact.shared", "ArtifactSharedHandler", "artifact_inbound"]
         for token in forbidden:
             with self.subTest(token=token):
                 self.assertNotIn(token, source)

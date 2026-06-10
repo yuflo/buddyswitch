@@ -2518,13 +2518,19 @@ exec "$real_git" "$@"
             status_payload = json.loads(status_result.stdout)
             self.assertTrue(status_payload["daemon"]["ready"])
             self.assertEqual(status_payload["daemon"]["ready_main_thread_id"], instance_payload["thread_id"])
-            self.assertEqual(status_payload["daemon"]["handlers"]["registered"], ["task_checkout", "message_available"])
+            self.assertEqual(
+                status_payload["daemon"]["handlers"]["registered"],
+                ["task_checkout", "message_available", "track_comment_added"],
+            )
             task_checkout_status = status_payload["daemon"]["handlers"]["items"]["task_checkout"]
             self.assertIs(task_checkout_status["enabled"], True)
             self.assertIs(task_checkout_status["active"], True)
             message_status = status_payload["daemon"]["handlers"]["items"]["message_available"]
             self.assertIs(message_status["enabled"], True)
             self.assertIs(message_status["active"], True)
+            track_comment_status = status_payload["daemon"]["handlers"]["items"]["track_comment_added"]
+            self.assertIs(track_comment_status["enabled"], True)
+            self.assertIs(track_comment_status["active"], True)
 
             calls = self._read_json_lines(Path(str(ctx["calls_path"])))
             daemon_resume = next(
@@ -5210,9 +5216,13 @@ exec "$real_git" "$@"
             self.assertIn("daemon", payload)
             self.assertTrue(payload["daemon"]["pid_file"].endswith("runtime/daemon/daemon.pid"))
             self.assertTrue(payload["daemon"]["state_path"].endswith("runtime/daemon/state.json"))
-            self.assertEqual(payload["daemon"]["handlers"]["registered"], ["task_checkout", "message_available"])
+            self.assertEqual(
+                payload["daemon"]["handlers"]["registered"],
+                ["task_checkout", "message_available", "track_comment_added"],
+            )
             self.assertTrue(payload["daemon"]["handlers"]["items"]["task_checkout"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["message_available"]["active"])
+            self.assertTrue(payload["daemon"]["handlers"]["items"]["track_comment_added"]["active"])
             self.assertEqual(payload["thread"]["status"], "idle")
 
     def test_human_status_reports_daemon_health_line(self) -> None:

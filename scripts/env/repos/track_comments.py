@@ -94,13 +94,13 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(mentioned_raw, list):
             raise ValueError("comment.mentioned_actors must be a list when provided")
         mentioned_actors = []
-        seen: set[str] = set()
+        seen: set[tuple[str, str]] = set()
         for idx, row in enumerate(mentioned_raw):
             actor = _normalize_actor(row, f"comment.mentioned_actors[{idx}]")
-            actor_id = actor["actor_id"]
-            if actor_id in seen:
+            actor_key = (actor["actor_id"], actor["role_id"])
+            if actor_key in seen:
                 continue
-            seen.add(actor_id)
+            seen.add(actor_key)
             mentioned_actors.append(actor)
 
     created_at = _require_non_empty_text(comment.get("created_at"), "comment.created_at")
@@ -183,13 +183,13 @@ def _normalize_mentioned_actors(mentioned_actors: list[dict[str, Any]] | None) -
     if not isinstance(mentioned_actors, list):
         raise ValueError("mentioned_actors must be a list when provided")
     normalized: list[dict[str, str]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for idx, row in enumerate(mentioned_actors):
         actor = _normalize_actor(row, f"mentioned_actors[{idx}]")
-        actor_id = actor["actor_id"]
-        if actor_id in seen:
+        actor_key = (actor["actor_id"], actor["role_id"])
+        if actor_key in seen:
             continue
-        seen.add(actor_id)
+        seen.add(actor_key)
         normalized.append(actor)
     return normalized
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -279,6 +280,12 @@ class ActorProfileTests(unittest.TestCase):
                 message_id="msg-123",
                 target_actor_address=ActorAddress("act-dev-daemon", "dev"),
             )
+            context.daemon.deliver_track_comment_added(
+                track_id="track-123",
+                comment_id="comment-123",
+                thread_id="comment-123",
+                target_actor_address={"actor_id": "act-dev-daemon", "role_id": "dev"},
+            )
         finally:
             runtime_context.daemon_client.list_contacts = original_list_contacts
             runtime_context.daemon_client.check_reachability = original_check_reachability
@@ -312,6 +319,25 @@ class ActorProfileTests(unittest.TestCase):
         self.assertNotIn("message_id", signal)
         self.assertNotIn("to_role", signal)
         self.assertNotIn("content", signal)
+
+        track_signal = calls[3][1]["signal"]
+        self.assertEqual(
+            {
+                "type": track_signal["type"],
+                "source_actor_address": track_signal["source_actor_address"],
+                "target_actor_address": track_signal["target_actor_address"],
+                "payload": track_signal["payload"],
+            },
+            {
+                "type": "track.comment.added",
+                "source_actor_address": {"actor_id": "act-design-daemon", "role_id": "design"},
+                "target_actor_address": {"actor_id": "act-dev-daemon", "role_id": "dev"},
+                "payload": {"track_id": "track-123", "comment_id": "comment-123", "thread_id": "comment-123"},
+            },
+        )
+        self.assertNotIn("content", track_signal["payload"])
+        self.assertNotIn("comment", track_signal["payload"])
+        self.assertNotIn("notification", json.dumps(track_signal, ensure_ascii=True))
 
     def test_runtime_boundary_ownership_is_searchable(self) -> None:
         self.assertFalse(hasattr(tool_registry, "_role_auth_rejection"))

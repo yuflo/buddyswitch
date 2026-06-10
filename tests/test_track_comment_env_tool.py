@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -17,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
@@ -151,6 +153,38 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             payload[key] = value
         return payload
 
+    def _patch_daemon_delivery(
+        self,
+        *,
+        delivery: dict[str, object] | None = None,
+        exc: BaseException | None = None,
+    ) -> list[dict[str, Any]]:
+        calls: list[dict[str, Any]] = []
+        original_deliver_signal = runtime_context.daemon_client.deliver_signal
+
+        def fake_deliver_signal(*, signal: dict[str, Any]) -> dict[str, object]:
+            calls.append(signal)
+            if exc is not None:
+                raise exc
+            if delivery is not None:
+                result = dict(delivery)
+                result.setdefault("target_actor_address", signal.get("target_actor_address"))
+                result.setdefault("signal", signal)
+                return result
+            return {
+                "delivery_status": "delivered",
+                "handling_status": "handled",
+                "target_actor_address": signal.get("target_actor_address"),
+                "signal": signal,
+            }
+
+        def restore() -> None:
+            runtime_context.daemon_client.deliver_signal = original_deliver_signal
+
+        runtime_context.daemon_client.deliver_signal = fake_deliver_signal
+        self.addCleanup(restore)
+        return calls
+
     def _seed_track(self, track_id: str) -> dict[str, object]:
         return track_repo.create_track(
             track_id,
@@ -161,6 +195,229 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             appetite="1 day",
             now={"next": "test", "blocker": None},
         )
+
+    def test_add_comment_delivers_track_comment_added_to_mentions_once(self) -> None:
+        self._seed_track("track-comment-delivery-mentions")
+        calls = self._patch_daemon_delivery()
+        source_actor = {
+            "actor_id": self._runtime_actor_id(role="dev", label="act-dev-track-delivery"),
+            "role_id": "dev",
+        }
+        target_pm = {"actor_id": "act-pm-track-mentioned", "role_id": "pm"}
+
+        response = self._dispatch(
+            actor_id="act-dev-track-delivery",
+            role="dev",
+            tool="track",
+            action="add_comment",
+            args={
+                "track_id": "track-comment-delivery-mentions",
+                "content": "Please review this Track point.",
+                "mentioned_actors": [target_pm, dict(target_pm), source_actor],
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        comment = response.get("comment")
+        self.assertIsInstance(comment, dict, msg=response)
+        assert isinstance(comment, dict)
+        self.assertEqual(len(calls), 1)
+        signal = calls[0]
+        self.assertEqual(signal["type"], "track.comment.added")
+        self.assertEqual(signal["source_actor_address"], source_actor)
+        self.assertEqual(signal["target_actor_address"], target_pm)
+        self.assertEqual(
+            signal["payload"],
+            {
+                "track_id": "track-comment-delivery-mentions",
+                "comment_id": comment["id"],
+                "thread_id": comment["thread_id"],
+            },
+        )
+        self.assertNotIn("content", signal["payload"])
+        self.assertNotIn("comment", signal["payload"])
+        self.assertNotIn("to_role", signal)
+        self.assertNotIn("nc.notification", json.dumps(signal, ensure_ascii=True))
+        self.assertEqual(response.get("delivery_status"), "delivered")
+        self.assertEqual(
+            response.get("delivery_summary"),
+            {"target_count": 1, "delivered_count": 1, "failed_count": 0},
+        )
+        results = response.get("delivery_results")
+        self.assertIsInstance(results, list, msg=response)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].get("target_actor_address"), target_pm)
+        self.assertEqual(results[0].get("delivery_status"), "delivered")
+
+    def test_add_comment_reply_notifies_parent_author_once(self) -> None:
+        self._seed_track("track-comment-delivery-reply")
+        calls = self._patch_daemon_delivery()
+        root = self._dispatch(
+            actor_id="act-dev-track-reply-source",
+            role="dev",
+            tool="track",
+            action="add_comment",
+            args={"track_id": "track-comment-delivery-reply", "content": "Root question"},
+        )
+        self.assertTrue(root.get("ok"), msg=root)
+        root_comment = root.get("comment")
+        self.assertIsInstance(root_comment, dict, msg=root)
+        assert isinstance(root_comment, dict)
+        self.assertEqual(calls, [])
+
+        reply = self._dispatch(
+            actor_id="act-pm-track-reply-author",
+            role="pm",
+            tool="track",
+            action="add_comment",
+            args={
+                "track_id": "track-comment-delivery-reply",
+                "content": "Reply for the original author.",
+                "reply_to": root_comment["id"],
+                "mentioned_actors": [root_comment["by_actor"], root_comment["by_actor"]],
+            },
+        )
+
+        self.assertTrue(reply.get("ok"), msg=reply)
+        reply_comment = reply.get("comment")
+        self.assertIsInstance(reply_comment, dict, msg=reply)
+        assert isinstance(reply_comment, dict)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["target_actor_address"], root_comment["by_actor"])
+        self.assertEqual(
+            calls[0]["payload"],
+            {
+                "track_id": "track-comment-delivery-reply",
+                "comment_id": reply_comment["id"],
+                "thread_id": root_comment["thread_id"],
+            },
+        )
+        self.assertEqual(reply.get("delivery_status"), "delivered")
+        self.assertEqual(
+            reply.get("delivery_summary"),
+            {"target_count": 1, "delivered_count": 1, "failed_count": 0},
+        )
+
+    def test_add_comment_deduplicates_targets_by_actor_address(self) -> None:
+        self._seed_track("track-comment-delivery-address-dedupe")
+        calls = self._patch_daemon_delivery()
+        target_pm = {"actor_id": "act-shared-track-target", "role_id": "pm"}
+        target_design = {"actor_id": "act-shared-track-target", "role_id": "design"}
+
+        response = self._dispatch(
+            actor_id="act-dev-track-address-dedupe",
+            role="dev",
+            tool="track",
+            action="add_comment",
+            args={
+                "track_id": "track-comment-delivery-address-dedupe",
+                "content": "Two concrete actor addresses need this.",
+                "mentioned_actors": [target_pm, dict(target_pm), target_design],
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(
+            [signal["target_actor_address"] for signal in calls],
+            [target_pm, target_design],
+        )
+        self.assertEqual(
+            response.get("delivery_summary"),
+            {"target_count": 2, "delivered_count": 2, "failed_count": 0},
+        )
+
+    def test_add_comment_without_attention_creates_state_without_delivery(self) -> None:
+        self._seed_track("track-comment-delivery-none")
+        calls = self._patch_daemon_delivery()
+
+        response = self._dispatch(
+            actor_id="act-dev-track-no-attention",
+            role="dev",
+            tool="track",
+            action="add_comment",
+            args={"track_id": "track-comment-delivery-none", "content": "No direct attention."},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        comment = response.get("comment")
+        self.assertIsInstance(comment, dict, msg=response)
+        assert isinstance(comment, dict)
+        self.assertTrue(comment_repo.track_comment_file("track-comment-delivery-none", str(comment["id"])).exists())
+        self.assertEqual(calls, [])
+        self.assertEqual(response.get("delivery_status"), "no_targets")
+        self.assertEqual(
+            response.get("delivery_summary"),
+            {"target_count": 0, "delivered_count": 0, "failed_count": 0},
+        )
+        self.assertEqual(response.get("delivery_results"), [])
+
+    def test_add_comment_delivery_failure_keeps_comment_and_reports_status(self) -> None:
+        self._seed_track("track-comment-delivery-failed")
+        target_pm = {"actor_id": "act-pm-track-offline", "role_id": "pm"}
+        self._patch_daemon_delivery(
+            delivery={
+                "delivery_status": "target_not_online",
+                "handling_status": "ignored",
+                "reachability_status": "registered_offline",
+            }
+        )
+
+        response = self._dispatch(
+            actor_id="act-dev-track-failure",
+            role="dev",
+            tool="track",
+            action="add_comment",
+            args={
+                "track_id": "track-comment-delivery-failed",
+                "content": "Delivery may fail but state should remain.",
+                "mentioned_actors": [target_pm],
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        comment = response.get("comment")
+        self.assertIsInstance(comment, dict, msg=response)
+        assert isinstance(comment, dict)
+        self.assertTrue(comment_repo.track_comment_file("track-comment-delivery-failed", str(comment["id"])).exists())
+        self.assertEqual(response.get("delivery_status"), "failed")
+        self.assertEqual(
+            response.get("delivery_summary"),
+            {"target_count": 1, "delivered_count": 0, "failed_count": 1},
+        )
+        results = response.get("delivery_results")
+        self.assertIsInstance(results, list, msg=response)
+        self.assertEqual(results[0].get("target_actor_address"), target_pm)
+        self.assertEqual(results[0].get("delivery_status"), "target_not_online")
+        self.assertEqual(results[0].get("reachability_status"), "registered_offline")
+
+    def test_add_comment_delivery_exception_keeps_comment_and_reports_signal_error(self) -> None:
+        self._seed_track("track-comment-delivery-exception")
+        target_pm = {"actor_id": "act-pm-track-exception", "role_id": "pm"}
+        self._patch_daemon_delivery(exc=RuntimeError("socket gone"))
+
+        response = self._dispatch(
+            actor_id="act-dev-track-exception",
+            role="dev",
+            tool="track",
+            action="add_comment",
+            args={
+                "track_id": "track-comment-delivery-exception",
+                "content": "Delivery exception should be visible.",
+                "mentioned_actors": [target_pm],
+            },
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        comment = response.get("comment")
+        self.assertIsInstance(comment, dict, msg=response)
+        assert isinstance(comment, dict)
+        self.assertTrue(comment_repo.track_comment_file("track-comment-delivery-exception", str(comment["id"])).exists())
+        self.assertEqual(response.get("delivery_status"), "failed")
+        results = response.get("delivery_results")
+        self.assertIsInstance(results, list, msg=response)
+        self.assertEqual(results[0].get("target_actor_address"), target_pm)
+        self.assertEqual(results[0].get("delivery_status"), "delivery_failed")
+        self.assertIn("socket gone", str(results[0].get("signal_error")))
 
     def test_add_list_reply_and_open_are_track_native(self) -> None:
         self._seed_track("track-comment-a")

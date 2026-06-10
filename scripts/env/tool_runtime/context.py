@@ -18,6 +18,7 @@ from env.domain import actor_private_workspace as _actor_private_workspace_domai
 from env.domain import messages as _message_domain
 from env.domain import source_refs as _source_ref_domain
 from env.domain import tasks as _task_domain
+from env.domain import track_comments as _track_comment_domain
 from env.domain import track_artifact_relations as _track_artifact_relations_domain
 import env_profiles
 from env_manifest import DEFAULT_MANIFEST
@@ -427,6 +428,20 @@ class DaemonAccess:
             payload={"message_id": message_id},
         )
 
+    def deliver_track_comment_added(
+        self,
+        *,
+        track_id: str,
+        comment_id: str,
+        thread_id: str,
+        target_actor_address: ActorAddress | dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.deliver_signal(
+            signal_type="track.comment.added",
+            target_actor_address=target_actor_address,
+            payload={"track_id": track_id, "comment_id": comment_id, "thread_id": thread_id},
+        )
+
     def request_parent_message_handling(self, *, message_id: str, prompt: str) -> dict[str, Any]:
         launcher_dir = _launcher_dir_for_runtime()
         if str(launcher_dir) not in sys.path:
@@ -458,6 +473,7 @@ class DomainAccess:
     message: Any = field(default_factory=lambda: _message_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
     task: Any = field(default_factory=lambda: _task_domain)
+    track_comment: Any = field(default_factory=lambda: _track_comment_domain)
     track_artifact_relations: Any = field(default_factory=lambda: _track_artifact_relations_domain)
 
 

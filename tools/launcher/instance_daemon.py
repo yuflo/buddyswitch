@@ -19,10 +19,14 @@ import daemon_core  # noqa: E402
 import message_inbound  # noqa: E402
 import notification_center  # noqa: E402
 import task_checkout_handler  # noqa: E402
+import track_comment_inbound  # noqa: E402
 
 
 def default_notification_registrations() -> list[notification_center.InboundSourceRegistration]:
-    return message_inbound.inbound_registrations()
+    return [
+        *message_inbound.inbound_registrations(),
+        *track_comment_inbound.inbound_registrations(),
+    ]
 
 
 def default_notify_subscriptions() -> list[str]:

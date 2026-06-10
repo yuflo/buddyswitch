@@ -16,6 +16,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 NC_PATH = ROOT / "tools" / "launcher" / "notification_center.py"
 MESSAGE_INBOUND_PATH = ROOT / "tools" / "launcher" / "message_inbound.py"
+TRACK_COMMENT_INBOUND_PATH = ROOT / "tools" / "launcher" / "track_comment_inbound.py"
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 MODULE_COUNTER = count()
 
@@ -193,10 +194,16 @@ class NotificationCenterTests(unittest.TestCase):
             "message.mark",
             "message.get",
             "message.send",
+            "TrackCommentAddedHandler",
+            "track_id",
+            "comment_id",
+            "track.open",
+            "track.list_comments",
             "notification.mark",
             "notification.archive",
             "nc.notification",
             "env.repos.messages",
+            "env.repos.track_comments",
         ]
 
         for token in forbidden_tokens:
@@ -205,8 +212,10 @@ class NotificationCenterTests(unittest.TestCase):
 
         imports = imported_modules(NC_PATH)
         self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("env.domain.messages", imports)
         self.assertNotIn("env.repos.messages", imports)
+        self.assertNotIn("env.repos.track_comments", imports)
 
     def test_message_inbound_registers_message_available_as_source_owned_handler(self) -> None:
         nc = load_module(NC_PATH)
@@ -246,6 +255,48 @@ class NotificationCenterTests(unittest.TestCase):
         )
 
         self.assertEqual([type(item).__name__ for item in handlers], ["MessageAvailableHandler"])
+        self.assertTrue(handlers[0].handles(trigger))
+
+    def test_track_comment_inbound_registers_track_comment_added_as_source_owned_handler(self) -> None:
+        nc = load_module(NC_PATH)
+        track_comment_inbound = load_module(TRACK_COMMENT_INBOUND_PATH)
+        daemon_core = load_module(DAEMON_CORE_PATH)
+
+        registrations = track_comment_inbound.inbound_registrations()
+
+        self.assertEqual(len(registrations), 1)
+        registration = registrations[0]
+        self.assertEqual(registration.event_type, "track.comment.added")
+        self.assertTrue(registration.owner_module.endswith("track_comment_inbound"))
+        self.assertEqual(
+            dict(registration.payload_contract),
+            {"required_fields": ("track_id", "comment_id", "thread_id")},
+        )
+        contract_text = json.dumps(dict(registration.payload_contract), ensure_ascii=True, default=list)
+        self.assertNotIn("content", contract_text.lower())
+        self.assertNotIn("body", contract_text.lower())
+        self.assertNotIn("notification", contract_text.lower())
+
+        handler = registration.handler_factory()
+        self.assertEqual(type(handler).__name__, "TrackCommentAddedHandler")
+        self.assertEqual(getattr(handler, "name", None), "track_comment_added")
+
+        handlers = nc.handlers_from_registrations(registrations)
+        trigger = daemon_core.daemon_triggers.DaemonTrigger(
+            source="mailbox_cross_actor_signal",
+            type="track.comment.added",
+            target_actor_address={"role_id": "dev", "actor_id": "act-dev-track-nc"},
+            origin_id="sig-track-nc",
+            correlation_id=None,
+            payload={"track_id": "track-nc", "comment_id": "comment-nc", "thread_id": "comment-nc"},
+            source_context={
+                "signal_id": "sig-track-nc",
+                "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-track-nc"},
+                "created_at": "2026-06-10T00:00:00Z",
+            },
+        )
+
+        self.assertEqual([type(item).__name__ for item in handlers], ["TrackCommentAddedHandler"])
         self.assertTrue(handlers[0].handles(trigger))
 
 
