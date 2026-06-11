@@ -14,9 +14,8 @@ from env.repos import track_comments as track_comment_repo
 from env.domain import track_artifact_relations as track_artifact_relations_domain
 from env.tool_runtime.actor_profile import ActorAddress
 
-VALID_TRACK_STATE = ("active", "blocked", "review", "done")
-VALID_TRACK_HEALTH = ("ok", "risk", "blocked", "stale")
-VALID_UPDATE_KIND = ("progress", "decision", "blocker", "proof")
+VALID_TRACK_STATE = ("active", "blocked", "done")
+VALID_UPDATE_KIND = ("progress", "decision", "blocker")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 VALID_MESSAGE_DISPOSITIONS = ("unseen", "absorbed", "replied", "needs_parent")
@@ -429,23 +428,20 @@ def create_track(
     track_id: str,
     title: str,
     *,
-    owner_role: str = "pm",
-    outcome: str = "",
-    appetite: str = "1 day",
-    now: dict[str, Any] | None = None,
-    state: str = "active",
-    health: str = "ok",
+    owner_actor: dict[str, Any],
+    outcome: str,
+    now: dict[str, Any],
+    acceptance_criteria: list[str] | None = None,
+    non_goals: list[str] | None = None,
 ) -> dict[str, Any]:
     return track_repo.create_track(
         track_id,
         title,
-        owner_role=owner_role,
-        created_by_actor=_actor_address_for_role(owner_role),
         outcome=outcome,
-        appetite=appetite,
+        owner_actor=owner_actor,
         now=now,
-        state=state,
-        health=health,
+        acceptance_criteria=acceptance_criteria,
+        non_goals=non_goals,
     )
 
 
@@ -527,7 +523,6 @@ def publish_track_proof(
         label=label,
         from_actor=_actor_address_for_role(from_role),
         summary=summary,
-        update_summary=summary,
     )
     return result["track"], result["artifact"], result["superseded_artifact_id"]
 

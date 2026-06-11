@@ -75,7 +75,6 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-runless-flow",
                 "title": "Runless Flow",
                 "outcome": "Integration path",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )

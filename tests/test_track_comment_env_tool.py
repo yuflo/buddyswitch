@@ -189,10 +189,8 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         return track_repo.create_track(
             track_id,
             f"Track {track_id}",
-            owner_role="pm",
-            created_by_actor={"actor_id": "act-pm-seed", "role_id": "pm"},
+            owner_actor={"actor_id": self._runtime_actor_id(role="pm", label="act-pm-resolve-comment"), "role_id": "pm"},
             outcome="Track comment test outcome",
-            appetite="1 day",
             now={"next": "test", "blocker": None},
         )
 
@@ -504,7 +502,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self.assertEqual(cues.get("open_thread_count"), 1)
         self.assertLessEqual(len(cues.get("recent_comments", [])), 3)
 
-    def test_resolve_is_pm_only_and_exact_track_scoped(self) -> None:
+    def test_resolve_is_owner_only_and_exact_track_scoped(self) -> None:
         self._seed_track("track-resolve-a")
         self._seed_track("track-resolve-b")
         root_a = self._dispatch(
@@ -534,8 +532,8 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             args={"track_id": "track-resolve-a", "comment_id": root_a_id, "resolution_summary": "Nope"},
         )
         self.assertFalse(non_pm.get("ok"), msg=non_pm)
-        self.assertEqual((non_pm.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
-        self.assertEqual(non_pm.get("required_permission"), "track.resolve_comment_thread")
+        self.assertEqual((non_pm.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
+        self.assertEqual(non_pm.get("permission_boundary"), "track.owner_actor")
 
         cross_track = self._dispatch(
             actor_id="act-pm-resolve-comment",

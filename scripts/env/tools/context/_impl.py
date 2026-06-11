@@ -256,18 +256,28 @@ def _build_source_workspace(
     return source_workspace
 
 
-def _candidate_track_row(*, track: dict[str, Any], active_role: str) -> dict[str, Any]:
-    role = "owner" if track.get("owner_role") == active_role else "collaborator"
+def _same_actor_address(left: Any, right: Any) -> bool:
+    return (
+        isinstance(left, dict)
+        and isinstance(right, dict)
+        and left.get("actor_id") == right.get("actor_id")
+        and left.get("role_id") == right.get("role_id")
+    )
+
+
+def _candidate_track_row(*, track: dict[str, Any], active_actor: dict[str, Any]) -> dict[str, Any]:
+    relation = "owner" if _same_actor_address(track.get("owner_actor"), active_actor) else "collaborator"
     return {
         "track_id": track.get("id"),
         "title": track.get("title"),
         "outcome": track.get("outcome", ""),
-        "owner_role": track.get("owner_role"),
-        "created_by_actor": track.get("created_by_actor"),
+        "owner_actor": track.get("owner_actor"),
         "state": track.get("state"),
-        "health": track.get("health"),
         "now": track.get("now"),
-        "active_role_relation": role,
+        "acceptance_criteria": track.get("acceptance_criteria"),
+        "non_goals": track.get("non_goals"),
+        "active_actor_relation": relation,
+        "active_role_relation": relation,
         "updated_at": track.get("updated_at"),
     }
 
@@ -556,7 +566,7 @@ def _current_context_sections(
     )
 
     writable_surfaces = _build_writable_surfaces(instance_payload)
-    candidate_tracks = [_candidate_track_row(track=row, active_role=active_role) for row in visible_tracks]
+    candidate_tracks = [_candidate_track_row(track=row, active_actor=context["active_actor"]) for row in visible_tracks]
     candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {

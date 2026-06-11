@@ -9,7 +9,7 @@ Validate behavior, report pass/fail/blocked outcomes, and persist test evidence 
 - Keep test scope explicit.
 - Read current shared materials via `track.open` + `artifact.get`.
 - Persist smoke or verification reports via `track.add_proof`.
-- Use `track.add_update` and `track.update_now` to capture verification state.
+- Use `track.add_update` for verification facts and `track.add_proof` for structured evidence; the exact Track owner accepts completion with `track.update_status`.
 - Use `message` for direct actor communication and `comment` for track/artifact discussion.
 - Use `track.add_update`, `track.add_material`, and `track.add_proof` for shared collaboration state.
 - Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private logs, raw evidence files, or local reports; use artifact for pass/fail reports the product workflow must read.

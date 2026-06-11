@@ -76,10 +76,8 @@ def _reject_payload(
             "track_id",
             "title",
             "outcome",
-            "appetite",
             "now",
             "state",
-            "health",
             "kind",
             "label",
             "summary",
@@ -148,15 +146,15 @@ def _reject_authority(*, action: str, active_actor: dict[str, Any], active_role:
         active_role=active_role,
         code="E_TRACK_AUTHORITY",
         message=message,
-        permission_boundary="track.lifecycle_authority",
-        human_summary="Track lifecycle authority is PM-only.",
+        permission_boundary="track.owner_actor",
+        human_summary="Track owner authority is required.",
         why_blocked=message,
-        impact="No lifecycle state changed.",
+        impact="No owner-only Track state changed.",
         state_changed=False,
         retryable=False,
-        retry_guidance="Retry as role 'pm'.",
+        retry_guidance="Ask the exact Track owner_actor to perform this action.",
         allowed_next_actions=["Use track.list to inspect current state."],
-        correctable_fields=["active_role"],
+        correctable_fields=["active_actor"],
     )
 
 
@@ -386,6 +384,45 @@ def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
     return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
 
 
+def _same_actor_address(left: Any, right: Any) -> bool:
+    try:
+        return _actor_address_payload(left, "left") == _actor_address_payload(right, "right")
+    except ValueError:
+        return False
+
+
+def _require_owner_actor(
+    *,
+    action: str,
+    track: dict[str, Any],
+    active_actor: dict[str, Any],
+    active_role: str,
+) -> dict[str, Any] | None:
+    owner_actor = track.get("owner_actor")
+    if _same_actor_address(owner_actor, active_actor):
+        return None
+    return _reject_authority(
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        message=(
+            "only the exact Track owner_actor can mutate requirement facts, lifecycle, "
+            "comment thread resolution, or archive state"
+        ),
+    )
+
+
+def _normalize_text_list_payload(value: Any, field: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a list")
+    rows: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{field}[{index}] must be a non-empty string")
+        rows.append(item.strip())
+    return rows
+
+
 def _normalize_mentioned_actors(
     *,
     mentioned_actors: Any,
@@ -498,46 +535,77 @@ def _track_comment_cues(
     context: TrackServiceContext,
 ) -> dict[str, Any]:
     comments = context.repos.track_comment.comments_for_track(track_id)
+    by_id = {row.get("id"): row for row in comments if isinstance(row.get("id"), str)}
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in comments:
         thread_id = row.get("thread_id")
         if isinstance(thread_id, str) and thread_id:
             grouped.setdefault(thread_id, []).append(row)
 
-    open_thread_count = 0
-    for rows in grouped.values():
-        if any(row.get("status") == "open" for row in rows):
-            open_thread_count += 1
+    def _preview(row: dict[str, Any]) -> str:
+        content = row.get("content")
+        if not isinstance(content, str):
+            return ""
+        return content[:120]
+
+    def _mentions_me(row: dict[str, Any]) -> bool:
+        mentions = row.get("mentioned_actors")
+        if not isinstance(mentions, list):
+            return False
+        return any(isinstance(item, dict) and _same_actor_address(item, active_actor) for item in mentions)
+
+    def _replies_to_me(row: dict[str, Any]) -> bool:
+        reply_to = row.get("reply_to")
+        if not isinstance(reply_to, str) or not reply_to:
+            return False
+        parent = by_id.get(reply_to)
+        if not isinstance(parent, dict):
+            return False
+        return _same_actor_address(parent.get("by_actor"), active_actor)
 
     recent = sorted(
         comments,
         key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")),
         reverse=True,
     )[:3]
-    active_actor_id = active_actor.get("actor_id")
-    mentioned_comment_ids: list[str] = []
-    for row in comments:
-        mentions = row.get("mentioned_actors")
-        if not isinstance(mentions, list):
-            continue
-        if any(isinstance(item, dict) and item.get("actor_id") == active_actor_id for item in mentions):
-            comment_id = row.get("id")
-            if isinstance(comment_id, str):
-                mentioned_comment_ids.append(comment_id)
+
+    open_threads: list[dict[str, Any]] = []
+    for thread_id, rows in grouped.items():
+        rows.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
+        statuses = {row.get("status") for row in rows}
+        thread_status = "resolved" if statuses == {"resolved"} else "open"
+        latest = rows[-1]
+        if thread_status == "open":
+            open_threads.append(
+                {
+                    "thread_id": thread_id,
+                    "latest_comment_id": latest.get("id"),
+                    "latest_comment_preview": _preview(latest),
+                    "latest_by_actor": latest.get("by_actor"),
+                    "comment_count": len(rows),
+                    "status": thread_status,
+                    "mentions_me": any(_mentions_me(row) for row in rows),
+                    "replies_to_me": any(_replies_to_me(row) for row in rows),
+                }
+            )
+    open_threads.sort(key=lambda row: (str(row.get("latest_comment_id") or ""), str(row.get("thread_id") or "")), reverse=True)
+
+    def _cue_row(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "comment_id": row.get("id"),
+            "thread_id": row.get("thread_id"),
+            "by_actor": row.get("by_actor"),
+            "status": row.get("status"),
+            "created_at": row.get("created_at"),
+            "preview": _preview(row),
+        }
 
     return {
-        "open_thread_count": open_thread_count,
-        "recent_comments": [
-            {
-                "comment_id": row.get("id"),
-                "thread_id": row.get("thread_id"),
-                "by_actor": row.get("by_actor"),
-                "status": row.get("status"),
-                "created_at": row.get("created_at"),
-            }
-            for row in recent
-        ],
-        "mentioned_comment_ids": mentioned_comment_ids,
+        "open_thread_count": len(open_threads),
+        "recent_comments": [_cue_row(row) for row in recent],
+        "open_threads": open_threads,
+        "mentions_to_me": [_cue_row(row) for row in comments if _mentions_me(row)],
+        "replies_to_me": [_cue_row(row) for row in comments if _replies_to_me(row)],
         "source_of_truth": "track.list_comments",
     }
 
@@ -550,11 +618,14 @@ def _track_page(
 ) -> dict[str, Any]:
     page = dict(track)
     active_actor = context["active_actor"]
-    page["artifact_relations"] = [
+    projected_relations = [
         _project_track_artifact_ref(ref=row, active_actor=active_actor, active_role=active_role, context=context)
         for row in track.get("artifact_relations", [])
         if isinstance(row, dict)
     ]
+    page["artifact_relations"] = projected_relations
+    page["materials"] = [row for row in projected_relations if row.get("role") == "material"]
+    page["proofs"] = [row for row in projected_relations if row.get("role") == "proof"]
     page["updates"] = [row for row in track.get("updates", []) if isinstance(row, dict)]
     track_id = track.get("id")
     if isinstance(track_id, str) and track_id:
@@ -567,11 +638,11 @@ def _track_summary(track: dict[str, Any]) -> dict[str, Any]:
         "id": track.get("id"),
         "title": track.get("title"),
         "outcome": track.get("outcome"),
-        "owner_role": track.get("owner_role"),
+        "owner_actor": track.get("owner_actor"),
         "state": track.get("state"),
-        "health": track.get("health"),
-        "appetite": track.get("appetite"),
         "now": track.get("now"),
+        "acceptance_criteria": track.get("acceptance_criteria"),
+        "non_goals": track.get("non_goals"),
         "updated_at": track.get("updated_at"),
     }
 
@@ -605,7 +676,7 @@ def list_tracks_for_active_role(*, args: dict[str, Any], context: TrackServiceCo
         read_scope="non-archived track page summaries",
         allowed_next_actions=[
             "Use track.open to read one track page.",
-            "Use track.update_now, track.add_material, track.add_update, or track.add_proof on active tracks.",
+            "Use track.update_requirements, track.update_status, track.add_material, track.add_update, or track.add_proof on active tracks.",
         ],
         extra={"tracks": payload_rows},
     )
@@ -642,7 +713,7 @@ def open_track_for_active_role(*, args: dict[str, Any], context: TrackServiceCon
         read_scope="one shared track page",
         allowed_next_actions=[
             "Use artifact.get with track material/proof artifact_id for full body reads.",
-            "Use track.add_material/add_update/add_proof/update_now to update the page.",
+            "Use track.add_material/add_update/add_proof/update_requirements/update_status to update the page.",
         ],
         extra={"track_id": track_id, "track": page},
     )
@@ -846,9 +917,13 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
         return error
     assert isinstance(track_id, str)
 
-    _, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    track, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
+    assert isinstance(track, dict)
+    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    if owner_error is not None:
+        return owner_error
 
     comment_id = args.get("comment_id")
     if not isinstance(comment_id, str) or not comment_id.strip():
@@ -930,32 +1005,14 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
     )
 
 
-def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
-    action = "track.create"
-    active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
-    if payload_error is not None:
-        return payload_error
-    if active_role != "pm":
-        return _reject_authority(action=action, active_actor=active_actor, active_role=active_role, message="only pm can create tracks")
-
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
-    if error is not None:
-        return error
-    assert isinstance(track_id, str)
-
-    title = args.get("title")
-    outcome = args.get("outcome")
-    appetite = args.get("appetite")
-    now = args.get("now")
-    if not isinstance(title, str) or not title.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="title is required")
-    if not isinstance(outcome, str) or not outcome.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="outcome is required")
-    if not isinstance(appetite, str) or not appetite.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="appetite is required")
-    if not isinstance(now, dict):
+def _normalize_now_payload(
+    *,
+    action: str,
+    value: Any,
+    active_actor: dict[str, Any],
+    active_role: str,
+) -> dict[str, Any] | dict[str, Any]:
+    if not isinstance(value, dict):
         return _reject_payload(
             action=action,
             active_actor=active_actor,
@@ -963,7 +1020,7 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
             message="now must be an object with required field next and optional blocker",
             field_errors=[_now_field_error()],
         )
-    if not isinstance(now.get("next"), str) or not now.get("next", "").strip():
+    if not isinstance(value.get("next"), str) or not value.get("next", "").strip():
         return _reject_payload(
             action=action,
             active_actor=active_actor,
@@ -971,7 +1028,7 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
             message="now.next is required",
             field_errors=[_now_field_error()],
         )
-    blocker = now.get("blocker")
+    blocker = value.get("blocker")
     if blocker is not None and not isinstance(blocker, str):
         return _reject_payload(
             action=action,
@@ -980,35 +1037,48 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
             message="now.blocker must be a string or null",
             field_errors=[_now_field_error()],
         )
+    return {"next": value.get("next", "").strip(), "blocker": blocker}
 
-    state = args.get("state", "active")
-    health = args.get("health", "ok")
-    if state not in context.repos.track.VALID_TRACK_STATE:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=f"state must be one of {', '.join(context.repos.track.VALID_TRACK_STATE)}",
-        )
-    if health not in context.repos.track.VALID_TRACK_HEALTH:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=f"health must be one of {', '.join(context.repos.track.VALID_TRACK_HEALTH)}",
-        )
+
+def create_track_for_active_actor(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+    action = "track.create"
+    active_role = context["active_role"]
+    active_actor = context["active_actor"]
+    payload_error = _require_fields(action, args, active_actor, active_role)
+    if payload_error is not None:
+        return payload_error
+
+    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    if error is not None:
+        return error
+    assert isinstance(track_id, str)
+
+    title = args.get("title")
+    outcome = args.get("outcome")
+    now = args.get("now")
+    if not isinstance(title, str) or not title.strip():
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="title is required")
+    if not isinstance(outcome, str) or not outcome.strip():
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="outcome is required")
+    normalized_now = _normalize_now_payload(action=action, value=now, active_actor=active_actor, active_role=active_role)
+    if isinstance(normalized_now, dict) and normalized_now.get("ok") is False:
+        return normalized_now
+
+    try:
+        acceptance_criteria = _normalize_text_list_payload(args.get("acceptance_criteria", []), "acceptance_criteria")
+        non_goals = _normalize_text_list_payload(args.get("non_goals", []), "non_goals")
+    except ValueError as exc:
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
     try:
         track = context.repos.track.create_track(
             track_id,
             title.strip(),
-            owner_role="pm",
-            created_by_actor=active_actor,
             outcome=outcome.strip(),
-            appetite=appetite.strip(),
-            now=now,
-            state=state,
-            health=health,
+            owner_actor=active_actor,
+            now=normalized_now,
+            acceptance_criteria=acceptance_criteria,
+            non_goals=non_goals,
         )
     except ValueError as exc:
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
@@ -1018,7 +1088,7 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
         action=action,
         active_actor=active_actor,
         active_role=active_role,
-        effect_summary=f"Created one PM-owned track page '{track_id}'.",
+        effect_summary=f"Created one active Track page '{track_id}' owned by the active actor.",
         state_changed=True,
         durability="durable",
         created_ids=[track_id],
@@ -1048,8 +1118,8 @@ def _load_non_archived_track(
     return track, None
 
 
-def update_now_for_active_role(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
-    action = "track.update_now"
+def update_requirements_for_owner(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+    action = "track.update_requirements"
     active_role = context["active_role"]
     active_actor = context["active_actor"]
     payload_error = _require_fields(action, args, active_actor, active_role)
@@ -1065,87 +1135,97 @@ def update_now_for_active_role(*, args: dict[str, Any], context: TrackServiceCon
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
+    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    if owner_error is not None:
+        return owner_error
 
     patch: dict[str, Any] = {}
-    if "state" in args:
-        state = args.get("state")
-        if state not in context.repos.track.VALID_TRACK_STATE:
-            return _reject_payload(
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                message=f"state must be one of {', '.join(context.repos.track.VALID_TRACK_STATE)}",
-            )
-        patch["state"] = state
-    if "health" in args:
-        health = args.get("health")
-        if health not in context.repos.track.VALID_TRACK_HEALTH:
-            return _reject_payload(
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                message=f"health must be one of {', '.join(context.repos.track.VALID_TRACK_HEALTH)}",
-            )
-        patch["health"] = health
-    if "now" in args:
-        now_value = args.get("now")
-        if not isinstance(now_value, dict):
-            return _reject_payload(
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                message="now must be an object with required field next and optional blocker",
-                field_errors=[_now_field_error()],
-            )
-        if not isinstance(now_value.get("next"), str) or not now_value.get("next", "").strip():
-            return _reject_payload(
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                message="now.next is required",
-                field_errors=[_now_field_error()],
-            )
-        blocker = now_value.get("blocker")
-        if blocker is not None and not isinstance(blocker, str):
-            return _reject_payload(
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                message="now.blocker must be a string or null",
-                field_errors=[_now_field_error()],
-            )
-        patch["now"] = now_value
+    for field in ("title", "outcome"):
+        if field in args:
+            value = args.get(field)
+            if not isinstance(value, str) or not value.strip():
+                return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"{field} must be a non-empty string")
+            patch[field] = value.strip()
+    try:
+        if "acceptance_criteria" in args:
+            patch["acceptance_criteria"] = _normalize_text_list_payload(args.get("acceptance_criteria"), "acceptance_criteria")
+        if "non_goals" in args:
+            patch["non_goals"] = _normalize_text_list_payload(args.get("non_goals"), "non_goals")
+    except ValueError as exc:
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
     if not patch:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="at least one of now/state/health is required")
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="at least one requirement field is required")
 
     try:
         updated = context.repos.track.update_track(track_id, patch)
     except ValueError as exc:
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
-    summary = f"{active_role} updated now-state"
-    context.repos.track.append_track_update(
-        track_id=track_id,
-        by_actor=active_actor,
-        kind="progress",
-        summary=summary,
-        refs=[],
+    return tool_results.success(
+        tool="track",
+        action=action,
+        active_actor=active_actor,
+        active_role=active_role,
+        effect_summary=f"Updated requirement facts on Track '{track_id}'.",
+        state_changed=True,
+        durability="durable",
+        updated_ids=[track_id],
+        state_changes=[{"object_type": "track", "change": "requirements_updated", "track_id": track_id}],
+        allowed_next_actions=["Use track.open to verify requirement facts."],
+        extra={"track_id": track_id, "track": _track_page(updated, active_role=active_role, context=context)},
     )
-    updated = context.repos.track.get_track(track_id)
-    assert isinstance(updated, dict)
+
+
+def update_status_for_owner(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+    action = "track.update_status"
+    active_role = context["active_role"]
+    active_actor = context["active_actor"]
+    payload_error = _require_fields(action, args, active_actor, active_role)
+    if payload_error is not None:
+        return payload_error
+
+    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    if error is not None:
+        return error
+    assert isinstance(track_id, str)
+
+    track, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    if track_error is not None:
+        return track_error
+    assert isinstance(track, dict)
+    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    if owner_error is not None:
+        return owner_error
+
+    state = args.get("state")
+    if state not in context.repos.track.VALID_TRACK_STATE:
+        return _reject_payload(
+            action=action,
+            active_actor=active_actor,
+            active_role=active_role,
+            message=f"state must be one of {', '.join(context.repos.track.VALID_TRACK_STATE)}",
+        )
+    normalized_now = _normalize_now_payload(action=action, value=args.get("now"), active_actor=active_actor, active_role=active_role)
+    if isinstance(normalized_now, dict) and normalized_now.get("ok") is False:
+        return normalized_now
+
+    try:
+        updated = context.repos.track.update_track(track_id, {"state": state, "now": normalized_now})
+    except ValueError as exc:
+        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
 
     return tool_results.success(
         tool="track",
         action=action,
         active_actor=active_actor,
         active_role=active_role,
-        effect_summary=f"Updated now/state/health on non-archived track '{track_id}'.",
+        effect_summary=f"Updated owner status on Track '{track_id}'.",
         state_changed=True,
         durability="durable",
         updated_ids=[track_id],
-        state_changes=[{"object_type": "track", "change": "updated", "track_id": track_id}],
-        allowed_next_actions=["Use track.open to verify now-state and timeline updates."],
+        state_changes=[{"object_type": "track", "change": "status_updated", "track_id": track_id}],
+        allowed_next_actions=["Use track.open to verify state and now fields."],
         extra={"track_id": track_id, "track": _track_page(updated, active_role=active_role, context=context)},
     )
 
@@ -1379,7 +1459,6 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
             label=label.strip(),
             from_actor=active_actor,
             summary=summary,
-            update_summary=summary or f"{active_role} published proof",
         )
     except ValueError as exc:
         message = str(exc)
@@ -1389,11 +1468,9 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
     updated_track = relation_result["track"]
     related_artifact = relation_result["artifact"]
     superseded_artifact_id = relation_result["superseded_artifact_id"]
-    update = relation_result["update"]
 
     changes: list[dict[str, Any]] = [
         {"object_type": "track", "change": "proof_relation_added", "track_id": track_id, "artifact_id": related_artifact["id"]},
-        {"object_type": "track", "change": "update_added", "track_id": track_id, "update_id": update["id"]},
     ]
     if isinstance(superseded_artifact_id, str) and superseded_artifact_id:
         changes.append(
@@ -1411,36 +1488,32 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
         active_actor=active_actor,
         active_role=active_role,
         effect_summary=(
-            f"Related artifact '{related_artifact['id']}' as current proof on track '{track_id}' "
-            f"and recorded proof update '{update['id']}'."
+            f"Related artifact '{related_artifact['id']}' as current proof on track '{track_id}'."
         ),
         state_changed=True,
         durability="durable",
         updated_ids=[track_id],
         state_changes=changes,
         allowed_next_actions=[
-            "Use track.open to verify artifact relations and timeline updates.",
+            "Use track.open to verify proof relations.",
             "Use artifact.get to read proof body.",
-            "Use track.update_now when proof changes track close readiness.",
+            "Owner can use track.update_status to accept proof as done.",
         ],
         extra={
             "track_id": track_id,
             "artifact_id": related_artifact["id"],
-            "update_id": update["id"],
             "track": _track_page(updated_track, active_role=active_role, context=context),
         },
     )
 
 
-def archive_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+def archive_track_for_owner(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.archive"
     active_role = context["active_role"]
     active_actor = context["active_actor"]
     payload_error = _require_fields(action, args, active_actor, active_role)
     if payload_error is not None:
         return payload_error
-    if active_role != "pm":
-        return _reject_authority(action=action, active_actor=active_actor, active_role=active_role, message="only pm can archive tracks")
 
     track_id, error = _require_track_id(action, args, active_actor, active_role)
     if error is not None:
@@ -1450,6 +1523,9 @@ def archive_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) 
     track = context.repos.track.get_track(track_id)
     if track is None:
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"track not found: {track_id}")
+    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    if owner_error is not None:
+        return owner_error
 
     state_changed = False
     if track.get("archived_at") is None:
@@ -1478,13 +1554,14 @@ _ACTION_HANDLERS = {
     'add_material': add_material_to_track,
     'add_proof': add_proof_to_track,
     'add_update': add_update_to_track,
-    'archive': archive_track_for_pm,
-    'create': create_track_for_pm,
+    'archive': archive_track_for_owner,
+    'create': create_track_for_active_actor,
     'list': list_tracks_for_active_role,
     'list_comments': list_comments_on_track,
     'open': open_track_for_active_role,
     'resolve_comment_thread': resolve_comment_thread_on_track,
-    'update_now': update_now_for_active_role,
+    'update_requirements': update_requirements_for_owner,
+    'update_status': update_status_for_owner,
 }
 
 

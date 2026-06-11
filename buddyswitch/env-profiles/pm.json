@@ -32,7 +32,8 @@
     ],
     "track_effects": [
       "create",
-      "update_now",
+      "update_requirements",
+      "update_status",
       "add_material",
       "add_update",
       "add_proof",

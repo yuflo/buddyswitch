@@ -200,7 +200,8 @@ class ActorProfileTests(unittest.TestCase):
         )
         self.assertEqual(preview.get("active_role"), "dev")
         self.assertIn("track.list", preview.get("available_actions", []))
-        self.assertIn("track.create", preview.get("restricted_actions", []))
+        self.assertIn("track.create", preview.get("available_actions", []))
+        self.assertEqual(preview.get("restricted_actions"), [])
 
     def test_actor_private_file_summaries_are_actor_owned(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -266,18 +266,18 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertIs(response.get("retryable"), False)
         self.assertIn("blocked message _impl import", str(response.get("why_blocked")))
 
-    def test_role_auth_denies_before_selected_private_impl_import(self) -> None:
-        instance_json = self._instance_json(actor_id="act-dev-role-deny-before-import", role="dev")
+    def test_track_create_role_policy_allows_dev_to_reach_selected_private_impl_import(self) -> None:
+        instance_json = self._instance_json(actor_id="act-dev-role-allow-before-import", role="dev")
         completed = self._run_router_subprocess_with_blocked_impl(
             instance_json=instance_json,
             payload={
                 "tool": "track",
                 "action": "create",
                 "args": {
-                    "track_id": "track-denied",
-                    "title": "Denied",
+                    "track_id": "track-dev-allowed",
+                    "title": "Allowed",
                     "outcome": "x",
-                    "appetite": "1d",
+                    "now": {"next": "seed", "blocker": None},
                 },
             },
             blocked_module="env.tools.track._impl",
@@ -286,12 +286,9 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         payload = json.loads(completed.stdout)
         response = payload["response"]
-        self._assert_role_auth_receipt(
-            response,
-            required_permission="track.create",
-            active_role="dev",
-        )
-        self.assertNotIn("env.tools.track._impl", payload["loaded"])
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL_DISPATCH")
+        self.assertEqual(response.get("permission_boundary"), "env.tool.dispatch")
 
     def test_allowed_role_reaches_selected_private_impl_import(self) -> None:
         instance_json = self._instance_json(actor_id="act-pm-role-allow-reaches-import", role="pm")
@@ -304,7 +301,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
                     "track_id": "track-allowed",
                     "title": "Allowed",
                     "outcome": "x",
-                    "appetite": "1d",
+                    "now": {"next": "seed", "blocker": None},
                 },
             },
             blocked_module="env.tools.track._impl",
@@ -317,19 +314,16 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertEqual(response.get("permission_boundary"), "env.tool.dispatch")
         self.assertIn("blocked selected _impl import", str(response.get("why_blocked")))
 
-    def test_role_auth_denial_precedes_args_shape_validation(self) -> None:
-        instance_json = self._instance_json(actor_id="act-dev-role-deny-before-payload", role="dev")
+    def test_track_create_payload_validation_runs_after_role_policy_allows_dev(self) -> None:
+        instance_json = self._instance_json(actor_id="act-dev-role-allow-before-payload", role="dev")
         response = self._dispatch_env_tool(
             payload={"tool": "track", "action": "create", "args": "not-an-object"},
             instance_json=instance_json,
             role="dev",
         )
-        self._assert_role_auth_receipt(
-            response,
-            required_permission="track.create",
-            active_role="dev",
-        )
-        self.assertNotEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL_PAYLOAD")
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL_PAYLOAD")
+        self.assertEqual(response.get("permission_boundary"), "request-payload")
 
     def test_selected_dispatch_imports_no_sibling_private_impl_modules(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-selected-impl-import", role="dev")

@@ -15,7 +15,7 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 ## Required Behavior
 
-- Keep track lifecycle mutations explicit and PM-owned (`track.create`, `track.open`, `track.update_now`, `track.archive`).
+- Keep Track lifecycle mutations explicit and owner-owned (`track.create`, `track.open`, `track.update_status`, `track.archive`).
 - Read shared state from `track.open` before deciding publish/mutation order.
 - Create private PM draft/revision artifacts via `artifact.create_revision` using `template` and markdown `body`.
 - Publish product direction, briefs, decisions, and close proof via `track.add_material` / `track.add_proof` using existing `artifact_id` values.

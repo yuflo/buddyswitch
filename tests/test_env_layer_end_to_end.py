@@ -91,7 +91,6 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": track_id,
                 "title": track_id,
                 "outcome": "flow",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -267,7 +266,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(test_proof_pub.get("ok"), msg=test_proof_pub)
         proof_changes = {row.get("change") for row in test_proof_pub.get("state_changes", []) if isinstance(row, dict)}
         self.assertIn("proof_relation_added", proof_changes)
-        self.assertIn("update_added", proof_changes)
+        self.assertNotIn("update_added", proof_changes)
 
         pm_open = self._dispatch(role="pm", tool="track", action="open", args={"track_id": track_id})
         self.assertTrue(pm_open.get("ok"), msg=pm_open)
@@ -280,8 +279,8 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         pm_update = self._dispatch(
             role="pm",
             tool="track",
-            action="update_now",
-            args={"track_id": track_id, "state": "done", "health": "ok", "now": {"next": "ship", "blocker": None}},
+            action="update_status",
+            args={"track_id": track_id, "state": "done", "now": {"next": "ship", "blocker": None}},
         )
         self.assertTrue(pm_update.get("ok"), msg=pm_update)
 
@@ -609,9 +608,8 @@ class EnvLayerProductRootSplitTests(unittest.TestCase):
                     created = env_store.create_track(
                         track_id,
                         "State Root Split",
-                        owner_role="pm",
+                        owner_actor={"actor_id": "act-pm-state-root", "role_id": "pm"},
                         outcome="verify state split",
-                        appetite="1 day",
                         now={"next": "verify", "blocker": None},
                     )
                     self.assertEqual(created.get("id"), track_id)

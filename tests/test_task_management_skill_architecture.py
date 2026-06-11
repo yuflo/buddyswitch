@@ -111,9 +111,8 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         env_store.create_track(
             "track-task-arch",
             "Task Arch",
-            owner_role="pm",
+            owner_actor={"actor_id": "act-pm-task-arch", "role_id": "pm"},
             outcome="Validate private task-only object writes.",
-            appetite="1 day",
             now={"next": "Create private tasks", "blocker": None},
         )
         env_store.create_artifact_revision(
@@ -169,7 +168,13 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertEqual(payload["decision_surface"]["binding_state"]["state"], "runless")
 
     def test_task_capture_rejects_publication_payload_fields_without_shared_mutation(self) -> None:
-        env_store.create_track("track-task-arch-action-reject", "Task arch action reject", owner_role="pm")
+        env_store.create_track(
+            "track-task-arch-action-reject",
+            "Task arch action reject",
+            owner_actor={"actor_id": "act-pm-task-arch", "role_id": "pm"},
+            outcome="Reject publication payloads",
+            now={"next": "seed", "blocker": None},
+        )
         env_store.create_artifact_revision(
             artifact_id="art-pm-task-arch-action-reject",
             title="Task arch action reject artifact",

@@ -207,7 +207,6 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-feedback-direct-publish",
                 "title": "direct publish",
                 "outcome": "reject",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -261,7 +260,6 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-feedback-a",
                 "title": "a",
                 "outcome": "a",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -273,7 +271,6 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-feedback-b",
                 "title": "b",
                 "outcome": "b",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -349,7 +346,6 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-feedback-write-contract",
                 "title": "write contract",
                 "outcome": "verify write response fields",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -422,8 +418,9 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-feedback-foreign",
             "Foreign scope track",
-            owner_role="pm",
+            owner_actor={"actor_id": "act-pm-feedback", "role_id": "pm"},
             outcome="scope",
+            now={"next": "seed", "blocker": None},
         )
         self._write_taskbox_task(
             actor_id="act-feedback-runless",

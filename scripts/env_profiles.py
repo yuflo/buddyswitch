@@ -272,9 +272,15 @@ def validate_env_profile(
             f"state_capability.task_effects must be exactly {expected_task_effects}"
         )
     track_effects = _require_string_list(state_capability.get("track_effects"), "state_capability.track_effects")
-    expected_track_effects = ["update_now", "add_material", "add_update", "add_proof"]
-    if role_id == "pm":
-        expected_track_effects = ["create", *expected_track_effects, "archive"]
+    expected_track_effects = [
+        "create",
+        "update_requirements",
+        "update_status",
+        "add_material",
+        "add_update",
+        "add_proof",
+        "archive",
+    ]
     if track_effects != expected_track_effects:
         raise EnvProfileError(
             f"state_capability.track_effects mismatch for '{role_id}': "
@@ -282,7 +288,7 @@ def validate_env_profile(
         )
 
     comment_effects = _require_string_list(state_capability.get("comment_effects"), "state_capability.comment_effects")
-    expected_comment_effects = ["resolve"] if role_id == "pm" else []
+    expected_comment_effects = ["resolve"]
     if comment_effects != expected_comment_effects:
         raise EnvProfileError(
             f"state_capability.comment_effects mismatch for '{role_id}': "

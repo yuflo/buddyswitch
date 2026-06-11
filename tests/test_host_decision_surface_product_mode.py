@@ -92,9 +92,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         track = env_store.create_track(
             "track-market-decision",
             "Market Decision",
-            owner_role="pm",
+            owner_actor={"actor_id": "act-pm-decision", "role_id": "pm"},
             outcome="Ship market decision with clear positioning.",
-            appetite="1 day",
             now={"next": "Scan market", "blocker": None},
         )
         self._seed_taskbox_task(role="market", task_id="task-market-decision", title="Scan market", track_id=str(track["id"]))
@@ -131,9 +130,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         track = env_store.create_track(
             "track-context-entry-surface",
             "Entry Surface",
-            owner_role="pm",
+            owner_actor={"actor_id": "act-pm-entry", "role_id": "pm"},
             outcome="Validate compact entry surface.",
-            appetite="1 day",
             now={"next": "Seed artifacts", "blocker": None},
         )
         artifact = env_store.create_artifact_revision(
@@ -234,17 +232,15 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         track_a = env_store.create_track(
             "track-context-filter-a",
             "Filter A",
-            owner_role="pm",
+            owner_actor={"actor_id": "act-pm-filter", "role_id": "pm"},
             outcome="A",
-            appetite="1 day",
             now={"next": "A", "blocker": None},
         )
         track_b = env_store.create_track(
             "track-context-filter-b",
             "Filter B",
-            owner_role="pm",
+            owner_actor={"actor_id": "act-pm-filter", "role_id": "pm"},
             outcome="B",
-            appetite="1 day",
             now={"next": "B", "blocker": None},
         )
         art_a = env_store.create_artifact_revision(
@@ -372,25 +368,33 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(response["permission_boundary"], "request-payload")
         self.assertIn("unsupported payload fields", response["why_blocked"].lower())
 
-    def test_non_pm_track_write_rejected_by_authority_boundary(self) -> None:
-        response = self._dispatch(
-            role="design",
+    def test_non_owner_track_status_rejected_by_owner_boundary(self) -> None:
+        created = self._dispatch(
+            role="pm",
             tool="track",
             action="create",
             args={
                 "track_id": "track-design-unauthorized",
                 "title": "No",
                 "outcome": "Denied",
-                "appetite": "1 day",
                 "now": {"next": "Denied", "blocker": None},
             },
         )
+        self.assertTrue(created["ok"], msg=created)
+        response = self._dispatch(
+            role="design",
+            tool="track",
+            action="update_status",
+            args={
+                "track_id": "track-design-unauthorized",
+                "state": "blocked",
+                "now": {"next": "Denied", "blocker": "owner required"},
+            },
+        )
         self.assertFalse(response["ok"])
-        self.assertEqual((response.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
-        self.assertEqual(response["permission_boundary"], "tool.role_authority")
-        self.assertEqual(response.get("required_permission"), "track.create")
+        self.assertEqual((response.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
+        self.assertEqual(response["permission_boundary"], "track.owner_actor")
         self.assertEqual(response.get("active_role"), "design")
-        self.assertEqual(response.get("allowed_roles"), ["pm"])
 
     def test_pm_page_prototype_decision_surface_prefers_direct_private_actor_private_directory_without_phrase_rule(self) -> None:
         pm_agents = (ROOT / "tools" / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md").read_text(

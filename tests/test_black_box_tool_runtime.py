@@ -36,7 +36,8 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
         "list_comments",
         "open",
         "resolve_comment_thread",
-        "update_now",
+        "update_requirements",
+        "update_status",
     },
 }
 

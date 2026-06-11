@@ -71,7 +71,13 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("unsupported", str(payload["error"]["message"]).lower())
 
     def test_context_summarize_exposes_runless_decision_surface(self) -> None:
-        track = env_store.create_track("track-runless-router", "Runless Router", owner_role="pm")
+        track = env_store.create_track(
+            "track-runless-router",
+            "Runless Router",
+            owner_actor={"actor_id": "act-pm-runless", "role_id": "pm"},
+            outcome="Runless router outcome",
+            now={"next": "seed", "blocker": None},
+        )
         self._write_taskbox_task(
             actor_id="act-pm-runless",
             role="pm",

@@ -21,18 +21,17 @@ class ProofRelationResult(TypedDict):
     track: dict[str, Any]
     artifact: dict[str, Any]
     superseded_artifact_id: str | None
-    update: dict[str, Any]
 
 
 def _actor_payload(value: dict[str, Any]) -> dict[str, str]:
     return ActorAddress.from_payload(value).to_payload()
 
 
-def _actor_id(value: Any) -> str | None:
+def _actor_payload_or_none(value: Any) -> dict[str, str] | None:
     if not isinstance(value, dict):
         return None
     try:
-        return ActorAddress.from_payload(value).actor_id
+        return ActorAddress.from_payload(value).to_payload()
     except ValueError:
         return None
 
@@ -62,7 +61,7 @@ def _same_relation_slot(*, row: dict[str, Any], role: str, label: str, template:
         row.get("role") == role
         and row.get("label") == label
         and row.get("template") == template
-        and _actor_id(row.get("from_actor")) == actor.actor_id
+        and _actor_payload_or_none(row.get("from_actor")) == actor.to_payload()
     )
 
 
@@ -166,7 +165,6 @@ def add_proof_relation(
     label: str,
     from_actor: dict[str, Any],
     summary: str,
-    update_summary: str | None = None,
 ) -> ProofRelationResult:
     track = _load_track(track_id)
     actor = ActorAddress.from_payload(_actor_payload(from_actor))
@@ -180,24 +178,12 @@ def add_proof_relation(
         summary=summary,
     )
 
-    update_row = {
-        "id": f"upd-{uuid.uuid4().hex[:8]}",
-        "by_actor": actor.to_payload(),
-        "summary": update_summary if isinstance(update_summary, str) and update_summary.strip() else f"{actor.role_id} shared proof",
-        "kind": "proof",
-        "refs": [{"type": "artifact", "id": artifact_id}],
-        "created_at": track_repo.now_iso(),
-    }
-    updates = [row for row in track.get("updates", []) if isinstance(row, dict)]
-
     track_after = dict(track)
     track_after["artifact_relations"] = rows
-    track_after["updates"] = [*updates, update_row]
     track_after["updated_at"] = track_repo.now_iso()
     saved_track = track_repo.save_track(track_after)
     return {
         "track": saved_track,
         "artifact": artifact,
         "superseded_artifact_id": superseded_artifact_id,
-        "update": update_row,
     }

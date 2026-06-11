@@ -116,7 +116,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertIn("track", catalog.supported_tools())
 
         track_create = catalog.get_action_definition("track", "create").input_schema
-        track_update_now = catalog.get_action_definition("track", "update_now").input_schema
+        track_update_status = catalog.get_action_definition("track", "update_status").input_schema
+        track_update_requirements = catalog.get_action_definition("track", "update_requirements").input_schema
         track_add_update = catalog.get_action_definition("track", "add_update").input_schema
         track_add_comment = catalog.get_action_definition("track", "add_comment").input_schema
         track_list_comments = catalog.get_action_definition("track", "list_comments").input_schema
@@ -147,7 +148,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("comment", catalog.supported_tools())
 
         create_now = track_create["properties"]["now"]
-        update_now = track_update_now["properties"]["now"]
+        update_now = track_update_status["properties"]["now"]
         for row in (create_now, update_now):
             self.assertEqual(row.get("type"), "object")
             self.assertIs(row.get("additionalProperties"), False)
@@ -157,17 +158,20 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             self.assertIsInstance(row.get("examples"), list)
             self.assertTrue(row.get("examples"))
 
+        self.assertNotIn("state", track_create["properties"])
+        self.assertNotIn("health", track_create["properties"])
+        self.assertNotIn("appetite", track_create["properties"])
+        self.assertNotIn("owner_role", track_create["properties"])
+        self.assertNotIn("created_by_actor", track_create["properties"])
         self.assertEqual(
-            track_create["properties"]["state"].get("enum"),
-            ["active", "blocked", "review", "done"],
+            track_update_status["properties"]["state"].get("enum"),
+            ["active", "blocked", "done"],
         )
-        self.assertEqual(
-            track_create["properties"]["health"].get("enum"),
-            ["ok", "risk", "blocked", "stale"],
-        )
+        self.assertIn("acceptance_criteria", track_update_requirements["properties"])
+        self.assertIn("non_goals", track_update_requirements["properties"])
         self.assertEqual(
             track_add_update["properties"]["kind"].get("enum"),
-            ["progress", "decision", "blocker", "proof"],
+            ["progress", "decision", "blocker"],
         )
 
         refs_items = track_add_update["properties"]["refs"].get("items", {})

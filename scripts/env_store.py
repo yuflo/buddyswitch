@@ -87,7 +87,6 @@ _RETIRED_TASK_APIS = frozenset(
 _RETIRED_OBJECT_APIS = frozenset(
     {
         "VALID_TRACK_STATE",
-        "VALID_TRACK_HEALTH",
         "VALID_UPDATE_KIND",
         "VALID_ARTIFACT_TEMPLATES",
         "track_file",

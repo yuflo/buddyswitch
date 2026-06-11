@@ -11,10 +11,14 @@ from env.tool_runtime.actor_profile import AuthSubject
 COMMON_ROLE_PERMISSIONS = frozenset(
     {
         "track.read",
-        "track.update_now",
+        "track.create",
+        "track.update_requirements",
+        "track.update_status",
         "track.add_material",
         "track.add_update",
         "track.add_proof",
+        "track.archive",
+        "track.resolve_comment_thread",
         "task.read",
         "task.capture",
         "task.select",
@@ -39,9 +43,7 @@ COMMON_ROLE_PERMISSIONS = frozenset(
     }
 )
 
-ROLE_PERMISSION_ADDITIONS = {
-    "pm": frozenset({"track.create", "track.archive", "track.resolve_comment_thread"}),
-}
+ROLE_PERMISSION_ADDITIONS: dict[str, frozenset[str]] = {}
 
 
 @dataclass(frozen=True)

@@ -49,27 +49,20 @@ class RuntimeObjectAccess:
     def list_tracks(self) -> list[dict[str, Any]]:
         return _track_repo.list_tracks()
 
-    def create_track(self, track_id: str, title: str, outcome: str, appetite: str, now: dict[str, Any], state: str, health: str) -> dict[str, Any]:
+    def create_track(self, track_id: str, title: str, outcome: str, owner_actor: dict[str, Any], now: dict[str, Any]) -> dict[str, Any]:
         return _track_repo.create_track(
             track_id,
             title,
             outcome=outcome,
-            appetite=appetite,
+            owner_actor=owner_actor,
             now=now,
-            state=state,
-            health=health,
         )
 
     def get_track(self, track_id: str) -> dict[str, Any] | None:
         return _track_repo.get_track(track_id)
 
-    def update_track_now(self, track_id: str, now: dict[str, Any], state: str | None, health: str | None) -> dict[str, Any]:
-        patch: dict[str, Any] = {"now": now}
-        if state is not None:
-            patch["state"] = state
-        if health is not None:
-            patch["health"] = health
-        return _track_repo.update_track(track_id, patch)
+    def update_track_status(self, track_id: str, now: dict[str, Any], state: str) -> dict[str, Any]:
+        return _track_repo.update_track(track_id, {"now": now, "state": state})
 
     def add_track_material(self, track_id: str, artifact_id: str, label: str, summary: str) -> tuple[dict[str, Any], dict[str, Any]]:
         result = _track_artifact_relations_domain.add_material_relation(
@@ -97,7 +90,6 @@ class RuntimeObjectAccess:
             label=label,
             from_actor={"actor_id": "act-pm-system", "role_id": "pm"},
             summary=summary,
-            update_summary=summary,
         )
         return result["track"], result["artifact"]
 

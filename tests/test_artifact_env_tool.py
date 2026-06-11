@@ -118,7 +118,6 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": track_id,
                 "title": track_id,
                 "outcome": "outcome",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -1091,7 +1090,13 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((r2_read.get("artifact") or {}).get("currentness"), "current")
 
     def test_create_revision_from_archived_published_artifact_rejects_without_new_artifact(self) -> None:
-        track = env_store.create_track("track-art-revision-archived", "Archived Revision", owner_role="pm")
+        track = env_store.create_track(
+            "track-art-revision-archived",
+            "Archived Revision",
+            owner_actor={"actor_id": "act-pm-system", "role_id": "pm"},
+            outcome="Archived revision outcome",
+            now={"next": "seed", "blocker": None},
+        )
         artifact = env_store.create_artifact_revision(
             artifact_id="art-revision-archived-r1",
             title="Archived source",

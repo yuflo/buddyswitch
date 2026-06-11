@@ -210,12 +210,11 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-gate-order",
                 "title": "Gate order",
                 "outcome": "Prove ordering.",
-                "appetite": "small",
                 "now": {"next": "test", "blocker": None},
             },
         )
-        self.assertNotEqual((pm_only.get("error") or {}).get("code"), "E_ACTIVE_TASK_REQUIRED", msg=pm_only)
-        self.assertEqual((pm_only.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH", msg=pm_only)
+        self.assertEqual((pm_only.get("error") or {}).get("code"), "E_ACTIVE_TASK_REQUIRED", msg=pm_only)
+        self.assertEqual(pm_only.get("permission_boundary"), "task.active_anchor")
 
         malformed_args = self._dispatch(
             instance=market_instance,

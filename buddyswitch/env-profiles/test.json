@@ -31,12 +31,16 @@
       "history"
     ],
     "track_effects": [
-      "update_now",
+      "create",
+      "update_requirements",
+      "update_status",
       "add_material",
       "add_update",
-      "add_proof"
+      "add_proof",
+      "archive"
     ],
     "comment_effects": [
+      "resolve"
     ]
   },
   "tool_capability": {

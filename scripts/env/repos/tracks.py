@@ -11,11 +11,16 @@ from typing import Any
 from env.tool_runtime.actor_profile import ActorAddress
 from . import runtime_files
 
-VALID_TRACK_STATE = ("active", "blocked", "review", "done")
-VALID_TRACK_HEALTH = ("ok", "risk", "blocked", "stale")
-VALID_UPDATE_KIND = ("progress", "decision", "blocker", "proof")
+VALID_TRACK_STATE = ("active", "blocked", "done")
+VALID_UPDATE_KIND = ("progress", "decision", "blocker")
 VALID_ARTIFACT_RELATION_ROLE = ("material", "proof", "input", "deliverable")
 _LEGACY_TRACK_ROLE_FIELDS = ("current" + "_role", "next" + "_role")
+_RETIRED_TRACK_FIELDS = {
+    "owner_role",
+    "created_by_actor",
+    "health",
+    "appetite",
+}
 _LEGACY_TRACK_FIELDS = {
     "status",
     "summary",
@@ -39,6 +44,19 @@ def _normalize_actor(value: Any, field: str) -> dict[str, str]:
         return ActorAddress.from_payload(value).to_payload()
     except ValueError as exc:
         raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
+
+
+def _normalize_text_list(value: Any, field: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a list")
+    rows: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{field}[{index}] must be a non-empty string")
+        rows.append(item.strip())
+    return rows
 
 
 def _track_file(track_id: str) -> Path:
@@ -110,6 +128,29 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
     }
 
 
+def _has_current_proof_relation(relations: list[dict[str, Any]]) -> bool:
+    return any(row.get("role") == "proof" and bool(row.get("current")) for row in relations)
+
+
+def _enforce_state_invariants(*, state: str, now: dict[str, Any], artifact_relations: list[dict[str, Any]]) -> None:
+    blocker = now.get("blocker")
+    if state == "active":
+        if blocker is not None:
+            raise ValueError("active tracks require track.now.blocker = null")
+        return
+    if state == "blocked":
+        if not isinstance(blocker, str) or not blocker.strip():
+            raise ValueError("blocked tracks require a non-empty track.now.blocker")
+        return
+    if state == "done":
+        if blocker is not None:
+            raise ValueError("done tracks require track.now.blocker = null")
+        if not _has_current_proof_relation(artifact_relations):
+            raise ValueError("done tracks require at least one current proof relation")
+        return
+    raise ValueError(f"track.state must be one of {', '.join(VALID_TRACK_STATE)}")
+
+
 def _call_test_save_hook_if_mock(track: dict[str, Any]) -> dict[str, Any] | None:
     module = sys.modules.get("env" + "_legacy_store")
     if module is None:
@@ -160,13 +201,11 @@ def create_track(
     track_id: str,
     title: str,
     *,
-    owner_role: str = "pm",
-    created_by_actor: dict[str, Any] | None = None,
-    outcome: str = "",
-    appetite: str = "1 day",
-    now: dict[str, Any] | None = None,
-    state: str = "active",
-    health: str = "ok",
+    owner_actor: dict[str, Any],
+    outcome: str,
+    now: dict[str, Any],
+    acceptance_criteria: list[str] | None = None,
+    non_goals: list[str] | None = None,
 ) -> dict[str, Any]:
     runtime_files.require_id(track_id, "track id")
     if get_track(track_id):
@@ -175,15 +214,12 @@ def create_track(
     track = {
         "id": track_id,
         "title": title,
-        "outcome": outcome or "unspecified outcome",
-        "owner_role": owner_role,
-        "created_by_actor": created_by_actor
-        if isinstance(created_by_actor, dict)
-        else {"actor_id": f"act-{owner_role}-system", "role_id": owner_role},
-        "state": state,
-        "health": health,
-        "appetite": appetite,
-        "now": now or {"next": "unspecified", "blocker": None},
+        "outcome": outcome,
+        "owner_actor": owner_actor,
+        "state": "active",
+        "now": now,
+        "acceptance_criteria": acceptance_criteria or [],
+        "non_goals": non_goals or [],
         "artifact_relations": [],
         "updates": [],
         "created_at": timestamp,
@@ -197,7 +233,17 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
-    allowed = {"title", "outcome", "state", "health", "appetite", "now", "artifact_relations", "updates", "archived_at"}
+    allowed = {
+        "title",
+        "outcome",
+        "state",
+        "now",
+        "acceptance_criteria",
+        "non_goals",
+        "artifact_relations",
+        "updates",
+        "archived_at",
+    }
     for key, value in patch.items():
         if key not in allowed:
             raise ValueError(f"unsupported track field: {key}")
@@ -240,32 +286,31 @@ def append_track_update(
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     for field in _LEGACY_TRACK_ROLE_FIELDS:
         if field in track:
-            raise ValueError("legacy track role-routing fields are retired; use immutable owner_role")
-    forbidden = sorted(field for field in track if field in _LEGACY_TRACK_FIELDS)
+            raise ValueError("legacy track role-routing fields are retired; use owner_actor")
+    forbidden = sorted(field for field in track if field in _LEGACY_TRACK_FIELDS or field in _RETIRED_TRACK_FIELDS)
     if forbidden:
         raise ValueError(f"legacy track fields are retired: {', '.join(forbidden)}")
 
     track_id = runtime_files.require_id(track.get("id", ""), "track.id")
     title = _require_non_empty_text(track.get("title"), "track.title")
     outcome = _require_non_empty_text(track.get("outcome"), "track.outcome")
-    owner_role = _require_non_empty_text(track.get("owner_role"), "track.owner_role")
-    created_by_actor = _normalize_actor(track.get("created_by_actor"), "track.created_by_actor")
+    owner_actor = _normalize_actor(track.get("owner_actor"), "track.owner_actor")
     state = track.get("state")
-    health = track.get("health")
     if state not in VALID_TRACK_STATE:
         raise ValueError(f"track.state must be one of {', '.join(VALID_TRACK_STATE)}")
-    if health not in VALID_TRACK_HEALTH:
-        raise ValueError(f"track.health must be one of {', '.join(VALID_TRACK_HEALTH)}")
-
-    appetite = _require_non_empty_text(track.get("appetite"), "track.appetite")
     now = _normalize_now(track.get("now"))
 
     artifact_relations = track.get("artifact_relations")
     if not isinstance(artifact_relations, list):
         raise ValueError("track.artifact_relations must be a list")
+    normalized_relations = [_normalize_artifact_relation(row) for row in artifact_relations]
+
     updates = track.get("updates")
     if not isinstance(updates, list):
         raise ValueError("track.updates must be a list")
+    normalized_updates = [_normalize_update_row(row) for row in updates]
+
+    _enforce_state_invariants(state=state, now=now, artifact_relations=normalized_relations)
 
     created_at = _require_non_empty_text(track.get("created_at"), "track.created_at")
     updated_at = _require_non_empty_text(track.get("updated_at"), "track.updated_at")
@@ -277,14 +322,13 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "id": track_id,
         "title": title,
         "outcome": outcome,
-        "owner_role": owner_role,
-        "created_by_actor": created_by_actor,
+        "owner_actor": owner_actor,
         "state": state,
-        "health": health,
-        "appetite": appetite,
         "now": now,
-        "artifact_relations": [_normalize_artifact_relation(row) for row in artifact_relations],
-        "updates": [_normalize_update_row(row) for row in updates],
+        "acceptance_criteria": _normalize_text_list(track.get("acceptance_criteria", []), "track.acceptance_criteria"),
+        "non_goals": _normalize_text_list(track.get("non_goals", []), "track.non_goals"),
+        "artifact_relations": normalized_relations,
+        "updates": normalized_updates,
         "created_at": created_at,
         "updated_at": updated_at,
         "archived_at": archived_at,

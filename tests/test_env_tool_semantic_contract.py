@@ -30,7 +30,8 @@ _EXPECTED_ACTIONS_BY_TOOL = {
         "add_comment",
         "list_comments",
         "resolve_comment_thread",
-        "update_now",
+        "update_requirements",
+        "update_status",
         "add_material",
         "add_update",
         "add_proof",
@@ -83,7 +84,8 @@ _EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS = {
     "track.create",
     "track.add_comment",
     "track.resolve_comment_thread",
-    "track.update_now",
+    "track.update_requirements",
+    "track.update_status",
     "track.add_material",
     "track.add_update",
     "track.add_proof",
@@ -213,7 +215,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("message", "get", ("exact", "message_id", "disposition")),
             ("message", "mark", ("absorbed", "needs_parent", "disposition")),
             ("message", "list", ("inbox", "read", "track")),
-            ("track", "resolve_comment_thread", ("pm", "thread", "resolved")),
+            ("track", "resolve_comment_thread", ("owner", "thread", "resolved")),
         ]
         for tool, action, snippets in checks:
             text = self._semantic_text(tool=tool, action=action)
@@ -542,9 +544,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         task_model = str(desc["task"].get("object_model", "")).lower()
         artifact_model = str(desc["artifact"].get("object_model", "")).lower()
 
-        self.assertIn("shared product outcome thread", track_model)
-        self.assertIn("feature iteration", track_model)
-        self.assertIn("not every feature", track_model)
+        self.assertIn("owner_actor", track_model)
+        self.assertIn("collaboration facts", track_model)
+        self.assertIn("comments are the only actor-attention", track_model)
         self.assertIn("private work item", task_model)
         self.assertIn("context link", task_model)
         self.assertIn("draft", artifact_model)

@@ -238,7 +238,13 @@ class ArtifactCompatibilityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
 class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_task_track_id_hint_does_not_mutate_track_state(self) -> None:
-        env_store.create_track("track-task-hint", "Task Hint", owner_role="pm")
+        env_store.create_track(
+            "track-task-hint",
+            "Task Hint",
+            owner_actor={"actor_id": "act-pm-task-hint", "role_id": "pm"},
+            outcome="Task hint outcome",
+            now={"next": "seed", "blocker": None},
+        )
         before = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
 
         instance_root = self._instance_root("act-task-track-hint")
@@ -297,7 +303,13 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
 class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_create_track_uses_artifact_relations_not_publication_slots(self) -> None:
-        track = env_store.create_track("track-relation-shape", "Relation Shape", owner_role="pm")
+        track = env_store.create_track(
+            "track-relation-shape",
+            "Relation Shape",
+            owner_actor={"actor_id": "act-pm-relation", "role_id": "pm"},
+            outcome="Relation outcome",
+            now={"next": "seed", "blocker": None},
+        )
 
         self.assertIn("artifact_relations", track)
         self.assertEqual(track["artifact_relations"], [])
@@ -316,11 +328,8 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "id": "track-reject-publication-slots",
             "title": "Reject publication slots",
             "outcome": "outcome",
-            "owner_role": "pm",
-            "created_by_actor": {"actor_id": "act-pm-reject-track", "role_id": "pm"},
+            "owner_actor": {"actor_id": "act-pm-reject-track", "role_id": "pm"},
             "state": "active",
-            "health": "ok",
-            "appetite": "1 day",
             "now": {"next": "next", "blocker": None},
             "artifact_relations": [],
             "updates": [],
@@ -341,11 +350,8 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "id": "track-relation-normalize",
                 "title": "Relation Normalize",
                 "outcome": "outcome",
-                "owner_role": "pm",
-                "created_by_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+                "owner_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
                 "state": "active",
-                "health": "ok",
-                "appetite": "1 day",
                 "now": {"next": "next", "blocker": None},
                 "artifact_relations": [
                     {
@@ -379,11 +385,8 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "id": "track-relation-invalid-role",
             "title": "Relation Invalid",
             "outcome": "outcome",
-            "owner_role": "pm",
-            "created_by_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+            "owner_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
             "state": "active",
-            "health": "ok",
-            "appetite": "1 day",
             "now": {"next": "next", "blocker": None},
             "artifact_relations": [
                 {
@@ -417,7 +420,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "summary": "",
             "updated_at": "2026-05-18T10:00:00+08:00",
         }
-        with self.assertRaisesRegex(ValueError, "legacy track fields are retired: status, summary, task_ids"):
+        with self.assertRaisesRegex(ValueError, "legacy track fields are retired: owner_role, status, summary, task_ids"):
             env_store.validate_track(payload)
 
 

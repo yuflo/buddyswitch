@@ -91,18 +91,16 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-identity-spoof",
                 "title": "Identity spoof",
                 "outcome": "x",
-                "appetite": "1d",
+                "now": {"next": "seed", "blocker": None},
                 "active_role": "pm",
                 "role": "pm",
             },
         )
 
         self.assertFalse(payload["ok"], msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
-        self.assertEqual(payload.get("permission_boundary"), "tool.role_authority")
-        self.assertEqual(payload.get("required_permission"), "track.create")
+        self.assertEqual((payload.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
+        self.assertEqual(payload.get("permission_boundary"), "request-payload")
         self.assertEqual(payload.get("active_role"), "dev")
-        self.assertEqual(payload.get("allowed_roles"), ["pm"])
         self.assertIs(payload.get("state_changed"), False)
 
     def test_runtime_surface_has_no_run_or_binding_identity_tools(self) -> None:

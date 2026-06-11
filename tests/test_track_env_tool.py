@@ -122,7 +122,6 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": track_id,
                 "title": track_id,
                 "outcome": "outcome",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -157,28 +156,32 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args=args,
         )
 
-    def test_pm_creates_human_readable_track_page(self) -> None:
+    def test_create_sets_active_actor_as_owner(self) -> None:
         instance_json = self._pm_instance()
         created = self._create_track(instance_json=instance_json, track_id="track-human-page")
         self.assertTrue(created.get("ok"), msg=created)
         track = created.get("track")
         self.assertIsInstance(track, dict, msg=created)
         assert isinstance(track, dict)
-        self.assertEqual(track.get("owner_role"), "pm")
         self.assertEqual(
-            track.get("created_by_actor"),
+            track.get("owner_actor"),
             {"actor_id": self._runtime_actor_id(role="pm", label="act-pm-track"), "role_id": "pm"},
         )
         self.assertEqual(track.get("state"), "active")
-        self.assertEqual(track.get("health"), "ok")
+        self.assertEqual(track.get("acceptance_criteria"), [])
+        self.assertEqual(track.get("non_goals"), [])
         self.assertEqual(track.get("artifact_relations"), [])
         self.assertEqual(track.get("updates"), [])
+        self.assertNotIn("owner_role", track)
+        self.assertNotIn("created_by_actor", track)
+        self.assertNotIn("health", track)
+        self.assertNotIn("appetite", track)
         self.assertNotIn("shared_materials", track)
         self.assertNotIn("close_proof", track)
 
-    def test_non_pm_cannot_create_track(self) -> None:
+    def test_non_pm_can_create_owned_track(self) -> None:
         instance_json = self._instance_json(actor_id="act-design-track", role="design")
-        denied = self._dispatch(
+        created = self._dispatch(
             instance_json=instance_json,
             actor_id="act-design-track",
             role="design",
@@ -188,34 +191,32 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-denied",
                 "title": "Denied",
                 "outcome": "Denied",
-                "appetite": "1 day",
                 "now": {"next": "x", "blocker": None},
             },
         )
-        self.assertFalse(denied.get("ok"), msg=denied)
-        self.assertEqual((denied.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
-        self.assertEqual(denied.get("permission_boundary"), "tool.role_authority")
-        self.assertEqual(denied.get("required_permission"), "track.create")
-        self.assertEqual(denied.get("active_role"), "design")
-        self.assertEqual(denied.get("allowed_roles"), ["pm"])
-        self.assertIs(denied.get("state_changed"), False)
-        self.assertFalse(env_store.track_file("track-denied").exists())
+        self.assertTrue(created.get("ok"), msg=created)
+        track = created.get("track")
+        self.assertIsInstance(track, dict, msg=created)
+        assert isinstance(track, dict)
+        self.assertEqual(
+            track.get("owner_actor"),
+            {"actor_id": self._runtime_actor_id(role="design", label="act-design-track"), "role_id": "design"},
+        )
 
-    def test_update_now_rejects_owner_role_without_state_mutation(self) -> None:
+    def test_update_requirements_rejects_owner_role_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-role-now").get("ok"))
-        before = env_store.track_file("track-owner-role-now").read_text(encoding="utf-8")
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-role-requirements").get("ok"))
+        before = env_store.track_file("track-owner-role-requirements").read_text(encoding="utf-8")
 
-        design_instance = self._instance_json(actor_id="act-design-owner-now", role="design")
         rejected = self._dispatch(
-            instance_json=design_instance,
-            actor_id="act-design-owner-now",
-            role="design",
+            instance_json=pm_instance,
+            actor_id="act-pm-track",
+            role="pm",
             tool="track",
-            action="update_now",
+            action="update_requirements",
             args={
-                "track_id": "track-owner-role-now",
-                "now": {"next": "x", "blocker": None},
+                "track_id": "track-owner-role-requirements",
+                "title": "x",
                 "owner_role": "design",
             },
         )
@@ -224,7 +225,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(rejected.get("permission_boundary"), "request-payload")
         self.assertIs(rejected.get("state_changed"), False)
         self.assertIn("unsupported payload fields: owner_role", str(rejected.get("why_blocked")))
-        self.assertEqual(env_store.track_file("track-owner-role-now").read_text(encoding="utf-8"), before)
+        self.assertEqual(env_store.track_file("track-owner-role-requirements").read_text(encoding="utf-8"), before)
 
     def test_add_update_rejects_owner_role_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
@@ -826,7 +827,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(env_store.get_track(track_id), before_track)
         self.assertEqual(env_store.get_artifact(artifact_id), before_artifact)
 
-    def test_add_proof_creates_relation_and_timeline_update_without_artifact_mutation(self) -> None:
+    def test_add_proof_creates_relation_without_timeline_or_artifact_mutation(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-relation").get("ok"))
 
@@ -856,7 +857,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         changes = {row.get("change") for row in proof.get("state_changes", []) if isinstance(row, dict)}
         self.assertNotIn("published_proof", changes)
         self.assertIn("proof_relation_added", changes)
-        self.assertIn("update_added", changes)
+        self.assertNotIn("update_added", changes)
 
         artifact = env_store.get_artifact("art-proof-r1")
         self.assertEqual(artifact, before_artifact)
@@ -873,12 +874,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("shared_materials", track)
         self.assertNotIn("close_proof", track)
         updates = [row for row in track.get("updates", []) if isinstance(row, dict)]
-        self.assertEqual(len(updates), 1)
-        self.assertEqual(updates[0].get("kind"), "proof")
-        refs = updates[0].get("refs")
-        self.assertIsInstance(refs, list)
-        assert isinstance(refs, list)
-        self.assertEqual(refs[0].get("id"), "art-proof-r1")
+        self.assertEqual(updates, [])
 
     def test_add_proof_replaces_current_relation_without_artifact_mutation(self) -> None:
         pm_instance = self._pm_instance()
@@ -992,11 +988,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"track_id": "track-archive"},
         )
         self.assertFalse(denied.get("ok"), msg=denied)
-        self.assertEqual((denied.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
-        self.assertEqual(denied.get("permission_boundary"), "tool.role_authority")
-        self.assertEqual(denied.get("required_permission"), "track.archive")
+        self.assertEqual((denied.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
+        self.assertEqual(denied.get("permission_boundary"), "track.owner_actor")
         self.assertEqual(denied.get("active_role"), "design")
-        self.assertEqual(denied.get("allowed_roles"), ["pm"])
         self.assertIs(denied.get("state_changed"), False)
         after_denied_archive = env_store.get_track("track-archive")
         self.assertIsInstance(after_denied_archive, dict)
@@ -1025,7 +1019,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         for action, args in (
             ("open", {"track_id": "track-archive"}),
-            ("update_now", {"track_id": "track-archive", "state": "done"}),
+            ("update_status", {"track_id": "track-archive", "state": "done", "now": {"next": "ship", "blocker": None}}),
             ("add_update", {"track_id": "track-archive", "kind": "progress", "summary": "x"}),
             ("add_material", {"track_id": "track-archive", "artifact_id": "art-archive-r1", "label": "Brief", "summary": "x"}),
             ("add_proof", {"track_id": "track-archive", "artifact_id": "art-archive-r1", "label": "Smoke", "summary": "x"}),

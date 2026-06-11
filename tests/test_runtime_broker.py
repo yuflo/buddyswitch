@@ -450,7 +450,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(supported["ok"], msg=supported)
 
-        role_denied = self._dispatch(
+        task_gated = self._dispatch(
             method="env.tool",
             params={
                 "tool": "track",
@@ -459,17 +459,17 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "track_id": "track-broker-role-denied",
                     "title": "Broker Role Denied",
                     "outcome": "Denied",
-                    "appetite": "1 day",
+                    "now": {"next": "Denied", "blocker": None},
                 },
             },
             instance_json=instance_json,
             actor_id="act-dev-example",
             role="dev",
         )
-        self.assertFalse(role_denied["ok"], msg=role_denied)
-        self.assertEqual(role_denied["error"]["code"], "E_TOOL_ROLE_AUTH")
-        self.assertEqual(role_denied.get("active_role"), "dev")
-        self.assertEqual(role_denied.get("required_permission"), "track.create")
+        self.assertFalse(task_gated["ok"], msg=task_gated)
+        self.assertEqual(task_gated["error"]["code"], "E_ACTIVE_TASK_REQUIRED")
+        self.assertEqual(task_gated.get("permission_boundary"), "task.active_anchor")
+        self.assertEqual(task_gated.get("active_role"), "dev")
 
         wrong_instance = self._dispatch(
             method="env.tool",
@@ -789,7 +789,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
     def test_lock_mode_for_mutating_env_tool_is_write(self) -> None:
         for params in (
             {"tool": "task", "action": "capture", "args": {}},
-            {"tool": "track", "action": "update_now", "args": {}},
+            {"tool": "track", "action": "update_status", "args": {}},
             {"tool": "track", "action": "add_material", "args": {}},
             {"tool": "track", "action": "add_update", "args": {}},
             {"tool": "track", "action": "add_proof", "args": {}},

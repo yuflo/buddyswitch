@@ -151,10 +151,8 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         track = track_repo.create_track(
             track_id,
             f"Track {track_id}",
-            owner_role="pm",
-            created_by_actor={"actor_id": "act-pm-track-source", "role_id": "pm"},
+            owner_actor={"actor_id": "act-pm-track-source", "role_id": "pm"},
             outcome="Track comment handler outcome",
-            appetite="1 day",
             now={"next": "test", "blocker": None},
         )
         if archived:

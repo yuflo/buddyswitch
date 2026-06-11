@@ -94,17 +94,25 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             if effects:
                 track_effects_seen.append((role_id, effects))
             self.assertNotIn("request_" + "effects", profile["state_capability"])
-            expected_comment_effects = ["resolve"] if role_id == "pm" else []
-            self.assertEqual(profile["state_capability"]["comment_effects"], expected_comment_effects)
+            self.assertEqual(profile["state_capability"]["comment_effects"], ["resolve"])
 
+        expected_track_effects = [
+            "create",
+            "update_requirements",
+            "update_status",
+            "add_material",
+            "add_update",
+            "add_proof",
+            "archive",
+        ]
         self.assertEqual(
             track_effects_seen,
             [
-                ("market", ["update_now", "add_material", "add_update", "add_proof"]),
-                ("pm", ["create", "update_now", "add_material", "add_update", "add_proof", "archive"]),
-                ("design", ["update_now", "add_material", "add_update", "add_proof"]),
-                ("dev", ["update_now", "add_material", "add_update", "add_proof"]),
-                ("test", ["update_now", "add_material", "add_update", "add_proof"]),
+                ("market", expected_track_effects),
+                ("pm", expected_track_effects),
+                ("design", expected_track_effects),
+                ("dev", expected_track_effects),
+                ("test", expected_track_effects),
             ],
         )
 

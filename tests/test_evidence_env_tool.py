@@ -231,7 +231,13 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_readable_but_not_authored_target_is_rejected(self) -> None:
         artifact_id = self._seed_market_targets()
-        env_store.create_track("track-market-readable", "Readable Market Track", owner_role="market")
+        env_store.create_track(
+            "track-market-readable",
+            "Readable Market Track",
+            owner_actor={"actor_id": "act-market-readable", "role_id": "market"},
+            outcome="Readable market outcome",
+            now={"next": "seed", "blocker": None},
+        )
         env_store.publish_track_material(
             track_id="track-market-readable",
             artifact_id=artifact_id,

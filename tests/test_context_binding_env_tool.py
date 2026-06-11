@@ -176,7 +176,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _seed_context_state(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-context")
-        env_store.create_track("track-context-active", "Context Track", owner_role="pm")
+        env_store.create_track(
+            "track-context-active",
+            "Context Track",
+            owner_actor={"actor_id": actor_id, "role_id": "dev"},
+            outcome="Context outcome",
+            now={"next": "seed", "blocker": None},
+        )
         self._seed_taskbox_task(
             actor_id=actor_id,
             role="dev",
@@ -227,9 +233,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-context-archived",
             "Archived Track",
-            owner_role="pm",
-            state="done",
-            health="ok",
+            owner_actor={"actor_id": self._runtime_actor_id(role="pm", label="act-pm-context"), "role_id": "pm"},
+            outcome="Archived outcome",
+            now={"next": "archived", "blocker": None},
         )
         self._seed_taskbox_task(
             actor_id=actor_id,
@@ -360,14 +366,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("track.list", preview.get("available_actions", []))
         self.assertIn("artifact.create_revision", preview.get("available_actions", []))
         self.assertIn("message.send", preview.get("available_actions", []))
-        self.assertIn("track.create", preview.get("restricted_actions", []))
-        self.assertIn("track.archive", preview.get("restricted_actions", []))
-        self.assertIn("track.resolve_comment_thread", preview.get("restricted_actions", []))
-        details = preview.get("restricted_action_details")
-        self.assertIsInstance(details, dict, msg=preview)
-        assert isinstance(details, dict)
-        self.assertEqual(details.get("track.create", {}).get("required_permission"), "track.create")
-        self.assertEqual(details.get("track.create", {}).get("restricted_to_roles"), ["pm"])
+        self.assertIn("track.create", preview.get("available_actions", []))
+        self.assertIn("track.update_requirements", preview.get("available_actions", []))
+        self.assertIn("track.update_status", preview.get("available_actions", []))
+        self.assertIn("track.archive", preview.get("available_actions", []))
+        self.assertIn("track.resolve_comment_thread", preview.get("available_actions", []))
+        self.assertEqual(preview.get("restricted_actions"), [])
+        self.assertEqual(preview.get("restricted_action_details"), {})
         self.assertNotIn("object_" + "permissions", json.dumps(snapshot, ensure_ascii=True))
         self.assertIn("active actor private", str(snapshot.get("task_visibility")))
         artifact_create = tool_registry.operation_semantics()["artifact.create_revision"]
@@ -385,7 +390,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("track-scoped", str(snapshot.get("track_comment_support")).lower())
         self.assertIn("browser", str(snapshot.get("search_boundary")).lower())
 
-    def test_context_candidate_tracks_use_owner_role_and_actor_creator(self) -> None:
+    def test_context_candidate_tracks_use_owner_actor_and_exact_actor_relation(self) -> None:
         self._seed_context_state()
         instance_json = self._instance_json()
         payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
@@ -397,9 +402,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertIn("owner_role", row)
-            self.assertIn("created_by_actor", row)
-            self.assertIn(row.get("active_role_relation"), {"owner", "observer", "collaborator"})
+            self.assertIn("owner_actor", row)
+            self.assertNotIn("owner_role", row)
+            self.assertNotIn("created_by_actor", row)
+            self.assertIn(row.get("active_actor_relation"), {"owner", "collaborator"})
+            self.assertIn(row.get("active_role_relation"), {"owner", "collaborator"})
+            if row.get("track_id") == "track-context-active":
+                self.assertEqual(row.get("active_actor_relation"), "owner")
             self.assertNotIn("current_role", row)
             self.assertNotIn("next_role", row)
             self.assertNotIn("participant", row)
@@ -840,11 +849,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         preview = snapshot.get("runtime_policy_preview")
         self.assertIsInstance(preview, dict, msg=snapshot)
         assert isinstance(preview, dict)
-        details = preview.get("restricted_action_details")
-        self.assertIsInstance(details, dict, msg=preview)
-        assert isinstance(details, dict)
-        self.assertEqual(details.get("track.resolve_comment_thread", {}).get("required_permission"), "track.resolve_comment_thread")
-        self.assertEqual(details.get("track.resolve_comment_thread", {}).get("restricted_to_roles"), ["pm"])
+        self.assertIn("track.resolve_comment_thread", preview.get("available_actions", []))
+        self.assertEqual(preview.get("restricted_action_details"), {})
         self.assertNotIn("object_" + "permissions", json.dumps(payload, ensure_ascii=True))
         self.assertIn("source_workspace", operation_semantics["context.get"]["returns"])
         self.assertIn("writable_surfaces", operation_semantics["context.get"]["returns"])
@@ -875,7 +881,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("read-only", summarize_description)
 
         track_catalog = payload.get("tool_catalog", {}).get("track", {})
-        self.assertIn("shared product outcome thread", str(track_catalog.get("object_model", "")).lower())
+        track_model = str(track_catalog.get("object_model", "")).lower()
+        self.assertIn("owner_actor", track_model)
+        self.assertIn("collaboration facts", track_model)
         track_create = track_catalog.get("action_semantics", {}).get("create", {})
         self.assertIn("visibility", track_create)
         self.assertIn("failure_state_guarantee", track_create)

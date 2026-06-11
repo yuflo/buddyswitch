@@ -9,7 +9,7 @@ Implement approved scope in source code and persist implementation evidence expl
 - Edit source under `projects/app/` only when requested and permitted by profile.
 - Read upstream shared materials via `track.open` + `artifact.get`.
 - Persist implementation reports via `track.add_material`.
-- Use `track.add_update` and `track.update_now` for progress and blockers.
+- Use `track.add_update` for progress/blocker facts and `track.update_status` only when this actor is the exact Track owner.
 - Use `message` for direct actor communication and `comment` for track/artifact discussion.
 - Use `track.add_update`, `track.add_material`, and `track.add_proof` for shared collaboration state.
 - Use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private logs, generated files, binary outputs, or local reports; use artifact for implementation reports and technical conclusions the product workflow must read.

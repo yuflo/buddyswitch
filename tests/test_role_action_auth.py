@@ -53,16 +53,12 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             role_auth.authorize("none", "pm", self.manifest)  # type: ignore[arg-type]
 
-    def test_pm_only_permissions_allow_only_pm(self) -> None:
-        for permission in ("track.create", "track.archive", "track.resolve_comment_thread"):
+    def test_track_owner_permissions_allow_every_manifest_role_at_policy_layer(self) -> None:
+        for permission in ("track.create", "track.update_requirements", "track.update_status", "track.archive", "track.resolve_comment_thread"):
             with self.subTest(permission=permission):
-                self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), frozenset({"pm"}))
+                self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
                 self.assertTrue(role_auth.authorize(permission, self._subject("pm"), self.manifest).allowed)
-                denied = role_auth.authorize(permission, self._subject("dev"), self.manifest)
-                self.assertFalse(denied.allowed)
-                self.assertEqual(denied.required_permission, permission)
-                self.assertEqual(denied.active_role, "dev")
-                self.assertEqual(denied.allowed_roles, ("pm",))
+                self.assertTrue(role_auth.authorize(permission, self._subject("dev"), self.manifest).allowed)
 
     def test_common_permissions_allow_every_manifest_role(self) -> None:
         for permission in (
@@ -113,12 +109,13 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertIn("track.list", summary["available_actions"])
         self.assertIn("artifact.create_revision", summary["available_actions"])
         self.assertIn("message.send", summary["available_actions"])
-        self.assertIn("track.create", summary["restricted_actions"])
-        self.assertIn("track.archive", summary["restricted_actions"])
-        self.assertIn("track.resolve_comment_thread", summary["restricted_actions"])
-        details = summary["restricted_action_details"]
-        self.assertEqual(details.get("track.create", {}).get("required_permission"), "track.create")
-        self.assertEqual(details.get("track.create", {}).get("restricted_to_roles"), ["pm"])
+        self.assertIn("track.create", summary["available_actions"])
+        self.assertIn("track.update_requirements", summary["available_actions"])
+        self.assertIn("track.update_status", summary["available_actions"])
+        self.assertIn("track.archive", summary["available_actions"])
+        self.assertIn("track.resolve_comment_thread", summary["available_actions"])
+        self.assertEqual(summary["restricted_actions"], [])
+        self.assertEqual(summary["restricted_action_details"], {})
 
     def test_pm_preview_has_no_pm_only_restricted_actions(self) -> None:
         summary = role_auth.role_action_summary(self._subject("pm"), self.manifest, self.operation_semantics)
@@ -126,6 +123,8 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertNotIn("track.archive", summary["restricted_actions"])
         self.assertNotIn("track.resolve_comment_thread", summary["restricted_actions"])
         self.assertIn("track.create", summary["available_actions"])
+        self.assertIn("track.update_requirements", summary["available_actions"])
+        self.assertIn("track.update_status", summary["available_actions"])
         self.assertIn("track.archive", summary["available_actions"])
         self.assertIn("track.resolve_comment_thread", summary["available_actions"])
 

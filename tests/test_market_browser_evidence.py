@@ -215,7 +215,13 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_market_task_and_artifact(self, *, actor_id: str = "act-market") -> tuple[str, str]:
-        track = env_store.create_track("track-market-evidence", "Market Evidence", owner_role="market")
+        track = env_store.create_track(
+            "track-market-evidence",
+            "Market Evidence",
+            owner_actor={"actor_id": self._runtime_actor_id(role="market", label=actor_id), "role_id": "market"},
+            outcome="Market evidence outcome",
+            now={"next": "seed", "blocker": None},
+        )
         task_id = "task-market-evidence"
         actual_actor_id = self._runtime_actor_id(role="market", label=actor_id)
         self._write_taskbox_task(

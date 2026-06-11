@@ -440,7 +440,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "track_id": "track-response",
                 "title": "Response",
                 "outcome": "Response outcome",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -573,7 +572,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "track_id": "track-declared-effects",
                 "title": "Declared Effects",
                 "outcome": "Compare responses to definitions.",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -677,7 +675,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "track_id": "track-mutation-response",
                 "title": "Mutation response",
                 "outcome": "outcome",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -717,7 +714,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(set(proof.get("updated_ids", [])), {"track-mutation-response"})
         changes = {row.get("change") for row in proof.get("state_changes", []) if isinstance(row, dict)}
         self.assertIn("proof_relation_added", changes)
-        self.assertIn("update_added", changes)
+        self.assertNotIn("update_added", changes)
 
     def test_message_mark_needs_parent_prompt_failure_follows_rejection_contract(self) -> None:
         dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
@@ -888,7 +885,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "track_id": "track-field-errors",
                 "title": "Field Errors",
                 "outcome": "Improve payload recovery.",
-                "appetite": "1 day",
                 "now": {"next": "seed", "blocker": None},
             },
         )
@@ -922,21 +918,20 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                         "track_id": "track-field-errors-bad-now",
                         "title": "Bad now",
                         "outcome": "fail",
-                        "appetite": "1 day",
                         "now": "next step",
                     },
                 ),
                 "now",
             ),
             (
-                "track.update_now.now",
+                "track.update_status.now",
                 self._dispatch(
                     instance_json=pm_instance_json,
                     actor_id=pm_actor_id,
                     role="pm",
                     tool="track",
-                    action="update_now",
-                    args={"track_id": "track-field-errors", "now": {"blocker": None}},
+                    action="update_status",
+                    args={"track_id": "track-field-errors", "state": "active", "now": {"blocker": None}},
                 ),
                 "now",
             ),
