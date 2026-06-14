@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import sys
 import tempfile
 import unittest
 from itertools import count
@@ -13,9 +15,23 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from env.repos import runtime_files  # noqa: E402
+
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
 MODULE_COUNTER = count()
+RUNTIME_ENV_KEYS = (
+    "BUDDYSWITCH_SHARED_ROOT",
+    "BUDDYSWITCH_STATE_ROOT",
+    "BUDDYSWITCH_INSTANCE_ROOT",
+    "BUDDYSWITCH_INSTANCE_JSON",
+    "BUDDYSWITCH_WORKSPACE_DIR",
+    "BUDDYSWITCH_ACTOR_ID",
+)
 
 
 def load_daemon_core() -> Any:
@@ -36,7 +52,18 @@ class StopDaemonLoop(RuntimeError):
 
 class DaemonCoreTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        self._saved_runtime_env = {key: os.environ.get(key) for key in RUNTIME_ENV_KEYS}
+        self.addCleanup(self._restore_runtime_env, self._saved_runtime_env)
         self.core = load_daemon_core()
+
+    def _restore_runtime_env(self, values: dict[str, str | None]) -> None:
+        for key, value in values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        runtime_files.reset_runtime_root_override()
+        runtime_files.refresh_runtime_roots_from_env()
 
 
 class DaemonCoreStateTests(DaemonCoreTestCase):
@@ -390,6 +417,25 @@ class DaemonCoreBindingTests(DaemonCoreTestCase):
             with self.assertRaises(self.core.app_server.AppServerProtocolError):
                 self.core.bind_main_thread(context, client)
 
+    def test_derive_daemon_runtime_env_projects_shared_state_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+
+            env = self.core.derive_daemon_runtime_env(context)
+
+            shared_root = Path(temp_root)
+            self.assertEqual(
+                env,
+                {
+                    "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
+                    "BUDDYSWITCH_STATE_ROOT": str(shared_root / "state"),
+                    "BUDDYSWITCH_INSTANCE_ROOT": str(instance["instance_root"]),
+                    "BUDDYSWITCH_INSTANCE_JSON": str(instance["instance_json"]),
+                    "BUDDYSWITCH_WORKSPACE_DIR": str(instance["workspace_dir"]),
+                },
+            )
+
 
 class DaemonCoreLifecycleTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
@@ -408,8 +454,9 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
         instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
         return {"instance_root": instance_root, "instance_json": instance_json}
 
-    def _patch_process_start(self, pids: list[int]) -> list[list[str]]:
+    def _patch_process_start(self, pids: list[int]) -> tuple[list[list[str]], list[dict[str, object]]]:
         commands: list[list[str]] = []
+        popen_kwargs: list[dict[str, object]] = []
         original_popen = self.core.subprocess.Popen
 
         class FakeProcess:
@@ -419,13 +466,14 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             def poll(self) -> None:
                 return None
 
-        def fake_popen(command: list[str], **_kwargs: object) -> FakeProcess:
+        def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
             commands.append(command)
+            popen_kwargs.append(kwargs)
             return FakeProcess(pids.pop(0))
 
         self.addCleanup(setattr, self.core.subprocess, "Popen", original_popen)
         self.core.subprocess.Popen = fake_popen
-        return commands
+        return commands, popen_kwargs
 
     def _patch_sleep_to_record_ready(
         self,
@@ -493,7 +541,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
     def test_start_daemon_creates_runtime_files_and_is_idempotent_when_pid_is_live(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            commands = self._patch_process_start([4321])
+            commands, _popen_kwargs = self._patch_process_start([4321])
             self._patch_pid_live({4321})
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4321)
 
@@ -514,12 +562,32 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertTrue(self.core.daemon_log_file(instance["instance_root"]).exists())
             self.assertTrue(self.core.daemon_state_file(instance["instance_root"]).exists())
 
+    def test_start_daemon_passes_shared_state_root_to_child_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            _commands, popen_kwargs = self._patch_process_start([4326])
+            self._patch_pid_live({4326})
+            self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4326)
+
+            payload = self.core.start_daemon(instance["instance_json"])
+
+            self.assertTrue(payload["started"])
+            self.assertEqual(len(popen_kwargs), 1)
+            env = popen_kwargs[0].get("env")
+            self.assertIsInstance(env, dict)
+            assert isinstance(env, dict)
+            self.assertEqual(env["BUDDYSWITCH_SHARED_ROOT"], str(Path(temp_root)))
+            self.assertEqual(env["BUDDYSWITCH_STATE_ROOT"], str(Path(temp_root) / "state"))
+            self.assertEqual(env["BUDDYSWITCH_INSTANCE_ROOT"], str(instance["instance_root"]))
+            self.assertEqual(env["BUDDYSWITCH_INSTANCE_JSON"], str(instance["instance_json"]))
+            self.assertEqual(env["BUDDYSWITCH_WORKSPACE_DIR"], str(instance["instance_root"] / "workspace"))
+
     def test_start_daemon_replaces_stale_pid_before_starting_new_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             self.core.daemon_pid_file(instance["instance_root"]).parent.mkdir(parents=True, exist_ok=True)
             self.core.daemon_pid_file(instance["instance_root"]).write_text("9999\n", encoding="utf-8")
-            commands = self._patch_process_start([4322])
+            commands, _popen_kwargs = self._patch_process_start([4322])
             self._patch_pid_live({4322})
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4322)
 
@@ -565,7 +633,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             self.core.daemon_pid_file(instance["instance_root"]).parent.mkdir(parents=True, exist_ok=True)
             self.core.daemon_pid_file(instance["instance_root"]).write_text("9999\n", encoding="utf-8")
-            commands = self._patch_process_start([4325])
+            commands, _popen_kwargs = self._patch_process_start([4325])
             self._patch_pid_live({9999, 4325})
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4325)
             original_terminate = self.core._terminate_pid
@@ -923,6 +991,37 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
         self.core.heartbeat_daemon_actor = fake_heartbeat
         self.core.unregister_daemon_actor = fake_unregister
         return calls
+
+    def test_run_daemon_binds_shared_state_root_before_handlers_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            wrong_root = Path(temp_root) / "wrong-state"
+            runtime_files.reset_runtime_root_override()
+            os.environ.pop("BUDDYSWITCH_SHARED_ROOT", None)
+            os.environ["BUDDYSWITCH_STATE_ROOT"] = str(wrong_root)
+            runtime_files.refresh_runtime_roots_from_env()
+
+            fake_client = FakeRunDaemonClient(notifications=[StopDaemonLoop("stop")])
+            self._patch_app_server_client(fake_client)
+            communication = self._patch_daemon_communication()
+            observed_roots: list[Path] = []
+            fake_start_mailbox = self.core.start_daemon_mailbox
+
+            def observing_start_mailbox(**kwargs: object) -> object:
+                observed_roots.append(runtime_files.STATE_ROOT)
+                return fake_start_mailbox(**kwargs)
+
+            self.core.start_daemon_mailbox = observing_start_mailbox
+
+            with self.assertRaises(StopDaemonLoop):
+                self.core.run_daemon(instance["instance_json"], handlers=[])
+
+            expected_state_root = Path(temp_root) / "state"
+            expected_resolved_state_root = expected_state_root.resolve(strict=False)
+            self.assertEqual(os.environ["BUDDYSWITCH_STATE_ROOT"], str(expected_state_root))
+            self.assertEqual(runtime_files.STATE_ROOT, expected_resolved_state_root)
+            self.assertEqual(observed_roots, [expected_resolved_state_root])
+            self.assertEqual(len(communication["mailbox_closed"]), 1)
 
     def test_run_daemon_continues_after_notification_idle_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

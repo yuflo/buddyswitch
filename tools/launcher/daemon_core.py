@@ -26,6 +26,7 @@ import daemon_mailbox  # noqa: E402
 import daemon_triggers  # noqa: E402
 import side_thread_registry  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 
@@ -957,6 +958,17 @@ def load_daemon_context(instance_json: Path) -> DaemonContext:
     )
 
 
+def derive_daemon_runtime_env(context: DaemonContext) -> dict[str, str]:
+    shared_root = context.instance_root.parent.parent
+    return {
+        "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
+        "BUDDYSWITCH_STATE_ROOT": str(shared_root / "state"),
+        "BUDDYSWITCH_INSTANCE_ROOT": str(context.instance_root),
+        "BUDDYSWITCH_INSTANCE_JSON": str(context.instance_json),
+        "BUDDYSWITCH_WORKSPACE_DIR": str(context.workspace_dir),
+    }
+
+
 def actor_address_for_context(context: DaemonContext) -> actor_profile.ActorAddress:
     record = actor_profile.runtime_actor_record_from_dispatch(
         actor_id=context.actor_id,
@@ -1325,6 +1337,8 @@ def start_daemon(
         "--instance-json",
         str(instance_json),
     ]
+    child_env = os.environ.copy()
+    child_env.update(derive_daemon_runtime_env(context))
     with log_path.open("ab") as log_handle:
         process = subprocess.Popen(
             command,
@@ -1333,6 +1347,7 @@ def start_daemon(
             stderr=subprocess.STDOUT,
             start_new_session=True,
             cwd=str(context.instance_root),
+            env=child_env,
         )
     _write_text_file(pid_path, str(process.pid))
     deadline = time.monotonic() + DAEMON_READY_TIMEOUT_SECONDS
@@ -1390,6 +1405,8 @@ def run_daemon(
     notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> int:
     context = load_daemon_context(instance_json)
+    os.environ.update(derive_daemon_runtime_env(context))
+    runtime_files.refresh_runtime_roots_from_env()
     actor_address = actor_address_for_context(context)
     state = DaemonState.load(
         instance_root=context.instance_root,

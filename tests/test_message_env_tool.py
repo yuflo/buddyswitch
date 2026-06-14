@@ -885,6 +885,10 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("[MESSAGE NEEDS PARENT]", prompt)
         self.assertIn(seed["id"], prompt)
         self.assertIn("It changes the active implementation direction.", prompt)
+        self.assertIn("Runtime context:", prompt)
+        self.assertIn("task.current", prompt)
+        self.assertIn("task.capture/task.select", prompt)
+        self.assertIn("If the requested work is small enough to complete now", prompt)
 
     def test_projected_runtime_context_uses_repo_root_for_parent_handoff_import(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-projected-parent", role="dev")

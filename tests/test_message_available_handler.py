@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+MESSAGE_DOMAIN_PATH = ROOT / "scripts" / "env" / "domain" / "messages.py"
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 HANDLER_PATH = ROOT / "tools" / "launcher" / "message_available_handler.py"
 MODULE_COUNTER = count()
@@ -211,6 +212,14 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertIn("msg-readable", prompt)
             self.assertIn('From: {"actor_id": "act-pm-readable", "role_id": "pm"}', prompt)
             self.assertIn('To: {"actor_id": "act-dev-daemon", "role_id": "dev"}', prompt)
+            self.assertIn("Required action:", prompt)
+            self.assertIn("Runtime context:", prompt)
+            self.assertIn("Work-demand guidance:", prompt)
+            self.assertIn("concrete work demand for this actor", prompt)
+            self.assertIn("acknowledgement alone is usually not completion", prompt)
+            self.assertIn("task.current", prompt)
+            self.assertIn("task.capture/task.select", prompt)
+            self.assertIn("smallest substantive work", prompt)
             self.assertIn("message__get", prompt)
             self.assertIn("message__conversation", prompt)
             self.assertIn("message__send", prompt)
@@ -238,6 +247,12 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertIn("msg-readable", prompt)
             self.assertIn('From: {"actor_id": "act-pm-readable", "role_id": "pm"}', prompt)
             self.assertIn('To: {"actor_id": "act-dev-daemon", "role_id": "dev"}', prompt)
+            self.assertIn("Runtime context:", prompt)
+            self.assertIn("Side triage should not silently convert parent-level work into a lightweight acknowledgement.", prompt)
+            self.assertIn("Outcome B: Parent must process it.", prompt)
+            self.assertIn("The message assigns concrete work to this actor", prompt)
+            self.assertIn("should not be completed as a side-triage acknowledgement", prompt)
+            self.assertIn("the reason must cite the specific condition", prompt)
             self.assertIn("message__get", prompt)
             self.assertIn("message__conversation", prompt)
             self.assertIn("message__send", prompt)
@@ -258,7 +273,12 @@ class MessageAvailableHandlerTests(unittest.TestCase):
         )
 
         self.assertIn("[MESSAGE NEEDS PARENT]", prompt)
+        self.assertIn("Reason from side triage:", prompt)
         self.assertIn("Requires parent context.", prompt)
+        self.assertIn("Runtime context:", prompt)
+        self.assertIn("task.current", prompt)
+        self.assertIn("task.capture/task.select", prompt)
+        self.assertIn("smallest substantive work", prompt)
         self.assertIn("message__get", prompt)
         self.assertIn("message__conversation", prompt)
         self.assertIn("message__send", prompt)
@@ -303,6 +323,24 @@ class MessageAvailableHandlerTests(unittest.TestCase):
 
             self.assertEqual(result.status, "ignored")
             self.assertEqual(runtime.calls, [])
+
+    def test_message_prompt_renderers_are_sectioned_domain_helpers(self) -> None:
+        source = MESSAGE_DOMAIN_PATH.read_text(encoding="utf-8")
+
+        for helper in (
+            "_message_header",
+            "_message_runtime_context",
+            "_message_parent_steps",
+            "_message_side_triage_steps",
+            "_message_parent_work_demand_tips",
+            "_message_side_work_demand_tips",
+            "_message_finish",
+        ):
+            with self.subTest(helper=helper):
+                self.assertIn(f"def {helper}(", source)
+        self.assertIn("def render_parent_message_prompt(", source)
+        self.assertIn("def render_side_triage_prompt(", source)
+        self.assertIn("def render_parent_required_prompt(", source)
 
 
 if __name__ == "__main__":

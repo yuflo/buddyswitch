@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
 
+TRACK_COMMENT_DOMAIN_PATH = ROOT / "scripts" / "env" / "domain" / "track_comments.py"
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 HANDLER_PATH = ROOT / "tools" / "launcher" / "track_comment_added_handler.py"
 MODULE_COUNTER = count()
@@ -95,6 +97,15 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         runtime_files.reset_runtime_root_override()
         self._tmp_dir.cleanup()
         super().tearDown()
+
+    def _restore_runtime_env(self, values: dict[str, str | None]) -> None:
+        for key, value in values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        runtime_files.reset_runtime_root_override()
+        runtime_files.refresh_runtime_roots_from_env()
 
     def _instance(self, *, actor_id: str = "act-dev-track-handler", role: str = "dev") -> dict[str, Any]:
         instance_root = self.runtime_root / "instances" / actor_id
@@ -298,6 +309,77 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertIn("archived", result.message)
         self.assertEqual(runtime.calls, [])
 
+    def test_track_comment_handler_reads_rows_from_daemon_bound_shared_state_root(self) -> None:
+        original_env = {
+            key: os.environ.get(key)
+            for key in (
+                "BUDDYSWITCH_SHARED_ROOT",
+                "BUDDYSWITCH_STATE_ROOT",
+                "BUDDYSWITCH_INSTANCE_ROOT",
+                "BUDDYSWITCH_INSTANCE_JSON",
+                "BUDDYSWITCH_WORKSPACE_DIR",
+                "BUDDYSWITCH_ACTOR_ID",
+            )
+        }
+        self.addCleanup(self._restore_runtime_env, original_env)
+        runtime_files.reset_runtime_root_override()
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_root_text:
+            shared_root = Path(temp_root_text)
+            state_root = shared_root / "state"
+            instance_root = shared_root / "instances" / "act-dev-track-handler"
+            workspace_dir = instance_root / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            instance_json = instance_root / "instance.json"
+            payload = {
+                "actor_id": "act-dev-track-handler",
+                "role": "dev",
+                "status": "active",
+                "instance_root": str(instance_root),
+                "workspace_dir": str(workspace_dir),
+                "thread_id": "thr-main-track",
+                "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
+            }
+            instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+            context = self.daemon_core.load_daemon_context(instance_json)
+
+            os.environ.update(self.daemon_core.derive_daemon_runtime_env(context))
+            os.environ["BUDDYSWITCH_ACTOR_ID"] = "act-dev-track-handler"
+            runtime_files.refresh_runtime_roots_from_env()
+
+            track_id = "track-comment-shared-root"
+            self._seed_track(track_id)
+            comment = self._seed_comment(
+                track_id=track_id,
+                mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}],
+            )
+            comment_path = (
+                state_root
+                / "buddyswitch"
+                / "objects"
+                / "track-comments"
+                / track_id
+                / f"{comment['id']}.json"
+            )
+            self.assertTrue(comment_path.exists())
+            self.assertFalse((shared_root / "buddyswitch" / "objects" / "track-comments").exists())
+
+            state = self.daemon_core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-track-handler",
+                main_thread_id="thr-main-track",
+            )
+            runtime = FakeDaemonRuntime()
+
+            result = self.handler.handle(
+                context,
+                state,
+                runtime,
+                self._trigger(payload=self._payload_for(comment)),
+            )
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity", "submit_parent_prompt"])
+
     def test_track_comment_handler_routes_idle_parent_to_parent_prompt(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "idle", "active_turn_id": None})
@@ -322,6 +404,15 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertIn("[TRACK COMMENT ATTENTION]", prompt)
         self.assertIn(str(comment["id"]), prompt)
         self.assertIn(str(comment["track_id"]), prompt)
+        self.assertIn("Required action:", prompt)
+        self.assertIn("Runtime context:", prompt)
+        self.assertIn("Track tools remain the source of truth", prompt)
+        self.assertIn("Task tools are only for this actor's private work tracking", prompt)
+        self.assertIn("Work-demand guidance:", prompt)
+        self.assertIn("acknowledgement alone is usually not completion", prompt)
+        self.assertIn("task.current", prompt)
+        self.assertIn("task.capture/task.select", prompt)
+        self.assertIn("reply with the result in the Track thread", prompt)
         self.assertIn("track.open", prompt)
         self.assertIn("track.list_comments", prompt)
         self.assertIn("track.add_comment", prompt)
@@ -362,13 +453,22 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         prompt = call["text"]
         self.assertIsInstance(prompt, str)
         self.assertIn("[TRACK COMMENT TRIAGE]", prompt)
+        self.assertIn("Runtime context:", prompt)
+        self.assertIn("Side triage is for quick Track-thread handling only.", prompt)
+        self.assertIn("Work-demand guidance:", prompt)
+        self.assertIn("do not present it as done", prompt)
+        self.assertIn("Leave substantive work for the parent/main path", prompt)
         self.assertIn("track.open", prompt)
         self.assertIn("track.list_comments", prompt)
         self.assertIn("track.add_comment", prompt)
         self.assertIn("track.resolve_comment_thread", prompt)
+        self.assertIn("Use only Track tools for this comment.", prompt)
         self.assertNotIn("notification.", prompt)
         self.assertNotIn("side_thread_id", prompt)
         self.assertNotIn("needs_parent", prompt)
+        self.assertNotIn("absorbed", prompt)
+        self.assertNotIn("replied", prompt)
+        self.assertNotIn("message__mark", prompt)
 
     def test_track_comment_handler_routes_reply_attention_to_parent_comment_author(self) -> None:
         instance = self._instance()
@@ -406,6 +506,23 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertIn("app-server down", result.message)
         self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity"])
+
+    def test_track_comment_prompt_renderers_are_sectioned_domain_helpers(self) -> None:
+        source = TRACK_COMMENT_DOMAIN_PATH.read_text(encoding="utf-8")
+
+        for helper in (
+            "_track_comment_header",
+            "_track_comment_runtime_context",
+            "_track_comment_parent_steps",
+            "_track_comment_side_steps",
+            "_track_comment_parent_work_demand_tips",
+            "_track_comment_side_work_demand_tips",
+            "_track_comment_finish",
+        ):
+            with self.subTest(helper=helper):
+                self.assertIn(f"def {helper}(", source)
+        self.assertIn("def render_parent_track_comment_prompt(", source)
+        self.assertIn("def render_side_track_comment_prompt(", source)
 
 
 if __name__ == "__main__":
