@@ -274,4 +274,3 @@ builder already produces.
 
 If the browser page list cannot be read, do not guess. The tool response should make the failed
 resource check visible instead of silently opening as if the limit had been enforced.
-
