@@ -7,11 +7,18 @@ import argparse
 import copy
 import json
 import os
+from pathlib import Path
 import shlex
 import subprocess
 import sys
 import threading
 from typing import Any
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from env.cdp_browser_session import BROWSER_PAGE_LIMIT_BLOCK_TEXT, evaluate_page_open_gate  # noqa: E402
 
 
 DEFAULT_UPSTREAM_COMMAND = "npx chrome-devtools-mcp@1.1.1"
@@ -57,6 +64,21 @@ def tool_error_response(request: dict[str, Any], text: str) -> dict[str, Any]:
     }
 
 
+def tool_success_response(request: dict[str, Any], text: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": request.get("jsonrpc", "2.0"),
+        "id": request.get("id"),
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": text,
+                }
+            ],
+        },
+    }
+
+
 def rpc_error_response(request: dict[str, Any], text: str) -> dict[str, Any]:
     return {
         "jsonrpc": request.get("jsonrpc", "2.0"),
@@ -75,16 +97,19 @@ def focus_block_text(method: str) -> str:
     )
 
 
-def mutate_tool_call(message: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def mutate_tool_call(
+    message: dict[str, Any],
+    browser_url: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
     params = message.get("params")
     if not isinstance(params, dict):
-        return message, None
+        return message, None, None
     name = params.get("name")
     arguments = params.get("arguments")
     if arguments is None:
         arguments = {}
     if not isinstance(arguments, dict):
-        return message, None
+        return message, None, None
 
     if name == "new_page":
         if "isolatedContext" in arguments:
@@ -93,13 +118,31 @@ def mutate_tool_call(message: dict[str, Any]) -> tuple[dict[str, Any] | None, di
                 "BuddySwitch blocked new_page with isolatedContext because upstream Chrome DevTools MCP "
                 "does not apply background creation to isolated browser contexts. This keeps the "
                 "chrome-devtools-cockpit path non-activating.",
-            )
+            ), None
+        target_url = arguments.get("url")
+        hint: str | None = None
+        if isinstance(target_url, str) and target_url.strip():
+            gate = evaluate_page_open_gate(browser_url, target_url.strip())
+            if gate.kind == "verification_failed":
+                return None, tool_error_response(
+                    message,
+                    gate.message or "Browser page-count verification failed.",
+                ), None
+            if gate.kind == "block":
+                return None, tool_error_response(message, BROWSER_PAGE_LIMIT_BLOCK_TEXT), None
+            if gate.kind == "reuse":
+                target_id = gate.target_id or "<unknown>"
+                return None, tool_success_response(
+                    message,
+                    f"Reused existing browser page {target_id}. No new page was opened.",
+                ), None
+            hint = gate.hint_text()
         rewritten = copy.deepcopy(message)
         rewritten_params = rewritten.setdefault("params", {})
         rewritten_arguments = dict(arguments)
         rewritten_arguments["background"] = True
         rewritten_params["arguments"] = rewritten_arguments
-        return rewritten, None
+        return rewritten, None, hint
 
     if name == "select_page":
         rewritten = copy.deepcopy(message)
@@ -107,18 +150,21 @@ def mutate_tool_call(message: dict[str, Any]) -> tuple[dict[str, Any] | None, di
         rewritten_arguments = dict(arguments)
         rewritten_arguments["bringToFront"] = False
         rewritten_params["arguments"] = rewritten_arguments
-        return rewritten, None
+        return rewritten, None, None
 
-    return message, None
+    return message, None, None
 
 
-def mutate_client_message(message: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def mutate_client_message(
+    message: dict[str, Any],
+    browser_url: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
     method = message.get("method")
     if method in FOCUS_METHODS and is_jsonrpc_request(message):
-        return None, rpc_error_response(message, focus_block_text(str(method)))
+        return None, rpc_error_response(message, focus_block_text(str(method))), None
     if method == "tools/call":
-        return mutate_tool_call(message)
-    return message, None
+        return mutate_tool_call(message, browser_url)
+    return message, None, None
 
 
 def append_description(value: object, addition: str) -> str:
@@ -185,6 +231,20 @@ def patch_tool_list_message(message: dict[str, Any]) -> dict[str, Any]:
     return patched
 
 
+def patch_tool_response_hint(message: dict[str, Any], hint: str) -> dict[str, Any]:
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return message
+    patched = copy.deepcopy(message)
+    patched_result = patched.setdefault("result", {})
+    content = patched_result.get("content")
+    if not isinstance(content, list):
+        content = []
+        patched_result["content"] = content
+    content.append({"type": "text", "text": hint})
+    return patched
+
+
 def write_json_line(message: dict[str, Any], output_lock: threading.Lock) -> None:
     with output_lock:
         sys.stdout.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
@@ -203,6 +263,7 @@ def upstream_to_client(
     upstream: subprocess.Popen[str],
     output_lock: threading.Lock,
     tools_list_ids: set[Any],
+    pending_hints: dict[Any, str],
     ids_lock: threading.Lock,
 ) -> None:
     assert upstream.stdout is not None
@@ -220,12 +281,16 @@ def upstream_to_client(
             continue
         message_id = message.get("id")
         should_patch = False
+        response_hint: str | None = None
         with ids_lock:
             if message_id in tools_list_ids:
                 tools_list_ids.discard(message_id)
                 should_patch = True
+            response_hint = pending_hints.pop(message_id, None)
         if should_patch:
             message = patch_tool_list_message(message)
+        if response_hint:
+            message = patch_tool_response_hint(message, response_hint)
         write_json_line(message, output_lock)
 
 
@@ -246,7 +311,7 @@ def close_upstream(upstream: subprocess.Popen[str]) -> int:
         return upstream.wait(timeout=UPSTREAM_EXIT_GRACE_SECONDS)
 
 
-def run_proxy(upstream_argv: list[str]) -> int:
+def run_proxy(upstream_argv: list[str], browser_url: str) -> int:
     try:
         upstream = subprocess.Popen(
             upstream_argv,
@@ -263,9 +328,10 @@ def run_proxy(upstream_argv: list[str]) -> int:
     output_lock = threading.Lock()
     ids_lock = threading.Lock()
     tools_list_ids: set[Any] = set()
+    pending_hints: dict[Any, str] = {}
     relay = threading.Thread(
         target=upstream_to_client,
-        args=(upstream, output_lock, tools_list_ids, ids_lock),
+        args=(upstream, output_lock, tools_list_ids, pending_hints, ids_lock),
         daemon=True,
     )
     relay.start()
@@ -291,12 +357,15 @@ def run_proxy(upstream_argv: list[str]) -> int:
                 with ids_lock:
                     tools_list_ids.add(message.get("id"))
 
-            outbound, local_response = mutate_client_message(message)
+            outbound, local_response, response_hint = mutate_client_message(message, browser_url)
             if local_response is not None:
                 write_json_line(local_response, output_lock)
                 continue
             if outbound is None:
                 continue
+            if response_hint and is_jsonrpc_request(outbound):
+                with ids_lock:
+                    pending_hints[outbound.get("id")] = response_hint
             upstream.stdin.write(json.dumps(outbound, ensure_ascii=True, separators=(",", ":")) + "\n")
             upstream.stdin.flush()
     except BrokenPipeError:
@@ -314,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    return run_proxy(upstream_argv)
+    return run_proxy(upstream_argv, args.browser_url)
 
 
 if __name__ == "__main__":

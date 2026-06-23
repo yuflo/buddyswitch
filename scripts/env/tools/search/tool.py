@@ -159,7 +159,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='open_browser',
                 title='search.open_browser',
-                description='Open one search URL through launcher-managed browser endpoint.',
+                description='Open or reuse one search URL through launcher-managed browser endpoint under the browser page limit.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -186,16 +186,17 @@ def _build_definition() -> ToolDefinition:
                 authority='profile.search_boundary',
                 visibility='launcher-managed browser session',
                 durability='transient',
-                result_content_level='browser open intent and target URL',
-                success_effect='Opens the planned search URL in the launcher-managed browser for browser-native discovery.',
-                failure_state_guarantee='Rejected browser actions do not open a page and do not mutate product state.',
+                result_content_level='browser open/reuse intent, target URL, and page-count state',
+                success_effect='Opens the planned search URL in the launcher-managed browser for browser-native discovery, or reuses the exact URL when it is already open without creating a duplicate page.',
+                failure_state_guarantee='Rejected browser actions do not open a page, do not bypass the page limit, and do not mutate product state.',
                 reads=(
                     'search profile',
                     'query payload',
                     'launcher browser endpoint',
+                    'browser page list',
                 ),
                 writes=(
-                    'browser session page open',
+                    'browser session page open when the target URL is not already open and the page limit allows a new page',
                 ),
                 does_not_write=(
                     'product objects',
@@ -210,12 +211,16 @@ def _build_definition() -> ToolDefinition:
                     'target_url',
                     'backend',
                     'engine',
+                    'page_opened',
+                    'browser_page_count',
+                    'browser_page_limit',
                 ),
                 use_when=(
-                    'You need to start browser-native discovery by opening a query URL in the launcher-managed browser, then continue with chrome-devtools-cockpit.',
+                    'You need to start browser-native discovery by opening or reusing a query URL in the launcher-managed browser, then continue with chrome-devtools-cockpit.',
                 ),
                 do_not_use_when=(
                     'You only need search metadata or URL planning without opening a page.',
+                    'The browser page limit is already reached and the target URL is not already open; close or reuse pages before retrying.',
                     'You are trying to use legacy non-payload flags for query or engine; provide payload fields only.',
                 ),
                 risk_hints={

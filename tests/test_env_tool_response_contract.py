@@ -86,6 +86,13 @@ def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802
             state.setdefault("requests", []).append({"method": "GET", "path": self.path})
             parsed = urlparse(self.path)
+            if parsed.path == "/json/list":
+                payload = state.get("targets", [])
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+                return
             if parsed.path == "/json/version":
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -661,6 +668,43 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         self._assert_rejection_contract(browser_rejection)
         self.assertIn("browser", str(browser_rejection.get("why_blocked", "")).lower())
+
+    def test_search_open_browser_reuse_success_declares_no_browser_mutation(self) -> None:
+        actor_id = "act-dev-search-reuse-contract"
+        dev_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev")
+        target_url = "https://www.google.com/search?q=BuddySwitch"
+        cdp_state: dict[str, object] = {
+            "requests": [],
+            "targets": [
+                {
+                    "id": "target-existing-contract",
+                    "type": "page",
+                    "url": target_url,
+                }
+            ],
+        }
+        _server, _thread, browser_port = self._start_cdp_server(cdp_state)
+        dev_payload = json.loads(dev_instance.read_text(encoding="utf-8"))
+        dev_payload["browser_port"] = browser_port
+        dev_instance.write_text(json.dumps(dev_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+        browser_reuse = self._dispatch(
+            instance_json=dev_instance,
+            actor_id=f"{actor_id}-dev",
+            role="dev",
+            tool="search",
+            action="open_browser",
+            args={"query": "BuddySwitch", "engine": "google"},
+        )
+
+        self._assert_success_contract(browser_reuse)
+        self.assertEqual(browser_reuse.get("page_opened"), False, msg=browser_reuse)
+        self.assertEqual(browser_reuse.get("page_reused"), True, msg=browser_reuse)
+        self.assertEqual(browser_reuse.get("reused_target_id"), "target-existing-contract", msg=browser_reuse)
+        self.assertEqual(browser_reuse.get("state_changed"), False, msg=browser_reuse)
+        self.assertEqual(browser_reuse.get("durability"), "none", msg=browser_reuse)
+        self.assertEqual(browser_reuse.get("mutates_product_state"), False, msg=browser_reuse)
+        self.assertEqual(cdp_state.get("rpc_requests", []), [], msg=cdp_state)
 
     def test_relation_success_responses_describe_object_mutations(self) -> None:
         actor_id = "act-pm-mutation-response"

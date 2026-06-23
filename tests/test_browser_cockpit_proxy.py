@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 import signal
@@ -10,13 +11,55 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+SOFT_PAGE_HINT_8 = "Browser pages: 8/16. Reuse or close pages before opening many more."
+HARD_PAGE_BLOCK = (
+    "Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL."
+)
+
+
+def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
+    return [
+        {
+            "id": f"target-{index}",
+            "type": "page",
+            "url": f"https://example.com/page-{index}",
+        }
+        for index in range(start, start + count)
+    ]
+
+
+def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            state.setdefault("requests", []).append({"method": "GET", "path": self.path})
+            parsed = urlparse(self.path)
+            if parsed.path == "/json/list":
+                if state.get("list_fail"):
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                payload = state.get("list_payload", state.get("targets", []))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    return Handler
 
 
 class BrowserCockpitProxyTests(unittest.TestCase):
@@ -108,7 +151,23 @@ for raw_line in sys.stdin:
 """,
         )
 
-    def _run_proxy(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
+    def _start_cdp_list_server(self, state: dict[str, object]) -> str:
+        server = HTTPServer(("127.0.0.1", 0), _make_cdp_list_handler(state))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}"
+
+    def _run_proxy(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        browser_url: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
+        if browser_url is None:
+            browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
             upstream = temp_root_path / "fake_upstream.py"
@@ -124,7 +183,7 @@ for raw_line in sys.stdin:
                 str(PROXY),
                 "--upstream-command",
                 f"{sys.executable} {upstream}",
-                "--browser-url=http://127.0.0.1:9222",
+                f"--browser-url={browser_url}",
             ]
             proc = subprocess.Popen(
                 command,
@@ -171,10 +230,81 @@ for raw_line in sys.stdin:
         )
 
         self.assertEqual(responses[0]["id"], 1)
-        self.assertIn("--browser-url=http://127.0.0.1:9222", upstream_argv)
+        self.assertEqual(len(upstream_argv), 1)
+        self.assertTrue(upstream_argv[0].startswith("--browser-url=http://127.0.0.1:"), msg=upstream_argv)
         arguments = forwarded[0]["params"]["arguments"]
         self.assertEqual(arguments["url"], "https://example.com")
         self.assertIs(arguments["background"], True)
+
+    def test_new_page_below_hint_threshold_forwards_without_page_hint(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(6)})
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [self._single_call("new_page", {"url": "https://example.com/new"})],
+            browser_url=browser_url,
+        )
+
+        self.assertEqual(len(forwarded), 1)
+        arguments = forwarded[0]["params"]["arguments"]
+        self.assertEqual(arguments["url"], "https://example.com/new")
+        self.assertIs(arguments["background"], True)
+        self.assertNotIn("Browser pages:", json.dumps(responses, ensure_ascii=True))
+
+    def test_new_page_reaching_hint_threshold_forwards_and_appends_page_hint(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(7)})
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [self._single_call("new_page", {"url": "https://example.com/new"})],
+            browser_url=browser_url,
+        )
+
+        self.assertEqual(len(forwarded), 1)
+        arguments = forwarded[0]["params"]["arguments"]
+        self.assertIs(arguments["background"], True)
+        self.assertIn(SOFT_PAGE_HINT_8, json.dumps(responses, ensure_ascii=True))
+
+    def test_new_page_blocks_locally_at_hard_page_limit_without_forwarding(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(16)})
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [self._single_call("new_page", {"url": "https://example.com/new"})],
+            browser_url=browser_url,
+        )
+
+        self.assertEqual(forwarded, [])
+        response = responses[0]
+        self.assertIs(response["result"]["isError"], True)
+        self.assertIn(HARD_PAGE_BLOCK, response["result"]["content"][0]["text"])
+
+    def test_new_page_reuses_exact_url_at_hard_page_limit_without_forwarding(self) -> None:
+        target_url = "https://example.com/new"
+        targets = _page_targets(15) + [{"id": "target-existing-page", "type": "page", "url": target_url}]
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": targets})
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [self._single_call("new_page", {"url": target_url})],
+            browser_url=browser_url,
+        )
+
+        self.assertEqual(forwarded, [])
+        response = responses[0]
+        self.assertFalse(response["result"].get("isError", False), msg=response)
+        text = response["result"]["content"][0]["text"]
+        self.assertIn("target-existing-page", text)
+        self.assertIn("No new page was opened", text)
+
+    def test_new_page_reports_page_count_verification_failure_without_forwarding(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "list_fail": True})
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [self._single_call("new_page", {"url": "https://example.com/new"})],
+            browser_url=browser_url,
+        )
+
+        self.assertEqual(forwarded, [])
+        response = responses[0]
+        self.assertIs(response["result"]["isError"], True)
+        self.assertIn("page-count", response["result"]["content"][0]["text"].lower())
 
     def test_new_page_forces_background_when_caller_requests_foreground(self) -> None:
         _responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
@@ -192,6 +322,23 @@ for raw_line in sys.stdin:
         arguments = forwarded[0]["params"]["arguments"]
         self.assertEqual(arguments["pageId"], 3)
         self.assertIs(arguments["bringToFront"], False)
+
+    def test_focus_rpc_methods_are_rejected_without_forwarding(self) -> None:
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [
+                {"jsonrpc": "2.0", "id": 1, "method": "Page.bringToFront", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "Target.activateTarget", "params": {}},
+            ]
+        )
+
+        self.assertEqual(forwarded, [])
+        by_id = {response["id"]: response for response in responses}
+        for request_id, method in ((1, "Page.bringToFront"), (2, "Target.activateTarget")):
+            with self.subTest(method=method):
+                response = by_id[request_id]
+                self.assertEqual(response["error"]["code"], -32000)
+                self.assertIn(method, response["error"]["message"])
+                self.assertIn("non-activating", response["error"]["message"])
 
     def test_new_page_isolated_context_is_rejected_without_forwarding(self) -> None:
         responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
