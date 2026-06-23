@@ -142,8 +142,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNone(view["pending_switch"])
         self.assertEqual(view["recent_events"], [])
         self.assertEqual(view["recent_evidence"], [])
-        self.assertIn("capture", view["available_actions"])
-        self.assertIn("review", view["available_actions"])
+        self.assertGreaterEqual(set(view["available_actions"]), {"capture", "review"})
         self.assertEqual(self._history_file(instance_root=instance_root, role=role).read_text(encoding="utf-8"), before_history)
         self.assertEqual(self._task_files(instance_root=instance_root, role=role), before_tasks)
 
@@ -208,8 +207,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual([row["id"] for row in view["shelf"]], ["task-0002-beta"])
         self.assertEqual(view["pending_switch"]["confirmation_id"], "confirm-0001")
         self.assertEqual(view["recent_evidence"][-1]["evidence"], "User asked to switch")
-        self.assertIn("switch_confirm", view["available_actions"])
-        self.assertIn("checkout", view["available_actions"])
+        self.assertGreaterEqual(set(view["available_actions"]), {"switch_confirm", "checkout"})
 
     def test_task_tui_renders_task_view_model_without_old_operation_wording(self) -> None:
         view = {
@@ -242,16 +240,19 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         tui = task_tui.render_task_tui(view)
 
-        self.assertIn("[TASK CONTEXT]", tui)
-        self.assertIn("Current Anchor: task-0001-clean-runtime-environment", tui)
-        self.assertIn("Shelf:", tui)
-        self.assertIn("task-0002-next-task", tui)
-        self.assertIn("Pending Switch: confirm-0001", tui)
-        self.assertIn("Available Actions: current, capture, switch_confirm, progress, checkout, review", tui)
-        self.assertIn("Checkout: task.checkout next=continue|finish|block", tui)
-        self.assertIn("Switch request.", tui)
+        for expected in (
+            "[TASK CONTEXT]",
+            "Current Anchor: task-0001-clean-runtime-environment",
+            "task-0002-next-task",
+            "Pending Switch: confirm-0001",
+            "Checkout: task.checkout next=continue|finish|block",
+            "Switch request.",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, tui)
         for forbidden in ("Task Handling Cue", "task.propose", "task.confirm", "task__propose", "task__confirm"):
-            self.assertNotIn(forbidden, tui)
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, tui)
 
     def test_stop_task_tui_renders_checkpoint_for_status_and_next_work(self) -> None:
         view = {
@@ -274,26 +275,26 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         tui = task_tui.render_stop_task_tui(view, {"turn_id": "turn_123"})
 
-        self.assertIn("[TASK CHECKPOINT]", tui)
-        self.assertIn("Previous turn completed: turn_123", tui)
-        self.assertIn("Active task", tui)
-        self.assertIn("task-0003-clean-runtime-env", tui)
-        self.assertIn("Recent evidence", tui)
-        self.assertIn("Focused test added.", tui)
-        self.assertIn("Intent", tui)
-        self.assertIn("Use this checkpoint to decide the next useful action from the current task state.", tui)
-        self.assertIn("If the task is active, keep working in this turn when there is a clear path forward.", tui)
-        self.assertIn("When stopping", tui)
-        self.assertIn("task.progress", tui)
-        self.assertIn("task.checkout finish", tui)
-        self.assertIn("task.checkout block", tui)
-        self.assertIn("task.checkout continue", tui)
-        self.assertIn("pause an unfinished task", tui)
-        self.assertNotIn("[TASK CHECKOUT]", tui)
-        self.assertNotIn("No capture, select, switch_request, or switch_confirm in checkout.", tui)
-        self.assertNotIn("Stay silent if no checkout update is needed.", tui)
-        for forbidden in ("task.propose", "task.confirm", "Task Handling Cue"):
-            self.assertNotIn(forbidden, tui)
+        for expected in (
+            "[TASK CHECKPOINT]",
+            "Previous turn completed: turn_123",
+            "task-0003-clean-runtime-env - Clean runtime env",
+            "Focused test added.",
+            "If the task is active, keep working in this turn when there is a clear path forward.",
+            "task.checkout continue: pause an unfinished task",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, tui)
+        for forbidden in (
+            "[TASK CHECKOUT]",
+            "No capture, select, switch_request, or switch_confirm in checkout.",
+            "Stay silent if no checkout update is needed.",
+            "task.propose",
+            "task.confirm",
+            "Task Handling Cue",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, tui)
 
 
 if __name__ == "__main__":

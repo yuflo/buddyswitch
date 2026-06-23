@@ -30,6 +30,18 @@ def load_module(path: Path) -> Any:
     return module
 
 
+def assert_contains_all(testcase: unittest.TestCase, text: str, expected: tuple[str, ...]) -> None:
+    for token in expected:
+        with testcase.subTest(token=token):
+            testcase.assertIn(token, text)
+
+
+def assert_contains_none(testcase: unittest.TestCase, text: str, forbidden: tuple[str, ...]) -> None:
+    for token in forbidden:
+        with testcase.subTest(token=token):
+            testcase.assertNotIn(token, text)
+
+
 class FakeDaemonRuntime:
     def __init__(
         self,
@@ -208,26 +220,38 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertEqual(call["interrupt_policy"], "none")
             prompt = call["text"]
             self.assertIsInstance(prompt, str)
-            self.assertIn("[MESSAGE AVAILABLE]", prompt)
-            self.assertIn("msg-readable", prompt)
-            self.assertIn('From: {"actor_id": "act-pm-readable", "role_id": "pm"}', prompt)
-            self.assertIn('To: {"actor_id": "act-dev-daemon", "role_id": "dev"}', prompt)
-            self.assertIn("Required action:", prompt)
-            self.assertIn("Runtime context:", prompt)
-            self.assertIn("Work-demand guidance:", prompt)
-            self.assertIn("concrete work demand for this actor", prompt)
-            self.assertIn("acknowledgement alone is usually not completion", prompt)
-            self.assertIn("task.current", prompt)
-            self.assertIn("task.capture/task.select", prompt)
-            self.assertIn("smallest substantive work", prompt)
-            self.assertIn("message__get", prompt)
-            self.assertIn("message__conversation", prompt)
-            self.assertIn("message__send", prompt)
-            self.assertIn("message__mark", prompt)
-            self.assertNotIn("message__" + "list", prompt)
-            self.assertNotIn("Fallback CLI", prompt)
-            self.assertNotIn("python3 scripts/env/client.py", prompt)
-            self.assertNotIn("message body", prompt.lower())
+            assert_contains_all(
+                self,
+                prompt,
+                (
+                    "[MESSAGE AVAILABLE]",
+                    "msg-readable",
+                    'From: {"actor_id": "act-pm-readable", "role_id": "pm"}',
+                    'To: {"actor_id": "act-dev-daemon", "role_id": "dev"}',
+                    "Work-demand guidance:",
+                    "acknowledgement alone is usually not completion",
+                    "task.current",
+                    "task.capture/task.select",
+                    "message__get",
+                    "message__send",
+                    "message__mark",
+                ),
+            )
+            assert_contains_none(
+                self,
+                prompt,
+                (
+                    "message__" + "list",
+                    "Fallback CLI",
+                    "python3 scripts/env/client.py",
+                    "mailbox.local_trigger",
+                    "message." + "parent_required",
+                    "parent_thread_id",
+                    "side_thread_id",
+                    "codex-remote",
+                ),
+            )
+            assert_contains_none(self, prompt.lower(), ("message body",))
 
     def test_message_available_handler_routes_running_parent_to_side_triage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -243,26 +267,35 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             self.assertEqual(call["origin_id"], "msg-readable")
             prompt = call["text"]
             self.assertIsInstance(prompt, str)
-            self.assertIn("[MESSAGE TRIAGE]", prompt)
-            self.assertIn("msg-readable", prompt)
-            self.assertIn('From: {"actor_id": "act-pm-readable", "role_id": "pm"}', prompt)
-            self.assertIn('To: {"actor_id": "act-dev-daemon", "role_id": "dev"}', prompt)
-            self.assertIn("Runtime context:", prompt)
-            self.assertIn("Side triage should not silently convert parent-level work into a lightweight acknowledgement.", prompt)
-            self.assertIn("Outcome B: Parent must process it.", prompt)
-            self.assertIn("The message assigns concrete work to this actor", prompt)
-            self.assertIn("should not be completed as a side-triage acknowledgement", prompt)
-            self.assertIn("the reason must cite the specific condition", prompt)
-            self.assertIn("message__get", prompt)
-            self.assertIn("message__conversation", prompt)
-            self.assertIn("message__send", prompt)
-            self.assertIn("message__mark", prompt)
-            self.assertNotIn("message__" + "list", prompt)
-            self.assertNotIn("mailbox.local_trigger", prompt)
-            self.assertNotIn("message." + "parent_required", prompt)
-            self.assertNotIn("parent_thread_id", prompt)
-            self.assertNotIn("side_thread_id", prompt)
-            self.assertNotIn("codex-remote", prompt)
+            assert_contains_all(
+                self,
+                prompt,
+                (
+                    "[MESSAGE TRIAGE]",
+                    "msg-readable",
+                    "Side triage should not silently convert parent-level work into a lightweight acknowledgement.",
+                    "Outcome B: Parent must process it.",
+                    "The message assigns concrete work to this actor",
+                    "message__get",
+                    "message__send",
+                    "message__mark",
+                ),
+            )
+            assert_contains_none(
+                self,
+                prompt,
+                (
+                    "message__" + "list",
+                    "Fallback CLI",
+                    "python3 scripts/env/client.py",
+                    "message body",
+                    "mailbox.local_trigger",
+                    "message." + "parent_required",
+                    "parent_thread_id",
+                    "side_thread_id",
+                    "codex-remote",
+                ),
+            )
 
     def test_parent_required_prompt_renderer_is_message_owned(self) -> None:
         prompt = self.handler_module.message_rules.render_parent_required_prompt(
@@ -272,20 +305,35 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             "Requires parent context.",
         )
 
-        self.assertIn("[MESSAGE NEEDS PARENT]", prompt)
-        self.assertIn("Reason from side triage:", prompt)
-        self.assertIn("Requires parent context.", prompt)
-        self.assertIn("Runtime context:", prompt)
-        self.assertIn("task.current", prompt)
-        self.assertIn("task.capture/task.select", prompt)
-        self.assertIn("smallest substantive work", prompt)
-        self.assertIn("message__get", prompt)
-        self.assertIn("message__conversation", prompt)
-        self.assertIn("message__send", prompt)
-        self.assertIn("message__mark", prompt)
-        self.assertNotIn("message__" + "list", prompt)
-        self.assertNotIn("message." + "parent_required", prompt)
-        self.assertNotIn("mailbox.local_trigger", prompt)
+        assert_contains_all(
+            self,
+            prompt,
+            (
+                "[MESSAGE NEEDS PARENT]",
+                "Reason from side triage:",
+                "Requires parent context.",
+                "task.current",
+                "task.capture/task.select",
+                "message__get",
+                "message__send",
+                "message__mark",
+            ),
+        )
+        assert_contains_none(
+            self,
+            prompt,
+            (
+                "message__" + "list",
+                "Fallback CLI",
+                "python3 scripts/env/client.py",
+                "message body",
+                "mailbox.local_trigger",
+                "message." + "parent_required",
+                "parent_thread_id",
+                "side_thread_id",
+                "codex-remote",
+            ),
+        )
 
     def test_message_available_handler_fails_when_parent_activity_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

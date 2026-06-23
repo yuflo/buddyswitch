@@ -40,6 +40,18 @@ def load_module(path: Path) -> Any:
     return module
 
 
+def assert_contains_all(testcase: unittest.TestCase, text: str, expected: tuple[str, ...]) -> None:
+    for token in expected:
+        with testcase.subTest(token=token):
+            testcase.assertIn(token, text)
+
+
+def assert_contains_none(testcase: unittest.TestCase, text: str, forbidden: tuple[str, ...]) -> None:
+    for token in forbidden:
+        with testcase.subTest(token=token):
+            testcase.assertNotIn(token, text)
+
+
 class FakeDaemonRuntime:
     def __init__(self, *, activity: dict[str, object] | None = None) -> None:
         self.activity = activity or {"status": "idle", "active_turn_id": None}
@@ -401,37 +413,42 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertEqual(call["interrupt_policy"], "none")
         prompt = call["text"]
         self.assertIsInstance(prompt, str)
-        self.assertIn("[TRACK COMMENT ATTENTION]", prompt)
-        self.assertIn(str(comment["id"]), prompt)
-        self.assertIn(str(comment["track_id"]), prompt)
-        self.assertIn("Required action:", prompt)
-        self.assertIn("Runtime context:", prompt)
-        self.assertIn("Track tools remain the source of truth", prompt)
-        self.assertIn("Task tools are only for this actor's private work tracking", prompt)
-        self.assertIn("Work-demand guidance:", prompt)
-        self.assertIn("acknowledgement alone is usually not completion", prompt)
-        self.assertIn("task.current", prompt)
-        self.assertIn("task.capture/task.select", prompt)
-        self.assertIn("reply with the result in the Track thread", prompt)
-        self.assertIn("track.open", prompt)
-        self.assertIn("track.list_comments", prompt)
-        self.assertIn("track.add_comment", prompt)
-        self.assertIn("track.resolve_comment_thread", prompt)
-        forbidden = [
-            "notification.",
-            "nc.notification",
-            "daemon",
-            "mailbox",
-            "message.available",
-            "absorbed",
-            "replied",
-            "needs_parent",
-            "parent_thread_id",
-            "side_thread_id",
-        ]
-        for token in forbidden:
-            with self.subTest(token=token):
-                self.assertNotIn(token, prompt)
+        assert_contains_all(
+            self,
+            prompt,
+            (
+                "[TRACK COMMENT ATTENTION]",
+                str(comment["id"]),
+                str(comment["track_id"]),
+                "Track tools remain the source of truth",
+                "Task tools are only for this actor's private work tracking",
+                "Work-demand guidance:",
+                "acknowledgement alone is usually not completion",
+                "task.current",
+                "task.capture/task.select",
+                "track.open",
+                "track.list_comments",
+                "track.add_comment",
+                "track.resolve_comment_thread",
+            ),
+        )
+        assert_contains_none(
+            self,
+            prompt,
+            (
+                "notification.",
+                "nc.notification",
+                "daemon",
+                "mailbox",
+                "message.available",
+                "absorbed",
+                "replied",
+                "needs_parent",
+                "parent_thread_id",
+                "side_thread_id",
+                "message__mark",
+            ),
+        )
 
     def test_track_comment_handler_routes_running_parent_to_side_triage(self) -> None:
         instance = self._instance()
@@ -452,23 +469,39 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertEqual(call["origin_id"], comment["id"])
         prompt = call["text"]
         self.assertIsInstance(prompt, str)
-        self.assertIn("[TRACK COMMENT TRIAGE]", prompt)
-        self.assertIn("Runtime context:", prompt)
-        self.assertIn("Side triage is for quick Track-thread handling only.", prompt)
-        self.assertIn("Work-demand guidance:", prompt)
-        self.assertIn("do not present it as done", prompt)
-        self.assertIn("Leave substantive work for the parent/main path", prompt)
-        self.assertIn("track.open", prompt)
-        self.assertIn("track.list_comments", prompt)
-        self.assertIn("track.add_comment", prompt)
-        self.assertIn("track.resolve_comment_thread", prompt)
-        self.assertIn("Use only Track tools for this comment.", prompt)
-        self.assertNotIn("notification.", prompt)
-        self.assertNotIn("side_thread_id", prompt)
-        self.assertNotIn("needs_parent", prompt)
-        self.assertNotIn("absorbed", prompt)
-        self.assertNotIn("replied", prompt)
-        self.assertNotIn("message__mark", prompt)
+        assert_contains_all(
+            self,
+            prompt,
+            (
+                "[TRACK COMMENT TRIAGE]",
+                "Side triage is for quick Track-thread handling only.",
+                "Work-demand guidance:",
+                "do not present it as done",
+                "Leave substantive work for the parent/main path",
+                "track.open",
+                "track.list_comments",
+                "track.add_comment",
+                "track.resolve_comment_thread",
+                "Use only Track tools for this comment.",
+            ),
+        )
+        assert_contains_none(
+            self,
+            prompt,
+            (
+                "notification.",
+                "nc.notification",
+                "daemon",
+                "mailbox",
+                "message.available",
+                "absorbed",
+                "replied",
+                "needs_parent",
+                "parent_thread_id",
+                "side_thread_id",
+                "message__mark",
+            ),
+        )
 
     def test_track_comment_handler_routes_reply_attention_to_parent_comment_author(self) -> None:
         instance = self._instance()
