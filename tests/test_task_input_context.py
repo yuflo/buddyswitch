@@ -253,7 +253,7 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for forbidden in ("Task Handling Cue", "task.propose", "task.confirm", "task__propose", "task__confirm"):
             self.assertNotIn(forbidden, tui)
 
-    def test_stop_task_tui_renders_checkout_operations_only(self) -> None:
+    def test_stop_task_tui_renders_checkpoint_for_status_and_next_work(self) -> None:
         view = {
             "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
             "task_state": "active",
@@ -274,13 +274,24 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         tui = task_tui.render_stop_task_tui(view, {"turn_id": "turn_123"})
 
-        self.assertIn("[TASK CHECKOUT]", tui)
+        self.assertIn("[TASK CHECKPOINT]", tui)
         self.assertIn("Previous turn completed: turn_123", tui)
         self.assertIn("Active task", tui)
         self.assertIn("task-0003-clean-runtime-env", tui)
-        self.assertIn("task.checkout next=continue", tui)
-        self.assertIn("task.checkout next=finish", tui)
-        self.assertIn("task.checkout next=block", tui)
+        self.assertIn("Recent evidence", tui)
+        self.assertIn("Focused test added.", tui)
+        self.assertIn("Intent", tui)
+        self.assertIn("Use this checkpoint to decide the next useful action from the current task state.", tui)
+        self.assertIn("If the task is active, keep working in this turn when there is a clear path forward.", tui)
+        self.assertIn("When stopping", tui)
+        self.assertIn("task.progress", tui)
+        self.assertIn("task.checkout finish", tui)
+        self.assertIn("task.checkout block", tui)
+        self.assertIn("task.checkout continue", tui)
+        self.assertIn("pause an unfinished task", tui)
+        self.assertNotIn("[TASK CHECKOUT]", tui)
+        self.assertNotIn("No capture, select, switch_request, or switch_confirm in checkout.", tui)
+        self.assertNotIn("Stay silent if no checkout update is needed.", tui)
         for forbidden in ("task.propose", "task.confirm", "Task Handling Cue"):
             self.assertNotIn(forbidden, tui)
 

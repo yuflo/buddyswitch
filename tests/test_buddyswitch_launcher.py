@@ -5335,7 +5335,7 @@ exec "$real_git" "$@"
             params = turn_start_rows[0]["params"]
             self.assertEqual(params["threadId"], "thr-main")
             prompt = params["input"][0]["text"]
-            self.assertTrue(prompt.startswith("[TASK CHECKOUT]"), msg=prompt)
+            self.assertTrue(prompt.startswith("[TASK CHECKPOINT]"), msg=prompt)
             self.assertNotIn("[USER INPUT]", prompt)
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(daemon_state["daemon_origin_turn_ids"], ["turn-daemon-1"])

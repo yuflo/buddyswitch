@@ -160,7 +160,7 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
 
         def fake_render_stop_task_tui(view: object, previous_turn: object) -> str:
             calls.append(("render", {"view": view, "previous_turn": previous_turn}))
-            return "[TASK CHECKOUT]\ntask.checkout next=continue"
+            return "[TASK CHECKPOINT]\ntask.checkout continue"
 
         self.addCleanup(setattr, self.task_checkout_handler.task_management, "current_view", original_view)
         self.addCleanup(setattr, self.task_checkout_handler.task_tui, "render_stop_task_tui", original_render)
@@ -305,7 +305,7 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.assertEqual(runtime.calls[0]["interrupt_policy"], "none")
             prompt = runtime.calls[0]["text"]
             assert isinstance(prompt, str)
-            self.assertTrue(prompt.startswith("[TASK CHECKOUT]"))
+            self.assertTrue(prompt.startswith("[TASK CHECKPOINT]"))
             self.assertNotIn("[TASK CONTEXT]", prompt)
             self.assertNotIn("[USER INPUT]", prompt)
             self.assertEqual([name for name, _payload in calls], ["view", "render"])

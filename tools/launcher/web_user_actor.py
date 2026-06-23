@@ -19,6 +19,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_mailbox  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 from env.tools.message import _impl as message_impl  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
@@ -42,6 +43,28 @@ def _web_user_instance_json() -> Path:
     if isinstance(raw_path, str) and raw_path.strip():
         return Path(raw_path.strip()).expanduser().resolve(strict=False)
     return _shared_root() / "state" / "runtime" / "web-user-actor" / "instance.json"
+
+
+def _run_with_shared_state_root(action: Any) -> dict[str, Any]:
+    previous_state_root = os.environ.get("BUDDYSWITCH_STATE_ROOT")
+    previous_actor_id = os.environ.get("BUDDYSWITCH_ACTOR_ID")
+    had_state_root = "BUDDYSWITCH_STATE_ROOT" in os.environ
+    had_actor_id = "BUDDYSWITCH_ACTOR_ID" in os.environ
+    os.environ["BUDDYSWITCH_STATE_ROOT"] = str(_shared_root() / "state")
+    os.environ["BUDDYSWITCH_ACTOR_ID"] = WEB_USER_ACTOR_ADDRESS["actor_id"]
+    runtime_files.refresh_runtime_roots_from_env()
+    try:
+        return action()
+    finally:
+        if had_state_root and previous_state_root is not None:
+            os.environ["BUDDYSWITCH_STATE_ROOT"] = previous_state_root
+        else:
+            os.environ.pop("BUDDYSWITCH_STATE_ROOT", None)
+        if had_actor_id and previous_actor_id is not None:
+            os.environ["BUDDYSWITCH_ACTOR_ID"] = previous_actor_id
+        else:
+            os.environ.pop("BUDDYSWITCH_ACTOR_ID", None)
+        runtime_files.refresh_runtime_roots_from_env()
 
 
 def _web_user_tool_context() -> runtime_context.ToolContext:
@@ -74,22 +97,25 @@ def send_web_user_message(
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:
-    context = _web_user_tool_context()
-    args: dict[str, Any] = {
-        "target_actor_address": target_actor_address,
-        "content": content,
-    }
-    if reply_to is not None:
-        args["reply_to"] = reply_to
-    return message_impl.send_message_from_actor(
-        args=args,
-        context=context,
-        source_actor_address=WEB_USER_ACTOR_ADDRESS,
-        active_actor=dict(WEB_USER_ACTOR_ADDRESS),
-        active_role="user",
-        require_active_role_manifest=False,
-        action="message.send",
-    )
+    def action() -> dict[str, Any]:
+        context = _web_user_tool_context()
+        args: dict[str, Any] = {
+            "target_actor_address": target_actor_address,
+            "content": content,
+        }
+        if reply_to is not None:
+            args["reply_to"] = reply_to
+        return message_impl.send_message_from_actor(
+            args=args,
+            context=context,
+            source_actor_address=WEB_USER_ACTOR_ADDRESS,
+            active_actor=dict(WEB_USER_ACTOR_ADDRESS),
+            active_role="user",
+            require_active_role_manifest=False,
+            action="message.send",
+        )
+
+    return _run_with_shared_state_root(action)
 
 
 def web_user_mailbox_socket_path(shared_root: Path | None = None) -> Path:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -12,6 +13,7 @@ import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -33,6 +35,7 @@ SPEC.loader.exec_module(WEB_USER_ACTOR)
 
 import daemon_mailbox  # noqa: E402
 from env.repos import messages as message_repo  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -147,6 +150,35 @@ class WebUserActorTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(signal["payload"], {"message_id": response.get("message_id")})
         for forbidden in ("content", "message", "from_role", "to_role"):
             self.assertNotIn(forbidden, signal)
+
+    def test_send_web_user_message_uses_shared_state_root_from_source_web_process(self) -> None:
+        calls = self._patch_daemon()
+        target = {"role_id": "market", "actor_id": "act-market-target"}
+
+        with tempfile.TemporaryDirectory() as temp_shared_root:
+            shared_root = Path(temp_shared_root)
+            runtime_files.reset_runtime_root_override()
+            try:
+                with patch.dict(os.environ, {"BUDDYSWITCH_SHARED_ROOT": str(shared_root)}, clear=False):
+                    os.environ.pop("BUDDYSWITCH_STATE_ROOT", None)
+
+                    response = WEB_USER_ACTOR.send_web_user_message(
+                        target_actor_address=target,
+                        content="Route this through the shared runtime state.",
+                    )
+            finally:
+                runtime_files.set_runtime_root_override(self.runtime_root)
+
+            self.assertTrue(response.get("ok"), msg=response)
+            self.assertEqual([call[0] for call in calls], ["reachability", "deliver"])
+            message_id = response.get("message_id")
+            self.assertIsInstance(message_id, str)
+            assert isinstance(message_id, str)
+            message_path = shared_root / "state" / "buddyswitch" / "objects" / "messages" / f"{message_id}.json"
+            self.assertTrue(message_path.exists(), msg=message_path)
+            message = json.loads(message_path.read_text(encoding="utf-8"))
+            self.assertEqual(message["from_actor_address"], WEB_USER_ACTOR.WEB_USER_ACTOR_ADDRESS)
+            self.assertEqual(message["to_actor_address"], target)
 
     def test_send_web_user_message_target_not_online_creates_no_message(self) -> None:
         calls = self._patch_daemon(reachability={"reachability_status": "registered_offline", "record": None})

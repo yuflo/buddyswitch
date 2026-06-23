@@ -135,9 +135,10 @@ def render_task_tui(view: Mapping[str, object]) -> str:
 def render_stop_task_tui(view: Mapping[str, Any], previous_turn: Mapping[str, Any]) -> str:
     current_anchor = _as_mapping(view.get("current_anchor"))
     recent_events = view.get("recent_events")
+    recent_evidence = view.get("recent_evidence")
 
     lines: list[str] = [
-        "[TASK CHECKOUT]",
+        "[TASK CHECKPOINT]",
         f"Previous turn completed: {_turn_id(previous_turn)}",
         "",
         "Active task",
@@ -153,24 +154,37 @@ def render_stop_task_tui(view: Mapping[str, Any], previous_turn: Mapping[str, An
     else:
         lines.extend(
             [
-                f"  {current_anchor.get('id') or 'unknown'}",
+                f"  {_task_label(current_anchor)}",
                 f"  Status: {current_anchor.get('status') or view.get('task_state') or 'none'}",
                 f"  Progress: {current_anchor.get('progress_summary') or current_anchor.get('summary') or 'none'}",
                 f"  Last event: {_short_event(recent_events[-1] if isinstance(recent_events, list) and recent_events else None)}",
             ]
         )
 
+    lines.append("")
+    lines.append("Recent evidence")
+    if isinstance(recent_evidence, list) and recent_evidence:
+        for row in recent_evidence:
+            mapping = _as_mapping(row)
+            if mapping is None:
+                continue
+            evidence = mapping.get("evidence") or mapping.get("reason") or "none"
+            lines.append(f"  - {mapping.get('task_id') or 'unknown'}: {evidence}")
+    else:
+        lines.append("  - none")
+
     lines.extend(
         [
             "",
-            "Checkout",
-            "  task.checkout next=continue",
-            "  task.checkout next=finish",
-            "  task.checkout next=block",
+            "Intent",
+            "  Use this checkpoint to decide the next useful action from the current task state.",
+            "  If the task is active, keep working in this turn when there is a clear path forward.",
             "",
-            "Limits",
-            "  No capture, select, switch_request, or switch_confirm in checkout.",
-            "  Stay silent if no checkout update is needed.",
+            "When stopping",
+            "  task.progress: record meaningful new progress or evidence.",
+            "  task.checkout finish: the deliverable is complete; include evidence.",
+            "  task.checkout block: progress is blocked; include reason.",
+            "  task.checkout continue: pause an unfinished task; name the next concrete action or waiting condition.",
         ]
     )
     return "\n".join(lines)

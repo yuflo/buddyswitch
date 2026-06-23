@@ -115,6 +115,7 @@ class SubmitTurnTests(unittest.TestCase):
         self.assertNotIn("task_management", source)
         self.assertNotIn("[TASK CONTEXT]", source)
         self.assertNotIn("[TASK CHECKOUT]", source)
+        self.assertNotIn("[TASK CHECKPOINT]", source)
         self.assertNotIn("task_checkout", source)
 
     def test_instance_input_source_routes_through_submit_turn_helper(self) -> None:
