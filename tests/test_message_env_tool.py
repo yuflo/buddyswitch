@@ -1511,6 +1511,44 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual([row["id"] for row in response.get("messages", [])], [row["id"] for row in rows[2:5]])
 
+    def test_message_conversation_accepts_external_user_participant(self) -> None:
+        active = self._actor_address(role="dev", label="act-dev-user-conversation")
+        web_user = {"role_id": "user", "actor_id": "act-user-local"}
+        first = message_repo.save_message(
+            {
+                "id": "msg-user-conv-1",
+                "from_actor_address": web_user,
+                "to_actor_address": active,
+                "content": "Browser message",
+                "reply_to": None,
+                "created_at": "2026-06-23T00:00:01Z",
+            }
+        )
+        second = message_repo.save_message(
+            {
+                "id": "msg-user-conv-2",
+                "from_actor_address": active,
+                "to_actor_address": web_user,
+                "content": "Actor reply",
+                "reply_to": first["id"],
+                "created_at": "2026-06-23T00:00:02Z",
+            }
+        )
+        instance_json = self._instance_json(actor_id="act-dev-user-conversation", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-user-conversation",
+            role="dev",
+            tool="message",
+            action="conversation",
+            args={"target_actor_address": web_user},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual([row["id"] for row in response.get("messages", [])], [first["id"], second["id"]])
+        self.assertEqual(response.get("selector"), {"target_actor_address": web_user})
+
     def test_message_send_reply_to_accepts_same_visible_actor_conversation_pair(self) -> None:
         self._patch_daemon()
         dev = self._actor_address(role="dev", label="act-dev-reply")
@@ -1674,6 +1712,40 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(original["disposition"], "unseen")
         self.assertIsNone(original["processed_by_actor_address"])
 
+    def test_message_send_reply_to_accepts_external_user_participant(self) -> None:
+        calls = self._patch_daemon()
+        dev = self._actor_address(role="dev", label="act-dev-user-reply")
+        web_user = {"role_id": "user", "actor_id": "act-user-local"}
+        seed = env_store.create_message(
+            from_actor_address=web_user,
+            to_actor_address=dev,
+            content="Hello from the browser",
+        )
+        instance_json = self._instance_json(actor_id="act-dev-user-reply", role="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id="act-dev-user-reply",
+            role="dev",
+            tool="message",
+            action="send",
+            args={"target_actor_address": web_user, "content": "ack to browser", "reply_to": seed["id"]},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        rows = self._message_rows()
+        reply = next(row for row in rows if row["id"] == response["message_id"])
+        self.assertEqual(reply["from_actor_address"], dev)
+        self.assertEqual(reply["to_actor_address"], web_user)
+        self.assertEqual(reply["reply_to"], seed["id"])
+        original = message_repo.get_message(seed["id"])
+        self.assertIsNotNone(original)
+        assert original is not None
+        self.assertEqual(original["disposition"], "replied")
+        self.assertEqual(original["processed_by_actor_address"], dev)
+        self.assertEqual([call[0] for call in calls], ["reachability", "deliver"])
+        self.assertEqual(calls[1][1]["signal"]["target_actor_address"], web_user)
+
     def test_message_send_reply_to_rejects_duplicate_completed_processing(self) -> None:
         self._patch_daemon()
         dev = self._actor_address(role="dev", label="act-dev-reply-duplicate")
@@ -1786,6 +1858,18 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         source = (ROOT / "scripts" / "env" / "repos" / "messages.py").read_text(encoding="utf-8")
         self.assertNotIn("from_role", source)
         self.assertNotIn("to_role", source)
+
+    def test_message_active_user_role_is_not_manifest_declared(self) -> None:
+        domain = runtime_context.DomainAccess().message
+        manifest_roles = domain.manifest_role_ids(
+            {"roles": [{"id": "pm"}, {"id": "dev"}, {"id": "design"}]}
+        )
+
+        with self.assertRaises(domain.MessageScopeError):
+            domain.ensure_active_role_is_manifest_declared(
+                active_role="user",
+                manifest_role_ids=manifest_roles,
+            )
 
     def test_message_edit_delete_and_read_receipt_actions_are_unsupported(self) -> None:
         instance_json = self._instance_json(actor_id="act-dev-unsup", role="dev")

@@ -1949,7 +1949,15 @@ fail_unknown_top_level_command() {
 }
 
 web_main() {
-  python3 "${WEB_MANAGEMENT_HELPER}" "$@"
+  buddyswitch_central_daemon_ensure || return $?
+  local status
+  if python3 "${WEB_MANAGEMENT_HELPER}" "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  buddyswitch_central_daemon_stop_if_idle
+  return "${status}"
 }
 
 main() {

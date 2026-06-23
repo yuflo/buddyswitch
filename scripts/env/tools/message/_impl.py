@@ -337,21 +337,34 @@ def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) ->
     )
 
 
-def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
-    action = "message.send"
-    active_actor = context["active_actor"]
-    active_role = context["active_role"]
+def _actor_address_from_any(context: MessageServiceContext, value: Any) -> Any:
+    if hasattr(value, "to_payload"):
+        return value
+    return context.rules.message.ActorAddress.from_payload(value)
+
+
+def send_message_from_actor(
+    *,
+    args: dict[str, Any],
+    context: MessageServiceContext,
+    source_actor_address: Any,
+    active_actor: dict[str, Any],
+    active_role: str,
+    require_active_role_manifest: bool = True,
+    action: str = "message.send",
+) -> dict[str, Any]:
     manifest_roles = _manifest_role_ids(context)
-    source_actor_address = context.actor_address
+    source_actor = _actor_address_from_any(context, source_actor_address)
 
     try:
-        context.rules.message.ensure_active_role_is_manifest_declared(
-            active_role=active_role,
-            manifest_role_ids=manifest_roles,
-        )
+        if require_active_role_manifest:
+            context.rules.message.ensure_active_role_is_manifest_declared(
+                active_role=active_role,
+                manifest_role_ids=manifest_roles,
+            )
         request = context.rules.message.prepare_send_request(
             args=args,
-            source_actor_address=source_actor_address,
+            source_actor_address=source_actor,
             manifest_role_ids=manifest_roles,
             get_message=context.repos.message.get_message,
             allowed_fields=_allowed_fields("send"),
@@ -405,7 +418,7 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
 
     try:
         message = context.repos.message.create_message(
-            from_actor_address=source_actor_address,
+            from_actor_address=source_actor,
             to_actor_address=target_actor,
             content=request["content"],
             reply_to=request["reply_to"],
@@ -455,7 +468,7 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         try:
             updated_reply_to = context.rules.message.transition_message_disposition(
                 message=reply_to_message,
-                active_actor_address=context.actor_address,
+                active_actor_address=source_actor,
                 disposition="replied",
                 reason=None,
                 now=context.repos.runtime_files.now_iso(),
@@ -545,7 +558,7 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         active_role=active_role,
         effect_summary=(
             f"Sent one durable direct message from actor "
-            f"'{source_actor_address.actor_id}' to '{target_actor.actor_id}'."
+            f"'{source_actor.actor_id}' to '{target_actor.actor_id}'."
         ),
         state_changed=True,
         durability="durable",
@@ -556,6 +569,18 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
             "Use message.list to inspect delivered inbox messages when needed.",
         ],
         extra=extra,
+    )
+
+
+def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
+    return send_message_from_actor(
+        args=args,
+        context=context,
+        source_actor_address=context.actor_address,
+        active_actor=context["active_actor"],
+        active_role=context["active_role"],
+        require_active_role_manifest=True,
+        action="message.send",
     )
 
 

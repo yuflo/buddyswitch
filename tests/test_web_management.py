@@ -111,6 +111,16 @@ class FakeTerminalOpener:
             raise self.error
 
 
+class FakeWebMessageSender:
+    def __init__(self, result: dict[str, object]) -> None:
+        self.result = result
+        self.calls: list[dict[str, object]] = []
+
+    def send(self, *, target_actor_address: dict[str, object], content: str) -> dict[str, object]:
+        self.calls.append({"target_actor_address": target_actor_address, "content": content})
+        return dict(self.result)
+
+
 class OrderedRunner:
     def __init__(self, steps: list[CommandStep]) -> None:
         self.steps = list(steps)
@@ -133,6 +143,7 @@ class WebManagementServerTestCase(unittest.TestCase):
         *,
         terminal_opener: Callable[[str], None] | None = None,
         platform_name: str | None = None,
+        web_message_sender: Callable[..., dict[str, object]] | None = None,
     ) -> tuple[FakeRunner, str]:
         fake_runner = runner or FakeRunner()
         service_kwargs: dict[str, object] = {}
@@ -140,6 +151,8 @@ class WebManagementServerTestCase(unittest.TestCase):
             service_kwargs["terminal_opener"] = terminal_opener
         if platform_name is not None:
             service_kwargs["platform_name"] = platform_name
+        if web_message_sender is not None:
+            service_kwargs["web_message_sender"] = web_message_sender
         service = WEB_MANAGEMENT.WebManagementService(
             repo_root=ROOT,
             command_runner=fake_runner.run,
@@ -212,6 +225,19 @@ class WebManagementUnitTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertNotIn("attach-open", result.stdout + result.stderr)
         self.assertIn("instance attach <actor-id>", result.stdout)
+
+    def test_web_launcher_ensures_central_daemon_for_web_user_actor(self) -> None:
+        source = LAUNCHER.read_text(encoding="utf-8")
+        start = source.index("web_main() {")
+        end = source.index("\n}\n\nmain() {", start)
+        block = source[start:end]
+
+        ensure_index = block.index("buddyswitch_central_daemon_ensure || return $?")
+        run_index = block.index('python3 "${WEB_MANAGEMENT_HELPER}" "$@"')
+        stop_index = block.index("buddyswitch_central_daemon_stop_if_idle")
+        self.assertLess(ensure_index, run_index)
+        self.assertLess(run_index, stop_index)
+        self.assertIn('return "${status}"', block)
 
     def test_map_command_failure_uses_required_status_codes(self) -> None:
         cases = [
@@ -978,6 +1004,120 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                         ["instance", "status", "act-pm-demo", "--json"],
                     ],
                 )
+
+    def test_messages_route_rejects_empty_text_before_status_lookup(self) -> None:
+        sender = FakeWebMessageSender({"ok": True})
+        runner = OrderedRunner([])
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            web_message_sender=sender.send,
+        )
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/act-dev-demo/messages", b'{"text":"   "}')
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(sender.calls, [])
+
+    def test_messages_route_resolves_target_from_instance_status_and_calls_adapter(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "status", "act-dev-demo", "--json"],
+                    command_json(active_status("act-dev-demo", "thread-main", "idle") | {"role": "dev"}),
+                ),
+            ]
+        )
+        sender = FakeWebMessageSender(
+            {
+                "ok": True,
+                "message_id": "msg-web-demo",
+                "delivery_status": "delivered",
+                "handling_status": "handled",
+                "target_actor_address": {"role_id": "dev", "actor_id": "act-dev-demo"},
+            }
+        )
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            web_message_sender=sender.send,
+        )
+
+        status, payload = service.handle_api(
+            "POST",
+            "/api/instances/act-dev-demo/messages",
+            b'{"text":"  Please inspect this.  "}',
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["message_id"], "msg-web-demo")
+        self.assertEqual(payload["delivery_status"], "delivered")
+        self.assertEqual(payload["handling_status"], "handled")
+        self.assertEqual(payload["target_actor_address"], {"role_id": "dev", "actor_id": "act-dev-demo"})
+        self.assertEqual(payload["instance"]["actor_id"], "act-dev-demo")
+        self.assertEqual(
+            sender.calls,
+            [
+                {
+                    "target_actor_address": {"role_id": "dev", "actor_id": "act-dev-demo"},
+                    "content": "Please inspect this.",
+                }
+            ],
+        )
+
+    def test_messages_route_maps_adapter_rejection_to_structured_error(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "status", "act-dev-demo", "--json"],
+                    command_json(active_status("act-dev-demo", "thread-main", "idle") | {"role": "dev"}),
+                ),
+            ]
+        )
+        sender = FakeWebMessageSender(
+            {
+                "ok": False,
+                "error": {"code": "E_MESSAGE_TARGET_NOT_ONLINE", "message": "target actor is not online"},
+                "permission_boundary": "message.reachability",
+                "reachability_status": "registered_offline",
+                "state_changed": False,
+                "target_actor_address": {"role_id": "dev", "actor_id": "act-dev-demo"},
+            }
+        )
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            web_message_sender=sender.send,
+        )
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/act-dev-demo/messages", b'{"text":"hello"}')
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.code, "E_MESSAGE_TARGET_NOT_ONLINE")
+        self.assertIsNotNone(raised.exception.details)
+        assert raised.exception.details is not None
+        self.assertEqual(raised.exception.details["reachability_status"], "registered_offline")
+        self.assertEqual(raised.exception.details["instance"]["actor_id"], "act-dev-demo")
+
+    def test_web_management_does_not_write_message_rows_or_construct_signals(self) -> None:
+        source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
+
+        for forbidden in (
+            "env.repos.messages",
+            "create_message",
+            "save_message",
+            "delete_message",
+            "message.available",
+            "signal_id",
+            "daemon_client.deliver_signal",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
 
     def test_side_create_route_delegates_and_reports_side_thread_id(self) -> None:
         runner = OrderedRunner(

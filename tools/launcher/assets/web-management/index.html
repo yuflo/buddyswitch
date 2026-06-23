@@ -41,7 +41,7 @@
           <div class="title-row">
             <div>
               <h1>Instance control room</h1>
-              <p class="page-summary">Create, inspect, steer, and recover local role instances from one workspace.</p>
+              <p class="page-summary">Create, inspect, message, and recover local actor instances from one workspace.</p>
             </div>
             <div class="header-actions">
               <span id="server-status" class="status-pill">Checking</span>
@@ -91,13 +91,13 @@
               <div class="panel-heading compact">
                 <div>
                   <h2 id="action-heading">Actions</h2>
-                  <p class="panel-subtitle">Main-thread control and lifecycle recovery</p>
+                  <p class="panel-subtitle">Direct message and lifecycle controls</p>
                 </div>
               </div>
               <div class="action-body">
                 <label class="field textarea-field">
-                  <span>Instruction</span>
-                  <textarea id="instruction-input" rows="6" placeholder="Send the next instruction to the selected instance."></textarea>
+                  <span>Message</span>
+                  <textarea id="instruction-input" rows="6" placeholder="Send a direct message to the selected actor."></textarea>
                 </label>
                 <div class="action-group" aria-label="Main thread actions">
                   <button id="send-button" class="button primary" type="button">Send</button>

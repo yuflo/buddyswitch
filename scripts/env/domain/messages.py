@@ -79,6 +79,11 @@ VALID_TRANSITIONS = {
     ("needs_parent", "absorbed"),
     ("needs_parent", "replied"),
 }
+EXTERNAL_MESSAGE_ROLE_IDS = {"user"}
+
+
+def message_participant_role_ids(manifest_role_ids: set[str]) -> set[str]:
+    return set(manifest_role_ids) | EXTERNAL_MESSAGE_ROLE_IDS
 
 
 def _format_actor_address(actor_address: ActorAddress | dict[str, Any]) -> str:
@@ -397,6 +402,7 @@ def prepare_contacts_request(
     allowed_fields: set[str],
 ) -> ContactsRequest:
     _reject_unknown_fields(args, allowed_fields)
+    participant_roles = message_participant_role_ids(manifest_role_ids)
     role_filter = args.get("role")
     normalized_role: str | None = None
     if role_filter is not None:
@@ -404,7 +410,7 @@ def prepare_contacts_request(
             raise MessagePayloadError("role must be a non-empty string when provided", correctable_fields=["role"])
         candidate = role_filter.strip()
         if candidate:
-            if candidate not in manifest_role_ids:
+            if candidate not in participant_roles:
                 raise MessagePayloadError(f"unknown role filter: {candidate}", correctable_fields=["role"])
             normalized_role = candidate
     return {"role": normalized_role}
@@ -419,6 +425,7 @@ def prepare_send_request(
     allowed_fields: set[str],
 ) -> SendRequest:
     _reject_unknown_fields(args, allowed_fields)
+    participant_roles = message_participant_role_ids(manifest_role_ids)
 
     target_raw = args.get("target_actor_address")
     try:
@@ -429,7 +436,7 @@ def prepare_send_request(
             correctable_fields=["target_actor_address"],
         ) from exc
 
-    if target_actor.role_id not in manifest_role_ids:
+    if target_actor.role_id not in participant_roles:
         raise MessagePayloadError(
             f"unknown target actor role: {target_actor.role_id}",
             correctable_fields=["target_actor_address"],
@@ -561,6 +568,7 @@ def transition_message_disposition(
 
 def prepare_list_request(*, args: dict[str, Any], manifest_role_ids: set[str], allowed_fields: set[str]) -> ListRequest:
     _reject_unknown_fields(args, allowed_fields)
+    participant_roles = message_participant_role_ids(manifest_role_ids)
 
     role_filter = args.get("role")
     normalized_role: str | None = None
@@ -569,7 +577,7 @@ def prepare_list_request(*, args: dict[str, Any], manifest_role_ids: set[str], a
             raise MessagePayloadError("role must be a non-empty string when provided", correctable_fields=["role"])
         candidate = role_filter.strip()
         if candidate:
-            if candidate not in manifest_role_ids:
+            if candidate not in participant_roles:
                 raise MessagePayloadError(f"unknown role filter: {candidate}", correctable_fields=["role"])
             normalized_role = candidate
 
@@ -595,6 +603,7 @@ def prepare_conversation_request(
     allowed_fields: set[str],
 ) -> ConversationRequest:
     _reject_unknown_fields(args, allowed_fields)
+    participant_roles = message_participant_role_ids(manifest_role_ids)
 
     if "target_actor_address" not in args or args.get("target_actor_address") is None:
         raise MessagePayloadError("target_actor_address is required", correctable_fields=["target_actor_address"])
@@ -605,7 +614,7 @@ def prepare_conversation_request(
             f"target_actor_address must be a valid ActorAddress: {exc}",
             correctable_fields=["target_actor_address"],
         ) from exc
-    if target_actor.role_id not in manifest_role_ids:
+    if target_actor.role_id not in participant_roles:
         raise MessagePayloadError(
             f"unknown target actor role: {target_actor.role_id}",
             correctable_fields=["target_actor_address"],

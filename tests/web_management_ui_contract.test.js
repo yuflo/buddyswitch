@@ -91,7 +91,7 @@ test('production javascript keeps the real api surface', () => {
     '/api/roles',
     '/api/instances',
     '/status',
-    '/input',
+    '/messages',
     '/interrupt',
     '/stop',
     '/clear',
@@ -104,14 +104,20 @@ test('production javascript keeps the real api surface', () => {
 
   assertIncludes(appJs, "method: 'DELETE'");
   assertIncludes(combinedAssets, 'Copy command');
+  assertExcludes(appJs, "selectedInstanceId) + '/input'");
 });
 
 test('production assets present role-configured actor instance wording', () => {
   assertIncludes(indexHtml, '>Role<');
   assertIncludes(indexHtml, 'Stored local actor instances');
+  assertIncludes(indexHtml, '>Message<');
+  assertIncludes(indexHtml, 'Send a direct message to the selected actor.');
   assertExcludes(combinedAssets, '>' + 'Buddy' + '<');
   assertExcludes(combinedAssets, 'selected' + 'Buddy');
   assertExcludes(combinedAssets, 'Stored local ' + 'role instances');
+  assertExcludes(combinedAssets, '>Instruction<');
+  assertExcludes(combinedAssets, 'thread input');
+  assertExcludes(combinedAssets, 'steer');
   assertIncludes(combinedAssets, 'BuddySwitch');
 });
 

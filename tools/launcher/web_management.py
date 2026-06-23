@@ -17,9 +17,15 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
+HELPER_DIR = Path(__file__).resolve().parent
+if str(HELPER_DIR) not in sys.path:
+    sys.path.insert(0, str(HELPER_DIR))
+
+import web_user_actor
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-STATIC_ROOT = Path(__file__).resolve().parent / "assets" / "web-management"
+STATIC_ROOT = HELPER_DIR / "assets" / "web-management"
 VALID_INSTANCE_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
 
@@ -224,12 +230,14 @@ class WebManagementService:
         repo_root: Path,
         command_runner: Callable[[list[str], float], CommandResult] | Callable[..., CommandResult] | None = None,
         terminal_opener: Callable[[str], None] | None = None,
+        web_message_sender: Callable[..., dict[str, Any]] | None = None,
         platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._runner = command_runner or LauncherCommandRunner(repo_root).run
         self._terminal_opener = terminal_opener or open_macos_terminal_app
+        self._web_message_sender = web_message_sender or web_user_actor.send_web_user_message
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
 
@@ -264,6 +272,8 @@ class WebManagementService:
             return 200, self._clear(actor_id)
         if method == "POST" and action == "input":
             return 200, self._send_input(actor_id, body)
+        if method == "POST" and action == "messages":
+            return 200, self._send_message(actor_id, body)
         if method == "POST" and action == "side":
             return 200, self._side(actor_id, body)
         if method == "POST" and action == "side-close":
@@ -288,6 +298,8 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/clear")], "clear"
         if path.startswith(status_prefix) and path.endswith("/input"):
             return path[len(status_prefix) : -len("/input")], "input"
+        if path.startswith(status_prefix) and path.endswith("/messages"):
+            return path[len(status_prefix) : -len("/messages")], "messages"
         if path.startswith(status_prefix) and path.endswith("/side/close"):
             return path[len(status_prefix) : -len("/side/close")], "side-close"
         if path.startswith(status_prefix) and path.endswith("/side"):
@@ -354,6 +366,58 @@ class WebManagementService:
         if isinstance(expected_turn_id, str):
             payload["expected_turn_id"] = expected_turn_id
         return payload
+
+    def _send_message(self, actor_id: str, body: bytes) -> dict[str, Any]:
+        payload = self._parse_json_body(body)
+        unknown = sorted(key for key in payload if key != "text")
+        if unknown:
+            raise HttpError(
+                status=400,
+                code="INVALID_REQUEST",
+                message=f"Unsupported message request fields: {', '.join(unknown)}.",
+            )
+        text = payload.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
+        return self._run_busy(
+            f"instance:{actor_id}:messages",
+            lambda: self._send_message_under_lock(actor_id, text.strip()),
+        )
+
+    def _send_message_under_lock(self, actor_id: str, text: str) -> dict[str, Any]:
+        instance = self._get_instance_status(actor_id)
+        instance_actor_id = instance.get("actor_id")
+        role = instance.get("role")
+        if not isinstance(instance_actor_id, str) or not instance_actor_id.strip():
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status for {actor_id}.")
+        if not isinstance(role, str) or not role.strip():
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance role for {actor_id}.")
+        target_actor_address = {"role_id": role.strip(), "actor_id": instance_actor_id.strip()}
+        result = self._web_message_sender(
+            target_actor_address=target_actor_address,
+            content=text,
+        )
+        if not isinstance(result, dict):
+            raise HttpError(status=502, code="MESSAGE_SEND_FAILED", message="Web message sender returned invalid result.")
+        if result.get("ok") is not True:
+            raise _web_message_http_error(result, instance=instance)
+        response: dict[str, Any] = {
+            "ok": True,
+            "instance": instance,
+            "target_actor_address": result.get("target_actor_address") or target_actor_address,
+        }
+        for key in (
+            "message_id",
+            "delivery_status",
+            "handling_status",
+            "reachability_status",
+            "cleanup_status",
+            "state_changed",
+            "durability",
+        ):
+            if key in result:
+                response[key] = result[key]
+        return response
 
     def _clear(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
@@ -712,6 +776,33 @@ def _command_error_message(command_label: str, result: CommandResult) -> str:
     return f"Command failed: {command_label}"
 
 
+def _web_message_http_error(result: dict[str, Any], *, instance: dict[str, Any]) -> HttpError:
+    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    code = error.get("code") if isinstance(error.get("code"), str) and error.get("code") else "MESSAGE_SEND_FAILED"
+    message = (
+        error.get("message")
+        if isinstance(error.get("message"), str) and error.get("message")
+        else str(result.get("human_summary") or "Message send failed.")
+    )
+    permission_boundary = result.get("permission_boundary")
+    delivery_status = result.get("delivery_status")
+    cleanup_status = result.get("cleanup_status")
+    if code in {"E_MESSAGE_PAYLOAD", "E_MESSAGE_SCOPE"} or permission_boundary == "request-payload":
+        status = 400
+    elif code == "E_MESSAGE_SEND_INDETERMINATE" or cleanup_status == "failed":
+        status = 502
+    elif delivery_status in {"delivery_failed", "target_not_online"} or permission_boundary in {
+        "message.reachability",
+        "message.delivery",
+    }:
+        status = 409
+    else:
+        status = 409
+    details = {key: value for key, value in result.items() if key not in {"ok", "error"}}
+    details["instance"] = instance
+    return HttpError(status=status, code=code, message=message, details=details)
+
+
 def _first_nonempty_line(text: str) -> str | None:
     for line in text.splitlines():
         cleaned = line.strip()
@@ -803,12 +894,20 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     service = WebManagementService(repo_root=REPO_ROOT)
     server = create_server(args.host, args.port, service)
+    web_user_runtime = web_user_actor.WebUserActorRuntime()
+    try:
+        web_user_runtime.start()
+    except Exception as exc:
+        server.server_close()
+        print(f"BuddySwitch web-user actor sink failed to start: {exc}", file=sys.stderr, flush=True)
+        return 1
     print(f"BuddySwitch web management listening on http://{args.host}:{server.server_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        web_user_runtime.close()
         server.server_close()
     return 0
 

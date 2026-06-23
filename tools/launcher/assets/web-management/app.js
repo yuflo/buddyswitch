@@ -330,7 +330,9 @@
     render(state, elements);
     try {
       const payload = await requestFactory();
-      state.message = payload && payload.turn_id
+      state.message = payload && payload.message_id
+        ? 'Sent message ' + payload.message_id + (payload.delivery_status ? ' (' + payload.delivery_status + ').' : '.')
+        : payload && payload.turn_id
         ? 'Action completed for ' + state.selectedInstanceId + ' (' + payload.turn_id + ').'
         : 'Action completed.';
       clearOpenTuiFeedback(state);
@@ -490,8 +492,8 @@
       });
     });
     elements.sendButton.addEventListener('click', function () {
-      runMutation(state, elements, 'input', function () {
-        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/input', {
+      runMutation(state, elements, 'messages', function () {
+        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: state.draftText }),
