@@ -9,6 +9,11 @@ from typing import Any, TypedDict
 from urllib.parse import urlencode
 
 import env_profiles
+from env.cdp_browser_session import (
+    BROWSER_PAGE_LIMIT,
+    BROWSER_PAGE_LIMIT_BLOCK_TEXT,
+    evaluate_page_open_gate,
+)
 from env.tool_runtime.context import default_manifest_path as DEFAULT_MANIFEST
 from .tool import DEFINITION
 from env.tool_runtime import results as tool_results
@@ -406,6 +411,82 @@ def _browser_open_failed(
     )
 
 
+def _browser_page_count_unverified(
+    *,
+    context: SearchServiceContext,
+    target_url: str,
+    browser_endpoint: str,
+    reason: str,
+) -> dict[str, Any]:
+    return tool_results.rejection(
+        tool="search",
+        action="search.open_browser",
+        active_actor=context["active_actor"],
+        active_role=context["active_role"],
+        code="E_SEARCH_BROWSER_PAGE_COUNT_UNVERIFIED",
+        message="browser page-count verification failed",
+        permission_boundary="search.browser.page_limit",
+        human_summary="Browser page-count verification failed.",
+        why_blocked=reason,
+        impact="No browser page was opened and no BuddySwitch runtime state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Ensure the browser page list endpoint is readable, then retry opening this URL.",
+        allowed_next_actions=[
+            "Check browser endpoint readiness and retry search.open_browser.",
+        ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_browser_page_count_verification",
+                reason="Use when you need browser readiness metadata before retrying.",
+            )
+        ],
+        extra={
+            "target_url": target_url,
+            "browser_endpoint": browser_endpoint,
+            "browser_page_limit": BROWSER_PAGE_LIMIT,
+            "page_opened": False,
+            "reason": reason,
+        },
+    )
+
+
+def _browser_page_limit_reached(
+    *,
+    context: SearchServiceContext,
+    target_url: str,
+    browser_endpoint: str,
+    browser_page_count: int,
+) -> dict[str, Any]:
+    return tool_results.rejection(
+        tool="search",
+        action="search.open_browser",
+        active_actor=context["active_actor"],
+        active_role=context["active_role"],
+        code="E_SEARCH_BROWSER_PAGE_LIMIT_REACHED",
+        message=BROWSER_PAGE_LIMIT_BLOCK_TEXT,
+        permission_boundary="search.browser.page_limit",
+        human_summary="Browser page limit reached.",
+        why_blocked=BROWSER_PAGE_LIMIT_BLOCK_TEXT,
+        impact="No browser page was opened and no BuddySwitch runtime state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Close or reuse existing browser pages, then retry opening this URL.",
+        allowed_next_actions=[
+            "Close or reuse existing browser pages, then retry search.open_browser.",
+        ],
+        extra={
+            "target_url": target_url,
+            "browser_endpoint": browser_endpoint,
+            "browser_page_count": browser_page_count,
+            "browser_page_limit": BROWSER_PAGE_LIMIT,
+            "page_opened": False,
+        },
+    )
+
+
 def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str, Any]) -> dict[str, Any]:
     permission = boundary.get("search_api")
     if permission == "user-approved-only":
@@ -662,6 +743,48 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             reason=browser_reason or "instance browser endpoint is missing",
             target_url=target_url,
         )
+    page_gate = evaluate_page_open_gate(browser_endpoint, target_url)
+    if page_gate.kind == "verification_failed":
+        return _browser_page_count_unverified(
+            context=context,
+            target_url=target_url,
+            browser_endpoint=browser_endpoint,
+            reason=page_gate.message or "Browser page-count verification failed.",
+        )
+    if page_gate.kind == "block":
+        return _browser_page_limit_reached(
+            context=context,
+            target_url=target_url,
+            browser_endpoint=browser_endpoint,
+            browser_page_count=page_gate.page_count or BROWSER_PAGE_LIMIT,
+        )
+    if page_gate.kind == "reuse":
+        target_id = page_gate.target_id or ""
+        return tool_results.success(
+            tool="search",
+            action="search.open_browser",
+            active_actor=context["active_actor"],
+            active_role=context["active_role"],
+            effect_summary="Reused an existing browser page for the planned target URL; no new page was opened.",
+            state_changed=False,
+            durability="none",
+            allowed_next_actions=[
+                "Use chrome-devtools-cockpit to select the reused page, inspect result pages, and capture evidence.",
+            ],
+            extra={
+                "engine": engine,
+                "query": query,
+                "target_url": target_url,
+                "browser_endpoint": browser_endpoint,
+                "page_opened": False,
+                "page_reused": True,
+                "reused_target_id": target_id,
+                "browser_page_count": page_gate.page_count,
+                "browser_page_limit": BROWSER_PAGE_LIMIT,
+                "permission_boundary": "search.browser",
+                "mutates_product_state": False,
+            },
+        )
     opened, open_reason = _open_browser_page(browser_endpoint, target_url)
     if not opened:
         return _browser_open_failed(
@@ -670,12 +793,16 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             browser_endpoint=browser_endpoint,
             reason=open_reason or "Chrome DevTools page open failed",
         )
+    hint = page_gate.hint_text()
+    effect_summary = "Opened the planned target URL in launcher-managed browser session without writing product objects."
+    if hint:
+        effect_summary = f"{effect_summary} {hint}"
     return tool_results.success(
         tool="search",
         action="search.open_browser",
         active_actor=context["active_actor"],
         active_role=context["active_role"],
-        effect_summary="Opened the planned target URL in launcher-managed browser session without writing product objects.",
+        effect_summary=effect_summary,
         state_changed=True,
         durability="transient",
         state_changes=[
@@ -694,6 +821,8 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "target_url": target_url,
             "browser_endpoint": browser_endpoint,
             "page_opened": True,
+            "browser_page_count": page_gate.projected_page_count,
+            "browser_page_limit": BROWSER_PAGE_LIMIT,
             "permission_boundary": "search.browser",
             "mutates_product_state": False,
         },

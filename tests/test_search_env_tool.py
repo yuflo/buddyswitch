@@ -79,6 +79,18 @@ def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802
             state.setdefault("requests", []).append({"method": "GET", "path": self.path})
             parsed = urlparse(self.path)
+            if parsed.path == "/json/list":
+                if state.get("list_fail"):
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                payload = state.get("list_payload", state.get("targets", []))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+                return
+
             if parsed.path == "/json/version":
                 if state.get("version_fail"):
                     self.send_response(500)
@@ -133,6 +145,23 @@ def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
             return
 
     return Handler
+
+
+SOFT_PAGE_HINT_8 = "Browser pages: 8/16. Reuse or close pages before opening many more."
+HARD_PAGE_BLOCK = (
+    "Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL."
+)
+
+
+def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
+    return [
+        {
+            "id": f"target-{index}",
+            "type": "page",
+            "url": f"https://example.com/page-{index}",
+        }
+        for index in range(start, start + count)
+    ]
 
 
 class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -467,6 +496,117 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(params, dict)
         self.assertEqual(params.get("url"), target_url)
         self.assertIs(params.get("background"), True)
+
+    def test_search_open_browser_below_hint_threshold_opens_without_page_hint(self) -> None:
+        state: dict[str, object] = {"requests": [], "targets": _page_targets(6)}
+        _server, _thread, port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": "creator analytics pain", "engine": "google"},
+            instance_json=instance_json,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("page_opened"), True, msg=response)
+        self.assertEqual(response.get("state_changed"), True, msg=response)
+        self.assertEqual(response.get("browser_page_count"), 7, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
+        self.assertNotIn("Browser pages:", json.dumps(response, ensure_ascii=True))
+        rpc_requests = state.get("rpc_requests")
+        self.assertIsInstance(rpc_requests, list, msg=state)
+        assert isinstance(rpc_requests, list)
+        self.assertEqual(len(rpc_requests), 1)
+
+    def test_search_open_browser_reaching_hint_threshold_opens_with_page_hint(self) -> None:
+        state: dict[str, object] = {"requests": [], "targets": _page_targets(7)}
+        _server, _thread, port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": "creator analytics pain", "engine": "google"},
+            instance_json=instance_json,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("page_opened"), True, msg=response)
+        self.assertEqual(response.get("browser_page_count"), 8, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
+        self.assertIn(SOFT_PAGE_HINT_8, json.dumps(response, ensure_ascii=True))
+        rpc_requests = state.get("rpc_requests")
+        self.assertIsInstance(rpc_requests, list, msg=state)
+        assert isinstance(rpc_requests, list)
+        self.assertEqual(len(rpc_requests), 1)
+
+    def test_search_open_browser_blocks_new_url_at_hard_page_limit_without_creating_target(self) -> None:
+        state: dict[str, object] = {"requests": [], "targets": _page_targets(16)}
+        _server, _thread, port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": "creator analytics pain", "engine": "google"},
+            instance_json=instance_json,
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_LIMIT_REACHED")
+        self.assertEqual(response.get("error", {}).get("message"), HARD_PAGE_BLOCK)
+        self.assertEqual(response.get("state_changed"), False, msg=response)
+        self.assertEqual(response.get("durability"), "none", msg=response)
+        self.assertEqual(response.get("page_opened"), False, msg=response)
+        self.assertEqual(response.get("browser_page_count"), 16, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
+        self.assertEqual(
+            response.get("retry_guidance"),
+            "Close or reuse existing browser pages, then retry opening this URL.",
+            msg=response,
+        )
+        self.assertEqual(state.get("rpc_requests", []), [], msg=state)
+
+    def test_search_open_browser_reuses_exact_url_at_hard_page_limit_without_creating_target(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        targets = _page_targets(15) + [{"id": "target-existing-search", "type": "page", "url": target_url}]
+        state: dict[str, object] = {"requests": [], "targets": targets}
+        _server, _thread, port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": "creator analytics pain", "engine": "google"},
+            instance_json=instance_json,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("page_opened"), False, msg=response)
+        self.assertEqual(response.get("page_reused"), True, msg=response)
+        self.assertEqual(response.get("reused_target_id"), "target-existing-search", msg=response)
+        self.assertEqual(response.get("state_changed"), False, msg=response)
+        self.assertEqual(response.get("durability"), "none", msg=response)
+        self.assertEqual(response.get("browser_page_count"), 16, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
+        self.assertEqual(state.get("rpc_requests", []), [], msg=state)
+
+    def test_search_open_browser_reports_page_count_verification_failure_without_creating_target(self) -> None:
+        state: dict[str, object] = {"requests": [], "list_fail": True}
+        _server, _thread, port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": "creator analytics pain", "engine": "google"},
+            instance_json=instance_json,
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_COUNT_UNVERIFIED")
+        self.assertEqual(response.get("state_changed"), False, msg=response)
+        self.assertEqual(response.get("durability"), "none", msg=response)
+        self.assertEqual(response.get("page_opened"), False, msg=response)
+        self.assertIn("page-count", json.dumps(response, ensure_ascii=True).lower())
+        self.assertEqual(state.get("rpc_requests", []), [], msg=state)
 
     def test_search_open_browser_encodes_queries_for_supported_engines(self) -> None:
         cases = (
