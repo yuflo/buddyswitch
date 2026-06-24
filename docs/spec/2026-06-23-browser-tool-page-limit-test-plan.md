@@ -16,20 +16,20 @@ Browser-opening tools must make browser page pressure visible and must stop open
 The first constants are:
 
 ```text
-page_limit = 16
-hint_threshold = 8
+page_limit = 10
+hint_threshold = 5
 ```
 
 Canonical soft hint:
 
 ```text
-Browser pages: <count>/16. Reuse or close pages before opening many more.
+Browser pages: <count>/10. Reuse or close pages before opening many more.
 ```
 
 Canonical hard block:
 
 ```text
-Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL.
+Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL.
 ```
 
 ## Risk And Resource Boundary
@@ -63,8 +63,8 @@ These tests should be added in the smallest existing focused file that can exerc
 1. Page snapshot counts only CDP targets with `type == "page"`.
 2. Duplicate detection matches the exact requested target URL and returns the existing target id.
 3. Gate result is `allow` when current page count is below the hard limit and the target URL is not already open.
-4. Gate result is `reuse` when the target URL is already open, including at `16/16`.
-5. Gate result is `block` when page count is `16/16` and the target URL is not already open.
+4. Gate result is `reuse` when the target URL is already open, including at `10/10`.
+5. Gate result is `block` when page count is `10/10` and the target URL is not already open.
 6. Gate result records a verification failure when `/json/list` cannot be read or does not return a JSON list; callers must not silently claim page-count enforcement succeeded.
 
 ### `search.open_browser`
@@ -72,27 +72,27 @@ These tests should be added in the smallest existing focused file that can exerc
 Add focused tests to `tests/test_search_env_tool.py`.
 
 1. Below hint threshold, `search.open_browser` opens normally without the soft hint.
-   - Fake `/json/list` returns six `type=page` targets with different URLs.
+   - Fake `/json/list` returns three `type=page` targets with different URLs.
    - Call `search.open_browser` for a new query URL.
-   - Assert `ok=true`, `page_opened=true`, `state_changed=true`, `browser_page_count=7`, `browser_page_limit=16`.
+   - Assert `ok=true`, `page_opened=true`, `state_changed=true`, `browser_page_count=4`, `browser_page_limit=10`.
    - Assert response text does not contain `Browser pages:`.
    - Assert exactly one `Target.createTarget` RPC happened with `background=true`.
 
-2. Allowed open that reaches `8/16` includes the canonical soft hint.
-   - Fake `/json/list` returns seven page targets.
+2. Allowed open that reaches `5/10` includes the canonical soft hint.
+   - Fake `/json/list` returns four page targets.
    - Call `search.open_browser` for a new target.
-   - Assert response contains `Browser pages: 8/16. Reuse or close pages before opening many more.`
+   - Assert response contains `Browser pages: 5/10. Reuse or close pages before opening many more.`
    - Assert the page was opened once.
 
 3. Hard limit blocks a new URL before `Target.createTarget`.
-   - Fake `/json/list` returns sixteen page targets with different URLs.
+   - Fake `/json/list` returns ten page targets with different URLs.
    - Call `search.open_browser` for a new target.
-   - Assert `ok=false`, `error.code=E_SEARCH_BROWSER_PAGE_LIMIT_REACHED`, `state_changed=false`, `durability=none`, `page_opened=false`, `browser_page_count=16`, `browser_page_limit=16`.
+   - Assert `ok=false`, `error.code=E_SEARCH_BROWSER_PAGE_LIMIT_REACHED`, `state_changed=false`, `durability=none`, `page_opened=false`, `browser_page_count=10`, `browser_page_limit=10`.
    - Assert `retry_guidance=Close or reuse existing browser pages, then retry opening this URL.`
    - Assert no websocket RPC request happened.
 
 4. Hard limit reuses an exact existing URL instead of blocking or opening.
-   - Fake `/json/list` returns sixteen page targets, including the exact target URL.
+   - Fake `/json/list` returns ten page targets, including the exact target URL.
    - Call `search.open_browser` for that target.
    - Assert `ok=true`, `page_opened=false`, `page_reused=true`, `reused_target_id` matches the fake target.
    - Assert `state_changed=false`, `durability=none`.
@@ -115,26 +115,26 @@ Add focused tests to `tests/test_search_env_tool.py`.
 Add focused tests to `tests/test_browser_cockpit_proxy.py`.
 
 1. Below hint threshold, `new_page` forwards with `background=true`.
-   - Fake `/json/list` returns six existing page targets.
+   - Fake `/json/list` returns three existing page targets.
    - Call proxy tool `new_page` with a new URL.
    - Assert upstream receives one call and `arguments.background is True`.
    - Assert response does not include `Browser pages:`.
 
-2. Allowed `new_page` that reaches `8/16` appends the canonical soft hint.
-   - Fake `/json/list` returns seven page targets.
+2. Allowed `new_page` that reaches `5/10` appends the canonical soft hint.
+   - Fake `/json/list` returns four page targets.
    - Call proxy tool `new_page` with a new URL.
    - Assert upstream receives the call with `background=true`.
-   - Assert the returned text contains `Browser pages: 8/16. Reuse or close pages before opening many more.`
+   - Assert the returned text contains `Browser pages: 5/10. Reuse or close pages before opening many more.`
 
 3. Hard limit blocks locally and does not forward.
-   - Fake `/json/list` returns sixteen page targets with different URLs.
+   - Fake `/json/list` returns ten page targets with different URLs.
    - Call proxy tool `new_page`.
    - Assert no upstream calls were written.
    - Assert local result has `isError=true`.
    - Assert text equals or contains the canonical hard block text.
 
 4. Hard limit duplicate URL reuses locally and does not forward.
-   - Fake `/json/list` returns sixteen page targets including the exact URL.
+   - Fake `/json/list` returns ten page targets including the exact URL.
    - Call proxy tool `new_page` for that exact URL.
    - Assert no upstream calls were written.
    - Assert local result has `isError` absent or false.

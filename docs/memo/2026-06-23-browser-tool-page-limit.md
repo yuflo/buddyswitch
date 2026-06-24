@@ -17,8 +17,8 @@ refuse to open a new page after the hard limit is reached.
 The first limit values are:
 
 ```text
-page_limit = 16
-hint_threshold = 8
+page_limit = 10
+hint_threshold = 5
 ```
 
 ## Current Status
@@ -57,12 +57,12 @@ If target URL is already open:
   do not open a duplicate page;
   return a concise reuse response.
 
-If current page_count >= 16:
+If current page_count >= 10:
   block the open operation;
   do not create a page;
   return a concise reason and close/reuse instruction.
 
-If opening would make page_count >= 8 and page_count < 16:
+If opening would make page_count >= 5 and page_count < 10:
   allow the open operation;
   include a concise page-count hint in the response.
 
@@ -73,13 +73,13 @@ Otherwise:
 Canonical soft hint text:
 
 ```text
-Browser pages: <count>/16. Reuse or close pages before opening many more.
+Browser pages: <count>/10. Reuse or close pages before opening many more.
 ```
 
 Canonical hard block text:
 
 ```text
-Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL.
+Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL.
 ```
 
 The wording must stay short and direct. Do not add long coaching text, workflow advice, or prose
@@ -165,7 +165,7 @@ launcher prompt modules.
 - evaluate the browser page gate before calling `cdp_background_page.py`;
 - return a rejection before opening when the limit is reached;
 - return a reuse success when the exact target URL is already open;
-- include the soft hint after an allowed open crosses or reaches `8/16`.
+- include the soft hint after an allowed open crosses or reaches `5/10`.
 
 `chrome_devtools_cockpit_proxy.py` should:
 
@@ -186,8 +186,8 @@ code = E_SEARCH_BROWSER_PAGE_LIMIT_REACHED
 state_changed = false
 durability = none
 page_opened = false
-browser_page_count = 16
-browser_page_limit = 16
+browser_page_count = 10
+browser_page_limit = 10
 retry_guidance = Close or reuse existing browser pages, then retry opening this URL.
 ```
 
@@ -215,21 +215,21 @@ Add focused tests before implementation.
 
 For `search.open_browser`:
 
-- below `8/16`, opens normally and returns no hint;
-- when an allowed open reaches `8/16`, opens and returns the canonical soft hint;
-- at `16/16`, if the target URL is not open, returns `E_SEARCH_BROWSER_PAGE_LIMIT_REACHED` and does
+- below `5/10`, opens normally and returns no hint;
+- when an allowed open reaches `5/10`, opens and returns the canonical soft hint;
+- at `10/10`, if the target URL is not open, returns `E_SEARCH_BROWSER_PAGE_LIMIT_REACHED` and does
   not call `Target.createTarget`;
-- at `16/16`, if the exact target URL is already open, returns a reuse response and does not call
+- at `10/10`, if the exact target URL is already open, returns a reuse response and does not call
   `Target.createTarget`;
 - if `/json/list` cannot be read, the response should be explicit about browser page-count
   verification failure and must not silently claim the limit was checked.
 
 For `chrome-devtools-cockpit` proxy:
 
-- below `8/16`, `new_page` still forwards with `background=true`;
-- when an allowed `new_page` reaches `8/16`, the proxy response includes the canonical soft hint;
-- at `16/16`, `new_page` is blocked locally and not forwarded upstream;
-- at `16/16`, duplicate URL returns a local reuse response and is not forwarded upstream;
+- below `5/10`, `new_page` still forwards with `background=true`;
+- when an allowed `new_page` reaches `5/10`, the proxy response includes the canonical soft hint;
+- at `10/10`, `new_page` is blocked locally and not forwarded upstream;
+- at `10/10`, duplicate URL returns a local reuse response and is not forwarded upstream;
 - existing focus-control behavior still holds: `select_page` forces `bringToFront=false`, focus RPCs
   are blocked, and `new_page` with `isolatedContext` is rejected.
 
@@ -257,8 +257,8 @@ git status --short --branch
 
 The implementation is not complete unless tests prove:
 
-- soft hint starts at `8/16`;
-- hard block starts at `16/16`;
+- soft hint starts at `5/10`;
+- hard block starts at `10/10`;
 - blocked opens do not create pages;
 - duplicate URLs are not opened again;
 - `search.open_browser` and `chrome-devtools-cockpit new_page` cannot diverge on page-count rules;

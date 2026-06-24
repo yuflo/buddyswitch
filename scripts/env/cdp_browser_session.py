@@ -10,11 +10,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 
-BROWSER_PAGE_LIMIT = 16
-BROWSER_PAGE_HINT_THRESHOLD = 8
-BROWSER_PAGE_HINT_TEMPLATE = "Browser pages: {count}/16. Reuse or close pages before opening many more."
+BROWSER_PAGE_LIMIT = 10
+BROWSER_PAGE_HINT_THRESHOLD = 5
+BROWSER_PAGE_HINT_TEMPLATE = "Browser pages: {count}/10. Reuse or close pages before opening many more."
 BROWSER_PAGE_LIMIT_BLOCK_TEXT = (
-    "Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL."
+    "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
 )
 
 BrowserPageGateKind = Literal["allow", "reuse", "block", "verification_failed"]

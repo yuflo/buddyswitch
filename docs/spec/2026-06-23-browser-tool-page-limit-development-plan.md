@@ -26,10 +26,10 @@ Callers translate the structured gate result into their own response shape:
 In `scripts/env/cdp_browser_session.py` define:
 
 ```python
-BROWSER_PAGE_LIMIT = 16
-BROWSER_PAGE_HINT_THRESHOLD = 8
-BROWSER_PAGE_HINT_TEMPLATE = "Browser pages: {count}/16. Reuse or close pages before opening many more."
-BROWSER_PAGE_LIMIT_BLOCK_TEXT = "Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL."
+BROWSER_PAGE_LIMIT = 10
+BROWSER_PAGE_HINT_THRESHOLD = 5
+BROWSER_PAGE_HINT_TEMPLATE = "Browser pages: {count}/10. Reuse or close pages before opening many more."
+BROWSER_PAGE_LIMIT_BLOCK_TEXT = "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
 ```
 
 Use dataclasses or typed dictionaries for the helper result. Keep the result concrete:
@@ -58,9 +58,9 @@ Implementation requirements:
 - count rows whose `type` is exactly `"page"`;
 - match duplicate rows whose `url` is exactly the requested target URL;
 - if duplicate exists, return `reuse` regardless of count;
-- if count is at least `16`, return `block`;
+- if count is at least `10`, return `block`;
 - otherwise return `allow` with `projected_page_count=count + 1`;
-- expose `hint_text()` or equivalent only when projected count is at least `8`.
+- expose `hint_text()` or equivalent only when projected count is at least `5`.
 
 ## TDD Tasks
 
@@ -77,9 +77,9 @@ Modify `tests/test_search_env_tool.py`.
 
 2. Add tests from the search section of the test plan:
    - below threshold no hint;
-   - allowed open reaching `8/16` includes canonical hint;
-   - `16/16` new target blocks with `E_SEARCH_BROWSER_PAGE_LIMIT_REACHED`;
-   - `16/16` exact duplicate reuses without opening;
+   - allowed open reaching `5/10` includes canonical hint;
+   - `10/10` new target blocks with `E_SEARCH_BROWSER_PAGE_LIMIT_REACHED`;
+   - `10/10` exact duplicate reuses without opening;
    - `/json/list` failure is explicit and does not open.
 
 3. Run one focused red command:
@@ -103,9 +103,9 @@ Modify `tests/test_browser_cockpit_proxy.py`.
 
 3. Add tests from the proxy section of the test plan:
    - below threshold forwards with `background=true` and no hint;
-   - reaching `8/16` forwards and appends canonical hint;
-   - `16/16` new URL blocks locally;
-   - `16/16` exact duplicate reuses locally;
+   - reaching `5/10` forwards and appends canonical hint;
+   - `10/10` new URL blocks locally;
+   - `10/10` exact duplicate reuses locally;
    - list failure blocks locally with explicit text;
    - existing focus-control behavior still passes.
 
@@ -155,7 +155,7 @@ Modify `scripts/env/tools/search/_impl.py`.
    - `durability=none`;
    - `page_opened=false`;
    - `browser_page_count=16`;
-   - `browser_page_limit=16`;
+   - `browser_page_limit=10`;
    - `retry_guidance=Close or reuse existing browser pages, then retry opening this URL.`
 5. For `reuse`, return an env.tool success:
    - `state_changed=false`;
@@ -167,8 +167,8 @@ Modify `scripts/env/tools/search/_impl.py`.
    - `mutates_product_state=false`.
 6. For `allow`, call `_open_browser_page`.
    - Preserve the existing actual-open success metadata.
-   - Add `browser_page_count=<projected count>` and `browser_page_limit=16`.
-   - Add the canonical soft hint in `effect_summary` or `allowed_next_actions` when projected count is at least `8`.
+   - Add `browser_page_count=<projected count>` and `browser_page_limit=10`.
+   - Add the canonical soft hint in `effect_summary` or `allowed_next_actions` when projected count is at least `5`.
    - Do not include the hint below threshold.
 7. Keep invalid payload, invalid engine, missing browser endpoint, and CDP open failure behavior intact.
 
@@ -196,7 +196,7 @@ Modify `tools/launcher/chrome_devtools_cockpit_proxy.py`.
 5. For `block`, return local `tool_error_response` with canonical hard block text and do not forward.
 6. For `reuse`, return local success response with short text naming the reused target id and stating no new page was opened; do not forward.
 7. For `allow`, forward to upstream with `background=true`.
-8. Patch upstream response text for allowed opens when projected count is at least `8`.
+8. Patch upstream response text for allowed opens when projected count is at least `5`.
    - Add a small pending-hints map keyed by request id.
    - When `upstream_to_client` sees that request id, append the hint to every text content item or append a new text item.
    - Do not mark the upstream response as an error.
@@ -244,8 +244,8 @@ Review the final diff against these acceptance checks:
 - both browser-opening paths import or call the same shared helper;
 - blocked opens never call `Target.createTarget` or forward upstream;
 - duplicate exact URLs are reused and do not create a new page;
-- soft hint starts at `8/16`;
-- hard block starts at `16/16`;
+- soft hint starts at `5/10`;
+- hard block starts at `10/10`;
 - `/json/list` verification failure is visible;
 - response text is concise and includes canonical wording;
 - focused tests use fake servers and controlled subprocesses only.
