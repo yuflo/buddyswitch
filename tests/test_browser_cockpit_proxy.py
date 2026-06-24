@@ -20,9 +20,9 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
-SOFT_PAGE_HINT_8 = "Browser pages: 8/16. Reuse or close pages before opening many more."
+SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening many more."
 HARD_PAGE_BLOCK = (
-    "Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL."
+    "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
 )
 
 
@@ -237,7 +237,7 @@ for raw_line in sys.stdin:
         self.assertIs(arguments["background"], True)
 
     def test_new_page_below_hint_threshold_forwards_without_page_hint(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(6)})
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(3)})
 
         responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
             [self._single_call("new_page", {"url": "https://example.com/new"})],
@@ -251,7 +251,7 @@ for raw_line in sys.stdin:
         self.assertNotIn("Browser pages:", json.dumps(responses, ensure_ascii=True))
 
     def test_new_page_reaching_hint_threshold_forwards_and_appends_page_hint(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(7)})
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(4)})
 
         responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
             [self._single_call("new_page", {"url": "https://example.com/new"})],
@@ -261,10 +261,10 @@ for raw_line in sys.stdin:
         self.assertEqual(len(forwarded), 1)
         arguments = forwarded[0]["params"]["arguments"]
         self.assertIs(arguments["background"], True)
-        self.assertIn(SOFT_PAGE_HINT_8, json.dumps(responses, ensure_ascii=True))
+        self.assertIn(SOFT_PAGE_HINT_5, json.dumps(responses, ensure_ascii=True))
 
     def test_new_page_blocks_locally_at_hard_page_limit_without_forwarding(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(16)})
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(10)})
 
         responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
             [self._single_call("new_page", {"url": "https://example.com/new"})],
@@ -278,7 +278,7 @@ for raw_line in sys.stdin:
 
     def test_new_page_reuses_exact_url_at_hard_page_limit_without_forwarding(self) -> None:
         target_url = "https://example.com/new"
-        targets = _page_targets(15) + [{"id": "target-existing-page", "type": "page", "url": target_url}]
+        targets = _page_targets(9) + [{"id": "target-existing-page", "type": "page", "url": target_url}]
         browser_url = self._start_cdp_list_server({"requests": [], "targets": targets})
 
         responses, forwarded, _upstream_argv, _stderr = self._run_proxy(

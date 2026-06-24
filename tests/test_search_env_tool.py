@@ -147,9 +147,9 @@ def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-SOFT_PAGE_HINT_8 = "Browser pages: 8/16. Reuse or close pages before opening many more."
+SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening many more."
 HARD_PAGE_BLOCK = (
-    "Blocked: browser page limit reached (16/16). Close or reuse existing pages, then retry opening this URL."
+    "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
 )
 
 
@@ -498,7 +498,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIs(params.get("background"), True)
 
     def test_search_open_browser_below_hint_threshold_opens_without_page_hint(self) -> None:
-        state: dict[str, object] = {"requests": [], "targets": _page_targets(6)}
+        state: dict[str, object] = {"requests": [], "targets": _page_targets(3)}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
 
@@ -511,8 +511,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("page_opened"), True, msg=response)
         self.assertEqual(response.get("state_changed"), True, msg=response)
-        self.assertEqual(response.get("browser_page_count"), 7, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
+        self.assertEqual(response.get("browser_page_count"), 4, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
         self.assertNotIn("Browser pages:", json.dumps(response, ensure_ascii=True))
         rpc_requests = state.get("rpc_requests")
         self.assertIsInstance(rpc_requests, list, msg=state)
@@ -520,7 +520,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(len(rpc_requests), 1)
 
     def test_search_open_browser_reaching_hint_threshold_opens_with_page_hint(self) -> None:
-        state: dict[str, object] = {"requests": [], "targets": _page_targets(7)}
+        state: dict[str, object] = {"requests": [], "targets": _page_targets(4)}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
 
@@ -532,16 +532,16 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("page_opened"), True, msg=response)
-        self.assertEqual(response.get("browser_page_count"), 8, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
-        self.assertIn(SOFT_PAGE_HINT_8, json.dumps(response, ensure_ascii=True))
+        self.assertEqual(response.get("browser_page_count"), 5, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
+        self.assertIn(SOFT_PAGE_HINT_5, json.dumps(response, ensure_ascii=True))
         rpc_requests = state.get("rpc_requests")
         self.assertIsInstance(rpc_requests, list, msg=state)
         assert isinstance(rpc_requests, list)
         self.assertEqual(len(rpc_requests), 1)
 
     def test_search_open_browser_blocks_new_url_at_hard_page_limit_without_creating_target(self) -> None:
-        state: dict[str, object] = {"requests": [], "targets": _page_targets(16)}
+        state: dict[str, object] = {"requests": [], "targets": _page_targets(10)}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
 
@@ -557,8 +557,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("state_changed"), False, msg=response)
         self.assertEqual(response.get("durability"), "none", msg=response)
         self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertEqual(response.get("browser_page_count"), 16, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
+        self.assertEqual(response.get("browser_page_count"), 10, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
         self.assertEqual(
             response.get("retry_guidance"),
             "Close or reuse existing browser pages, then retry opening this URL.",
@@ -568,7 +568,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_search_open_browser_reuses_exact_url_at_hard_page_limit_without_creating_target(self) -> None:
         target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        targets = _page_targets(15) + [{"id": "target-existing-search", "type": "page", "url": target_url}]
+        targets = _page_targets(9) + [{"id": "target-existing-search", "type": "page", "url": target_url}]
         state: dict[str, object] = {"requests": [], "targets": targets}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
@@ -585,8 +585,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("reused_target_id"), "target-existing-search", msg=response)
         self.assertEqual(response.get("state_changed"), False, msg=response)
         self.assertEqual(response.get("durability"), "none", msg=response)
-        self.assertEqual(response.get("browser_page_count"), 16, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 16, msg=response)
+        self.assertEqual(response.get("browser_page_count"), 10, msg=response)
+        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
         self.assertEqual(state.get("rpc_requests", []), [], msg=state)
 
     def test_search_open_browser_reports_page_count_verification_failure_without_creating_target(self) -> None:
