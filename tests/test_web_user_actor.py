@@ -98,6 +98,15 @@ class WebUserActorTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         roles = WEB_USER_ACTOR.runtime_context.DomainAccess().message.manifest_role_ids(manifest)
         self.assertNotIn("user", roles)
 
+    def test_web_user_actor_uses_public_message_service_boundary(self) -> None:
+        source = WEB_USER_ACTOR_PATH.read_text(encoding="utf-8")
+        private_tool_import = "from env.tools.message import " + "_impl"
+        private_send_call = "message_impl." + "send_message_from_actor"
+
+        self.assertIn("from env.services import messages as message_service", source)
+        self.assertNotIn(private_tool_import, source)
+        self.assertNotIn(private_send_call, source)
+
     def test_web_user_business_strings_stay_out_of_daemon_infrastructure(self) -> None:
         infrastructure_files = [
             ROOT / "tools" / "launcher" / "daemon_core.py",

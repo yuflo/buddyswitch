@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import importlib.util
 import json
 import os
@@ -302,18 +303,24 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return attempts
 
     def _patch_message_retry_sleep(self) -> list[float]:
-        from env.tools.message import _impl as message_impl
+        from env.services import messages as message_service
+
+        message_impl = importlib.import_module("env.tools.message._impl")
 
         calls: list[float] = []
-        original = getattr(message_impl, "_sleep_for_message_mutation_retry", None)
-        if original is None:
-            return calls
+        patched_modules = []
 
         def fake_sleep(seconds: float) -> None:
             calls.append(seconds)
 
-        message_impl._sleep_for_message_mutation_retry = fake_sleep
-        self.addCleanup(setattr, message_impl, "_sleep_for_message_mutation_retry", original)
+        for module in (message_impl, message_service):
+            original = getattr(module, "_sleep_for_message_mutation_retry", None)
+            if original is None:
+                continue
+            module._sleep_for_message_mutation_retry = fake_sleep
+            patched_modules.append((module, original))
+        for module, original in patched_modules:
+            self.addCleanup(setattr, module, "_sleep_for_message_mutation_retry", original)
         return calls
 
     def test_message_contacts_lists_online_actor_contacts(self) -> None:
