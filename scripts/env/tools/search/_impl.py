@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import subprocess
 from typing import Any, TypedDict
 from urllib.parse import urlencode
 
 import env_profiles
+from env import cdp_browser_lifecycle as browser_lifecycle
 from env.cdp_browser_session import (
     BROWSER_PAGE_LIMIT,
     BROWSER_PAGE_LIMIT_BLOCK_TEXT,
@@ -149,7 +151,7 @@ def _build_search_url(query: str, engine: str) -> str:
     raise ValueError(f"unsupported search engine: {engine}")
 
 
-def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, str | None]:
+def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, str | None, str | None]:
     helper = env_profiles.ROOT / "scripts" / "env" / "cdp_background_page.py"
     try:
         completed = subprocess.run(
@@ -167,15 +169,24 @@ def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, st
             timeout=5.0,
         )
     except subprocess.TimeoutExpired:
-        return False, "Chrome DevTools Target.createTarget timed out"
+        return False, "Chrome DevTools Target.createTarget timed out", None
     except OSError as exc:
-        return False, str(exc)
+        return False, str(exc), None
     if completed.returncode == 0:
-        return True, None
+        try:
+            payload = json.loads(completed.stdout.strip())
+        except json.JSONDecodeError as exc:
+            return False, f"Target.createTarget returned invalid JSON: {exc}", None
+        if not isinstance(payload, dict):
+            return False, "Target.createTarget response was not an object", None
+        target_id = payload.get("targetId")
+        if not isinstance(target_id, str) or not target_id.strip():
+            return False, "Target.createTarget response missing result.targetId", None
+        return True, None, target_id.strip()
     reason = completed.stderr.strip() or completed.stdout.strip()
     if reason:
-        return False, reason
-    return False, f"Chrome DevTools Target.createTarget exited with status {completed.returncode}"
+        return False, reason, None
+    return False, f"Chrome DevTools Target.createTarget exited with status {completed.returncode}", None
 
 
 def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, Any]:
@@ -785,7 +796,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
                 "mutates_product_state": False,
             },
         )
-    opened, open_reason = _open_browser_page(browser_endpoint, target_url)
+    opened, open_reason, target_id = _open_browser_page(browser_endpoint, target_url)
     if not opened:
         return _browser_open_failed(
             context=context,
@@ -795,6 +806,19 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
         )
     hint = page_gate.hint_text()
     effect_summary = "Opened the planned target URL in launcher-managed browser session without writing product objects."
+    ttl_extra: dict[str, Any]
+    try:
+        ttl_extra = browser_lifecycle.register_browser_page_ttl(
+            instance_root=context["instance_json"].parent,
+            target_id=target_id or "",
+            target_url=target_url,
+        )
+        effect_summary = f"{effect_summary} Browser page TTL: {ttl_extra['ttl_seconds']}s."
+    except Exception as exc:
+        ttl_extra = {
+            "ttl_registered": False,
+            "ttl_registration_error": str(exc),
+        }
     if hint:
         effect_summary = f"{effect_summary} {hint}"
     return tool_results.success(
@@ -825,6 +849,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "browser_page_limit": BROWSER_PAGE_LIMIT,
             "permission_boundary": "search.browser",
             "mutates_product_state": False,
+            **ttl_extra,
         },
     )
 

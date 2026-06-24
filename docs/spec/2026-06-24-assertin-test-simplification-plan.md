@@ -44,7 +44,7 @@ Highest-volume files by AST count:
 - `tests/test_repo_consistency.py`: 85 direct calls.
 - `tests/test_message_available_handler.py`: 70 direct calls.
 - `tests/test_artifact_env_tool.py`: 61 direct calls.
-- `tests/test_env_tool_semantic_contract.py`: 53 direct calls.
+- semantic contract test suite: 53 direct calls.
 - `tests/test_buddy_env_sandbox.py`: 50 direct calls.
 - `tests/test_track_comment_added_handler.py`: 44 direct calls.
 - `tests/test_task_input_context.py`: 32 direct calls.

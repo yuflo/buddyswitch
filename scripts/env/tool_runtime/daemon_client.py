@@ -43,6 +43,15 @@ def central_daemon_socket_path_for_shared_root(shared_root: Path) -> Path:
     return Path("/tmp") / f"buddyswitch-central-daemon-{digest}.sock"
 
 
+def mailbox_socket_path_for_instance_root(instance_root: Path) -> Path:
+    root = Path(instance_root).expanduser().resolve(strict=False)
+    socket_path = root / "runtime" / "daemon" / "mailbox.sock"
+    if len(str(socket_path).encode("utf-8")) < 100:
+        return socket_path
+    digest = hashlib.sha1(str(root).encode("utf-8")).hexdigest()[:12]
+    return Path("/tmp") / f"buddyswitch-daemon-mailbox-{digest}.sock"
+
+
 def central_daemon_socket_from_env() -> Path:
     raw_socket = os.environ.get("BUDDYSWITCH_CENTRAL_DAEMON_SOCKET")
     if isinstance(raw_socket, str) and raw_socket.strip():
@@ -188,6 +197,35 @@ def request_mailbox(method: str, params: dict[str, Any], *, socket_path: Path) -
         socket_path=Path(socket_path),
         retry_until_connected=True,
     )
+
+
+def schedule_trigger(
+    *,
+    instance_root: Path,
+    delay_seconds: int | float,
+    trigger_type: str,
+    payload: dict[str, Any],
+    source_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    envelope = request_mailbox(
+        "mailbox.schedule_trigger",
+        {
+            "delay_seconds": delay_seconds,
+            "type": trigger_type,
+            "payload": dict(payload),
+            "source_context": dict(source_context or {}),
+        },
+        socket_path=mailbox_socket_path_for_instance_root(instance_root),
+    )
+    if envelope.get("ok") is not True:
+        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+        code = error.get("code") if isinstance(error.get("code"), str) else "daemon_schedule_error"
+        message = error.get("message") if isinstance(error.get("message"), str) else "daemon schedule request failed"
+        raise DaemonClientError(code, message, response=envelope)
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        raise DaemonClientError("daemon_schedule_protocol_error", "daemon schedule success missing result", response=envelope)
+    return result
 
 
 def register_actor(

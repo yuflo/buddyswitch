@@ -16,6 +16,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
+import browser_inbound  # noqa: E402
 import message_inbound  # noqa: E402
 import notification_center  # noqa: E402
 import task_checkout_handler  # noqa: E402
@@ -35,9 +36,11 @@ def default_notify_subscriptions() -> list[str]:
 
 def default_daemon_handlers() -> list[object]:
     registrations = default_notification_registrations()
+    browser_registrations = browser_inbound.inbound_registrations()
     return [
         task_checkout_handler.TaskCheckoutHandler(),
         *notification_center.handlers_from_registrations(registrations),
+        *notification_center.handlers_from_registrations(browser_registrations),
     ]
 
 

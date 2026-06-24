@@ -105,6 +105,50 @@ class DaemonServiceContractTests(unittest.TestCase):
         self.assertEqual(failed.status, "failed")
         self.assertEqual(failed.message, "boom")
 
+    def test_daemon_status_reports_schedule_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            state = self._state(instance["instance_root"])
+            pending = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-pending"},
+                now="2026-06-24T00:00:00Z",
+            )
+            delivered = state.create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-delivered"},
+                now="2026-06-24T00:00:00Z",
+            )
+            failed = state.create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-failed"},
+                now="2026-06-24T00:00:00Z",
+            )
+            canceled = state.create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-canceled"},
+                now="2026-06-24T00:00:00Z",
+            )
+            state.mark_schedule_delivered(delivered["schedule_id"], dispatch_result={"handling_status": "handled"}, now="2026-06-24T00:00:01Z")
+            state.mark_schedule_failed(failed["schedule_id"], message="close failed", now="2026-06-24T00:00:02Z")
+            state.cancel_schedule(canceled["schedule_id"], now="2026-06-24T00:00:03Z")
+
+            status = self.core.daemon_status(instance["instance_json"])
+
+            self.assertEqual(status["schedules"]["ids"], ["schedule-1", "schedule-2", "schedule-3", "schedule-4"])
+            self.assertEqual(
+                status["schedules"]["counts"],
+                {"pending": 1, "delivered": 1, "failed": 1, "canceled": 1},
+            )
+            self.assertEqual(status["schedules"]["items"][pending["schedule_id"]]["status"], "pending")
+            self.assertEqual(status["schedules"]["items"][delivered["schedule_id"]]["status"], "delivered")
+            self.assertEqual(status["schedules"]["items"][failed["schedule_id"]]["last_error"], "close failed")
+            self.assertEqual(status["schedules"]["items"][canceled["schedule_id"]]["status"], "canceled")
+
     def test_daemon_runtime_replaces_action_gateway_without_alias(self) -> None:
         self.assertTrue(hasattr(self.core, "DaemonRuntime"))
         self.assertTrue(hasattr(self.core, "DaemonHandler"))

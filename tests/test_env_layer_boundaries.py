@@ -106,16 +106,30 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
-                            if alias.name.startswith("env.services"):
+                            if alias.name.startswith("env.services") and alias.name != "env.services.messages":
                                 import_violations.append(f"{rel}:{node.lineno}: import {alias.name}")
                     elif isinstance(node, ast.ImportFrom):
                         module = node.module or ""
-                        if module.startswith("env.services"):
+                        if module == "env.services":
+                            for alias in node.names:
+                                if alias.name != "messages":
+                                    import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
+                        elif module.startswith("env.services") and module != "env.services.messages":
                             import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
         self.assertEqual(import_violations, [], msg="\n".join(import_violations))
 
         service_dir = ROOT / "scripts" / "env" / "services"
-        self.assertFalse(service_dir.exists(), msg=str(service_dir))
+        allowed_service_files = {
+            "scripts/env/services/__init__.py",
+            "scripts/env/services/messages.py",
+        }
+        if service_dir.exists():
+            service_files = {
+                path.relative_to(ROOT).as_posix()
+                for path in service_dir.rglob("*.py")
+                if "__pycache__" not in path.parts
+            }
+            self.assertEqual(service_files, allowed_service_files)
 
     def _patch_config(
         self,

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import importlib.util
 import json
 import os
 import signal
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from itertools import count
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -20,6 +22,9 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
+DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
+MODULE_COUNTER = count()
 SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening many more."
 HARD_PAGE_BLOCK = (
     "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
@@ -47,7 +52,11 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
                     self.send_response(500)
                     self.end_headers()
                     return
-                payload = state.get("list_payload", state.get("targets", []))
+                list_payloads = state.get("list_payloads")
+                if isinstance(list_payloads, list) and list_payloads:
+                    payload = list_payloads.pop(0)
+                else:
+                    payload = state.get("list_payload", state.get("targets", []))
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -60,6 +69,16 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
             return
 
     return Handler
+
+
+def load_module(path: Path) -> Any:
+    module_name = f"buddyswitch_{path.stem}_{next(MODULE_COUNTER)}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load spec for {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class BrowserCockpitProxyTests(unittest.TestCase):
@@ -165,6 +184,7 @@ for raw_line in sys.stdin:
         messages: list[dict[str, Any]],
         *,
         browser_url: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
         if browser_url is None:
             browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
@@ -178,6 +198,8 @@ for raw_line in sys.stdin:
             env = os.environ.copy()
             env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
+            if extra_env:
+                env.update(extra_env)
             command = [
                 sys.executable,
                 str(PROXY),
@@ -249,6 +271,50 @@ for raw_line in sys.stdin:
         self.assertEqual(arguments["url"], "https://example.com/new")
         self.assertIs(arguments["background"], True)
         self.assertNotIn("Browser pages:", json.dumps(responses, ensure_ascii=True))
+
+    def test_new_page_registers_ttl_after_exactly_one_new_target(self) -> None:
+        daemon_core = load_module(DAEMON_CORE_PATH)
+        daemon_mailbox = load_module(DAEMON_MAILBOX_PATH)
+        before = _page_targets(1)
+        after = before + [{"id": "target-new-page", "type": "page", "url": "https://example.com/new"}]
+        browser_url = self._start_cdp_list_server({"requests": [], "list_payloads": [before, before, after]})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            instance_root.mkdir(parents=True, exist_ok=True)
+            state = daemon_core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-browser",
+                main_thread_id="thr-main",
+            )
+            server = daemon_mailbox.DaemonMailboxServer(
+                socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-browser"},
+                handlers=[],
+                state=state,
+                now=lambda: "2026-06-24T00:00:00Z",
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(server.close)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(len(forwarded), 1)
+            self.assertIn("Browser page TTL: 600s.", json.dumps(responses, ensure_ascii=True))
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["type"], "browser.page.expired")
+            self.assertEqual(schedule["payload"]["target_id"], "target-new-page")
+            self.assertEqual(schedule["payload"]["target_url"], "https://example.com/new")
+            self.assertEqual(schedule["payload"]["ttl_seconds"], 600)
+            self.assertFalse(thread.is_alive())
 
     def test_new_page_reaching_hint_threshold_forwards_and_appends_page_hint(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(4)})

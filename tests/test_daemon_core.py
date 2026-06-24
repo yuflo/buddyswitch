@@ -1050,6 +1050,40 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIsNone(state["last_error"])
 
+    def test_run_daemon_sweeps_due_schedules_on_app_server_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            fake_client = FakeRunDaemonClient(
+                notifications=[
+                    self.core.app_server.AppServerTimeoutError("idle"),
+                    StopDaemonLoop("stop"),
+                ],
+            )
+            self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication()
+            original_sweep = self.core.sweep_due_scheduled_triggers
+            sweep_calls: list[dict[str, object]] = []
+
+            def fake_sweep(context: object, state: object, runtime: object, handlers: object) -> dict[str, object]:
+                sweep_calls.append(
+                    {
+                        "actor_id": getattr(context, "actor_id"),
+                        "state": state,
+                        "runtime": runtime,
+                        "handlers": handlers,
+                    }
+                )
+                return {"swept_count": 0, "delivered_count": 0, "failed_count": 0, "schedules": []}
+
+            self.addCleanup(setattr, self.core, "sweep_due_scheduled_triggers", original_sweep)
+            self.core.sweep_due_scheduled_triggers = fake_sweep
+
+            with self.assertRaises(StopDaemonLoop):
+                self.core.run_daemon(instance["instance_json"], handlers=[])
+
+            self.assertEqual(len(sweep_calls), 1)
+            self.assertEqual(sweep_calls[0]["actor_id"], "act-dev-daed00000001")
+
     def test_run_daemon_records_fatal_app_server_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)

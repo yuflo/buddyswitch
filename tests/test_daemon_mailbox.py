@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
 CENTRAL_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
 DAEMON_CLIENT_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py"
+DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 MODULE_COUNTER = count()
 
 
@@ -51,6 +52,7 @@ class DaemonMailboxTests(unittest.TestCase):
         self.mailbox = load_module(MAILBOX_PATH)
         self.central = load_module(CENTRAL_CORE_PATH)
         self.client = load_module(DAEMON_CLIENT_PATH)
+        self.core = load_module(DAEMON_CORE_PATH)
 
     def _signal(self, *, target_role: str = "dev", target_instance: str = "act-dev-daemon") -> dict[str, Any]:
         return self.mailbox.daemon_signal_envelope(
@@ -396,6 +398,121 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertEqual(response["error"]["code"], "invalid_local_trigger")
 
         self.assertEqual(dispatcher.triggers, [])
+
+    def test_mailbox_schedule_trigger_registers_instance_local_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
+            instance_root.mkdir(parents=True, exist_ok=True)
+            state = self.core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-daemon",
+                main_thread_id="thr-main",
+            )
+            server = self.mailbox.DaemonMailboxServer(
+                socket_path=Path("/tmp/not-used.sock"),
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                handlers=[],
+                state=state,
+                now=lambda: "2026-06-24T00:00:00Z",
+            )
+
+            response = server.dispatch(
+                {
+                    "protocol": self.client.MAILBOX_PROTOCOL,
+                    "request_id": "req-schedule",
+                    "method": "mailbox.schedule_trigger",
+                    "params": {
+                        "delay_seconds": 600,
+                        "type": "browser.page.expired",
+                        "payload": {"target_id": "target-ttl-1"},
+                        "source_context": {"owner": "browser"},
+                    },
+                }
+            )
+
+            self.assertTrue(response["ok"], msg=response)
+            schedule = response["result"]["schedule"]
+            self.assertEqual(schedule["schedule_id"], "schedule-1")
+            self.assertEqual(schedule["type"], "browser.page.expired")
+            self.assertEqual(schedule["status"], "pending")
+            self.assertEqual(schedule["due_at"], "2026-06-24T00:10:00Z")
+            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["payload"], {"target_id": "target-ttl-1"})
+
+    def test_mailbox_schedule_trigger_rejects_invalid_payload_without_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
+            instance_root.mkdir(parents=True, exist_ok=True)
+            state = self.core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-daemon",
+                main_thread_id="thr-main",
+            )
+            server = self.mailbox.DaemonMailboxServer(
+                socket_path=Path("/tmp/not-used.sock"),
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                handlers=[],
+                state=state,
+                now=lambda: "2026-06-24T00:00:00Z",
+            )
+
+            for params in (
+                {"delay_seconds": -1, "type": "browser.page.expired", "payload": {}},
+                {"delay_seconds": 600, "type": " ", "payload": {}},
+                {"delay_seconds": 600, "type": "browser.page.expired", "payload": []},
+                {"delay_seconds": 600, "type": "browser.page.expired", "payload": {}, "source_context": []},
+            ):
+                with self.subTest(params=params):
+                    response = server.dispatch(
+                        {
+                            "protocol": self.client.MAILBOX_PROTOCOL,
+                            "request_id": "req-schedule",
+                            "method": "mailbox.schedule_trigger",
+                            "params": params,
+                        }
+                    )
+
+                    self.assertFalse(response["ok"], msg=response)
+                    self.assertEqual(response["error"]["code"], "invalid_schedule_trigger")
+
+            self.assertFalse(self.core.daemon_state_file(instance_root).exists())
+
+    def test_daemon_client_schedule_trigger_posts_to_instance_mailbox(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
+            instance_root.mkdir(parents=True, exist_ok=True)
+            socket_path = self.client.mailbox_socket_path_for_instance_root(instance_root)
+            state = self.core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-daemon",
+                main_thread_id="thr-main",
+            )
+            server = self.mailbox.DaemonMailboxServer(
+                socket_path=socket_path,
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                handlers=[],
+                state=state,
+                now=lambda: "2026-06-24T00:00:00Z",
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(server.close)
+
+            result = self.client.schedule_trigger(
+                instance_root=instance_root,
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-ttl-1"},
+                source_context={"owner": "browser"},
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(result["schedule"]["schedule_id"], "schedule-1")
+            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["payload"], {"target_id": "target-ttl-1"})
+            self.assertFalse(thread.is_alive())
 
 
 if __name__ == "__main__":

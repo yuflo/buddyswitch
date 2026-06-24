@@ -18,6 +18,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 from env.cdp_browser_session import BROWSER_PAGE_LIMIT_BLOCK_TEXT, evaluate_page_open_gate  # noqa: E402
 
 
@@ -137,11 +138,21 @@ def mutate_tool_call(
                     f"Reused existing browser page {target_id}. No new page was opened.",
                 ), None
             hint = gate.hint_text()
+            try:
+                before_targets = browser_lifecycle.read_page_targets(browser_url)
+            except browser_lifecycle.BrowserLifecycleError:
+                before_targets = None
         rewritten = copy.deepcopy(message)
         rewritten_params = rewritten.setdefault("params", {})
         rewritten_arguments = dict(arguments)
         rewritten_arguments["background"] = True
         rewritten_params["arguments"] = rewritten_arguments
+        if isinstance(target_url, str) and target_url.strip():
+            return rewritten, None, {
+                "target_url": target_url.strip(),
+                "before_targets": before_targets,
+                "page_hint": hint,
+            }
         return rewritten, None, hint
 
     if name == "select_page":
@@ -245,6 +256,44 @@ def patch_tool_response_hint(message: dict[str, Any], hint: str) -> dict[str, An
     return patched
 
 
+def patch_tool_response_new_page_metadata(
+    message: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    browser_url: str,
+    instance_root: str | None,
+) -> dict[str, Any]:
+    patched = message
+    page_hint = metadata.get("page_hint")
+    if isinstance(page_hint, str) and page_hint:
+        patched = patch_tool_response_hint(patched, page_hint)
+    result = message.get("result")
+    if not isinstance(result, dict) or result.get("isError") is True:
+        return patched
+    before_targets = metadata.get("before_targets")
+    target_url = metadata.get("target_url")
+    if not isinstance(before_targets, list) or not isinstance(target_url, str) or not target_url:
+        return patch_tool_response_hint(patched, "Browser page TTL not registered.")
+    try:
+        after_targets = browser_lifecycle.read_page_targets(browser_url)
+        target_id = browser_lifecycle.new_page_target_id(before_targets, after_targets)
+        if target_id is None:
+            return patch_tool_response_hint(patched, "Browser page TTL not registered.")
+        if not isinstance(instance_root, str) or not instance_root.strip():
+            return patch_tool_response_hint(patched, "Browser page TTL not registered.")
+        ttl = browser_lifecycle.register_browser_page_ttl(
+            instance_root=Path(instance_root.strip()),
+            target_id=target_id,
+            target_url=target_url,
+        )
+    except Exception:
+        return patch_tool_response_hint(patched, "Browser page TTL not registered.")
+    ttl_seconds = ttl.get("ttl_seconds") if isinstance(ttl, dict) else None
+    if not isinstance(ttl_seconds, int):
+        ttl_seconds = browser_lifecycle.BROWSER_PAGE_TTL_SECONDS
+    return patch_tool_response_hint(patched, f"Browser page TTL: {ttl_seconds}s.")
+
+
 def write_json_line(message: dict[str, Any], output_lock: threading.Lock) -> None:
     with output_lock:
         sys.stdout.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
@@ -263,8 +312,10 @@ def upstream_to_client(
     upstream: subprocess.Popen[str],
     output_lock: threading.Lock,
     tools_list_ids: set[Any],
-    pending_hints: dict[Any, str],
+    pending_hints: dict[Any, Any],
     ids_lock: threading.Lock,
+    browser_url: str,
+    instance_root: str | None,
 ) -> None:
     assert upstream.stdout is not None
     for raw_line in upstream.stdout:
@@ -281,7 +332,7 @@ def upstream_to_client(
             continue
         message_id = message.get("id")
         should_patch = False
-        response_hint: str | None = None
+        response_hint: Any | None = None
         with ids_lock:
             if message_id in tools_list_ids:
                 tools_list_ids.discard(message_id)
@@ -289,7 +340,14 @@ def upstream_to_client(
             response_hint = pending_hints.pop(message_id, None)
         if should_patch:
             message = patch_tool_list_message(message)
-        if response_hint:
+        if isinstance(response_hint, dict):
+            message = patch_tool_response_new_page_metadata(
+                message,
+                response_hint,
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+        elif response_hint:
             message = patch_tool_response_hint(message, response_hint)
         write_json_line(message, output_lock)
 
@@ -328,10 +386,18 @@ def run_proxy(upstream_argv: list[str], browser_url: str) -> int:
     output_lock = threading.Lock()
     ids_lock = threading.Lock()
     tools_list_ids: set[Any] = set()
-    pending_hints: dict[Any, str] = {}
+    pending_hints: dict[Any, Any] = {}
     relay = threading.Thread(
         target=upstream_to_client,
-        args=(upstream, output_lock, tools_list_ids, pending_hints, ids_lock),
+        args=(
+            upstream,
+            output_lock,
+            tools_list_ids,
+            pending_hints,
+            ids_lock,
+            browser_url,
+            os.environ.get("BUDDYSWITCH_INSTANCE_ROOT"),
+        ),
         daemon=True,
     )
     relay.start()

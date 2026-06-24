@@ -237,6 +237,209 @@ class DaemonTriggerRouterTests(unittest.TestCase):
         self.assertNotIn("handle_signal", source)
         self.assertNotIn("handle_parent_required", source)
 
+    def test_scheduled_trigger_registration_persists_pending_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+
+            schedule = instance["state"].create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={
+                    "target_id": "target-ttl-1",
+                    "target_url": "https://example.com/new",
+                    "ttl_seconds": 600,
+                    "expiry_policy": "auto_close",
+                },
+                source_context={"owner": "browser"},
+                now="2026-06-24T00:00:00Z",
+            )
+
+            self.assertEqual(schedule["schedule_id"], "schedule-1")
+            self.assertEqual(schedule["type"], "browser.page.expired")
+            self.assertEqual(schedule["status"], "pending")
+            self.assertEqual(schedule["due_at"], "2026-06-24T00:10:00Z")
+            self.assertEqual(schedule["created_at"], "2026-06-24T00:00:00Z")
+            self.assertEqual(schedule["updated_at"], "2026-06-24T00:00:00Z")
+            self.assertEqual(schedule["last_error"], None)
+            self.assertEqual(schedule["payload"]["target_id"], "target-ttl-1")
+            self.assertEqual(schedule["source_context"], {"owner": "browser"})
+
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"], schedule)
+
+    def test_due_scheduled_trigger_dispatch_marks_delivered_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            instance["state"].create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-ttl-1"},
+                source_context={"owner": "browser"},
+                now="2026-06-24T00:00:00Z",
+            )
+            handled: list[Any] = []
+            core = self.daemon_core
+
+            class BrowserExpiryHandler:
+                name = "browser_page_expired"
+
+                def handles(self, trigger: Any) -> bool:
+                    return trigger.type == "browser.page.expired"
+
+                def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
+                    handled.append(trigger)
+                    return core.HandlerResult.handled()
+
+            first = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[BrowserExpiryHandler()],
+                now="2026-06-24T00:00:01Z",
+            )
+            second = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[BrowserExpiryHandler()],
+                now="2026-06-24T00:00:02Z",
+            )
+
+            self.assertEqual(first["swept_count"], 1)
+            self.assertEqual(first["delivered_count"], 1)
+            self.assertEqual(first["failed_count"], 0)
+            self.assertEqual(second["swept_count"], 0)
+            self.assertEqual(len(handled), 1)
+            trigger = handled[0]
+            self.assertEqual(trigger.source, "scheduled_trigger")
+            self.assertEqual(trigger.type, "browser.page.expired")
+            self.assertEqual(trigger.origin_id, "schedule-1")
+            self.assertEqual(trigger.payload, {"target_id": "target-ttl-1"})
+            self.assertEqual(trigger.source_context["schedule_id"], "schedule-1")
+            self.assertEqual(trigger.source_context["owner"], "browser")
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            row = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(row["status"], "delivered")
+            self.assertEqual(row["delivered_at"], "2026-06-24T00:00:01Z")
+            self.assertIsNone(row["last_error"])
+            self.assertEqual(row["dispatch_result"]["handling_status"], "handled")
+
+    def test_due_scheduled_trigger_with_no_handler_marks_failed_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            instance["state"].create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-ttl-1"},
+                now="2026-06-24T00:00:00Z",
+            )
+
+            first = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[],
+                now="2026-06-24T00:00:01Z",
+            )
+            second = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[],
+                now="2026-06-24T00:00:02Z",
+            )
+
+            self.assertEqual(first["swept_count"], 1)
+            self.assertEqual(first["failed_count"], 1)
+            self.assertEqual(second["swept_count"], 0)
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            row = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(row["status"], "failed")
+            self.assertEqual(row["last_error"], "scheduled trigger had no matching handler")
+            self.assertEqual(row["dispatch_result"]["handling_status"], "ignored")
+
+    def test_due_scheduled_trigger_handler_failure_marks_failed_without_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            instance["state"].create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-ttl-1"},
+                now="2026-06-24T00:00:00Z",
+            )
+            core = self.daemon_core
+
+            class FailingBrowserExpiryHandler:
+                name = "browser_page_expired"
+
+                def handles(self, trigger: Any) -> bool:
+                    return trigger.type == "browser.page.expired"
+
+                def handle(self, *_args: object) -> object:
+                    return core.HandlerResult.failed("close failed")
+
+            first = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[FailingBrowserExpiryHandler()],
+                now="2026-06-24T00:00:01Z",
+            )
+            second = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[FailingBrowserExpiryHandler()],
+                now="2026-06-24T00:00:02Z",
+            )
+
+            self.assertEqual(first["swept_count"], 1)
+            self.assertEqual(first["failed_count"], 1)
+            self.assertEqual(second["swept_count"], 0)
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            row = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(row["status"], "failed")
+            self.assertEqual(row["last_error"], "close failed")
+            self.assertEqual(row["dispatch_result"]["handling_status"], "failed")
+
+    def test_canceled_schedule_is_not_dispatched(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            schedule = instance["state"].create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-ttl-1"},
+                now="2026-06-24T00:00:00Z",
+            )
+            instance["state"].cancel_schedule(schedule["schedule_id"], now="2026-06-24T00:00:01Z")
+            calls: list[str] = []
+
+            class BrowserExpiryHandler:
+                name = "browser_page_expired"
+
+                def handles(self, trigger: Any) -> bool:
+                    return trigger.type == "browser.page.expired"
+
+                def handle(self, *_args: object) -> object:
+                    calls.append("called")
+                    raise AssertionError("canceled schedule must not dispatch")
+
+            result = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[BrowserExpiryHandler()],
+                now="2026-06-24T00:00:02Z",
+            )
+
+            self.assertEqual(result["swept_count"], 0)
+            self.assertEqual(calls, [])
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            row = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(row["status"], "canceled")
+            self.assertEqual(row["canceled_at"], "2026-06-24T00:00:01Z")
+
 
 if __name__ == "__main__":
     unittest.main()

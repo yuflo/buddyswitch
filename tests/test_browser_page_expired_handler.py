@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Tests for browser.page.expired daemon handler."""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+import unittest
+from itertools import count
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+HANDLER_PATH = ROOT / "tools" / "launcher" / "browser_page_expired_handler.py"
+TRIGGERS_PATH = ROOT / "tools" / "launcher" / "daemon_triggers.py"
+MODULE_COUNTER = count()
+
+
+def load_module(path: Path) -> Any:
+    if not path.exists():
+        raise AssertionError(f"expected module to exist: {path}")
+    module_name = f"buddyswitch_{path.stem}_{next(MODULE_COUNTER)}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load spec for {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class FakeContext:
+    actor_address = {"role_id": "dev", "actor_id": "act-dev-browser"}
+    actor_id = "act-dev-browser"
+    role = "dev"
+    instance_payload = {"browser_port": 9444}
+
+
+class FakeRuntime:
+    def __init__(self, *, activity_status: str = "idle") -> None:
+        self.activity_status = activity_status
+        self.parent_prompts: list[dict[str, object]] = []
+
+    def parent_activity(self) -> dict[str, object]:
+        return {"status": self.activity_status}
+
+    def submit_parent_prompt(
+        self,
+        text: str,
+        *,
+        handler_name: str,
+        origin_id: str | None,
+        interrupt_policy: str = "none",
+    ) -> dict[str, object]:
+        self.parent_prompts.append(
+            {
+                "text": text,
+                "handler_name": handler_name,
+                "origin_id": origin_id,
+                "interrupt_policy": interrupt_policy,
+            }
+        )
+        return {"turn_id": "turn-browser-ttl"}
+
+
+class BrowserPageExpiredHandlerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.handler_module = load_module(HANDLER_PATH)
+        self.triggers = load_module(TRIGGERS_PATH)
+
+    def _trigger(
+        self,
+        *,
+        target_actor_address: dict[str, str] | None = None,
+        expiry_policy: str = "auto_close",
+    ) -> Any:
+        return self.triggers.DaemonTrigger(
+            source="scheduled_trigger",
+            type="browser.page.expired",
+            target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
+            origin_id="schedule-1",
+            correlation_id=None,
+            payload={
+                "target_id": "target-ttl-1",
+                "target_url": "https://example.com/new",
+                "ttl_seconds": 600,
+                "expiry_policy": expiry_policy,
+            },
+            source_context={"schedule_id": "schedule-1"},
+        )
+
+    def test_auto_close_closes_existing_target_by_target_id(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
+            calls.append({"browser_url": browser_url, "target_id": target_id})
+            return {"status": "closed", "target_id": target_id}
+
+        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-ttl-1"}])
+
+    def test_auto_close_missing_target_is_handled(self) -> None:
+        def fake_close_page_target(_browser_url: str, target_id: str) -> dict[str, str]:
+            return {"status": "already_gone", "target_id": target_id}
+
+        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+
+    def test_auto_close_browser_unavailable_is_handled_as_stale(self) -> None:
+        def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
+            raise self.handler_module.browser_lifecycle.BrowserLifecycleError(
+                "failed to read Chrome DevTools /json/list: connection refused"
+            )
+
+        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+
+    def test_auto_close_close_failure_returns_failed_once(self) -> None:
+        def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
+            raise self.handler_module.browser_lifecycle.BrowserLifecycleError("simulated close failure")
+
+        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.message, "simulated close failure")
+
+    def test_notify_policy_submits_concise_parent_prompt(self) -> None:
+        runtime = FakeRuntime(activity_status="idle")
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(FakeContext(), state=object(), runtime=runtime, trigger=self._trigger(expiry_policy="notify"))
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(len(runtime.parent_prompts), 1)
+        prompt = runtime.parent_prompts[0]
+        self.assertEqual(prompt["handler_name"], "browser_page_expired")
+        self.assertEqual(prompt["origin_id"], "schedule-1")
+        self.assertIn("Browser page TTL expired", prompt["text"])
+        self.assertNotIn("schedule_id", prompt["text"])
+
+    def test_handler_rejects_wrong_target_actor(self) -> None:
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(
+            FakeContext(),
+            state=object(),
+            runtime=FakeRuntime(),
+            trigger=self._trigger(target_actor_address={"role_id": "pm", "actor_id": "act-pm-browser"}),
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("wrong target actor", result.message)
+
+
+if __name__ == "__main__":
+    unittest.main()

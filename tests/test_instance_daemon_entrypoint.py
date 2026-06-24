@@ -20,8 +20,13 @@ DAEMON_SH_PATH = ROOT / "tools" / "launcher" / "daemon.sh"
 CENTRAL_DAEMON_PATH = ROOT / "tools" / "launcher" / "central_daemon.py"
 MODULE_COUNTER = count()
 EXPECTED_SUBSCRIPTIONS = ["message.available", "track.comment.added"]
-EXPECTED_HANDLER_TYPES = ["TaskCheckoutHandler", "MessageAvailableHandler", "TrackCommentAddedHandler"]
-EXPECTED_HANDLER_NAMES = ["task_checkout", "message_available", "track_comment_added"]
+EXPECTED_HANDLER_TYPES = [
+    "TaskCheckoutHandler",
+    "MessageAvailableHandler",
+    "TrackCommentAddedHandler",
+    "BrowserPageExpiredHandler",
+]
+EXPECTED_HANDLER_NAMES = ["task_checkout", "message_available", "track_comment_added", "browser_page_expired"]
 
 
 def load_instance_daemon() -> Any:
@@ -59,10 +64,12 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         imports = imported_modules(INSTANCE_DAEMON_PATH)
 
         self.assertIn("notification_center", imports)
+        self.assertIn("browser_inbound", imports)
         self.assertIn("message_inbound", imports)
         self.assertIn("track_comment_inbound", imports)
         self.assertNotIn("message_available_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
+        self.assertNotIn("browser_page_expired_handler", imports)
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
         handlers = self.instance_daemon.default_daemon_handlers()
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)

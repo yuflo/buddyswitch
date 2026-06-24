@@ -109,6 +109,7 @@ class DaemonMailboxServer:
         context: Any | None = None,
         state: Any | None = None,
         trigger_dispatcher: Any | None = None,
+        now: Any | None = None,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve(strict=False)
         self.local_actor_address = ActorAddress.from_payload(
@@ -118,6 +119,7 @@ class DaemonMailboxServer:
         self.context = context
         self.state = state
         self.trigger_dispatcher = trigger_dispatcher
+        self.now = now
         self._stop_event = threading.Event()
         self._server: socket.socket | None = None
 
@@ -206,6 +208,11 @@ class DaemonMailboxServer:
             if not isinstance(params, dict):
                 return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
             return self._dispatch_local_trigger(request_id, params)
+        if method == "mailbox.schedule_trigger":
+            params = request.get("params")
+            if not isinstance(params, dict):
+                return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
+            return self._dispatch_schedule_trigger(request_id, params)
         if method != "mailbox.deliver":
             return self._response(request_id, code="mailbox_unknown_method", message="unsupported mailbox method")
         params = request.get("params")
@@ -270,6 +277,37 @@ class DaemonMailboxServer:
         except Exception as exc:
             return self._response(request_id, code="invalid_local_trigger", message=str(exc))
         return self._dispatch_trigger(request_id, trigger)
+
+    def _now_text(self) -> str | None:
+        if callable(self.now):
+            value = self.now()
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _dispatch_schedule_trigger(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
+        if self.state is None or not callable(getattr(self.state, "create_schedule", None)):
+            return self._response(
+                request_id,
+                code="schedule_unavailable",
+                message="daemon state does not support scheduled triggers",
+            )
+        try:
+            source_context = params.get("source_context", {})
+            if source_context is None:
+                source_context = {}
+            if not isinstance(source_context, dict):
+                raise ValueError("source_context must be an object")
+            schedule = self.state.create_schedule(
+                delay_seconds=params.get("delay_seconds"),
+                trigger_type=params.get("type"),
+                payload=params.get("payload"),
+                source_context=source_context,
+                now=self._now_text(),
+            )
+        except Exception as exc:
+            return self._response(request_id, code="invalid_schedule_trigger", message=str(exc))
+        return self._response(request_id, {"schedule": schedule})
 
 
 def mailbox_socket_path(instance_root: Path) -> Path:

@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -130,6 +130,22 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _parse_utc_timestamp(value: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("timestamp must be a non-empty string")
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_utc_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _state_payload(actor_id: str, main_thread_id: str) -> dict[str, Any]:
     return {
         "actor_id": actor_id,
@@ -138,6 +154,8 @@ def _state_payload(actor_id: str, main_thread_id: str) -> dict[str, Any]:
         "daemon_origin_turns": {},
         "daemon_runtime_call_ids": [],
         "daemon_runtime_calls": {},
+        "scheduled_trigger_ids": [],
+        "scheduled_triggers": {},
         "ready": None,
         "last_error": None,
         "handlers": {},
@@ -345,6 +363,51 @@ class DaemonState:
                 payload["handlers"].pop(handler_name, None)
                 continue
             handler_payload.pop("last_" + "action" + "_turn_id", None)
+        if not isinstance(payload.get("scheduled_trigger_ids"), list):
+            payload["scheduled_trigger_ids"] = []
+        payload["scheduled_trigger_ids"] = [
+            item for item in payload["scheduled_trigger_ids"] if isinstance(item, str) and item
+        ]
+        raw_schedules = payload.get("scheduled_triggers")
+        if not isinstance(raw_schedules, dict):
+            raw_schedules = {}
+        schedules: dict[str, Any] = {}
+        for schedule_id in payload["scheduled_trigger_ids"]:
+            raw_schedule = raw_schedules.get(schedule_id)
+            if not isinstance(raw_schedule, dict):
+                continue
+            if raw_schedule.get("schedule_id") != schedule_id:
+                continue
+            if raw_schedule.get("status") not in {"pending", "delivered", "failed", "canceled"}:
+                continue
+            if not isinstance(raw_schedule.get("type"), str) or not raw_schedule.get("type"):
+                continue
+            if not isinstance(raw_schedule.get("payload"), dict):
+                continue
+            if not isinstance(raw_schedule.get("source_context"), dict):
+                continue
+            if not isinstance(raw_schedule.get("created_at"), str) or not raw_schedule.get("created_at"):
+                continue
+            if not isinstance(raw_schedule.get("updated_at"), str) or not raw_schedule.get("updated_at"):
+                continue
+            if not isinstance(raw_schedule.get("due_at"), str) or not raw_schedule.get("due_at"):
+                continue
+            schedules[schedule_id] = {
+                "schedule_id": schedule_id,
+                "type": raw_schedule["type"],
+                "payload": dict(raw_schedule["payload"]),
+                "source_context": dict(raw_schedule["source_context"]),
+                "status": raw_schedule["status"],
+                "created_at": raw_schedule["created_at"],
+                "updated_at": raw_schedule["updated_at"],
+                "due_at": raw_schedule["due_at"],
+                "delivered_at": raw_schedule.get("delivered_at") if isinstance(raw_schedule.get("delivered_at"), str) else None,
+                "canceled_at": raw_schedule.get("canceled_at") if isinstance(raw_schedule.get("canceled_at"), str) else None,
+                "last_error": raw_schedule.get("last_error") if isinstance(raw_schedule.get("last_error"), str) else None,
+                "dispatch_result": raw_schedule.get("dispatch_result") if isinstance(raw_schedule.get("dispatch_result"), dict) else None,
+            }
+        payload["scheduled_trigger_ids"] = [item for item in payload["scheduled_trigger_ids"] if item in schedules]
+        payload["scheduled_triggers"] = schedules
         return cls(path=path, payload=payload)
 
     def save(self) -> None:
@@ -546,6 +609,144 @@ class DaemonState:
                     "message": message,
                     "at": _utc_now(),
                 }
+            },
+        )
+
+    def create_schedule(
+        self,
+        *,
+        delay_seconds: int | float,
+        trigger_type: str,
+        payload: dict[str, Any],
+        source_context: dict[str, Any] | None = None,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, (int, float)) or delay_seconds < 0:
+            raise ValueError("delay_seconds must be a non-negative number")
+        if not isinstance(trigger_type, str) or not trigger_type.strip():
+            raise ValueError("trigger_type must be a non-empty string")
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        if source_context is None:
+            source_context = {}
+        if not isinstance(source_context, dict):
+            raise ValueError("source_context must be an object")
+        created_at = now or _utc_now()
+        created_dt = _parse_utc_timestamp(created_at)
+        timestamp = _format_utc_timestamp(created_dt)
+        due_at = _format_utc_timestamp(created_dt + timedelta(seconds=float(delay_seconds)))
+        schedule_ids = [
+            item for item in self.payload.get("scheduled_trigger_ids", []) if isinstance(item, str) and item
+        ]
+        schedules = self.payload.get("scheduled_triggers")
+        if not isinstance(schedules, dict):
+            schedules = {}
+        counter = 1
+        while True:
+            schedule_id = f"schedule-{counter}"
+            if schedule_id not in schedules:
+                break
+            counter += 1
+        row = {
+            "schedule_id": schedule_id,
+            "type": trigger_type.strip(),
+            "payload": dict(payload),
+            "source_context": dict(source_context),
+            "status": "pending",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "due_at": due_at,
+            "delivered_at": None,
+            "canceled_at": None,
+            "last_error": None,
+            "dispatch_result": None,
+        }
+        schedule_ids.append(schedule_id)
+        schedules[schedule_id] = row
+        self.payload["scheduled_trigger_ids"] = schedule_ids
+        self.payload["scheduled_triggers"] = schedules
+        self.save()
+        return dict(row)
+
+    def due_schedules(self, *, now: str | None = None) -> list[dict[str, Any]]:
+        timestamp = now or _utc_now()
+        current = _parse_utc_timestamp(timestamp)
+        schedule_ids = [
+            item for item in self.payload.get("scheduled_trigger_ids", []) if isinstance(item, str) and item
+        ]
+        schedules = self.payload.get("scheduled_triggers")
+        schedule_items = schedules if isinstance(schedules, dict) else {}
+        due: list[dict[str, Any]] = []
+        for schedule_id in schedule_ids:
+            row = schedule_items.get(schedule_id)
+            if not isinstance(row, dict) or row.get("status") != "pending":
+                continue
+            due_at = row.get("due_at")
+            if not isinstance(due_at, str) or not due_at:
+                continue
+            if _parse_utc_timestamp(due_at) <= current:
+                due.append(dict(row))
+        return due
+
+    def _update_schedule(self, schedule_id: str, values: dict[str, Any]) -> dict[str, Any]:
+        schedules = self.payload.get("scheduled_triggers")
+        if not isinstance(schedules, dict):
+            raise KeyError(schedule_id)
+        row = schedules.get(schedule_id)
+        if not isinstance(row, dict):
+            raise KeyError(schedule_id)
+        row.update(values)
+        schedules[schedule_id] = row
+        self.payload["scheduled_triggers"] = schedules
+        self.save()
+        return dict(row)
+
+    def mark_schedule_delivered(
+        self,
+        schedule_id: str,
+        *,
+        dispatch_result: dict[str, Any],
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        timestamp = _format_utc_timestamp(_parse_utc_timestamp(now or _utc_now()))
+        return self._update_schedule(
+            schedule_id,
+            {
+                "status": "delivered",
+                "updated_at": timestamp,
+                "delivered_at": timestamp,
+                "last_error": None,
+                "dispatch_result": dict(dispatch_result),
+            },
+        )
+
+    def mark_schedule_failed(
+        self,
+        schedule_id: str,
+        *,
+        message: str,
+        dispatch_result: dict[str, Any] | None = None,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        timestamp = _format_utc_timestamp(_parse_utc_timestamp(now or _utc_now()))
+        return self._update_schedule(
+            schedule_id,
+            {
+                "status": "failed",
+                "updated_at": timestamp,
+                "last_error": message or "scheduled trigger failed",
+                "dispatch_result": dict(dispatch_result) if isinstance(dispatch_result, dict) else None,
+            },
+        )
+
+    def cancel_schedule(self, schedule_id: str, *, now: str | None = None) -> dict[str, Any]:
+        timestamp = _format_utc_timestamp(_parse_utc_timestamp(now or _utc_now()))
+        return self._update_schedule(
+            schedule_id,
+            {
+                "status": "canceled",
+                "updated_at": timestamp,
+                "canceled_at": timestamp,
             },
         )
 
@@ -1199,6 +1400,52 @@ def dispatch_trigger(
     }
 
 
+def sweep_due_scheduled_triggers(
+    context: DaemonContext,
+    state: DaemonState,
+    runtime: Any,
+    handlers: list[Any] | tuple[Any, ...],
+    *,
+    now: str | None = None,
+) -> dict[str, Any]:
+    timestamp = _format_utc_timestamp(_parse_utc_timestamp(now or _utc_now()))
+    actor_address = actor_address_for_context(context).to_payload()
+    swept_count = 0
+    delivered_count = 0
+    failed_count = 0
+    results: list[dict[str, Any]] = []
+    for schedule in state.due_schedules(now=timestamp):
+        schedule_id = schedule["schedule_id"]
+        trigger = daemon_triggers.normalize_scheduled_trigger(schedule, target_actor_address=actor_address)
+        dispatch_result = dispatch_trigger(context, state, runtime, trigger, handlers)
+        swept_count += 1
+        if (
+            dispatch_result.get("handling_status") == "handled"
+            and isinstance(dispatch_result.get("handled_count"), int)
+            and dispatch_result.get("handled_count") > 0
+        ):
+            updated = state.mark_schedule_delivered(schedule_id, dispatch_result=dispatch_result, now=timestamp)
+            delivered_count += 1
+        else:
+            error = dispatch_result.get("handling_error")
+            if not isinstance(error, str) or not error:
+                error = "scheduled trigger had no matching handler"
+            updated = state.mark_schedule_failed(
+                schedule_id,
+                message=error,
+                dispatch_result=dispatch_result,
+                now=timestamp,
+            )
+            failed_count += 1
+        results.append(updated)
+    return {
+        "swept_count": swept_count,
+        "delivered_count": delivered_count,
+        "failed_count": failed_count,
+        "schedules": results,
+    }
+
+
 def _handler_status_payload(
     state: DaemonState,
     handlers: list[Any] | tuple[Any, ...] | None,
@@ -1256,6 +1503,25 @@ def _runtime_status_payload(state: DaemonState) -> dict[str, Any]:
     return {"ids": list(items), "items": items}
 
 
+def _schedule_status_payload(state: DaemonState) -> dict[str, Any]:
+    schedule_ids = [
+        item for item in state.payload.get("scheduled_trigger_ids", []) if isinstance(item, str) and item
+    ]
+    schedules = state.payload.get("scheduled_triggers")
+    schedule_items = schedules if isinstance(schedules, dict) else {}
+    items = {
+        schedule_id: schedule_items[schedule_id]
+        for schedule_id in schedule_ids
+        if schedule_id in schedule_items and isinstance(schedule_items[schedule_id], dict)
+    }
+    counts = {"pending": 0, "delivered": 0, "failed": 0, "canceled": 0}
+    for item in items.values():
+        status = item.get("status")
+        if status in counts:
+            counts[status] += 1
+    return {"ids": list(items), "items": items, "counts": counts}
+
+
 def daemon_status(
     instance_json: Path,
     *,
@@ -1292,6 +1558,7 @@ def daemon_status(
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
         "runtime": _runtime_status_payload(state),
+        "schedules": _schedule_status_payload(state),
         "handlers": _handler_status_payload(state, handlers),
         "notify": {"subscriptions": _notify_subscriptions_payload(notify_subscriptions)},
     }
@@ -1442,6 +1709,12 @@ def run_daemon(
                 try:
                     notification = client.read_notification()
                 except app_server.AppServerTimeoutError:
+                    sweep_due_scheduled_triggers(
+                        context,
+                        state,
+                        DaemonRuntime(context=context, state=state, client=client),
+                        daemon_handlers,
+                    )
                     heartbeat_daemon_actor(context, actor_address)
                     continue
                 except app_server.AppServerError as exc:

@@ -19,6 +19,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 APP_SERVER_NOTIFICATION = "app_server_notification"
 MAILBOX_CROSS_ACTOR_SIGNAL = "mailbox_cross_actor_signal"
 MAILBOX_LOCAL_TRIGGER = "mailbox_local_trigger"
+SCHEDULED_TRIGGER = "scheduled_trigger"
 
 
 class DaemonTrigger:
@@ -177,5 +178,37 @@ def normalize_local_trigger(
         origin_id=origin_id,
         correlation_id=correlation_id,
         payload=payload,
+        source_context=source_context,
+    )
+
+
+def normalize_scheduled_trigger(
+    schedule: dict[str, Any],
+    *,
+    target_actor_address: dict[str, Any],
+) -> DaemonTrigger:
+    if not isinstance(schedule, dict):
+        raise ValueError("schedule must be an object")
+    schedule_id = _non_empty_string(schedule.get("schedule_id"), "schedule_id")
+    trigger_type = _non_empty_string(schedule.get("type"), "type")
+    payload = schedule.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("schedule payload must be an object")
+    raw_source_context = schedule.get("source_context")
+    source_context = dict(raw_source_context) if isinstance(raw_source_context, dict) else {}
+    source_context["schedule_id"] = schedule_id
+    due_at = schedule.get("due_at")
+    if isinstance(due_at, str) and due_at:
+        source_context["due_at"] = due_at
+    created_at = schedule.get("created_at")
+    if isinstance(created_at, str) and created_at:
+        source_context["created_at"] = created_at
+    return DaemonTrigger(
+        source=SCHEDULED_TRIGGER,
+        type=trigger_type,
+        target_actor_address=_actor_address_payload(target_actor_address, "target_actor_address"),
+        origin_id=schedule_id,
+        correlation_id=None,
+        payload=dict(payload),
         source_context=source_context,
     )
