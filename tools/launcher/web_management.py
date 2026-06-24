@@ -256,6 +256,8 @@ class WebManagementService:
             return 200, {"ok": True, "instances": self._list_instances()}
         if method == "POST" and path == "/api/instances":
             return 200, self._create_instance(body)
+        if method == "POST" and path == "/api/messages/send":
+            return 200, self._send_message_http(body)
 
         instance_action = self._parse_instance_action_path(path)
         if instance_action is None:
@@ -272,8 +274,6 @@ class WebManagementService:
             return 200, self._clear(actor_id)
         if method == "POST" and action == "input":
             return 200, self._send_input(actor_id, body)
-        if method == "POST" and action == "messages":
-            return 200, self._send_message(actor_id, body)
         if method == "POST" and action == "side":
             return 200, self._side(actor_id, body)
         if method == "POST" and action == "side-close":
@@ -298,8 +298,6 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/clear")], "clear"
         if path.startswith(status_prefix) and path.endswith("/input"):
             return path[len(status_prefix) : -len("/input")], "input"
-        if path.startswith(status_prefix) and path.endswith("/messages"):
-            return path[len(status_prefix) : -len("/messages")], "messages"
         if path.startswith(status_prefix) and path.endswith("/side/close"):
             return path[len(status_prefix) : -len("/side/close")], "side-close"
         if path.startswith(status_prefix) and path.endswith("/side"):
@@ -367,25 +365,32 @@ class WebManagementService:
             payload["expected_turn_id"] = expected_turn_id
         return payload
 
-    def _send_message(self, actor_id: str, body: bytes) -> dict[str, Any]:
+    def _send_message_http(self, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
-        unknown = sorted(key for key in payload if key != "text")
+        unknown = sorted(key for key in payload if key not in {"actor_id", "content"})
         if unknown:
             raise HttpError(
                 status=400,
                 code="INVALID_REQUEST",
                 message=f"Unsupported message request fields: {', '.join(unknown)}.",
             )
-        text = payload.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
+        actor_id = payload.get("actor_id")
+        if not isinstance(actor_id, str) or not actor_id.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message="actor_id is required.")
+        try:
+            actor_id = validate_actor_id(actor_id.strip())
+        except ValueError as exc:
+            raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
+        content = payload.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message="content must not be empty.")
         return self._run_busy(
-            f"instance:{actor_id}:messages",
-            lambda: self._send_message_under_lock(actor_id, text.strip()),
+            f"messages:{actor_id}",
+            lambda: self._send_message_http_under_lock(actor_id, content.strip()),
         )
 
-    def _send_message_under_lock(self, actor_id: str, text: str) -> dict[str, Any]:
-        instance = self._get_instance_status(actor_id)
+    def _send_message_http_under_lock(self, actor_id: str, content: str) -> dict[str, Any]:
+        instance = self._get_message_target_instance_status(actor_id)
         instance_actor_id = instance.get("actor_id")
         role = instance.get("role")
         if not isinstance(instance_actor_id, str) or not instance_actor_id.strip():
@@ -395,7 +400,7 @@ class WebManagementService:
         target_actor_address = {"role_id": role.strip(), "actor_id": instance_actor_id.strip()}
         result = self._web_message_sender(
             target_actor_address=target_actor_address,
-            content=text,
+            content=content,
         )
         if not isinstance(result, dict):
             raise HttpError(status=502, code="MESSAGE_SEND_FAILED", message="Web message sender returned invalid result.")
@@ -408,6 +413,7 @@ class WebManagementService:
         }
         for key in (
             "message_id",
+            "from_actor_address",
             "delivery_status",
             "handling_status",
             "reachability_status",
@@ -418,6 +424,22 @@ class WebManagementService:
             if key in result:
                 response[key] = result[key]
         return response
+
+    def _get_message_target_instance_status(self, actor_id: str) -> dict[str, Any]:
+        args = ["instance", "status", actor_id, "--json"]
+        result = self._runner(args, timeout_seconds=10)
+        if result.returncode != 0 or result.timed_out:
+            if not result.timed_out and result.returncode == 2:
+                raise HttpError(
+                    status=404,
+                    code="MESSAGE_TARGET_NOT_FOUND",
+                    message=f"Message target actor was not found: {actor_id}.",
+                )
+            raise map_command_failure(" ".join(args), result)
+        return load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance status for {actor_id}.",
+        )
 
     def _clear(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(

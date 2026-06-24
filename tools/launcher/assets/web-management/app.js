@@ -493,10 +493,13 @@
     });
     elements.sendButton.addEventListener('click', function () {
       runMutation(state, elements, 'messages', function () {
-        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/messages', {
+        return fetchJson('/api/messages/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: state.draftText }),
+          body: JSON.stringify({
+            actor_id: state.selectedInstanceId,
+            content: state.draftText,
+          }),
         });
       }).then(function () {
         state.draftText = '';

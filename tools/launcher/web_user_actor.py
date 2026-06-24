@@ -20,7 +20,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import daemon_mailbox  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
-from env.tools.message import _impl as message_impl  # noqa: E402
+from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
@@ -99,20 +99,12 @@ def send_web_user_message(
 ) -> dict[str, Any]:
     def action() -> dict[str, Any]:
         context = _web_user_tool_context()
-        args: dict[str, Any] = {
-            "target_actor_address": target_actor_address,
-            "content": content,
-        }
-        if reply_to is not None:
-            args["reply_to"] = reply_to
-        return message_impl.send_message_from_actor(
-            args=args,
+        return message_service.send_from_web_user(
             context=context,
-            source_actor_address=WEB_USER_ACTOR_ADDRESS,
-            active_actor=dict(WEB_USER_ACTOR_ADDRESS),
-            active_role="user",
-            require_active_role_manifest=False,
-            action="message.send",
+            target_actor_address=target_actor_address,
+            content=content,
+            web_user_actor_address=WEB_USER_ACTOR_ADDRESS,
+            reply_to=reply_to,
         )
 
     return _run_with_shared_state_root(action)

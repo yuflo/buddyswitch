@@ -90,8 +90,8 @@ test('production javascript keeps the real api surface', () => {
     '/api/health',
     '/api/roles',
     '/api/instances',
+    '/api/messages/send',
     '/status',
-    '/messages',
     '/interrupt',
     '/stop',
     '/clear',
@@ -103,6 +103,10 @@ test('production javascript keeps the real api surface', () => {
   });
 
   assertIncludes(appJs, "method: 'DELETE'");
+  assertIncludes(appJs, 'actor_id: state.selectedInstanceId');
+  assertIncludes(appJs, 'content: state.draftText');
+  assertExcludes(appJs, "selectedInstanceId) + '/messages'");
+  assertExcludes(appJs, 'JSON.stringify({ text: state.draftText })');
   assertIncludes(combinedAssets, 'Copy command');
   assertExcludes(appJs, "selectedInstanceId) + '/input'");
 });
