@@ -6,7 +6,7 @@ buddyswitch_instance_usage() {
 Usage:
   buddyswitch-codex instance roles [--json]
   buddyswitch-codex instance start --role <role> [--json]
-  buddyswitch-codex instance input <actor-id> --text <text> [--input-wrapper raw|task-tui] [--json]
+  buddyswitch-codex instance input <actor-id> --text <text> [--json]
   buddyswitch-codex instance side <actor-id> --text <text> [--json]
   buddyswitch-codex instance side <actor-id> --side-thread-id <side-thread-id> --text <text> [--json]
   buddyswitch-codex instance side close <actor-id> --side-thread-id <side-thread-id> [--json]

@@ -7,7 +7,6 @@ ENV_HELPER="${REPO_ROOT}/tools/launcher/env.sh"
 WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
-INPUT_WRAPPER_HELPER="${REPO_ROOT}/tools/launcher/input_wrapper.py"
 SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"
 DAEMON_HELPER="${REPO_ROOT}/tools/launcher/daemon.sh"
 INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
@@ -15,7 +14,7 @@ CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${INPUT_WRAPPER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -36,7 +35,7 @@ print_help() {
 Usage:
   buddyswitch-codex instance roles [--json]
   buddyswitch-codex instance start --role <role> [--json]
-  buddyswitch-codex instance input <actor-id> --text <text> [--input-wrapper raw|task-tui] [--json]
+  buddyswitch-codex instance input <actor-id> --text <text> [--json]
   buddyswitch-codex instance side <actor-id> --text <text> [--json]
   buddyswitch-codex instance side <actor-id> --side-thread-id <side-thread-id> --text <text> [--json]
   buddyswitch-codex instance side close <actor-id> --side-thread-id <side-thread-id> [--json]
@@ -195,7 +194,7 @@ PY
   echo "Workspace: ${BUDDYSWITCH_WORKSPACE_DIR}"
   echo "Project workspace: ${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
   echo "Instance record: ${instance_json}"
-  echo "Input: ./buddyswitch-codex instance input ${actor_id} --text \"<text>\" [--input-wrapper raw|task-tui]"
+  echo "Input: ./buddyswitch-codex instance input ${actor_id} --text \"<text>\""
   echo "Attach: ./buddyswitch-codex instance attach ${actor_id}"
   echo "Stop: ./buddyswitch-codex instance stop ${actor_id}"
   echo "Delete instance: ./buddyswitch-codex instance delete ${actor_id} --yes"
@@ -381,7 +380,7 @@ instance_set_inactive_locked() {
 }
 
 instance_input() {
-  local actor_id="${1:-}" text="" input_wrapper="raw" final_text="" thread_id="" arg output action turn_id json wrapper_output
+  local actor_id="${1:-}" text="" thread_id="" arg output action turn_id json
   json=0
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
@@ -399,22 +398,6 @@ instance_input() {
         fi
         text="$2"
         shift 2
-        ;;
-      --input-wrapper)
-        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "instance input requires --input-wrapper <raw|task-tui>" >&2
-          return 2
-        fi
-        input_wrapper="$2"
-        shift 2
-        ;;
-      --input-wrapper=*)
-        input_wrapper="${arg#--input-wrapper=}"
-        if [[ -z "${input_wrapper}" ]]; then
-          echo "instance input requires --input-wrapper <raw|task-tui>" >&2
-          return 2
-        fi
-        shift
         ;;
       --json)
         json=1
@@ -435,18 +418,6 @@ instance_input() {
   buddyswitch_validate_actor_id "${actor_id}" || return $?
   buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
   buddyswitch_env_bind_instance "${actor_id}" || return $?
-  wrapper_output="$(
-    python3 "${INPUT_WRAPPER_HELPER}" compose \
-      --wrapper "${input_wrapper}" \
-      --text "${text}" 2>&1
-  )" || {
-    local wrapper_status=$?
-    if [[ -n "${wrapper_output}" ]]; then
-      echo "${wrapper_output}" >&2
-    fi
-    return "${wrapper_status}"
-  }
-  final_text="${wrapper_output}"
   thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
   if [[ -z "${thread_id}" ]]; then
     echo "Instance input blocked: ${actor_id} has no thread id; stop/delete it and start a new instance." >&2
@@ -461,7 +432,7 @@ instance_input() {
     python3 "${SUBMIT_TURN_HELPER}" \
       --socket "$(buddyswitch_app_server_socket)" \
       --thread-id "${thread_id}" \
-      --text "${final_text}" \
+      --text "${text}" \
       --permissions "buddyswitch-runtime" 2>&1
   )" || {
     if [[ "${output}" == *"turn/steer failed"* ]]; then

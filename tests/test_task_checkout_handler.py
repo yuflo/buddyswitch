@@ -306,8 +306,6 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             prompt = runtime.calls[0]["text"]
             assert isinstance(prompt, str)
             self.assertTrue(prompt.startswith("[TASK CHECKPOINT]"))
-            self.assertNotIn("[TASK CONTEXT]", prompt)
-            self.assertNotIn("[USER INPUT]", prompt)
             self.assertEqual([name for name, _payload in calls], ["view", "render"])
             view_payload = calls[0][1]
             self.assertEqual(

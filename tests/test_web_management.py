@@ -942,8 +942,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                         "act-pm-demo",
                         "--text",
                         "Advance the brief",
-                        "--input-wrapper",
-                        "task-tui",
                         "--json",
                     ],
                     WEB_MANAGEMENT.CommandResult(
@@ -997,8 +995,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                             "act-pm-demo",
                             "--text",
                             "Advance the brief",
-                            "--input-wrapper",
-                            "task-tui",
                             "--json",
                         ],
                         ["instance", "status", "act-pm-demo", "--json"],
@@ -1284,8 +1280,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                         "act-pm-demo",
                         "--text",
                         "User task",
-                        "--input-wrapper",
-                        "task-tui",
                         "--json",
                     ],
                     command_json(
@@ -1321,8 +1315,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 "act-pm-demo",
                 "--text",
                 "Advance the brief",
-                "--input-wrapper",
-                "task-tui",
                 "--json",
             ],
             WEB_MANAGEMENT.CommandResult(

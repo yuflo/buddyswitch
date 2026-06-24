@@ -209,51 +209,6 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(view["recent_evidence"][-1]["evidence"], "User asked to switch")
         self.assertGreaterEqual(set(view["available_actions"]), {"switch_confirm", "checkout"})
 
-    def test_task_tui_renders_task_view_model_without_old_operation_wording(self) -> None:
-        view = {
-            "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},
-            "task_state": "active",
-            "current_anchor": {
-                "id": "task-0001-clean-runtime-environment",
-                "title": "Clean runtime environment",
-                "status": "active",
-                "summary": "Refine task input context.",
-                "progress_summary": "Refine task input context.",
-            },
-            "shelf": [{"id": "task-0002-next-task", "title": "Next Task", "status": "captured"}],
-            "pending_switch": {
-                "confirmation_id": "confirm-0001",
-                "from_task_id": "task-0001-clean-runtime-environment",
-                "target": {"mode": "existing", "task_id": "task-0002-next-task"},
-                "reason": "User asked to switch tasks.",
-                "evidence": "Switch request.",
-            },
-            "recent_events": [
-                {"event": "task.selected", "task_id": "task-0001-clean-runtime-environment"},
-                {"event": "task.switch.requested", "task_id": "task-0001-clean-runtime-environment"},
-            ],
-            "recent_evidence": [{"task_id": "task-0001-clean-runtime-environment", "evidence": "Switch request."}],
-            "available_actions": ["current", "capture", "switch_confirm", "progress", "checkout", "review"],
-            "checkout_cue": {"choices": ["continue", "finish", "block"], "requires": {"finish": "evidence", "block": "reason"}},
-            "warnings": ["One pending switch requires confirmation."],
-        }
-
-        tui = task_tui.render_task_tui(view)
-
-        for expected in (
-            "[TASK CONTEXT]",
-            "Current Anchor: task-0001-clean-runtime-environment",
-            "task-0002-next-task",
-            "Pending Switch: confirm-0001",
-            "Checkout: task.checkout next=continue|finish|block",
-            "Switch request.",
-        ):
-            with self.subTest(expected=expected):
-                self.assertIn(expected, tui)
-        for forbidden in ("Task Handling Cue", "task.propose", "task.confirm", "task__propose", "task__confirm"):
-            with self.subTest(forbidden=forbidden):
-                self.assertNotIn(forbidden, tui)
-
     def test_stop_task_tui_renders_checkpoint_for_status_and_next_work(self) -> None:
         view = {
             "owner_actor": {"actor_id": "act-dev-render", "role_id": "dev"},

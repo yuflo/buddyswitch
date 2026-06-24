@@ -1040,26 +1040,8 @@ exec "$real_git" "$@"
             encoding="utf-8",
         )
 
-    def _assert_composed_task_input(
-        self,
-        text: str,
-        *,
-        raw_text: str,
-        task_id: str = "task-0001-launcher-context",
-        title: str = "Launcher context task",
-    ) -> None:
-        self.assertTrue(text.startswith("[TASK CONTEXT]"), msg=text)
-        self.assertIn(f"Current Anchor: {task_id} - {title}", text)
-        self.assertIn("State: active", text)
-        self.assertIn("[USER INPUT]", text)
-        self.assertIn(raw_text, text)
-        self.assertLess(text.index(f"Current Anchor: {task_id}"), text.index("[USER INPUT]"))
-        self.assertLess(text.index("[USER INPUT]"), text.index(raw_text))
-
     def _assert_raw_input(self, text: str, *, raw_text: str) -> None:
         self.assertEqual(text, raw_text)
-        self.assertNotIn("[TASK CONTEXT]", text)
-        self.assertNotIn("[USER INPUT]", text)
 
     def _runtime_sparse_list(self, workspace_dir: Path) -> list[str]:
         return subprocess.check_output(
@@ -3090,92 +3072,7 @@ exec "$real_git" "$@"
             self.assertEqual(input_item["type"], "text")
             self._assert_raw_input(input_item["text"], raw_text="Steer current turn")
 
-    def test_input_task_tui_wrapper_starts_turn_when_thread_idle(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self._seed_instance_taskbox_current(
-                instance_root=Path(str(ctx["instance_root"])),
-                role=str(ctx["instance_payload"]["role"]),
-            )
-
-            input_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "input",
-                    ctx["actor_id"],
-                    "--text",
-                    "Draft brief",
-                    "--input-wrapper",
-                    "task-tui",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self._assert_composed_task_input(turn_start["params"]["input"][0]["text"], raw_text="Draft brief")
-
-    def test_input_task_tui_wrapper_steers_in_progress_turn(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={
-                    "thread_status": {"type": "active", "activeFlags": []},
-                    "turns": [
-                        {
-                            "id": "turn-123",
-                            "items": [],
-                            "itemsView": "summary",
-                            "status": "inProgress",
-                            "error": None,
-                            "startedAt": 0,
-                            "completedAt": None,
-                            "durationMs": None,
-                        }
-                    ],
-                },
-            )
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self._seed_instance_taskbox_current(
-                instance_root=Path(str(ctx["instance_root"])),
-                role=str(ctx["instance_payload"]["role"]),
-            )
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            input_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "input",
-                    ctx["actor_id"],
-                    "--text",
-                    "Steer current turn",
-                    "--input-wrapper",
-                    "task-tui",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
-            self._assert_composed_task_input(steer["params"]["input"][0]["text"], raw_text="Steer current turn")
-
-    def test_input_rejects_unknown_wrapper_without_rpc_mutation(self) -> None:
+    def test_input_rejects_unknown_option_without_rpc_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -3191,8 +3088,7 @@ exec "$real_git" "$@"
                     ctx["actor_id"],
                     "--text",
                     "Draft brief",
-                    "--input-wrapper",
-                    "task-ui",
+                    "--bogus-input-option",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -3201,8 +3097,9 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertNotEqual(input_result.returncode, 0)
-            self.assertEqual(self._read_rpc_rows(Path(str(ctx["calls_path"]))), [])
+            self.assertEqual(input_result.returncode, 2)
+            self.assertIn("Unknown instance input option: --bogus-input-option", input_result.stderr)
+            self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
 
     def test_input_json_includes_expected_turn_id_when_steering(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3319,7 +3216,6 @@ exec "$real_git" "$@"
                 turn_start["params"]["input"],
                 [{"type": "text", "text": "Explore the API shape", "text_elements": []}],
             )
-            self.assertNotIn("[TASK CONTEXT]", turn_start["params"]["input"][0]["text"])
             self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
             self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
 
@@ -5336,7 +5232,6 @@ exec "$real_git" "$@"
             self.assertEqual(params["threadId"], "thr-main")
             prompt = params["input"][0]["text"]
             self.assertTrue(prompt.startswith("[TASK CHECKPOINT]"), msg=prompt)
-            self.assertNotIn("[USER INPUT]", prompt)
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(daemon_state["daemon_origin_turn_ids"], ["turn-daemon-1"])
             self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "task_checkout")

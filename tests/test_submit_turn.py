@@ -113,7 +113,6 @@ class SubmitTurnTests(unittest.TestCase):
         source = SUBMIT_TURN_PATH.read_text(encoding="utf-8")
         self.assertNotIn("task_tui", source)
         self.assertNotIn("task_management", source)
-        self.assertNotIn("[TASK CONTEXT]", source)
         self.assertNotIn("[TASK CHECKOUT]", source)
         self.assertNotIn("[TASK CHECKPOINT]", source)
         self.assertNotIn("task_checkout", source)
