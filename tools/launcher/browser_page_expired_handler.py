@@ -108,7 +108,7 @@ class BrowserPageExpiredHandler:
         if root is not None:
             current_target_id = browser_lifecycle.current_target_id(root)
             if current_target_id == target_id and _parent_turn_is_running(runtime):
-                browser_lifecycle.touch_page_idle(instance_root=root, target_id=target_id)
+                browser_lifecycle.refresh_current_page_idle(instance_root=root, target_id=target_id)
                 return daemon_core.HandlerResult.handled()
         return self._auto_close(context, payload)
 
@@ -117,12 +117,16 @@ class BrowserPageExpiredHandler:
         if browser_endpoint is None:
             return daemon_core.HandlerResult.handled()
         try:
-            browser_lifecycle.close_page_target(browser_endpoint, payload["target_id"])
+            close_result = browser_lifecycle.close_page_target(browser_endpoint, payload["target_id"])
         except browser_lifecycle.BrowserLifecycleError as exc:
             message = str(exc)
             if _is_stale_browser_error(message):
                 return daemon_core.HandlerResult.handled()
             return daemon_core.HandlerResult.failed(message)
+        if close_result.get("status") in {"closed", "already_gone"}:
+            root = _instance_root(context)
+            if root is not None:
+                browser_lifecycle.forget_page_idle_target(instance_root=root, target_id=payload["target_id"])
         return daemon_core.HandlerResult.handled()
 
 

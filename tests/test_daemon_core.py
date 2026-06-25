@@ -1084,6 +1084,50 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.assertEqual(len(sweep_calls), 1)
             self.assertEqual(sweep_calls[0]["actor_id"], "act-dev-daed00000001")
 
+    def test_run_daemon_sweeps_due_schedules_after_notification_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            order: list[str] = []
+
+            class OrderedHandler:
+                name = "ordered"
+
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(self, context: object, state: object, runtime: object, trigger: object) -> object:
+                    del context, state, runtime, trigger
+                    order.append("handler")
+                    return self_core.HandlerResult.handled()
+
+            self_core = self.core
+            handler = OrderedHandler()
+            fake_client = FakeRunDaemonClient(
+                notifications=[
+                    self._completed(turn_id="turn-user-1"),
+                    StopDaemonLoop("stop"),
+                ],
+            )
+            self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication()
+            original_sweep = self.core.sweep_due_scheduled_triggers
+
+            def fake_sweep(context: object, state: object, runtime: object, handlers: object) -> dict[str, object]:
+                del context, state, runtime, handlers
+                order.append("sweep")
+                return {"swept_count": 0, "delivered_count": 0, "failed_count": 0, "schedules": []}
+
+            self.addCleanup(setattr, self.core, "sweep_due_scheduled_triggers", original_sweep)
+            self.core.sweep_due_scheduled_triggers = fake_sweep
+
+            with self.assertRaises(StopDaemonLoop):
+                self.core.run_daemon(instance["instance_json"], handlers=[handler])
+
+            self.assertEqual(order, ["handler", "sweep"])
+            state_payload = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            self.assertIn("scheduled_triggers", state_payload)
+            self.assertNotIn("browser", state_payload)
+
     def test_run_daemon_records_fatal_app_server_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)

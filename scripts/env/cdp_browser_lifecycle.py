@@ -139,12 +139,14 @@ def close_page_target(browser_url: str, target_id: str, timeout_seconds: float =
     targets = read_page_targets(browser_url, timeout_seconds=timeout_seconds)
     if normalized_target_id not in {_target_id(target) for target in targets}:
         return {"status": "already_gone", "target_id": normalized_target_id}
-    _send_browser_command(
+    result = _send_browser_command(
         browser_url,
         "Target.closeTarget",
         {"targetId": normalized_target_id},
         timeout_seconds,
     )
+    if result.get("success") is not True:
+        raise BrowserLifecycleError(f"Chrome DevTools did not close target {normalized_target_id}")
     return {"status": "closed", "target_id": normalized_target_id}
 
 
@@ -223,24 +225,21 @@ def _normalize_page_id(page_id: object) -> str | None:
     raise BrowserLifecycleError("page_id must be a string or integer when provided")
 
 
-def set_current_page(
+def _apply_target_metadata(
+    state: dict[str, Any],
     *,
-    instance_root: Path,
     target_id: str,
+    timestamp: str,
     target_url: str | None = None,
     page_id: object | None = None,
-    now: datetime | None = None,
 ) -> dict[str, Any]:
-    normalized_target_id = _normalize_target_id(target_id)
     normalized_page_id = _normalize_page_id(page_id)
-    timestamp = _format_utc(now or _utc_now())
-    state = _read_page_idle_state(instance_root)
     targets = state.setdefault("targets", {})
     if not isinstance(targets, dict):
         targets = {}
         state["targets"] = targets
-    target_state = dict(targets.get(normalized_target_id)) if isinstance(targets.get(normalized_target_id), dict) else {}
-    target_state["target_id"] = normalized_target_id
+    target_state = dict(targets.get(target_id)) if isinstance(targets.get(target_id), dict) else {}
+    target_state["target_id"] = target_id
     target_state["last_used_at"] = timestamp
     if isinstance(target_url, str) and target_url.strip():
         target_state["target_url"] = target_url.strip()
@@ -250,8 +249,29 @@ def set_current_page(
         if not isinstance(page_map, dict):
             page_map = {}
             state["page_id_to_target_id"] = page_map
-        page_map[normalized_page_id] = normalized_target_id
-    targets[normalized_target_id] = target_state
+        page_map[normalized_page_id] = target_id
+    targets[target_id] = target_state
+    return state
+
+
+def mark_current_page(
+    *,
+    instance_root: Path,
+    target_id: str,
+    target_url: str | None = None,
+    page_id: object | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    normalized_target_id = _normalize_target_id(target_id)
+    timestamp = _format_utc(now or _utc_now())
+    state = _read_page_idle_state(instance_root)
+    _apply_target_metadata(
+        state,
+        target_id=normalized_target_id,
+        timestamp=timestamp,
+        target_url=target_url,
+        page_id=page_id,
+    )
     state["current_target_id"] = normalized_target_id
     state["current_page_updated_at"] = timestamp
     _write_page_idle_state(instance_root, state)
@@ -280,25 +300,19 @@ def target_id_for_page_id(instance_root: Path, page_id: object) -> str | None:
     return None
 
 
-def touch_page_idle(
+def refresh_page_idle(
     *,
     instance_root: Path,
     target_id: str,
     target_url: str | None = None,
     page_id: object | None = None,
     idle_seconds: int = BROWSER_PAGE_IDLE_SECONDS,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     normalized_target_id = _normalize_target_id(target_id)
     if isinstance(idle_seconds, bool) or not isinstance(idle_seconds, int) or idle_seconds <= 0:
         raise BrowserLifecycleError("idle_seconds must be a positive integer")
-    now = _utc_now()
-    set_current_page(
-        instance_root=Path(instance_root),
-        target_id=normalized_target_id,
-        target_url=target_url,
-        page_id=page_id,
-        now=now,
-    )
+    timestamp_value = now or _utc_now()
     payload = {
         "target_id": normalized_target_id,
     }
@@ -310,8 +324,67 @@ def touch_page_idle(
         source_context={"owner": "browser"},
         schedule_key=f"browser.page.idle:{normalized_target_id}",
     )
+    state = _read_page_idle_state(Path(instance_root))
+    _apply_target_metadata(
+        state,
+        target_id=normalized_target_id,
+        timestamp=_format_utc(timestamp_value),
+        target_url=target_url,
+        page_id=page_id,
+    )
+    _write_page_idle_state(Path(instance_root), state)
     return {
         "idle_refreshed": True,
         "idle_seconds": idle_seconds,
-        "idle_expires_at": _format_utc(now + timedelta(seconds=idle_seconds)),
+        "idle_expires_at": _format_utc(timestamp_value + timedelta(seconds=idle_seconds)),
     }
+
+
+def refresh_current_page_idle(
+    *,
+    instance_root: Path,
+    target_id: str,
+    target_url: str | None = None,
+    page_id: object | None = None,
+    idle_seconds: int = BROWSER_PAGE_IDLE_SECONDS,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    timestamp_value = now or _utc_now()
+    result = refresh_page_idle(
+        instance_root=instance_root,
+        target_id=target_id,
+        target_url=target_url,
+        page_id=page_id,
+        idle_seconds=idle_seconds,
+        now=timestamp_value,
+    )
+    mark_current_page(
+        instance_root=instance_root,
+        target_id=target_id,
+        target_url=target_url,
+        page_id=page_id,
+        now=timestamp_value,
+    )
+    return result
+
+
+def forget_page_idle_target(*, instance_root: Path, target_id: str) -> dict[str, Any]:
+    normalized_target_id = _normalize_target_id(target_id)
+    state = _read_page_idle_state(Path(instance_root))
+    targets = state.setdefault("targets", {})
+    if not isinstance(targets, dict):
+        targets = {}
+        state["targets"] = targets
+    targets.pop(normalized_target_id, None)
+    page_map = state.setdefault("page_id_to_target_id", {})
+    if not isinstance(page_map, dict):
+        page_map = {}
+        state["page_id_to_target_id"] = page_map
+    stale_page_ids = [page_id for page_id, mapped_target in page_map.items() if mapped_target == normalized_target_id]
+    for page_id in stale_page_ids:
+        page_map.pop(page_id, None)
+    if state.get("current_target_id") == normalized_target_id:
+        state.pop("current_target_id", None)
+        state.pop("current_page_updated_at", None)
+    _write_page_idle_state(Path(instance_root), state)
+    return dict(state)

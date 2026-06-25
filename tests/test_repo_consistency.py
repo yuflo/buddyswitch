@@ -101,6 +101,34 @@ class RepoConsistencyTests(unittest.TestCase):
             " ".join(("address", "them", "only", "through", "actor_private", "env", "tools")),
         )
 
+    def test_launcher_tools_package_is_not_shadowed_by_env_tools_package(self) -> None:
+        env_tools_root = ROOT / "scripts" / "env"
+        script = f"""
+import json
+import sys
+sys.path = [{str(ROOT)!r}, {str(env_tools_root)!r}] + [
+    path for path in sys.path
+    if path not in ({str(env_tools_root)!r}, {str(ROOT)!r}, "")
+]
+import tools
+import tools.launcher
+print(json.dumps({{
+    "tools_file": getattr(tools, "__file__", None),
+    "launcher_paths": list(getattr(tools.launcher, "__path__", [])),
+}}))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr + completed.stdout)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(Path(payload["tools_file"]).resolve(strict=False), ROOT / "tools" / "__init__.py")
+        self.assertIn(str(ROOT / "tools" / "launcher"), payload["launcher_paths"])
+
     def test_active_runtime_modules_do_not_import_env_store(self) -> None:
         completed = subprocess.run(
             [

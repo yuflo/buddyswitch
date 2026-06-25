@@ -27,6 +27,7 @@ from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from env.tool_runtime import results as tool_results  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
+import env.tools.search._impl as search_impl  # noqa: E402
 import turn_runtime  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -146,6 +147,20 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         "unknown",
         "placeholder",
     }
+
+    def setUp(self) -> None:
+        super().setUp()
+        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
+
+        def default_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
+            return {
+                "idle_refreshed": True,
+                "idle_seconds": 300,
+                "idle_expires_at": "2026-06-24T00:05:00Z",
+            }
+
+        search_impl.browser_lifecycle.refresh_page_idle = default_refresh_page_idle
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
 
     @staticmethod
     def _meaningful_text_entries(value: object) -> list[str]:

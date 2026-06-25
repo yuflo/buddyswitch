@@ -1,0 +1,2 @@
+"""BuddySwitch launcher modules."""
+

@@ -1797,6 +1797,12 @@ def run_daemon(
                     state.record_error(origin_turn_id=None, message=str(exc))
                     return 1
                 dispatch_notification(context, state, client, notification, daemon_handlers)
+                sweep_due_scheduled_triggers(
+                    context,
+                    state,
+                    DaemonRuntime(context=context, state=state, client=client),
+                    daemon_handlers,
+                )
     except app_server.AppServerError as exc:
         state.record_error(origin_turn_id=None, message=str(exc))
         return 1

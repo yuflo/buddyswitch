@@ -498,20 +498,76 @@ def _browser_page_limit_reached(
     )
 
 
-def _touch_browser_page_idle(
+def _browser_lifecycle_registration_failed(
+    *,
+    context: SearchServiceContext,
+    target_url: str,
+    browser_endpoint: str,
+    reason: str,
+    page_reused: bool,
+    target_id: str | None,
+    close_result: dict[str, Any] | None = None,
+    close_error: str | None = None,
+    browser_page_count: int | None = None,
+) -> dict[str, Any]:
+    extra: dict[str, Any] = {
+        "target_url": target_url,
+        "browser_endpoint": browser_endpoint,
+        "page_opened": False,
+        "page_reused": page_reused,
+        "idle_refreshed": False,
+        "idle_refresh_error": reason,
+        "browser_page_limit": BROWSER_PAGE_LIMIT,
+    }
+    if target_id:
+        extra["reused_target_id" if page_reused else "created_target_id"] = target_id
+    if browser_page_count is not None:
+        extra["browser_page_count"] = browser_page_count
+    if close_result is not None:
+        extra["close_result"] = close_result
+    if close_error is not None:
+        extra["close_error"] = close_error
+    return tool_results.rejection(
+        tool="search",
+        action="search.open_browser",
+        active_actor=context["active_actor"],
+        active_role=context["active_role"],
+        code="E_SEARCH_BROWSER_LIFECYCLE_REGISTRATION_FAILED",
+        message="browser page lifecycle registration failed",
+        permission_boundary="search.browser.lifecycle",
+        human_summary="Browser page lifecycle registration failed.",
+        why_blocked=reason,
+        impact="No unmanaged browser page is reported as opened for this request.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Ensure the BuddySwitch daemon is running, then retry search.open_browser.",
+        allowed_next_actions=[
+            "Check BuddySwitch daemon readiness and retry search.open_browser.",
+            "Use search.status to inspect browser backend availability before retrying.",
+        ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_browser_lifecycle_registration",
+                reason="Use when you need browser lifecycle readiness metadata before retrying.",
+            )
+        ],
+        extra=extra,
+    )
+
+
+def _refresh_browser_page_idle(
     *,
     instance_root: Path,
     target_id: str,
     target_url: str,
 ) -> tuple[dict[str, Any], str | None]:
-    try:
-        idle_extra = browser_lifecycle.touch_page_idle(
-            instance_root=instance_root,
-            target_id=target_id,
-            target_url=target_url,
-        )
-    except Exception as exc:
-        return {"idle_refreshed": False, "idle_refresh_error": str(exc)}, None
+    idle_extra = browser_lifecycle.refresh_page_idle(
+        instance_root=instance_root,
+        target_id=target_id,
+        target_url=target_url,
+    )
     idle_seconds = idle_extra.get("idle_seconds") if isinstance(idle_extra, dict) else None
     if isinstance(idle_seconds, int):
         return idle_extra, f"Browser page idle refreshed: {idle_seconds}s."
@@ -791,11 +847,22 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
         )
     if page_gate.kind == "reuse":
         target_id = page_gate.target_id or ""
-        idle_extra, idle_summary = _touch_browser_page_idle(
-            instance_root=context["instance_json"].parent,
-            target_id=target_id,
-            target_url=target_url,
-        )
+        try:
+            idle_extra, idle_summary = _refresh_browser_page_idle(
+                instance_root=context["instance_json"].parent,
+                target_id=target_id,
+                target_url=target_url,
+            )
+        except Exception as exc:
+            return _browser_lifecycle_registration_failed(
+                context=context,
+                target_url=target_url,
+                browser_endpoint=browser_endpoint,
+                reason=str(exc),
+                page_reused=True,
+                target_id=target_id,
+                browser_page_count=page_gate.page_count,
+            )
         effect_summary = "Reused an existing browser page for the planned target URL; no new page was opened."
         if idle_summary:
             effect_summary = f"{effect_summary} {idle_summary}"
@@ -835,11 +902,31 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
         )
     hint = page_gate.hint_text()
     effect_summary = "Opened the planned target URL in launcher-managed browser session without writing product objects."
-    idle_extra, idle_summary = _touch_browser_page_idle(
-        instance_root=context["instance_json"].parent,
-        target_id=target_id or "",
-        target_url=target_url,
-    )
+    try:
+        idle_extra, idle_summary = _refresh_browser_page_idle(
+            instance_root=context["instance_json"].parent,
+            target_id=target_id or "",
+            target_url=target_url,
+        )
+    except Exception as exc:
+        close_result: dict[str, Any] | None = None
+        close_error: str | None = None
+        if target_id:
+            try:
+                close_result = browser_lifecycle.close_page_target(browser_endpoint, target_id)
+            except Exception as close_exc:
+                close_error = str(close_exc)
+        return _browser_lifecycle_registration_failed(
+            context=context,
+            target_url=target_url,
+            browser_endpoint=browser_endpoint,
+            reason=str(exc),
+            page_reused=False,
+            target_id=target_id,
+            close_result=close_result,
+            close_error=close_error,
+            browser_page_count=page_gate.projected_page_count,
+        )
     if idle_summary:
         effect_summary = f"{effect_summary} {idle_summary}"
     if hint:
