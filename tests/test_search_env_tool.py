@@ -129,7 +129,28 @@ def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
                         "id": message.get("id"),
                         "error": {"code": -32000, "message": "simulated cdp create target failure"},
                     }
+                elif message.get("method") == "Target.closeTarget":
+                    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                    target_id = params.get("targetId")
+                    targets = state.setdefault("targets", [])
+                    if isinstance(targets, list):
+                        state["targets"] = [
+                            target
+                            for target in targets
+                            if not (isinstance(target, dict) and target.get("id") == target_id)
+                        ]
+                    response = {"id": message.get("id"), "result": {"success": True}}
                 else:
+                    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                    targets = state.setdefault("targets", [])
+                    if isinstance(targets, list):
+                        targets.append(
+                            {
+                                "id": "target-search",
+                                "type": "page",
+                                "url": params.get("url") if isinstance(params.get("url"), str) else "",
+                            }
+                        )
                     response = {"id": message.get("id"), "result": {"targetId": "target-search"}}
                 _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
                 return
@@ -166,6 +187,20 @@ def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
 
 
 class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
+
+        def default_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
+            return {
+                "idle_refreshed": True,
+                "idle_seconds": 300,
+                "idle_expires_at": "2026-06-24T00:05:00Z",
+            }
+
+        search_impl.browser_lifecycle.refresh_page_idle = default_refresh_page_idle
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
+
     def _instance_json(
         self,
         *,
@@ -503,9 +538,9 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
         idle_calls: list[dict[str, object]] = []
-        original_touch = search_impl.browser_lifecycle.touch_page_idle
+        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
 
-        def fake_touch_page_idle(**kwargs: object) -> dict[str, object]:
+        def fake_refresh_page_idle(**kwargs: object) -> dict[str, object]:
             idle_calls.append(kwargs)
             return {
                 "idle_refreshed": True,
@@ -513,8 +548,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "idle_expires_at": "2026-06-24T00:05:00Z",
             }
 
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "touch_page_idle", original_touch)
-        search_impl.browser_lifecycle.touch_page_idle = fake_touch_page_idle
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
+        search_impl.browser_lifecycle.refresh_page_idle = fake_refresh_page_idle
 
         response = self._dispatch(
             action="open_browser",
@@ -528,9 +563,6 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("idle_refreshed"), True)
         self.assertEqual(response.get("idle_seconds"), 300)
         self.assertEqual(response.get("idle_expires_at"), "2026-06-24T00:05:00Z")
-        self.assertNotIn("ttl_registered", response)
-        self.assertNotIn("ttl_seconds", response)
-        self.assertNotIn("expiry_policy", response)
         self.assertNotIn("schedule", response)
         self.assertNotIn("schedule_id", json.dumps(response, ensure_ascii=True))
         self.assertIn("Browser page idle refreshed: 300s.", response.get("effect_summary", ""))
@@ -545,20 +577,20 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ],
         )
 
-    def test_search_open_browser_reports_idle_refresh_failure_without_rolling_back_open(self) -> None:
+    def test_search_open_browser_closes_new_target_when_idle_registration_fails(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
-        original_touch = search_impl.browser_lifecycle.touch_page_idle
+        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
 
-        def failing_touch_page_idle(**_kwargs: object) -> dict[str, object]:
+        def failing_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
             raise search_impl.browser_lifecycle.daemon_client.DaemonClientError(
                 "daemon_socket_unavailable",
                 "daemon socket unavailable",
             )
 
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "touch_page_idle", original_touch)
-        search_impl.browser_lifecycle.touch_page_idle = failing_touch_page_idle
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
+        search_impl.browser_lifecycle.refresh_page_idle = failing_refresh_page_idle
 
         response = self._dispatch(
             action="open_browser",
@@ -566,12 +598,16 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
         )
 
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), True, msg=response)
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_LIFECYCLE_REGISTRATION_FAILED")
+        self.assertEqual(response.get("page_opened"), False, msg=response)
         self.assertEqual(response.get("idle_refreshed"), False, msg=response)
         self.assertIn("daemon socket unavailable", response.get("idle_refresh_error", ""))
         self.assertNotIn("Browser page idle refreshed:", response.get("effect_summary", ""))
-        self.assertEqual(len(state.get("rpc_requests", [])), 1, msg=state)
+        rpc_requests = state.get("rpc_requests", [])
+        self.assertEqual([request.get("method") for request in rpc_requests], ["Target.createTarget", "Target.closeTarget"])
+        self.assertEqual(rpc_requests[1].get("params"), {"targetId": "target-search"})
+        self.assertEqual(state.get("targets"), [], msg=state)
 
     def test_search_reuse_refreshes_idle_for_reused_target(self) -> None:
         target_url = "https://www.google.com/search?q=creator+analytics+pain"
@@ -582,9 +618,9 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
         idle_calls: list[dict[str, object]] = []
-        original_touch = search_impl.browser_lifecycle.touch_page_idle
+        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
 
-        def fake_touch_page_idle(**kwargs: object) -> dict[str, object]:
+        def fake_refresh_page_idle(**kwargs: object) -> dict[str, object]:
             idle_calls.append(kwargs)
             return {
                 "idle_refreshed": True,
@@ -592,8 +628,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "idle_expires_at": "2026-06-24T00:05:00Z",
             }
 
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "touch_page_idle", original_touch)
-        search_impl.browser_lifecycle.touch_page_idle = fake_touch_page_idle
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
+        search_impl.browser_lifecycle.refresh_page_idle = fake_refresh_page_idle
 
         response = self._dispatch(
             action="open_browser",
@@ -605,9 +641,6 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("page_opened"), False, msg=response)
         self.assertEqual(response.get("page_reused"), True, msg=response)
         self.assertEqual(response.get("idle_refreshed"), True, msg=response)
-        self.assertNotIn("ttl_registered", response)
-        self.assertNotIn("ttl_seconds", response)
-        self.assertNotIn("expiry_policy", response)
         self.assertEqual(
             idle_calls,
             [
@@ -619,6 +652,40 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ],
         )
         self.assertEqual(state.get("rpc_requests", []), [], msg=state)
+
+    def test_search_open_browser_reuse_idle_registration_failure_returns_error_without_closing_existing_page(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        state: dict[str, object] = {
+            "requests": [],
+            "targets": [{"id": "target-existing-search", "type": "page", "url": target_url}],
+        }
+        _server, _thread, port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
+
+        def failing_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
+            raise search_impl.browser_lifecycle.daemon_client.DaemonClientError(
+                "daemon_socket_unavailable",
+                "daemon socket unavailable",
+            )
+
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
+        search_impl.browser_lifecycle.refresh_page_idle = failing_refresh_page_idle
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": "creator analytics pain", "engine": "google"},
+            instance_json=instance_json,
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_LIFECYCLE_REGISTRATION_FAILED")
+        self.assertEqual(response.get("page_opened"), False, msg=response)
+        self.assertEqual(response.get("page_reused"), True, msg=response)
+        self.assertEqual(response.get("idle_refreshed"), False, msg=response)
+        self.assertIn("daemon socket unavailable", response.get("idle_refresh_error", ""))
+        self.assertEqual(state.get("rpc_requests", []), [], msg=state)
+        self.assertEqual(state["targets"], [{"id": "target-existing-search", "type": "page", "url": target_url}])
 
     def test_search_open_browser_below_hint_threshold_opens_without_page_hint(self) -> None:
         state: dict[str, object] = {"requests": [], "targets": _page_targets(3)}

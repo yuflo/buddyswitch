@@ -314,6 +314,30 @@ buddyswitch_browser_mcp_browser_url() {
   ' "${config_path}"
 }
 
+buddyswitch_browser_mcp_instance_root() {
+  local server_name="$1"
+  local config_path section
+
+  config_path="$(buddyswitch_codex_config_path)"
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+
+  section="[mcp_servers.${server_name}]"
+  awk -v section="${section}" '
+    $0 == section { in_section = 1; next }
+    /^\[/ && in_section { exit }
+    in_section {
+      if (match($0, /--instance-root=[^" ,\]]+/)) {
+        value = substr($0, RSTART, RLENGTH)
+        sub(/^--instance-root=/, "", value)
+        print value
+        exit
+      }
+    }
+  ' "${config_path}"
+}
+
 buddyswitch_browser_mcp_uses_cockpit_proxy() {
   local server_name="$1"
   local config_path section
@@ -333,15 +357,19 @@ buddyswitch_browser_mcp_uses_cockpit_proxy() {
 }
 
 buddyswitch_browser_ensure_cockpit_mcp() {
-  local server_name expected_browser_url recorded_browser_url upstream_command
+  local server_name expected_browser_url expected_instance_root recorded_browser_url recorded_instance_root upstream_command
 
   server_name="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"
   expected_browser_url="$(buddyswitch_browser_url)"
+  expected_instance_root="$(buddyswitch_browser_instance_root)"
   upstream_command="npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}"
 
   if buddyswitch_browser_has_mcp_server "${server_name}"; then
     recorded_browser_url="$(buddyswitch_browser_mcp_browser_url "${server_name}" || true)"
-    if [[ "${recorded_browser_url}" == "${expected_browser_url}" ]] && buddyswitch_browser_mcp_uses_cockpit_proxy "${server_name}"; then
+    recorded_instance_root="$(buddyswitch_browser_mcp_instance_root "${server_name}" || true)"
+    if [[ "${recorded_browser_url}" == "${expected_browser_url}" ]] \
+      && [[ "${recorded_instance_root}" == "${expected_instance_root}" ]] \
+      && buddyswitch_browser_mcp_uses_cockpit_proxy "${server_name}"; then
       return 0
     fi
     buddyswitch_browser_remove_mcp_server "${server_name}"
@@ -352,7 +380,8 @@ buddyswitch_browser_ensure_cockpit_mcp() {
     python3 \
     "${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" \
     --upstream-command "${upstream_command}" \
-    --browser-url="${expected_browser_url}"
+    --browser-url="${expected_browser_url}" \
+    --instance-root="${expected_instance_root}"
 }
 
 buddyswitch_browser_pid_marker_is_active() {

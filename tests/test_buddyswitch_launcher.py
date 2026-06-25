@@ -267,13 +267,14 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         else:
             self.assertNotIn(repo_root_resolved, config_text.replace(str(repo_git_common_dir), ""))
 
-    def _assert_cockpit_proxy_registration(self, argv: list[object], browser_url: str) -> None:
+    def _assert_cockpit_proxy_registration(self, argv: list[object], browser_url: str, instance_root: Path) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
         self.assertIn("--", argv)
         separator_index = argv.index("--")
         self.assertEqual(argv[separator_index + 1], "python3")
         self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
         self.assertIn(f"--browser-url={browser_url}", argv)
+        self.assertIn(f"--instance-root={instance_root}", argv)
         self.assertNotIn("chrome-devtools-mcp@latest", argv)
 
     def _assert_env_mcp_registration(
@@ -1805,7 +1806,7 @@ exec "$real_git" "$@"
             env.pop("BUDDYSWITCH_ACTOR_ID", None)
 
             completed = subprocess.run(
-                ["bash", "-lc", command, "buddyswitch-run-codex-test", str(home), str(codex_home), str(xdg_config_home)],
+                ["bash", "-c", command, "buddyswitch-run-codex-test", str(home), str(codex_home), str(xdg_config_home)],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2291,7 +2292,11 @@ exec "$real_git" "$@"
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
             cockpit_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "chrome-devtools-cockpit")
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{browser_port}")
+            self._assert_cockpit_proxy_registration(
+                cockpit_add["argv"],
+                f"http://127.0.0.1:{browser_port}",
+                instance_root,
+            )
 
             for relative_path in (
                 "buddyswitch/objects" + "/tasks",
@@ -2937,7 +2942,11 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{expected_port}")
+            self._assert_cockpit_proxy_registration(
+                cockpit_add["argv"],
+                f"http://127.0.0.1:{expected_port}",
+                Path(payload["instance_json"]).parent,
+            )
 
     def test_input_starts_turn_when_thread_idle_defaults_to_raw(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -6506,7 +6515,11 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{browser_port}")
+            self._assert_cockpit_proxy_registration(
+                cockpit_add["argv"],
+                f"http://127.0.0.1:{browser_port}",
+                Path(str(instance_payload["instance_root"])),
+            )
             self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", payload["config_toml"])
 
     def test_start_with_required_role_blocks_codex_when_cockpit_mcp_setup_fails(self) -> None:
@@ -9286,7 +9299,7 @@ exit 0
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9444")
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9444", instance_root)
 
     def test_env_browser_ensure_repairs_stale_cockpit_mcp_browser_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -9379,7 +9392,110 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             )
             self.assertLess(remove_index, add_index)
             cockpit_add = call_entries[add_index]
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9444")
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9444", instance_root)
+
+    def test_env_browser_ensure_repairs_cockpit_mcp_missing_or_wrong_instance_root(self) -> None:
+        proxy_path = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+        cases = {
+            "missing": [
+                str(proxy_path),
+                "--upstream-command",
+                "npx chrome-devtools-mcp@1.1.1",
+                "--browser-url=http://127.0.0.1:9444",
+            ],
+            "mismatched": [
+                str(proxy_path),
+                "--upstream-command",
+                "npx chrome-devtools-mcp@1.1.1",
+                "--browser-url=http://127.0.0.1:9444",
+                "--instance-root=/tmp/buddyswitch-other-instance",
+            ],
+        }
+        for name, existing_args in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+                temp_root_path = Path(temp_root)
+                source_home_path = Path(source_home)
+                shared_root = source_home_path / ".codex-buddyswitch"
+                actor_id = f"act-pm-browser-instance-root-{name}"
+                instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9444)
+
+                source_codex_home = source_home_path / ".codex"
+                source_codex_home.mkdir(parents=True, exist_ok=True)
+                (source_codex_home / "auth.json").write_text(
+                    json.dumps(
+                        {
+                            "auth_mode": "apikey",
+                            "openai_api_key": "test-key",
+                            "tokens": None,
+                            "last_refresh": None,
+                            "agent_identity": None,
+                        },
+                        ensure_ascii=True,
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                instance_codex_home = instance_root / "codex-home"
+                instance_codex_home.mkdir(parents=True, exist_ok=True)
+                (instance_codex_home / "config.toml").write_text(
+                    f"""[mcp_servers.chrome-devtools-cockpit]
+command = "python3"
+args = {json.dumps(existing_args)}
+""",
+                    encoding="utf-8",
+                )
+
+                fake_bin = temp_root_path / "bin"
+                fake_bin.mkdir(parents=True, exist_ok=True)
+                self._write_fake_codex(fake_bin / "codex")
+                self._write_fake_curl(fake_bin / "curl")
+                self._write_fake_chrome(fake_bin / "fake-chrome")
+
+                ready_file = temp_root_path / "browser-ready.flag"
+                calls_path = temp_root_path / "calls.jsonl"
+
+                env = os.environ.copy()
+                env["HOME"] = str(source_home_path)
+                env.pop("CODEX_HOME", None)
+                env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+                env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+                env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+                env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+
+                ensure_result = subprocess.run(
+                    [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id, "--port", "9444"],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(ensure_result.returncode, 0, msg=ensure_result.stderr)
+
+                self.assertTrue(calls_path.exists(), "stale cockpit MCP config should be removed and re-added")
+                call_entries = [
+                    json.loads(line)
+                    for line in calls_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                remove_index = next(
+                    index
+                    for index, entry in enumerate(call_entries)
+                    if entry["argv"][:3] == ["mcp", "remove", "chrome-devtools-cockpit"]
+                )
+                add_index = next(
+                    index
+                    for index, entry in enumerate(call_entries)
+                    if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"]
+                )
+                self.assertLess(remove_index, add_index)
+                self._assert_cockpit_proxy_registration(
+                    call_entries[add_index]["argv"],
+                    "http://127.0.0.1:9444",
+                    instance_root,
+                )
 
     def test_browser_ensure_is_blocked_when_runtime_lock_is_held(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

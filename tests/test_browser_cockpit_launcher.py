@@ -324,13 +324,14 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
 """,
         )
 
-    def _assert_cockpit_proxy_registration(self, argv: list[object], browser_url: str) -> None:
+    def _assert_cockpit_proxy_registration(self, argv: list[object], browser_url: str, instance_root: Path) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
         self.assertIn("--", argv)
         separator_index = argv.index("--")
         self.assertEqual(argv[separator_index + 1], "python3")
         self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
         self.assertIn(f"--browser-url={browser_url}", argv)
+        self.assertIn(f"--instance-root={instance_root}", argv)
         self.assertNotIn("chrome-devtools-mcp@latest", argv)
 
     def test_browser_ensure_starts_chrome_with_shared_profile_and_bootstraps_mcps(self) -> None:
@@ -407,7 +408,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             mcp_add_names = [payload["argv"][2] for payload in payloads if payload["argv"][:2] == ["mcp", "add"]]
             self.assertEqual(mcp_add_names, ["chrome-devtools-cockpit"])
             cockpit_add = next(payload for payload in payloads if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9222")
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9222", instance_root)
 
             expected_home = instance_root / "home"
             expected_codex_home = instance_root / "codex-home"
@@ -852,7 +853,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
                 if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"]
             )
             self.assertLess(remove_index, add_index)
-            self._assert_cockpit_proxy_registration(payloads[add_index]["argv"], "http://127.0.0.1:9222")
+            self._assert_cockpit_proxy_registration(payloads[add_index]["argv"], "http://127.0.0.1:9222", instance_root)
 
     def test_browser_launcher_source_is_instance_only(self) -> None:
         text = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8")

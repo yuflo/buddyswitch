@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import importlib.util
 import json
@@ -25,6 +27,7 @@ PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
 MODULE_COUNTER = count()
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening many more."
 HARD_PAGE_BLOCK = (
     "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
@@ -40,6 +43,52 @@ def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
         }
         for index in range(start, start + count)
     ]
+
+
+def _websocket_accept_value(key: str) -> str:
+    digest = hashlib.sha1((key + WEBSOCKET_GUID).encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def _read_exact(stream: object, length: int) -> bytes:
+    chunks = b""
+    while len(chunks) < length:
+        chunk = stream.read(length - len(chunks))  # type: ignore[attr-defined]
+        if not chunk:
+            raise EOFError("websocket stream closed")
+        chunks += chunk
+    return chunks
+
+
+def _read_client_text_frame(stream: object) -> str:
+    first, second = _read_exact(stream, 2)
+    opcode = first & 0x0F
+    if opcode != 0x1:
+        raise ValueError(f"expected text frame, got opcode {opcode}")
+    length = second & 0x7F
+    if length == 126:
+        length = int.from_bytes(_read_exact(stream, 2), "big")
+    elif length == 127:
+        length = int.from_bytes(_read_exact(stream, 8), "big")
+    mask = _read_exact(stream, 4) if second & 0x80 else b""
+    payload = _read_exact(stream, length)
+    if mask:
+        payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    return payload.decode("utf-8")
+
+
+def _write_server_text_frame(stream: object, text: str) -> None:
+    payload = text.encode("utf-8")
+    first = 0x80 | 0x1
+    length = len(payload)
+    if length < 126:
+        header = bytes([first, length])
+    elif length < (1 << 16):
+        header = bytes([first, 126]) + length.to_bytes(2, "big")
+    else:
+        header = bytes([first, 127]) + length.to_bytes(8, "big")
+    stream.write(header + payload)  # type: ignore[attr-defined]
+    stream.flush()  # type: ignore[attr-defined]
 
 
 def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
@@ -61,6 +110,33 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+                return
+            if parsed.path == "/json/version":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                payload = {
+                    "Browser": "test",
+                    "webSocketDebuggerUrl": f"ws://127.0.0.1:{self.server.server_port}/devtools/browser/test",  # type: ignore[attr-defined]
+                }
+                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+                return
+            if parsed.path == "/devtools/browser/test":
+                key = self.headers.get("Sec-WebSocket-Key")
+                if not key:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                self.send_response(101)
+                self.send_header("Upgrade", "websocket")
+                self.send_header("Connection", "Upgrade")
+                self.send_header("Sec-WebSocket-Accept", _websocket_accept_value(key))
+                self.end_headers()
+                raw_message = _read_client_text_frame(self.rfile)
+                message = json.loads(raw_message)
+                state.setdefault("rpc_requests", []).append(message)
+                response = {"id": message.get("id"), "result": {"success": True}}
+                _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
                 return
             self.send_response(404)
             self.end_headers()
@@ -169,6 +245,9 @@ for raw_line in sys.stdin:
             }
             print(json.dumps(response, ensure_ascii=True), flush=True)
             continue
+        response_text = "called " + str(params.get("name"))
+        if params.get("name") == "select_page":
+            response_text = "Selected page: https://example.com/selected [selected]"
         response = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -176,7 +255,7 @@ for raw_line in sys.stdin:
                 "content": [
                     {
                         "type": "text",
-                        "text": "called " + str(params.get("name")),
+                        "text": response_text,
                     }
                 ]
             },
@@ -201,7 +280,9 @@ for raw_line in sys.stdin:
         messages: list[dict[str, Any]],
         *,
         browser_url: str | None = None,
+        instance_root: Path | None = None,
         extra_env: dict[str, str] | None = None,
+        clear_instance_root_env: bool = False,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
         if browser_url is None:
             browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
@@ -215,6 +296,8 @@ for raw_line in sys.stdin:
             env = os.environ.copy()
             env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
+            if clear_instance_root_env:
+                env.pop("BUDDYSWITCH_INSTANCE_ROOT", None)
             if extra_env:
                 env.update(extra_env)
             command = [
@@ -224,6 +307,8 @@ for raw_line in sys.stdin:
                 f"{sys.executable} {upstream}",
                 f"--browser-url={browser_url}",
             ]
+            if instance_root is not None:
+                command.append(f"--instance-root={instance_root}")
             proc = subprocess.Popen(
                 command,
                 cwd=ROOT,
@@ -290,9 +375,11 @@ for raw_line in sys.stdin:
         state_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
     def test_new_page_defaults_to_background(self) -> None:
-        responses, forwarded, upstream_argv, _stderr = self._run_proxy(
-            [self._single_call("new_page", {"url": "https://example.com"})]
-        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com"})],
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
 
         self.assertEqual(responses[0]["id"], 1)
         self.assertEqual(len(upstream_argv), 1)
@@ -304,10 +391,12 @@ for raw_line in sys.stdin:
     def test_new_page_below_hint_threshold_forwards_without_page_hint(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(3)})
 
-        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-            [self._single_call("new_page", {"url": "https://example.com/new"})],
-            browser_url=browser_url,
-        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
 
         self.assertEqual(len(forwarded), 1)
         arguments = forwarded[0]["params"]["arguments"]
@@ -315,7 +404,7 @@ for raw_line in sys.stdin:
         self.assertIs(arguments["background"], True)
         self.assertNotIn("Browser pages:", json.dumps(responses, ensure_ascii=True))
 
-    def test_new_page_refreshes_idle_after_exactly_one_new_target(self) -> None:
+    def test_new_page_refreshes_idle_with_explicit_instance_root_without_env(self) -> None:
         before = _page_targets(1)
         after = before + [{"id": "target-new-page", "type": "page", "url": "https://example.com/new"}]
         browser_url = self._start_cdp_list_server({"requests": [], "list_payloads": [before, before, after]})
@@ -327,7 +416,8 @@ for raw_line in sys.stdin:
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
                 browser_url=browser_url,
-                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+                instance_root=instance_root,
+                clear_instance_root_env=True,
             )
             server.close()
             thread.join(timeout=2)
@@ -341,7 +431,67 @@ for raw_line in sys.stdin:
             self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-new-page")
             self.assertEqual(schedule["payload"]["target_id"], "target-new-page")
             self.assertEqual(schedule["payload"], {"target_id": "target-new-page"})
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["current_target_id"], "target-new-page")
             self.assertFalse(thread.is_alive())
+
+    def test_new_page_without_instance_root_is_blocked_before_forwarding(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [self._single_call("new_page", {"url": "https://example.com/new"})],
+            browser_url=browser_url,
+            clear_instance_root_env=True,
+        )
+
+        self.assertEqual(forwarded, [])
+        response = responses[0]
+        self.assertIs(response["result"]["isError"], True)
+        self.assertIn("--instance-root", response["result"]["content"][0]["text"])
+
+    def test_new_page_registration_failure_closes_new_target_and_returns_error(self) -> None:
+        before = _page_targets(1)
+        after = before + [{"id": "target-new-page", "type": "page", "url": "https://example.com/new"}]
+        cdp_state: dict[str, object] = {"requests": [], "list_payloads": [before, before, after, after]}
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
+
+        self.assertEqual(len(forwarded), 1)
+        response = responses[0]
+        self.assertTrue(response["result"].get("isError"), msg=response)
+        self.assertIn("lifecycle", response["result"]["content"][0]["text"].lower())
+        rpc_requests = cdp_state.get("rpc_requests")
+        self.assertIsInstance(rpc_requests, list, msg=cdp_state)
+        assert isinstance(rpc_requests, list)
+        self.assertEqual([request.get("method") for request in rpc_requests], ["Target.closeTarget"])
+        self.assertEqual(rpc_requests[0].get("params"), {"targetId": "target-new-page"})
+
+    def test_new_page_reuse_registration_failure_returns_error_without_forwarding(self) -> None:
+        target_url = "https://example.com/new"
+        cdp_state: dict[str, object] = {
+            "requests": [],
+            "targets": [{"id": "target-existing-page", "type": "page", "url": target_url}],
+        }
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": target_url})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
+
+        self.assertEqual(forwarded, [])
+        response = responses[0]
+        self.assertTrue(response["result"].get("isError"), msg=response)
+        self.assertIn("lifecycle", response["result"]["content"][0]["text"].lower())
+        self.assertEqual(cdp_state.get("rpc_requests", []), [])
 
     def test_new_page_reuse_refreshes_idle_without_forwarding(self) -> None:
         target_url = "https://example.com/new"
@@ -355,7 +505,7 @@ for raw_line in sys.stdin:
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": target_url})],
                 browser_url=browser_url,
-                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+                instance_root=instance_root,
             )
             server.close()
             thread.join(timeout=2)
@@ -394,7 +544,7 @@ for raw_line in sys.stdin:
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("select_page", {"pageId": 3, "bringToFront": True})],
                 browser_url=browser_url,
-                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+                instance_root=instance_root,
             )
             server.close()
             thread.join(timeout=2)
@@ -407,6 +557,71 @@ for raw_line in sys.stdin:
             page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
             self.assertEqual(page_idle["current_target_id"], "target-select")
             self.assertFalse(thread.is_alive())
+
+    def test_select_page_resolves_selected_url_when_page_id_mapping_is_empty(self) -> None:
+        browser_url = self._start_cdp_list_server(
+            {
+                "requests": [],
+                "targets": [
+                    {
+                        "id": "target-selected",
+                        "type": "page",
+                        "url": "https://example.com/selected",
+                    }
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_idle_state(instance_root, {"targets": {}, "page_id_to_target_id": {}})
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("select_page", {"pageId": 3, "bringToFront": True})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(responses[0]["id"], 1)
+            self.assertEqual(forwarded[0]["params"]["arguments"]["bringToFront"], False)
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-selected")
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["current_target_id"], "target-selected")
+            self.assertEqual(page_idle["page_id_to_target_id"], {"3": "target-selected"})
+
+    def test_select_page_ambiguous_selected_url_does_not_refresh_wrong_target(self) -> None:
+        browser_url = self._start_cdp_list_server(
+            {
+                "requests": [],
+                "targets": [
+                    {"id": "target-selected-a", "type": "page", "url": "https://example.com/selected"},
+                    {"id": "target-selected-b", "type": "page", "url": "https://example.com/selected"},
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_idle_state(instance_root, {"targets": {}, "page_id_to_target_id": {}})
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, _forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("select_page", {"pageId": 3, "bringToFront": True})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
+            self.assertIn("lifecycle warning", json.dumps(responses, ensure_ascii=True).lower())
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertNotIn("current_target_id", page_idle)
 
     def test_page_scoped_success_refreshes_current_page_idle(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
@@ -433,7 +648,7 @@ for raw_line in sys.stdin:
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("take_snapshot", {})],
                 browser_url=browser_url,
-                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+                instance_root=instance_root,
             )
             server.close()
             thread.join(timeout=2)
@@ -445,6 +660,26 @@ for raw_line in sys.stdin:
             self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-current")
             self.assertEqual(schedule["payload"], {"target_id": "target-current"})
             self.assertFalse(thread.is_alive())
+
+    def test_page_scoped_success_without_current_page_reports_lifecycle_warning(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_idle_state(instance_root, {"targets": {}, "page_id_to_target_id": {}})
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("take_snapshot", {})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(forwarded[0]["params"]["name"], "take_snapshot")
+            self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
+            self.assertIn("lifecycle warning", json.dumps(responses, ensure_ascii=True).lower())
 
     def test_non_page_use_and_failed_page_response_do_not_refresh_idle(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
@@ -475,7 +710,7 @@ for raw_line in sys.stdin:
                     },
                 ],
                 browser_url=browser_url,
-                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+                instance_root=instance_root,
             )
             server.close()
             thread.join(timeout=2)
@@ -488,10 +723,12 @@ for raw_line in sys.stdin:
     def test_new_page_reaching_hint_threshold_forwards_and_appends_page_hint(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(4)})
 
-        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-            [self._single_call("new_page", {"url": "https://example.com/new"})],
-            browser_url=browser_url,
-        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
 
         self.assertEqual(len(forwarded), 1)
         arguments = forwarded[0]["params"]["arguments"]
@@ -501,10 +738,12 @@ for raw_line in sys.stdin:
     def test_new_page_blocks_locally_at_hard_page_limit_without_forwarding(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(10)})
 
-        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-            [self._single_call("new_page", {"url": "https://example.com/new"})],
-            browser_url=browser_url,
-        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
 
         self.assertEqual(forwarded, [])
         response = responses[0]
@@ -516,10 +755,16 @@ for raw_line in sys.stdin:
         targets = _page_targets(9) + [{"id": "target-existing-page", "type": "page", "url": target_url}]
         browser_url = self._start_cdp_list_server({"requests": [], "targets": targets})
 
-        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-            [self._single_call("new_page", {"url": target_url})],
-            browser_url=browser_url,
-        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            _daemon_core, server, thread = self._start_mailbox(instance_root)
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": target_url})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
 
         self.assertEqual(forwarded, [])
         response = responses[0]
@@ -531,10 +776,12 @@ for raw_line in sys.stdin:
     def test_new_page_reports_page_count_verification_failure_without_forwarding(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "list_fail": True})
 
-        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-            [self._single_call("new_page", {"url": "https://example.com/new"})],
-            browser_url=browser_url,
-        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
 
         self.assertEqual(forwarded, [])
         response = responses[0]
@@ -542,9 +789,11 @@ for raw_line in sys.stdin:
         self.assertIn("page-count", response["result"]["content"][0]["text"].lower())
 
     def test_new_page_forces_background_when_caller_requests_foreground(self) -> None:
-        _responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-            [self._single_call("new_page", {"url": "https://example.com", "background": False})]
-        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            _responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com", "background": False})],
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
 
         arguments = forwarded[0]["params"]["arguments"]
         self.assertIs(arguments["background"], True)

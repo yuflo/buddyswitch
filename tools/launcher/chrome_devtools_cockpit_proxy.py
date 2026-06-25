@@ -8,6 +8,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -36,6 +37,8 @@ PAGE_SCOPED_USE_TOOLS = {
     "fill",
     "press_key",
 }
+SELECTED_URL_RE = re.compile(r"(https?://\S+)\s+\[selected\]", re.IGNORECASE)
+LIFECYCLE_WARNING_PREFIX = "Browser lifecycle warning:"
 
 
 def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -46,6 +49,7 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         default=os.environ.get("BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND", DEFAULT_UPSTREAM_COMMAND),
         help="Command used to start the upstream Chrome DevTools MCP server.",
     )
+    parser.add_argument("--instance-root", help="BuddySwitch instance root for browser lifecycle state.")
     return parser.parse_known_args(argv)
 
 
@@ -122,25 +126,42 @@ def _idle_hint_from_result(result: dict[str, Any] | None) -> str:
     return "Browser page idle refreshed."
 
 
-def _touch_idle_hint(
+def _lifecycle_error_text(action: str, exc: BaseException, close_result: dict[str, Any] | None = None) -> str:
+    text = f"Browser page lifecycle registration failed during {action}: {exc}"
+    if close_result is not None:
+        text = f"{text} Closed browser target: {json.dumps(close_result, ensure_ascii=True)}"
+    return text
+
+
+def _refresh_current_idle_hint(
     *,
-    instance_root: str | None,
+    root: Path,
     target_id: str,
     target_url: str | None = None,
     page_id: object | None = None,
-) -> str | None:
-    root = _instance_root_path(instance_root)
-    if root is None:
-        return "Browser page idle not refreshed."
-    try:
-        result = browser_lifecycle.touch_page_idle(
-            instance_root=root,
-            target_id=target_id,
-            target_url=target_url,
-            page_id=page_id,
-        )
-    except Exception:
-        return "Browser page idle not refreshed."
+) -> str:
+    result = browser_lifecycle.refresh_current_page_idle(
+        instance_root=root,
+        target_id=target_id,
+        target_url=target_url,
+        page_id=page_id,
+    )
+    return _idle_hint_from_result(result)
+
+
+def _refresh_page_idle_hint(
+    *,
+    root: Path,
+    target_id: str,
+    target_url: str | None = None,
+    page_id: object | None = None,
+) -> str:
+    result = browser_lifecycle.refresh_page_idle(
+        instance_root=root,
+        target_id=target_id,
+        target_url=target_url,
+        page_id=page_id,
+    )
     return _idle_hint_from_result(result)
 
 
@@ -167,6 +188,12 @@ def mutate_tool_call(
                 "does not apply background creation to isolated browser contexts. This keeps the "
                 "chrome-devtools-cockpit path non-activating.",
             ), None
+        if _instance_root_path(instance_root) is None:
+            return None, tool_error_response(
+                message,
+                "BuddySwitch blocked new_page because chrome-devtools-cockpit requires --instance-root "
+                "to register browser lifecycle state before opening pages.",
+            ), None
         target_url = arguments.get("url")
         hint: str | None = None
         if isinstance(target_url, str) and target_url.strip():
@@ -180,11 +207,16 @@ def mutate_tool_call(
                 return None, tool_error_response(message, BROWSER_PAGE_LIMIT_BLOCK_TEXT), None
             if gate.kind == "reuse":
                 target_id = gate.target_id or "<unknown>"
-                idle_hint = _touch_idle_hint(
-                    instance_root=instance_root,
-                    target_id=target_id,
-                    target_url=target_url.strip(),
-                )
+                root = _instance_root_path(instance_root)
+                assert root is not None
+                try:
+                    idle_hint = _refresh_current_idle_hint(
+                        root=root,
+                        target_id=target_id,
+                        target_url=target_url.strip(),
+                    )
+                except Exception as exc:
+                    return None, tool_error_response(message, _lifecycle_error_text("new_page reuse", exc)), None
                 suffix = f" {idle_hint}" if idle_hint else ""
                 return None, tool_success_response(
                     message,
@@ -314,6 +346,43 @@ def patch_tool_response_hint(message: dict[str, Any], hint: str) -> dict[str, An
     return patched
 
 
+def tool_response_text(message: dict[str, Any]) -> str:
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return ""
+    content = result.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
+            parts.append(item["text"])
+    return "\n".join(parts)
+
+
+def selected_url_from_response(message: dict[str, Any]) -> str | None:
+    match = SELECTED_URL_RE.search(tool_response_text(message))
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def unique_page_target_for_url(browser_url: str, target_url: str) -> str | None:
+    targets = browser_lifecycle.read_page_targets(browser_url)
+    matches = [
+        target.get("id")
+        for target in targets
+        if isinstance(target, dict)
+        and target.get("type") == "page"
+        and target.get("url") == target_url
+        and isinstance(target.get("id"), str)
+        and target.get("id")
+    ]
+    if len(matches) != 1:
+        return None
+    return str(matches[0])
+
+
 def _tool_response_succeeded(message: dict[str, Any]) -> bool:
     result = message.get("result")
     return isinstance(result, dict) and result.get("isError") is not True
@@ -338,46 +407,91 @@ def patch_tool_response_page_use_metadata(
     kind = metadata.get("kind")
     if kind == "select_page":
         page_id = metadata.get("page_id")
+        target_id: str | None = None
+        target_url: str | None = None
         try:
             target_id = browser_lifecycle.target_id_for_page_id(root, page_id)
         except Exception:
-            return patched
+            target_id = None
         if target_id is None:
-            return patched
-        hint = _touch_idle_hint(
-            instance_root=instance_root,
-            target_id=target_id,
-            page_id=page_id,
-        )
-        return patch_tool_response_hint(patched, hint) if hint else patched
+            target_url = selected_url_from_response(message)
+            if target_url is None:
+                return patch_tool_response_hint(
+                    patched,
+                    f"{LIFECYCLE_WARNING_PREFIX} selected page target was not resolved; browser idle was not refreshed.",
+                )
+            try:
+                target_id = unique_page_target_for_url(browser_url, target_url)
+            except Exception:
+                target_id = None
+            if target_id is None:
+                return patch_tool_response_hint(
+                    patched,
+                    f"{LIFECYCLE_WARNING_PREFIX} selected page URL was ambiguous or missing in Chrome target list; browser idle was not refreshed.",
+                )
+        try:
+            hint = _refresh_current_idle_hint(
+                root=root,
+                target_id=target_id,
+                target_url=target_url,
+                page_id=page_id,
+            )
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} selected page idle was not refreshed: {exc}",
+            )
+        return patch_tool_response_hint(patched, hint)
     if kind == "current_page":
         try:
             target_id = browser_lifecycle.current_target_id(root)
-        except Exception:
-            return patched
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} current page target was not readable; browser idle was not refreshed: {exc}",
+            )
         if target_id is None:
-            return patched
-        hint = _touch_idle_hint(instance_root=instance_root, target_id=target_id)
-        return patch_tool_response_hint(patched, hint) if hint else patched
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} current page target is unknown; browser idle was not refreshed.",
+            )
+        try:
+            hint = _refresh_page_idle_hint(root=root, target_id=target_id)
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} current page idle was not refreshed: {exc}",
+            )
+        return patch_tool_response_hint(patched, hint)
     if kind != "new_page":
         return patched
     before_targets = metadata.get("before_targets")
     target_url = metadata.get("target_url")
     if not isinstance(before_targets, list) or not isinstance(target_url, str) or not target_url:
         return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
+    target_id: str | None = None
     try:
         after_targets = browser_lifecycle.read_page_targets(browser_url)
         target_id = browser_lifecycle.new_page_target_id(before_targets, after_targets)
         if target_id is None:
             return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
-        result = browser_lifecycle.touch_page_idle(
-            instance_root=root,
+        hint = _refresh_current_idle_hint(
+            root=root,
             target_id=target_id,
             target_url=target_url,
         )
-    except Exception:
-        return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
-    return patch_tool_response_hint(patched, _idle_hint_from_result(result))
+    except Exception as exc:
+        close_result: dict[str, Any] | None = None
+        if target_id:
+            try:
+                close_result = browser_lifecycle.close_page_target(browser_url, target_id)
+            except Exception as close_exc:
+                return tool_error_response(
+                    message,
+                    f"{_lifecycle_error_text('new_page', exc)} Failed to close browser target {target_id}: {close_exc}",
+                )
+        return tool_error_response(message, _lifecycle_error_text("new_page", exc, close_result))
+    return patch_tool_response_hint(patched, hint)
 
 
 def write_json_line(message: dict[str, Any], output_lock: threading.Lock) -> None:
@@ -455,7 +569,7 @@ def close_upstream(upstream: subprocess.Popen[str]) -> int:
         return upstream.wait(timeout=UPSTREAM_EXIT_GRACE_SECONDS)
 
 
-def run_proxy(upstream_argv: list[str], browser_url: str) -> int:
+def run_proxy(upstream_argv: list[str], browser_url: str, instance_root: str | None = None) -> int:
     try:
         upstream = subprocess.Popen(
             upstream_argv,
@@ -482,7 +596,7 @@ def run_proxy(upstream_argv: list[str], browser_url: str) -> int:
             pending_hints,
             ids_lock,
             browser_url,
-            os.environ.get("BUDDYSWITCH_INSTANCE_ROOT"),
+            instance_root,
         ),
         daemon=True,
     )
@@ -512,7 +626,7 @@ def run_proxy(upstream_argv: list[str], browser_url: str) -> int:
             outbound, local_response, response_hint = mutate_client_message(
                 message,
                 browser_url,
-                instance_root=os.environ.get("BUDDYSWITCH_INSTANCE_ROOT"),
+                instance_root=instance_root,
             )
             if local_response is not None:
                 write_json_line(local_response, output_lock)
@@ -539,7 +653,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    return run_proxy(upstream_argv, args.browser_url)
+    return run_proxy(upstream_argv, args.browser_url, args.instance_root)
 
 
 if __name__ == "__main__":

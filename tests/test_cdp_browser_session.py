@@ -130,6 +130,8 @@ def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
                         "id": message.get("id"),
                         "error": {"code": -32000, "message": "simulated close failure"},
                     }
+                elif state.get("close_success_false"):
+                    response = {"id": message.get("id"), "result": {"success": False}}
                 else:
                     response = {"id": message.get("id"), "result": {"success": True}}
                 _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
@@ -212,7 +214,18 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(self.lifecycle.BrowserLifecycleError, "simulated close failure"):
             self.lifecycle.close_page_target(browser_url, "target-close-1")
 
-    def test_touch_page_idle_writes_browser_state_and_keyed_schedule(self) -> None:
+    def test_close_page_target_false_success_is_failure(self) -> None:
+        state: dict[str, object] = {
+            "requests": [],
+            "targets": [{"id": "target-close-1", "type": "page", "url": "https://example.com"}],
+            "close_success_false": True,
+        }
+        _server, _thread, browser_url = self._start_cdp_server(state)
+
+        with self.assertRaisesRegex(self.lifecycle.BrowserLifecycleError, "did not close target"):
+            self.lifecycle.close_page_target(browser_url, "target-close-1")
+
+    def test_refresh_page_idle_does_not_set_current_target(self) -> None:
         calls: list[dict[str, object]] = []
 
         def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
@@ -225,10 +238,10 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-browser"
 
-            result = self.lifecycle.touch_page_idle(
+            result = self.lifecycle.refresh_page_idle(
                 instance_root=instance_root,
                 target_id="target-idle-1",
-                target_url="https://example.com/current",
+                target_url="https://example.com/background",
                 page_id=7,
             )
 
@@ -255,19 +268,115 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
             )
             state_path = instance_root / "runtime" / "browser" / "page_idle.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertEqual(state["current_target_id"], "target-idle-1")
-            self.assertEqual(state["current_page_updated_at"], "2026-06-24T00:00:00Z")
+            self.assertNotIn("current_target_id", state)
+            self.assertNotIn("current_page_updated_at", state)
             self.assertEqual(state["page_id_to_target_id"], {"7": "target-idle-1"})
-            self.assertEqual(state["targets"]["target-idle-1"]["target_url"], "https://example.com/current")
+            self.assertEqual(state["targets"]["target-idle-1"]["target_url"], "https://example.com/background")
             self.assertEqual(state["targets"]["target-idle-1"]["last_used_at"], "2026-06-24T00:00:00Z")
 
-    def test_touch_page_idle_rejects_blank_target_before_scheduling(self) -> None:
+    def test_mark_current_page_does_not_schedule_idle(self) -> None:
+        calls: list[dict[str, object]] = []
+        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs)
+        self.lifecycle._utc_now = lambda: datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-browser"
+
+            state = self.lifecycle.mark_current_page(
+                instance_root=instance_root,
+                target_id="target-current-1",
+                target_url="https://example.com/current",
+                page_id="9",
+            )
+
+            self.assertEqual(calls, [])
+            self.assertEqual(state["current_target_id"], "target-current-1")
+            self.assertEqual(state["current_page_updated_at"], "2026-06-24T00:00:00Z")
+            self.assertEqual(state["page_id_to_target_id"], {"9": "target-current-1"})
+            self.assertEqual(state["targets"]["target-current-1"]["target_url"], "https://example.com/current")
+
+    def test_refresh_current_page_idle_sets_current_and_schedules(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"schedule": {"schedule_id": "schedule-1"}}
+
+        self.lifecycle.daemon_client.schedule_trigger = fake_schedule_trigger
+        self.lifecycle._utc_now = lambda: datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-browser"
+
+            result = self.lifecycle.refresh_current_page_idle(
+                instance_root=instance_root,
+                target_id="target-current-idle",
+                target_url="https://example.com/current",
+                page_id=3,
+            )
+
+            self.assertTrue(result["idle_refreshed"])
+            self.assertEqual(calls[0]["schedule_key"], "browser.page.idle:target-current-idle")
+            state = json.loads(self.lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(state["current_target_id"], "target-current-idle")
+            self.assertEqual(state["page_id_to_target_id"], {"3": "target-current-idle"})
+            self.assertEqual(state["targets"]["target-current-idle"]["target_url"], "https://example.com/current")
+
+    def test_refresh_page_idle_schedule_failure_leaves_no_idle_state(self) -> None:
+        def failing_schedule_trigger(**_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("daemon unavailable")
+
+        self.lifecycle.daemon_client.schedule_trigger = failing_schedule_trigger
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-browser"
+
+            with self.assertRaisesRegex(RuntimeError, "daemon unavailable"):
+                self.lifecycle.refresh_page_idle(
+                    instance_root=instance_root,
+                    target_id="target-unmanaged",
+                    target_url="https://example.com/unmanaged",
+                )
+
+            self.assertFalse(self.lifecycle.page_idle_state_file(instance_root).exists())
+
+    def test_forget_page_idle_target_removes_target_mapping_and_current(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-browser"
+            self.lifecycle._write_page_idle_state(
+                instance_root,
+                {
+                    "current_target_id": "target-forget",
+                    "current_page_updated_at": "2026-06-24T00:00:00Z",
+                    "targets": {
+                        "target-forget": {
+                            "target_id": "target-forget",
+                            "target_url": "https://example.com/forget",
+                            "last_used_at": "2026-06-24T00:00:00Z",
+                            "page_id": "4",
+                        },
+                        "target-keep": {"target_id": "target-keep", "last_used_at": "2026-06-24T00:00:00Z"},
+                    },
+                    "page_id_to_target_id": {"4": "target-forget", "5": "target-keep"},
+                },
+            )
+
+            state = self.lifecycle.forget_page_idle_target(instance_root=instance_root, target_id="target-forget")
+
+            self.assertNotIn("target-forget", state["targets"])
+            self.assertIn("target-keep", state["targets"])
+            self.assertEqual(state["page_id_to_target_id"], {"5": "target-keep"})
+            self.assertNotIn("current_target_id", state)
+            persisted = json.loads(self.lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(persisted, state)
+
+    def test_refresh_page_idle_rejects_blank_target_before_scheduling(self) -> None:
         calls: list[dict[str, object]] = []
         self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs)
 
         with tempfile.TemporaryDirectory() as temp_root:
             with self.assertRaisesRegex(self.lifecycle.BrowserLifecycleError, "target_id"):
-                self.lifecycle.touch_page_idle(instance_root=Path(temp_root), target_id=" ")
+                self.lifecycle.refresh_page_idle(instance_root=Path(temp_root), target_id=" ")
 
         self.assertEqual(calls, [])
 
@@ -275,7 +384,7 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-browser"
 
-            self.lifecycle.set_current_page(
+            self.lifecycle.mark_current_page(
                 instance_root=instance_root,
                 target_id="target-cdp-1",
                 target_url="https://example.com/current",
