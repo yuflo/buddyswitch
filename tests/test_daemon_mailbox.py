@@ -57,7 +57,7 @@ class DaemonMailboxTests(unittest.TestCase):
     def _signal(self, *, target_role: str = "dev", target_instance: str = "act-dev-daemon") -> dict[str, Any]:
         return self.mailbox.daemon_signal_envelope(
             signal_id="sig-daemon-mailbox",
-            signal_type="message.available",
+            signal_type="example.ready",
             source_actor_address={"role_id": "pm", "actor_id": "act-pm-daemon"},
             target_actor_address={"role_id": target_role, "actor_id": target_instance},
             payload={"message_id": "msg-daemon-mailbox"},
@@ -68,7 +68,7 @@ class DaemonMailboxTests(unittest.TestCase):
         signal = self._signal()
 
         self.assertEqual(signal["signal_id"], "sig-daemon-mailbox")
-        self.assertEqual(signal["type"], "message.available")
+        self.assertEqual(signal["type"], "example.ready")
         self.assertEqual(signal["payload"], {"message_id": "msg-daemon-mailbox"})
         self.assertEqual(signal["source_actor_address"], {"role_id": "pm", "actor_id": "act-pm-daemon"})
         self.assertEqual(signal["target_actor_address"], {"role_id": "dev", "actor_id": "act-dev-daemon"})
@@ -77,7 +77,7 @@ class DaemonMailboxTests(unittest.TestCase):
 
     def test_validate_daemon_signal_rejects_legacy_message_event_shape(self) -> None:
         legacy_event = {
-            "type": "message.available",
+            "type": "example.ready",
             "message_id": "msg-daemon-mailbox",
             "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
             "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
@@ -129,7 +129,7 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertEqual(result["delivery_status"], "delivered")
             self.assertEqual(result["handling_status"], "handled")
             self.assertEqual(len(dispatcher.triggers), 1)
-            self.assertEqual(dispatcher.triggers[0].type, "message.available")
+            self.assertEqual(dispatcher.triggers[0].type, "example.ready")
             self.assertEqual(dispatcher.triggers[0].payload, {"message_id": "msg-daemon-mailbox"})
             self.assertFalse(thread.is_alive())
 
@@ -174,7 +174,7 @@ class DaemonMailboxTests(unittest.TestCase):
             paths = self.central.central_daemon_paths(Path(temp_root) / "shared")
             service = self.central.CentralDaemonService(paths=paths, now=lambda: "2026-05-30T00:00:00Z")
             legacy_event = {
-                "type": "message.available",
+                "type": "example.ready",
                 "message_id": "msg-daemon-mailbox",
                 "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
                 "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},

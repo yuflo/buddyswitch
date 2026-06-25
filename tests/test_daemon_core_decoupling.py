@@ -19,7 +19,7 @@ DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
 TASK_CHECKOUT_HANDLER_PATH = ROOT / "tools" / "launcher" / "task_checkout_handler.py"
 CENTRAL_DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
-MESSAGE_AVAILABLE_HANDLER_PATH = ROOT / "tools" / "launcher" / "message_available_handler.py"
+IM_WAKE_HANDLER_PATH = ROOT / "tools" / "launcher" / "im_wake_handler.py"
 DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
 NOTIFICATION_CENTER_PATH = ROOT / "tools" / "launcher" / "notification_center.py"
 MODULE_COUNTER = count()
@@ -247,14 +247,14 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             result = daemon_core.register_daemon_actor(
                 context,
                 actor_address,
-                notify_subscriptions=["message.available", "message.available", " "],
+                notify_subscriptions=["example.ready", "example.ready", " "],
             )
 
             endpoint = recorded["endpoint"]
             assert isinstance(endpoint, dict)
             self.assertEqual(endpoint["kind"], "daemon_mailbox_socket")
-            self.assertEqual(endpoint["subscriptions"], ["message.available"])
-            self.assertEqual(result["record"]["endpoint"]["subscriptions"], ["message.available"])
+            self.assertEqual(endpoint["subscriptions"], ["example.ready"])
+            self.assertEqual(result["record"]["endpoint"]["subscriptions"], ["example.ready"])
 
     def test_daemon_status_reports_notify_subscriptions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -264,10 +264,10 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             status = daemon_core.daemon_status(
                 instance["instance_json"],
                 handlers=[],
-                notify_subscriptions=["message.available", "message.available"],
+                notify_subscriptions=["example.ready", "example.ready"],
             )
 
-            self.assertEqual(status["notify"], {"subscriptions": ["message.available"]})
+            self.assertEqual(status["notify"], {"subscriptions": ["example.ready"]})
 
     def test_central_daemon_remains_reachability_only_without_thread_activity_imports(self) -> None:
         imports = _imported_modules(CENTRAL_DAEMON_CORE_PATH)
@@ -279,9 +279,9 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         self.assertNotIn("active_turn_id", source)
         self.assertNotIn("parent_activity", source)
 
-    def test_message_handler_does_not_directly_interrupt_or_mutate_side_registry(self) -> None:
-        source = MESSAGE_AVAILABLE_HANDLER_PATH.read_text(encoding="utf-8")
-        self.assertIn("message.available", source)
+    def test_im_wake_handler_does_not_directly_interrupt_or_mutate_side_registry(self) -> None:
+        source = IM_WAKE_HANDLER_PATH.read_text(encoding="utf-8")
+        self.assertIn("im.message.created", source)
         self.assertIn("message_id", source)
         self.assertNotIn("interrupt_turn", source)
         self.assertNotIn("launcher_submit_turn", source)

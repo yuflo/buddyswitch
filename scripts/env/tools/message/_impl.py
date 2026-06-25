@@ -1,81 +1,99 @@
 #!/usr/bin/env python3
-"""Runless message services for broker-routed env.tool operations."""
+"""Central IM projection for broker-routed message tool operations."""
 
 from __future__ import annotations
 
-import time
-from typing import Any, TypedDict
+from typing import Any
 
-from env.services import messages as message_service
-from .tool import DEFINITION
+from env.tool_runtime import im_client as im_client_module
 from env.tool_runtime import results as tool_results
+from .tool import DEFINITION
 
 
-MESSAGE_MUTATION_RETRY_DELAYS_SECONDS = (0.0, 0.1, 0.25)
-
-
-_ACTION_DEFINITION_MAP = {
-    'actions': [
-        {
-            'name': row.name,
-            'payload_fields': [
-                field
-                for field in (row.input_schema.get('properties') or {})
-                if isinstance(field, str)
-            ],
-        }
-        for row in DEFINITION.actions
-    ]
+_ACTION_METHODS = {
+    "contacts": "contacts",
+    "conversation": "conversation",
+    "get": "get",
+    "list": "list",
+    "mark": "mark",
+    "send": "send",
+}
+_ACTION_ALLOWED_FIELDS = {
+    row.name: {
+        field
+        for field in (row.input_schema.get("properties") or {})
+        if isinstance(field, str)
+    }
+    for row in DEFINITION.actions
 }
 
 
-def _sleep_for_message_mutation_retry(seconds: float) -> None:
-    time.sleep(seconds)
+def _client_for(context: Any) -> Any:
+    client = getattr(context, "im_client", None)
+    if client is not None:
+        return client
+    if isinstance(context, dict):
+        client = context.get("im_client")
+        if client is not None:
+            return client
+    return im_client_module.ActorImClient(context)
 
 
-def _run_message_mutation_with_retry(operation: Any) -> Any:
-    last_exc: Exception | None = None
-    for delay in MESSAGE_MUTATION_RETRY_DELAYS_SECONDS:
-        if delay > 0:
-            _sleep_for_message_mutation_retry(delay)
-        try:
-            return operation()
-        except Exception as exc:
-            last_exc = exc
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError("message mutation retry did not run")
+def contacts_message(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _client_for(context).contacts(args)
 
 
-class MessageServiceContext(TypedDict):
-    active_role: str
-    actor_id: str
-    instance_payload: dict[str, Any]
-    manifest: dict[str, Any]
+def send_message(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _client_for(context).send(args)
 
 
-def _guess_correctable_fields(message: str) -> list[str] | None:
-    if "unsupported payload fields:" in message:
-        suffix = message.split("unsupported payload fields:", 1)[1].strip()
-        if suffix:
-            return [row.strip() for row in suffix.split(",") if row.strip()]
-    for field in ("target_actor_address", "content", "reply_to", "message_id", "disposition", "reason", "role", "q", "limit"):
-        if field in message:
-            return [field]
-    return None
+def get_message(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _client_for(context).get(args)
 
 
-def _reject_payload(
-    *,
-    action: str,
-    active_actor: dict[str, Any],
-    active_role: str,
-    message: str,
-    correctable_fields: list[str] | None = None,
-) -> dict[str, Any]:
+def list_messages(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _client_for(context).list(args)
+
+
+def conversation_messages(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _client_for(context).conversation(args)
+
+
+def mark_message(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _client_for(context).mark(args)
+
+
+_ACTION_HANDLERS = {
+    "contacts": contacts_message,
+    "conversation": conversation_messages,
+    "get": get_message,
+    "list": list_messages,
+    "mark": mark_message,
+    "send": send_message,
+}
+
+
+def invoke(*, action: str, args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    handler = _ACTION_HANDLERS.get(action)
+    if handler is None:
+        raise ValueError(f"unsupported action: {action}")
+    rejection = _reject_unknown_payload_fields(action=action, args=args, context=context)
+    if rejection is not None:
+        return rejection
+    return handler(args=args, context=context)
+
+
+def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any] | None:
+    allowed = _ACTION_ALLOWED_FIELDS.get(action, set())
+    unknown = sorted(field for field in args if field not in allowed)
+    if not unknown:
+        return None
+    message = f"unsupported payload fields: {', '.join(unknown)}"
+    active_actor = context.get("active_actor") if isinstance(context.get("active_actor"), dict) else {}
+    active_role = context.get("active_role") if isinstance(context.get("active_role"), str) else ""
     return tool_results.rejection(
         tool="message",
-        action=action,
+        action=f"message.{action}",
         active_actor=active_actor,
         active_role=active_role,
         code="E_MESSAGE_PAYLOAD",
@@ -86,556 +104,9 @@ def _reject_payload(
         impact="No messages were created or changed.",
         state_changed=False,
         retryable=True,
-        retry_guidance="Fix the message payload fields and retry.",
+        retry_guidance="Retry with only documented message payload fields.",
         allowed_next_actions=[
-            "Use message.contacts to discover online target actor addresses.",
-            "Retry with only documented message payload fields.",
+            "Use the message tool schema to select documented payload fields.",
         ],
-        correctable_fields=correctable_fields if correctable_fields is not None else _guess_correctable_fields(message),
+        correctable_fields=unknown,
     )
-
-
-def _reject_scope(
-    *,
-    action: str,
-    active_actor: dict[str, Any],
-    active_role: str,
-    code: str,
-    message: str,
-    permission_boundary: str,
-    human_summary: str,
-    why_blocked: str,
-    retryable: bool,
-    correctable_fields: list[str] | None,
-) -> dict[str, Any]:
-    return tool_results.rejection(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        code=code,
-        message=message,
-        permission_boundary=permission_boundary,
-        human_summary=human_summary,
-        why_blocked=why_blocked,
-        impact="No messages were created or changed.",
-        state_changed=False,
-        retryable=retryable,
-        retry_guidance="Fix the scope issue and retry." if retryable else "This action cannot be retried as-is.",
-        allowed_next_actions=[
-            "Use message.contacts to discover online target actor addresses.",
-            "Use message.list to view available inbox messages.",
-        ],
-        correctable_fields=correctable_fields,
-    )
-
-
-def _manifest_role_ids(context: MessageServiceContext) -> set[str]:
-    return context.rules.message.manifest_role_ids(context.get("manifest"))
-
-
-def _allowed_fields(action_name: str) -> set[str]:
-    for row in _ACTION_DEFINITION_MAP.get("actions", []):
-        if isinstance(row, dict) and row.get("name") == action_name:
-            return {field for field in row.get("payload_fields", []) if isinstance(field, str)}
-    return set()
-
-
-def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
-    action = "message.contacts"
-    active_actor = context["active_actor"]
-    active_role = context["active_role"]
-    manifest_roles = _manifest_role_ids(context)
-
-    try:
-        context.rules.message.ensure_active_role_is_manifest_declared(
-            active_role=active_role,
-            manifest_role_ids=manifest_roles,
-        )
-        request = context.rules.message.prepare_contacts_request(
-            args=args,
-            manifest_role_ids=manifest_roles,
-            allowed_fields=_allowed_fields("contacts"),
-        )
-    except context.rules.message.MessagePayloadError as exc:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=str(exc),
-            correctable_fields=exc.correctable_fields,
-        )
-    except context.rules.message.MessageScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            code=exc.code,
-            message=str(exc),
-            permission_boundary=exc.permission_boundary,
-            human_summary=exc.human_summary,
-            why_blocked=exc.why_blocked,
-            retryable=exc.retryable,
-            correctable_fields=exc.correctable_fields,
-        )
-
-    try:
-        raw_contacts = context.daemon.list_contacts(role_id=request["role"])
-    except Exception as exc:
-        return tool_results.rejection(
-            tool="message",
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            code="E_MESSAGE_CONTACTS_UNAVAILABLE",
-            message=str(exc),
-            permission_boundary="message.contacts",
-            human_summary="Online actor contacts are unavailable.",
-            why_blocked="The central daemon contacts endpoint could not be reached.",
-            impact="No messages were created or changed.",
-            state_changed=False,
-            retryable=True,
-            retry_guidance="Retry message.contacts after the central daemon is available.",
-            allowed_next_actions=[
-                "Retry message.contacts after the daemon is running.",
-            ],
-        )
-    rows = raw_contacts.get("contacts") if isinstance(raw_contacts.get("contacts"), list) else []
-    contacts = context.rules.message.normalize_contact_rows(rows, active_actor_address=context.actor_address)
-    sendable_count = sum(1 for row in contacts if row.get("sendable") is True)
-    return tool_results.success(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        effect_summary=f"Returned {len(contacts)} online actor contact(s).",
-        state_changed=False,
-        durability="none",
-        read_scope="online actor contacts from central daemon",
-        allowed_next_actions=[
-            "Use message.send with contact.actor_address copied into target_actor_address.",
-        ],
-        extra={
-            "contacts": contacts,
-            "count": len(contacts),
-            "sendable_count": sendable_count,
-            "filters": {"role": request["role"]},
-        },
-    )
-
-
-def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
-    return message_service.send_from_actor(
-        args=args,
-        context=context,
-        source_actor_address=context.actor_address,
-        active_actor=context["active_actor"],
-        active_role=context["active_role"],
-        require_active_role_manifest=True,
-        action="message.send",
-    )
-
-
-def get_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
-    action = "message.get"
-    active_actor = context["active_actor"]
-    active_role = context["active_role"]
-    manifest_roles = _manifest_role_ids(context)
-
-    try:
-        context.rules.message.ensure_active_role_is_manifest_declared(
-            active_role=active_role,
-            manifest_role_ids=manifest_roles,
-        )
-        request = context.rules.message.prepare_get_request(
-            args=args,
-            allowed_fields=_allowed_fields("get"),
-        )
-        message = context.rules.message.ensure_processable_inbound_message(
-            message_id=request["message_id"],
-            message=context.repos.message.get_message(request["message_id"]),
-            active_actor_address=context.actor_address,
-        )
-    except context.rules.message.MessagePayloadError as exc:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=str(exc),
-            correctable_fields=exc.correctable_fields,
-        )
-    except context.rules.message.MessageScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            code=exc.code,
-            message=str(exc),
-            permission_boundary=exc.permission_boundary,
-            human_summary=exc.human_summary,
-            why_blocked=exc.why_blocked,
-            retryable=exc.retryable,
-            correctable_fields=exc.correctable_fields,
-        )
-
-    return tool_results.success(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        effect_summary=f"Returned exact message '{message['id']}' for active actor '{context.actor_address.actor_id}'.",
-        state_changed=False,
-        durability="none",
-        read_scope="active actor exact processable inbound message",
-        allowed_next_actions=[
-            "Use message.send with reply_to to reply.",
-            "Use message.mark to finish without a reply.",
-        ],
-        extra={
-            "message_id": message["id"],
-            "message": message,
-            "from_actor_address": message["from_actor_address"],
-            "to_actor_address": message["to_actor_address"],
-            "reply_to": message["reply_to"],
-            "disposition": message["disposition"],
-            "disposition_reason": message["disposition_reason"],
-            "disposition_updated_at": message["disposition_updated_at"],
-            "processed_by_actor_address": message["processed_by_actor_address"],
-        },
-    )
-
-
-def mark_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
-    action = "message.mark"
-    active_actor = context["active_actor"]
-    active_role = context["active_role"]
-    manifest_roles = _manifest_role_ids(context)
-
-    try:
-        context.rules.message.ensure_active_role_is_manifest_declared(
-            active_role=active_role,
-            manifest_role_ids=manifest_roles,
-        )
-        request = context.rules.message.prepare_mark_request(
-            args=args,
-            allowed_fields=_allowed_fields("mark"),
-        )
-        current_message = context.rules.message.ensure_processable_inbound_message(
-            message_id=request["message_id"],
-            message=context.repos.message.get_message(request["message_id"]),
-            active_actor_address=context.actor_address,
-        )
-        updated_message = context.rules.message.transition_message_disposition(
-            message=current_message,
-            active_actor_address=context.actor_address,
-            disposition=request["disposition"],
-            reason=request["reason"],
-            now=context.repos.runtime_files.now_iso(),
-        )
-    except context.rules.message.MessagePayloadError as exc:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=str(exc),
-            correctable_fields=exc.correctable_fields,
-        )
-    except context.rules.message.MessageScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            code=exc.code,
-            message=str(exc),
-            permission_boundary=exc.permission_boundary,
-            human_summary=exc.human_summary,
-            why_blocked=exc.why_blocked,
-            retryable=exc.retryable,
-            correctable_fields=exc.correctable_fields,
-        )
-
-    parent_request: dict[str, Any] | None = None
-    if request["disposition"] == "needs_parent":
-        original_previous_disposition = str(current_message.get("disposition") or "unseen")
-        prompt = context.rules.message.render_parent_required_prompt(
-            request["message_id"],
-            current_message["from_actor_address"],
-            current_message["to_actor_address"],
-            request["reason"] or "",
-        )
-        try:
-            parent_request = _run_message_mutation_with_retry(
-                lambda: context.daemon.request_parent_message_handling(
-                    message_id=request["message_id"],
-                    prompt=prompt,
-                )
-            )
-        except Exception as exc:
-            final_message = context.repos.message.get_message(request["message_id"]) or current_message
-            original_final_disposition = str(final_message.get("disposition") or original_previous_disposition)
-            return tool_results.rejection(
-                tool="message",
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                code="E_MESSAGE_PARENT_REQUIRED_SUBMIT_FAILED",
-                message=str(exc),
-                permission_boundary="message.needs_parent_runtime",
-                human_summary="Parent-required message handoff failed.",
-                why_blocked="The parent prompt could not be submitted, so the message was not marked needs_parent.",
-                impact="No message disposition changed; the original message remains in its previous disposition.",
-                state_changed=False,
-                durability="none",
-                retryable=True,
-                retry_guidance="Retry message.mark(needs_parent) after parent runtime availability is restored.",
-                allowed_next_actions=[
-                    "Use message.get to inspect the original processable message.",
-                ],
-                extra={
-                    "message_id": current_message["id"],
-                    "original_message_id": current_message["id"],
-                    "original_previous_disposition": original_previous_disposition,
-                    "original_final_disposition": original_final_disposition,
-                    "parent_prompt_submitted": False,
-                    "message": final_message,
-                },
-            )
-        try:
-            saved_message = _run_message_mutation_with_retry(
-                lambda: context.repos.message.save_message(updated_message)
-            )
-        except Exception as exc:
-            final_message = context.repos.message.get_message(request["message_id"]) or current_message
-            original_final_disposition = str(final_message.get("disposition") or original_previous_disposition)
-            return tool_results.rejection(
-                tool="message",
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                code="E_MESSAGE_NEEDS_PARENT_DISPOSITION_SAVE_FAILED",
-                message=str(exc),
-                permission_boundary="message.needs_parent_disposition",
-                human_summary="Parent prompt was submitted, but the message disposition could not be saved.",
-                why_blocked="The parent prompt was submitted, but the needs_parent disposition save failed.",
-                impact="Parent handling was requested; the original message remains in its previous disposition.",
-                state_changed=True,
-                durability="durable",
-                retryable=True,
-                retry_guidance="Inspect message state before repeating the parent handoff; the parent prompt was already submitted.",
-                allowed_next_actions=[
-                    "Use message.get to inspect the original processable message if it is still available.",
-                    "Inspect parent runtime state before repeating message.mark(needs_parent).",
-                ],
-                extra={
-                    "message_id": current_message["id"],
-                    "original_message_id": current_message["id"],
-                    "original_previous_disposition": original_previous_disposition,
-                    "original_final_disposition": original_final_disposition,
-                    "parent_prompt_submitted": True,
-                    "parent_request": parent_request,
-                    "message": final_message,
-                },
-            )
-    else:
-        try:
-            saved_message = context.repos.message.save_message(updated_message)
-        except (ValueError, OSError) as exc:
-            return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
-
-    state_change = {
-        "object_type": "message",
-        "change": f"marked_{saved_message['disposition']}",
-        "message_id": saved_message["id"],
-    }
-    extra: dict[str, Any] = {
-        "message_id": saved_message["id"],
-        "disposition": saved_message["disposition"],
-        "message": saved_message,
-        "disposition_reason": saved_message["disposition_reason"],
-        "disposition_updated_at": saved_message["disposition_updated_at"],
-        "processed_by_actor_address": saved_message["processed_by_actor_address"],
-    }
-    if parent_request is not None:
-        extra["parent_request"] = parent_request
-        extra["parent_prompt_submitted"] = True
-    return tool_results.success(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        effect_summary=f"Marked message '{saved_message['id']}' as {saved_message['disposition']}.",
-        state_changed=True,
-        durability="durable",
-        state_changes=[state_change],
-        allowed_next_actions=[
-            "Finish after this disposition path succeeds.",
-        ],
-        extra=extra,
-    )
-
-
-def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
-    action = "message.list"
-    active_actor = context["active_actor"]
-    active_role = context["active_role"]
-    manifest_roles = _manifest_role_ids(context)
-
-    try:
-        context.rules.message.ensure_active_role_is_manifest_declared(
-            active_role=active_role,
-            manifest_role_ids=manifest_roles,
-        )
-        request = context.rules.message.prepare_list_request(
-            args=args,
-            manifest_role_ids=manifest_roles,
-            allowed_fields=_allowed_fields("list"),
-        )
-    except context.rules.message.MessagePayloadError as exc:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=str(exc),
-            correctable_fields=exc.correctable_fields,
-        )
-    except context.rules.message.MessageScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            code=exc.code,
-            message=str(exc),
-            permission_boundary=exc.permission_boundary,
-            human_summary=exc.human_summary,
-            why_blocked=exc.why_blocked,
-            retryable=exc.retryable,
-            correctable_fields=exc.correctable_fields,
-        )
-
-    all_messages = context.repos.message.list_messages()
-    inbox = context.rules.message.filter_inbox_messages(
-        messages=all_messages,
-        active_actor_address=context.actor_address,
-        sender_role=request["role"],
-        q=request["q"],
-        limit=request["limit"],
-    )
-
-    return tool_results.success(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        effect_summary=f"Returned {len(inbox)} inbox message(s) for active actor '{context.actor_address.actor_id}'.",
-        state_changed=False,
-        durability="none",
-        read_scope="active actor inbox messages",
-        allowed_next_actions=[
-            "Use message.contacts to discover an online actor address for replies.",
-            "Use message.send to reply to a message when the target actor is online.",
-        ],
-        extra={
-            "messages": inbox,
-            "actor_address": context.actor_address.to_payload(),
-            "discovery_summary": {
-                "count": len(inbox),
-                "filters": {
-                    "role": request["role"],
-                    "q": request["q"],
-                    "limit": request["limit"],
-                },
-            },
-        },
-    )
-
-
-def conversation_messages(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
-    action = "message.conversation"
-    active_actor = context["active_actor"]
-    active_role = context["active_role"]
-    manifest_roles = _manifest_role_ids(context)
-
-    try:
-        context.rules.message.ensure_active_role_is_manifest_declared(
-            active_role=active_role,
-            manifest_role_ids=manifest_roles,
-        )
-        request = context.rules.message.prepare_conversation_request(
-            args=args,
-            source_actor_address=context.actor_address,
-            manifest_role_ids=manifest_roles,
-            allowed_fields=_allowed_fields("conversation"),
-        )
-    except context.rules.message.MessagePayloadError as exc:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=str(exc),
-            correctable_fields=exc.correctable_fields,
-        )
-    except context.rules.message.MessageScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            code=exc.code,
-            message=str(exc),
-            permission_boundary=exc.permission_boundary,
-            human_summary=exc.human_summary,
-            why_blocked=exc.why_blocked,
-            retryable=exc.retryable,
-            correctable_fields=exc.correctable_fields,
-        )
-
-    target_actor = request["target_actor_address"]
-    messages = context.rules.message.filter_conversation_messages(
-        messages=context.repos.message.list_messages(),
-        active_actor_address=context.actor_address,
-        target_actor_address=target_actor,
-        q=request["q"],
-        limit=request["limit"],
-    )
-    selector: dict[str, Any] = {"target_actor_address": target_actor.to_payload()}
-
-    return tool_results.success(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        effect_summary=f"Returned {len(messages)} visible conversation message(s) for active actor '{context.actor_address.actor_id}'.",
-        state_changed=False,
-        durability="none",
-        read_scope="active actor visible direct conversation messages",
-        allowed_next_actions=[
-            "Use message.list when you only need active actor inbox messages.",
-            "Use message.contacts before sending a new direct message.",
-        ],
-        extra={
-            "messages": messages,
-            "count": len(messages),
-            "selector": selector,
-            "actor_address": context.actor_address.to_payload(),
-            "filters": {
-                "q": request["q"],
-                "limit": request["limit"],
-            },
-        },
-    )
-
-
-_ACTION_HANDLERS = {
-    'contacts': contacts_message,
-    'conversation': conversation_messages,
-    'get': get_message,
-    'list': list_messages,
-    'mark': mark_message,
-    'send': send_message,
-}
-
-
-def invoke(*, action: str, args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    handler = _ACTION_HANDLERS.get(action)
-    if handler is None:
-        raise ValueError(f"unsupported action: {action}")
-    return handler(args=args, context=context)

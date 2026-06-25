@@ -17,7 +17,7 @@ DAEMON_OWNED_FILES = [
     ROOT / "tools" / "launcher" / "central_daemon.py",
     ROOT / "tools" / "launcher" / "central_daemon_core.py",
     ROOT / "tools" / "launcher" / "daemon_mailbox.py",
-    ROOT / "tools" / "launcher" / "message_available_handler.py",
+    ROOT / "tools" / "launcher" / "im_wake_handler.py",
     ROOT / "tools" / "launcher" / "track_comment_added_handler.py",
     ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py",
     ROOT / "scripts" / "env" / "tool_runtime" / "context.py",
@@ -114,6 +114,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
                 "message_inbound.py",
                 "track_comment_added_handler.py",
                 "track_comment_inbound.py",
+                "im_wake_handler.py",
                 "context.py",
             }
         ]
@@ -137,10 +138,10 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn('"track_id"', source)
         self.assertNotIn('"comment_id"', source)
 
-    def test_message_available_handler_owns_message_signal_payload_semantics(self) -> None:
-        handler_source = (ROOT / "tools" / "launcher" / "message_available_handler.py").read_text(encoding="utf-8")
+    def test_im_wake_handler_owns_im_signal_payload_semantics(self) -> None:
+        handler_source = (ROOT / "tools" / "launcher" / "im_wake_handler.py").read_text(encoding="utf-8")
 
-        self.assertIn("message.available", handler_source)
+        self.assertIn("im.message.created", handler_source)
         self.assertIn("message_id", handler_source)
         self.assertIn("def handle(", handler_source)
         self.assertNotIn("def handle_signal(", handler_source)

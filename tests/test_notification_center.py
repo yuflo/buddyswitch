@@ -217,7 +217,7 @@ class NotificationCenterTests(unittest.TestCase):
         self.assertNotIn("env.repos.messages", imports)
         self.assertNotIn("env.repos.track_comments", imports)
 
-    def test_message_inbound_registers_message_available_as_source_owned_handler(self) -> None:
+    def test_message_inbound_registers_im_message_created_as_source_owned_handler(self) -> None:
         nc = load_module(NC_PATH)
         message_inbound = load_module(MESSAGE_INBOUND_PATH)
         daemon_core = load_module(DAEMON_CORE_PATH)
@@ -226,35 +226,30 @@ class NotificationCenterTests(unittest.TestCase):
 
         self.assertEqual(len(registrations), 1)
         registration = registrations[0]
-        self.assertEqual(registration.event_type, "message.available")
+        self.assertEqual(registration.event_type, "im.message.created")
         self.assertTrue(registration.owner_module.endswith("message_inbound"))
-        self.assertEqual(dict(registration.payload_contract), {"required_fields": ("message_id",)})
+        self.assertEqual(dict(registration.payload_contract), {"required_fields": ("message_id", "conversation_id", "event_id")})
         contract_text = json.dumps(dict(registration.payload_contract), ensure_ascii=True, default=list)
         self.assertNotIn("body", contract_text.lower())
-        self.assertNotIn("conversation", contract_text.lower())
         self.assertNotIn("disposition", contract_text.lower())
         self.assertNotIn("needs_parent", contract_text)
 
         handler = registration.handler_factory()
-        self.assertEqual(type(handler).__name__, "MessageAvailableHandler")
-        self.assertEqual(getattr(handler, "name", None), "message_available")
+        self.assertEqual(type(handler).__name__, "ImMessageCreatedHandler")
+        self.assertEqual(getattr(handler, "name", None), "im_message_created")
 
         handlers = nc.handlers_from_registrations(registrations)
         trigger = daemon_core.daemon_triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal",
-            type="message.available",
+            type="im.message.created",
             target_actor_address={"role_id": "dev", "actor_id": "act-dev-nc"},
             origin_id="sig-nc",
             correlation_id=None,
-            payload={"message_id": "msg-nc"},
-            source_context={
-                "signal_id": "sig-nc",
-                "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-nc"},
-                "created_at": "2026-06-09T00:00:00Z",
-            },
+            payload={"message_id": "msg-nc", "conversation_id": "conv-nc", "event_id": "imev-nc"},
+            source_context={"signal_id": "sig-nc", "created_at": "2026-06-09T00:00:00Z"},
         )
 
-        self.assertEqual([type(item).__name__ for item in handlers], ["MessageAvailableHandler"])
+        self.assertEqual([type(item).__name__ for item in handlers], ["ImMessageCreatedHandler"])
         self.assertTrue(handlers[0].handles(trigger))
 
     def test_track_comment_inbound_registers_track_comment_added_as_source_owned_handler(self) -> None:

@@ -21,7 +21,7 @@ HELPER_DIR = Path(__file__).resolve().parent
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
-import web_user_actor
+import im_http_router
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -156,6 +156,9 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
         def do_POST(self) -> None:  # noqa: N802
             self._dispatch()
 
+        def do_PATCH(self) -> None:  # noqa: N802
+            self._dispatch()
+
         def do_DELETE(self) -> None:  # noqa: N802
             self._dispatch()
 
@@ -175,7 +178,8 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
                     self._serve_static(STATIC_ROOT / "app.js", "application/javascript; charset=utf-8")
                     return
                 if parsed.path.startswith("/api/"):
-                    self._serve_json(*service.handle_api(self.command, parsed.path, self._read_body(), self.headers))
+                    api_path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+                    self._serve_json(*service.handle_api(self.command, api_path, self._read_body(), self.headers))
                     return
                 self._serve_html_404()
             except HttpError as exc:
@@ -230,14 +234,17 @@ class WebManagementService:
         repo_root: Path,
         command_runner: Callable[[list[str], float], CommandResult] | Callable[..., CommandResult] | None = None,
         terminal_opener: Callable[[str], None] | None = None,
-        web_message_sender: Callable[..., dict[str, Any]] | None = None,
+        im_router: im_http_router.ImHttpRouter | None = None,
         platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._runner = command_runner or LauncherCommandRunner(repo_root).run
         self._terminal_opener = terminal_opener or open_macos_terminal_app
-        self._web_message_sender = web_message_sender or web_user_actor.send_web_user_message
+        self._im_router = im_router or im_http_router.ImHttpRouter(
+            actor_lister=self._list_im_actor_rows,
+            wake_actor=self._wake_im_actor,
+        )
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
 
@@ -256,8 +263,8 @@ class WebManagementService:
             return 200, {"ok": True, "instances": self._list_instances()}
         if method == "POST" and path == "/api/instances":
             return 200, self._create_instance(body)
-        if method == "POST" and path == "/api/messages/send":
-            return 200, self._send_message_http(body)
+        if path.startswith("/api/im/"):
+            return self._im_router.handle(method, path, body, headers or {})
 
         instance_action = self._parse_instance_action_path(path)
         if instance_action is None:
@@ -364,82 +371,6 @@ class WebManagementService:
         if isinstance(expected_turn_id, str):
             payload["expected_turn_id"] = expected_turn_id
         return payload
-
-    def _send_message_http(self, body: bytes) -> dict[str, Any]:
-        payload = self._parse_json_body(body)
-        unknown = sorted(key for key in payload if key not in {"actor_id", "content"})
-        if unknown:
-            raise HttpError(
-                status=400,
-                code="INVALID_REQUEST",
-                message=f"Unsupported message request fields: {', '.join(unknown)}.",
-            )
-        actor_id = payload.get("actor_id")
-        if not isinstance(actor_id, str) or not actor_id.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="actor_id is required.")
-        try:
-            actor_id = validate_actor_id(actor_id.strip())
-        except ValueError as exc:
-            raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
-        content = payload.get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="content must not be empty.")
-        return self._run_busy(
-            f"messages:{actor_id}",
-            lambda: self._send_message_http_under_lock(actor_id, content.strip()),
-        )
-
-    def _send_message_http_under_lock(self, actor_id: str, content: str) -> dict[str, Any]:
-        instance = self._get_message_target_instance_status(actor_id)
-        instance_actor_id = instance.get("actor_id")
-        role = instance.get("role")
-        if not isinstance(instance_actor_id, str) or not instance_actor_id.strip():
-            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status for {actor_id}.")
-        if not isinstance(role, str) or not role.strip():
-            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance role for {actor_id}.")
-        target_actor_address = {"role_id": role.strip(), "actor_id": instance_actor_id.strip()}
-        result = self._web_message_sender(
-            target_actor_address=target_actor_address,
-            content=content,
-        )
-        if not isinstance(result, dict):
-            raise HttpError(status=502, code="MESSAGE_SEND_FAILED", message="Web message sender returned invalid result.")
-        if result.get("ok") is not True:
-            raise _web_message_http_error(result, instance=instance)
-        response: dict[str, Any] = {
-            "ok": True,
-            "instance": instance,
-            "target_actor_address": result.get("target_actor_address") or target_actor_address,
-        }
-        for key in (
-            "message_id",
-            "from_actor_address",
-            "delivery_status",
-            "handling_status",
-            "reachability_status",
-            "cleanup_status",
-            "state_changed",
-            "durability",
-        ):
-            if key in result:
-                response[key] = result[key]
-        return response
-
-    def _get_message_target_instance_status(self, actor_id: str) -> dict[str, Any]:
-        args = ["instance", "status", actor_id, "--json"]
-        result = self._runner(args, timeout_seconds=10)
-        if result.returncode != 0 or result.timed_out:
-            if not result.timed_out and result.returncode == 2:
-                raise HttpError(
-                    status=404,
-                    code="MESSAGE_TARGET_NOT_FOUND",
-                    message=f"Message target actor was not found: {actor_id}.",
-                )
-            raise map_command_failure(" ".join(args), result)
-        return load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance status for {actor_id}.",
-        )
 
     def _clear(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
@@ -755,6 +686,43 @@ class WebManagementService:
             )
         return rows
 
+    def _list_im_actor_rows(self, role_id: str | None) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for instance in self._list_instances():
+            if instance.get("status") != "active":
+                continue
+            role = instance.get("role")
+            actor_id = instance.get("actor_id")
+            if not isinstance(role, str) or not isinstance(actor_id, str):
+                continue
+            if role_id is not None and role != role_id:
+                continue
+            rows.append(
+                {
+                    "actor_address": {"role_id": role, "actor_id": actor_id},
+                    "status": "online",
+                    "last_seen_at": instance.get("updated_at"),
+                }
+            )
+        return rows
+
+    def _wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        target = payload.get("target_actor_address")
+        if not isinstance(target, dict):
+            return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target_actor_address is required"}
+        actor_id = target.get("actor_id")
+        if not isinstance(actor_id, str) or not actor_id.strip():
+            return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target actor_id is required"}
+        try:
+            instance = self._get_instance_status(actor_id)
+        except HttpError as exc:
+            if exc.status == 404:
+                return {"wake_status": "target_not_online", "runtime_target": "none", "error": exc.message}
+            return {"wake_status": "wake_failed", "runtime_target": "none", "error": exc.message}
+        if instance.get("status") != "active":
+            return {"wake_status": "target_not_online", "runtime_target": "none", "error": "target actor is not active"}
+        return {"wake_status": "submitted", "runtime_target": "parent", "error": None}
+
     def _get_instance_status(self, actor_id: str) -> dict[str, Any]:
         result = self._run_command(["instance", "status", actor_id, "--json"], timeout_seconds=10)
         payload = load_command_json_object(
@@ -796,33 +764,6 @@ def _command_error_message(command_label: str, result: CommandResult) -> str:
     if message:
         return message
     return f"Command failed: {command_label}"
-
-
-def _web_message_http_error(result: dict[str, Any], *, instance: dict[str, Any]) -> HttpError:
-    error = result.get("error") if isinstance(result.get("error"), dict) else {}
-    code = error.get("code") if isinstance(error.get("code"), str) and error.get("code") else "MESSAGE_SEND_FAILED"
-    message = (
-        error.get("message")
-        if isinstance(error.get("message"), str) and error.get("message")
-        else str(result.get("human_summary") or "Message send failed.")
-    )
-    permission_boundary = result.get("permission_boundary")
-    delivery_status = result.get("delivery_status")
-    cleanup_status = result.get("cleanup_status")
-    if code in {"E_MESSAGE_PAYLOAD", "E_MESSAGE_SCOPE"} or permission_boundary == "request-payload":
-        status = 400
-    elif code == "E_MESSAGE_SEND_INDETERMINATE" or cleanup_status == "failed":
-        status = 502
-    elif delivery_status in {"delivery_failed", "target_not_online"} or permission_boundary in {
-        "message.reachability",
-        "message.delivery",
-    }:
-        status = 409
-    else:
-        status = 409
-    details = {key: value for key, value in result.items() if key not in {"ok", "error"}}
-    details["instance"] = instance
-    return HttpError(status=status, code=code, message=message, details=details)
 
 
 def _first_nonempty_line(text: str) -> str | None:
@@ -916,20 +857,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     service = WebManagementService(repo_root=REPO_ROOT)
     server = create_server(args.host, args.port, service)
-    web_user_runtime = web_user_actor.WebUserActorRuntime()
-    try:
-        web_user_runtime.start()
-    except Exception as exc:
-        server.server_close()
-        print(f"BuddySwitch web-user actor sink failed to start: {exc}", file=sys.stderr, flush=True)
-        return 1
     print(f"BuddySwitch web management listening on http://{args.host}:{server.server_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        web_user_runtime.close()
         server.server_close()
     return 0
 

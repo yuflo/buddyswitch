@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 import time
+import uuid
 from typing import Any, Protocol
 
 from env.tool_runtime import results as tool_results
@@ -155,84 +158,6 @@ def _reject_reachability(
     )
 
 
-def _reject_delivery_cleaned(
-    *,
-    action: str,
-    active_actor: dict[str, Any],
-    active_role: str,
-    delivery_status: str,
-    signal_error: str | None,
-    target_actor_address: dict[str, Any],
-) -> dict[str, Any]:
-    return tool_results.rejection(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        code="E_MESSAGE_DELIVERY_FAILED",
-        message="message.available signal delivery failed",
-        permission_boundary="message.delivery",
-        human_summary="Signal delivery failed after message creation, and the created message was cleaned up.",
-        why_blocked="Target daemon was online, but message.available signal delivery failed.",
-        impact="No readable message was created; the failed send was cleaned up.",
-        state_changed=False,
-        durability="none",
-        retryable=True,
-        retry_guidance="Retry message.send after rechecking message.contacts or target reachability.",
-        allowed_next_actions=[
-            "Use message.contacts to refresh the target actor address.",
-            "Retry message.send with the same target_actor_address if it is still online.",
-        ],
-        extra={
-            "delivery_status": delivery_status,
-            "cleanup_status": "cleaned",
-            "signal_error": signal_error,
-            "target_actor_address": target_actor_address,
-        },
-    )
-
-
-def _reject_delivery_indeterminate(
-    *,
-    action: str,
-    active_actor: dict[str, Any],
-    active_role: str,
-    message_id: str,
-    delivery_status: str,
-    signal_error: str | None,
-    cleanup_error: str,
-    target_actor_address: dict[str, Any],
-) -> dict[str, Any]:
-    return tool_results.rejection(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        code="E_MESSAGE_SEND_INDETERMINATE",
-        message="signal delivery failed and message cleanup failed",
-        permission_boundary="message.delivery_cleanup",
-        human_summary="Message send state is indeterminate.",
-        why_blocked="Signal delivery failed and cleanup of the created message also failed.",
-        impact="A message may still exist without target notification.",
-        state_changed=True,
-        durability="uncertain",
-        retryable=False,
-        retry_guidance="Do not blindly retry. Use context.get or message.list to inspect current state before deciding.",
-        allowed_next_actions=[
-            "Use context.get to inspect message recovery warnings.",
-            "Use message.list from the target actor if available to check whether the message is visible.",
-        ],
-        extra={
-            "message_id": message_id,
-            "delivery_status": delivery_status,
-            "cleanup_status": "failed",
-            "signal_error": signal_error,
-            "cleanup_error": cleanup_error,
-            "target_actor_address": target_actor_address,
-        },
-    )
-
-
 def _manifest_role_ids(context: MessageSendContext) -> set[str]:
     return context.rules.message.manifest_role_ids(context.get("manifest"))
 
@@ -243,29 +168,368 @@ def _actor_address_from_any(context: MessageSendContext, value: Any) -> Any:
     return context.rules.message.ActorAddress.from_payload(value)
 
 
-def send_from_web_user(
-    *,
-    context: MessageSendContext,
-    target_actor_address: dict[str, Any],
-    content: str,
-    web_user_actor_address: dict[str, Any],
-    reply_to: str | None = None,
-) -> dict[str, Any]:
-    args: dict[str, Any] = {
-        "target_actor_address": target_actor_address,
-        "content": content,
+def register_external_participant(*, client_kind: str, display_name: str) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    normalized_client_kind = client_kind.strip() if isinstance(client_kind, str) else ""
+    normalized_display_name = display_name.strip() if isinstance(display_name, str) else ""
+    if not normalized_client_kind:
+        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "client_kind must be a non-empty string"}}
+    if not normalized_display_name:
+        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "display_name must be a non-empty string"}}
+
+    external_id = f"ext-{uuid.uuid4().hex[:12]}"
+    participant = {
+        "kind": "external",
+        "external_id": external_id,
+        "client_kind": normalized_client_kind,
+        "display_name": normalized_display_name,
+        "created_at": message_repo.runtime_files.now_iso(),
+        "last_seen_at": message_repo.runtime_files.now_iso(),
     }
-    if reply_to is not None:
-        args["reply_to"] = reply_to
-    return send_from_actor(
-        args=args,
-        context=context,
-        source_actor_address=web_user_actor_address,
-        active_actor=dict(web_user_actor_address),
-        active_role=str(web_user_actor_address["role_id"]),
-        require_active_role_manifest=False,
-        action="message.send",
+    participant_token = f"impt-{secrets.token_hex(24)}"
+    token_hash = "sha256:" + hashlib.sha256(participant_token.encode("utf-8")).hexdigest()
+    message_repo.save_im_participant(participant)
+    message_repo.save_im_session(
+        {
+            "token_hash": token_hash,
+            "participant": {"kind": "external", "external_id": external_id},
+            "created_at": participant["created_at"],
+            "last_used_at": participant["created_at"],
+        }
     )
+    message_repo.save_im_cursor(
+        {
+            "participant": {"kind": "external", "external_id": external_id},
+            "last_event_id": message_repo.INITIAL_IM_EVENT_CURSOR,
+            "updated_at": participant["created_at"],
+        }
+    )
+    return {
+        "ok": True,
+        "participant": {
+            "kind": "external",
+            "external_id": external_id,
+            "client_kind": normalized_client_kind,
+            "display_name": normalized_display_name,
+        },
+        "participant_token": participant_token,
+        "event_cursor": message_repo.INITIAL_IM_EVENT_CURSOR,
+    }
+
+
+def _im_token_hash(participant_token: str) -> str:
+    return "sha256:" + hashlib.sha256(participant_token.encode("utf-8")).hexdigest()
+
+
+def authenticate_im_token(participant_token: str) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    if not isinstance(participant_token, str) or not participant_token.strip():
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "participant token is required"}}
+    session = message_repo.get_im_session_by_token_hash(_im_token_hash(participant_token.strip()))
+    if session is None:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "participant token is invalid"}}
+    participant = session.get("participant")
+    if not isinstance(participant, dict):
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "participant session is invalid"}}
+    try:
+        participant_ref = message_repo.im_participant_ref(participant)
+    except ValueError as exc:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
+    session["last_used_at"] = message_repo.runtime_files.now_iso()
+    message_repo.save_im_session(session)
+    return {"ok": True, "participant": participant_ref}
+
+
+def _new_im_id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+def send_im_message(
+    *,
+    sender_participant: dict[str, Any],
+    to: dict[str, Any],
+    content: str,
+    reply_to: str | None = None,
+    wake_actor: Any | None = None,
+) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    sender = message_repo.im_participant_ref(sender_participant)
+    target = message_repo.im_participant_ref(to)
+    normalized_content = content.strip() if isinstance(content, str) else ""
+    if not normalized_content:
+        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "content must be a non-empty string"}}
+    if reply_to is not None and (not isinstance(reply_to, str) or not reply_to.strip()):
+        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "reply_to must be a non-empty string"}}
+    reply_to_id = reply_to.strip() if isinstance(reply_to, str) else None
+
+    now = message_repo.runtime_files.now_iso()
+    if reply_to_id is not None:
+        original_message = message_repo.get_im_message(reply_to_id)
+        if original_message is None:
+            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to message not found"}}
+        conversation = message_repo.get_im_conversation(str(original_message.get("conversation_id") or ""))
+        if conversation is None:
+            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to conversation not found"}}
+        participants = conversation.get("participants")
+        if not isinstance(participants, list):
+            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to conversation is invalid"}}
+        participant_keys = {message_repo.im_participant_key(row) for row in participants if isinstance(row, dict)}
+        if {message_repo.im_participant_key(sender), message_repo.im_participant_key(target)} != participant_keys:
+            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to must stay in the same direct conversation"}}
+        conversation_id = str(conversation["id"])
+        created_at = str(conversation.get("created_at") or now)
+    else:
+        existing = message_repo.find_im_direct_conversation([sender, target])
+        if existing is None:
+            conversation_id = _new_im_id("conv")
+            created_at = now
+        else:
+            conversation_id = str(existing["id"])
+            created_at = str(existing.get("created_at") or now)
+    message_id = _new_im_id("msg")
+    event_id = _new_im_id("imev")
+    sequence = message_repo.next_im_sequence()
+    conversation = message_repo.save_im_conversation(
+        {
+            "id": conversation_id,
+            "type": "direct",
+            "participants": [sender, target],
+            "created_at": created_at,
+            "updated_at": now,
+            "last_message_id": message_id,
+            "last_sequence": sequence,
+        }
+    )
+    message = message_repo.save_im_message(
+        {
+            "id": message_id,
+            "conversation_id": conversation_id,
+            "from": sender,
+            "to": [target],
+            "content": normalized_content,
+            "reply_to": reply_to_id,
+            "created_at": now,
+            "sequence": sequence,
+        }
+    )
+    message_repo.save_im_message_state(
+        {
+            "message_id": message_id,
+            "participant": target,
+            "disposition": "unseen",
+            "reason": None,
+            "processed_by": None,
+            "updated_at": now,
+        }
+    )
+    for participant in (sender, target):
+        message_repo.save_im_event(
+            {
+                "event_id": event_id,
+                "type": "message.created",
+                "participant": participant,
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "from": sender,
+                "to": [target],
+                "reply_to": reply_to_id,
+                "created_at": now,
+                "sequence": sequence,
+            }
+        )
+    message_repo.save_im_cursor(
+        {
+            "participant": sender,
+            "last_event_id": event_id,
+            "updated_at": now,
+        }
+    )
+
+    wake_status = "not_applicable"
+    if target.get("kind") == "actor":
+        wake_payload = {
+            "type": "im.message.created",
+            "wake_id": _new_im_id("imwake"),
+            "target_actor_address": target["actor_address"],
+            "message_id": message_id,
+            "conversation_id": conversation_id,
+            "event_id": event_id,
+            "created_at": now,
+        }
+        if wake_actor is None:
+            wake_status = "submitted"
+        else:
+            try:
+                wake_result = wake_actor(wake_payload)
+            except Exception:
+                wake_status = "wake_failed"
+            else:
+                candidate = wake_result.get("wake_status") if isinstance(wake_result, dict) else None
+                wake_status = candidate if candidate in {"submitted", "target_not_online", "wake_failed", "not_applicable"} else "wake_failed"
+
+    return {
+        "ok": True,
+        "message": {
+            "id": message["id"],
+            "conversation_id": conversation["id"],
+            "reply_to": message["reply_to"],
+        },
+        "event_id": event_id,
+        "delivery_status": "accepted",
+        "wake_status": wake_status,
+        "next_cursor": event_id,
+    }
+
+
+def read_im_events(
+    *,
+    participant: dict[str, Any],
+    cursor: str,
+    limit: int = 50,
+    wait_ms: int = 0,
+) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    del wait_ms
+    participant_ref = message_repo.im_participant_ref(participant)
+    normalized_cursor = cursor.strip() if isinstance(cursor, str) and cursor.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
+    normalized_limit = limit if isinstance(limit, int) and limit > 0 else 50
+    events = message_repo.list_im_events_for_participant(participant_ref)
+    if normalized_cursor == message_repo.INITIAL_IM_EVENT_CURSOR:
+        visible = events[:normalized_limit]
+    else:
+        visible = []
+        seen_cursor = False
+        for event in events:
+            if seen_cursor:
+                visible.append(event)
+                if len(visible) >= normalized_limit:
+                    break
+            elif event.get("event_id") == normalized_cursor:
+                seen_cursor = True
+    next_cursor = normalized_cursor
+    if visible:
+        next_cursor = str(visible[-1]["event_id"])
+    return {
+        "ok": True,
+        "events": visible,
+        "next_cursor": next_cursor,
+        "participant": participant_ref,
+    }
+
+
+def _im_scope_error(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": "E_IM_SCOPE", "message": message}}
+
+
+def _im_not_found(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": "E_IM_NOT_FOUND", "message": message}}
+
+
+def _participant_can_see_message(message_repo: Any, participant: dict[str, Any], message: dict[str, Any]) -> bool:
+    conversation = message_repo.get_im_conversation(str(message.get("conversation_id") or ""))
+    if conversation is None:
+        return False
+    rows = conversation.get("participants")
+    if not isinstance(rows, list):
+        return False
+    participant_key = message_repo.im_participant_key(participant)
+    return participant_key in {message_repo.im_participant_key(row) for row in rows if isinstance(row, dict)}
+
+
+def get_im_message(*, participant: dict[str, Any], message_id: str) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    participant_ref = message_repo.im_participant_ref(participant)
+    message = message_repo.get_im_message(message_id)
+    if message is None:
+        return _im_not_found(f"message not found: {message_id}")
+    if not _participant_can_see_message(message_repo, participant_ref, message):
+        return _im_scope_error("participant is not in the message conversation")
+    return {"ok": True, "message": message}
+
+
+def list_im_replies(*, participant: dict[str, Any], message_id: str) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    root_response = get_im_message(participant=participant, message_id=message_id)
+    if root_response.get("ok") is not True:
+        return root_response
+    replies = [
+        row
+        for row in message_repo.list_im_messages()
+        if row.get("reply_to") == message_id and _participant_can_see_message(message_repo, participant, row)
+    ]
+    return {
+        "ok": True,
+        "message_id": message_id,
+        "replies": replies,
+        "count": len(replies),
+    }
+
+
+def get_im_direct_conversation(
+    *,
+    participant: dict[str, Any],
+    target: dict[str, Any],
+    limit: int = 20,
+) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    participant_ref = message_repo.im_participant_ref(participant)
+    target_ref = message_repo.im_participant_ref(target)
+    conversation = message_repo.find_im_direct_conversation([participant_ref, target_ref])
+    if conversation is None:
+        return _im_not_found("direct conversation not found")
+    messages = [
+        row
+        for row in message_repo.list_im_messages()
+        if row.get("conversation_id") == conversation.get("id")
+        and _participant_can_see_message(message_repo, participant_ref, row)
+    ]
+    normalized_limit = limit if isinstance(limit, int) and limit > 0 else 20
+    return {
+        "ok": True,
+        "conversation": conversation,
+        "messages": messages[-normalized_limit:],
+        "count": min(len(messages), normalized_limit),
+    }
+
+
+def update_im_disposition(
+    *,
+    participant: dict[str, Any],
+    message_id: str,
+    disposition: str,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    participant_ref = message_repo.im_participant_ref(participant)
+    message_response = get_im_message(participant=participant_ref, message_id=message_id)
+    if message_response.get("ok") is not True:
+        return message_response
+    if disposition not in {"absorbed", "replied", "needs_parent"}:
+        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "invalid disposition"}}
+    current = message_repo.get_im_message_state(message_id, participant_ref)
+    if current is None:
+        return _im_scope_error("participant has no state for this message")
+    previous = current.get("disposition")
+    updated = dict(current)
+    updated["disposition"] = disposition
+    updated["reason"] = reason.strip() if isinstance(reason, str) and reason.strip() else None
+    updated["updated_at"] = message_repo.runtime_files.now_iso()
+    message_repo.save_im_message_state(updated)
+    return {
+        "ok": True,
+        "message_id": message_id,
+        "participant": participant_ref,
+        "disposition": disposition,
+        "state_changed": previous != disposition or current.get("reason") != updated["reason"],
+    }
 
 
 def send_from_actor(
@@ -278,221 +542,40 @@ def send_from_actor(
     require_active_role_manifest: bool = True,
     action: str = "message.send",
 ) -> dict[str, Any]:
+    del action
     manifest_roles = _manifest_role_ids(context)
     source_actor = _actor_address_from_any(context, source_actor_address)
-
-    try:
-        if require_active_role_manifest:
-            context.rules.message.ensure_active_role_is_manifest_declared(
-                active_role=active_role,
-                manifest_role_ids=manifest_roles,
-            )
-        request = context.rules.message.prepare_send_request(
-            args=args,
-            source_actor_address=source_actor,
-            manifest_role_ids=manifest_roles,
-            get_message=context.repos.message.get_message,
-            allowed_fields=SEND_ALLOWED_FIELDS,
-        )
-    except context.rules.message.MessagePayloadError as exc:
-        return _reject_payload(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            message=str(exc),
-            correctable_fields=exc.correctable_fields,
-        )
-    except context.rules.message.MessageScopeError as exc:
+    if require_active_role_manifest and active_role not in manifest_roles:
         return _reject_scope(
-            action=action,
+            action="message.send",
             active_actor=active_actor,
             active_role=active_role,
-            code=exc.code,
-            message=str(exc),
-            permission_boundary=exc.permission_boundary,
-            human_summary=exc.human_summary,
-            why_blocked=exc.why_blocked,
-            retryable=exc.retryable,
-            correctable_fields=exc.correctable_fields,
+            code="E_MESSAGE_SCOPE",
+            message=f"active role '{active_role}' is not declared in manifest",
+            permission_boundary="message.manifest_role",
+            human_summary="Active role is not part of the manifest-declared message scope.",
+            why_blocked="message actions require active_role to be declared in manifest.roles.",
+            retryable=False,
+            correctable_fields=None,
         )
-
-    target_actor = request["target_actor_address"]
-    target_payload = target_actor.to_payload()
-    try:
-        reachability = context.daemon.check_reachability(target_actor_address=target_actor)
-    except Exception as exc:
-        return _reject_reachability(
-            action=action,
+    target = args.get("target_actor_address")
+    if not isinstance(target, dict):
+        return _reject_payload(
+            action="message.send",
             active_actor=active_actor,
             active_role=active_role,
-            reachability_status="unavailable",
-            target_actor_address=target_payload,
-            message=f"target reachability check failed: {exc}",
+            message="target_actor_address must be an actor participant object",
+            correctable_fields=["target_actor_address"],
         )
-    reachability_status = reachability.get("reachability_status")
-    if reachability_status != "online":
-        status = reachability_status if isinstance(reachability_status, str) and reachability_status else "unavailable"
-        return _reject_reachability(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            reachability_status=status,
-            target_actor_address=target_payload,
-            message=f"target actor is not online: {status}",
-        )
-
-    try:
-        message = context.repos.message.create_message(
-            from_actor_address=source_actor,
-            to_actor_address=target_actor,
-            content=request["content"],
-            reply_to=request["reply_to"],
-        )
-    except (ValueError, OSError) as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
-
-    try:
-        delivery = context.daemon.deliver_message_available(
-            message_id=message["id"],
-            target_actor_address=target_actor,
-        )
-    except Exception as exc:
-        delivery = {
-            "delivery_status": "delivery_failed",
-            "signal_error": str(exc),
-        }
-    delivery_status = delivery.get("delivery_status") if isinstance(delivery.get("delivery_status"), str) else "delivery_failed"
-    if delivery_status != "delivered":
-        signal_error = delivery.get("signal_error") if isinstance(delivery.get("signal_error"), str) else None
-        try:
-            context.repos.message.delete_message(message["id"])
-        except Exception as exc:
-            return _reject_delivery_indeterminate(
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                message_id=message["id"],
-                delivery_status=delivery_status,
-                signal_error=signal_error,
-                cleanup_error=str(exc),
-                target_actor_address=target_payload,
-            )
-        return _reject_delivery_cleaned(
-            action=action,
-            active_actor=active_actor,
-            active_role=active_role,
-            delivery_status=delivery_status,
-            signal_error=signal_error,
-            target_actor_address=target_payload,
-        )
-
-    reply_to_message = request["reply_to_message"]
-    reply_to_updated: dict[str, Any] | None = None
-    if reply_to_message is not None:
-        original_previous_disposition = str(reply_to_message.get("disposition") or "unseen")
-        try:
-            updated_reply_to = context.rules.message.transition_message_disposition(
-                message=reply_to_message,
-                active_actor_address=source_actor,
-                disposition="replied",
-                reason=None,
-                now=context.repos.runtime_files.now_iso(),
-            )
-        except (context.rules.message.MessagePayloadError, context.rules.message.MessageScopeError) as exc:
-            return _reject_scope(
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                code=getattr(exc, "code", "E_MESSAGE_SCOPE"),
-                message=str(exc),
-                permission_boundary=getattr(exc, "permission_boundary", "message.disposition"),
-                human_summary=getattr(exc, "human_summary", "Message disposition transition failed."),
-                why_blocked=getattr(exc, "why_blocked", str(exc)),
-                retryable=getattr(exc, "retryable", False),
-                correctable_fields=getattr(exc, "correctable_fields", ["reply_to"]),
-            )
-        try:
-            reply_to_updated = _run_message_mutation_with_retry(
-                lambda: context.repos.message.save_message(updated_reply_to)
-            )
-        except Exception as exc:
-            final_message = context.repos.message.get_message(reply_to_message["id"]) or reply_to_message
-            original_final_disposition = str(final_message.get("disposition") or original_previous_disposition)
-            return tool_results.rejection(
-                tool="message",
-                action=action,
-                active_actor=active_actor,
-                active_role=active_role,
-                code="E_MESSAGE_REPLY_DISPOSITION_SAVE_FAILED",
-                message=str(exc),
-                permission_boundary="message.reply_disposition",
-                human_summary="Reply was delivered, but the original message disposition could not be saved.",
-                why_blocked="The reply message is durable and delivered, but saving the original message as replied failed.",
-                impact="The reply exists and was delivered; the original message remains in its previous disposition.",
-                state_changed=True,
-                durability="durable",
-                retryable=True,
-                retry_guidance="Do not blindly send another reply. Inspect the original message state before deciding whether any follow-up is needed.",
-                allowed_next_actions=[
-                    "Use message.get to inspect the original processable message if it is still available.",
-                    "Use message.conversation to inspect whether the delivered reply already covers the message.",
-                ],
-                extra={
-                    "message_id": message["id"],
-                    "reply_message_id": message["id"],
-                    "delivery_status": "delivered",
-                    "reply_to": request["reply_to"],
-                    "original_message_id": reply_to_message["id"],
-                    "original_previous_disposition": original_previous_disposition,
-                    "original_final_disposition": original_final_disposition,
-                    "target_actor_address": target_payload,
-                },
-            )
-
-    handling_status = delivery.get("handling_status") if isinstance(delivery.get("handling_status"), str) else None
-    state_changes = [{"object_type": "message", "change": "sent", "message_id": message["id"]}]
-    extra: dict[str, Any] = {
-        "message_id": message["id"],
-        "from_actor_address": source_actor.to_payload(),
-        "delivery_status": "delivered",
-        "handling_status": handling_status,
-        "target_actor_address": target_payload,
-    }
-    updated_ids: list[str] | None = None
-    if reply_to_message is not None and reply_to_updated is not None:
-        state_changes.append(
-            {
-                "object_type": "message",
-                "change": "marked_replied",
-                "message_id": reply_to_updated["id"],
-            }
-        )
-        updated_ids = [reply_to_updated["id"]]
-        extra.update(
-            {
-                "reply_to": request["reply_to"],
-                "original_message_id": reply_to_updated["id"],
-                "original_previous_disposition": original_previous_disposition,
-                "original_final_disposition": reply_to_updated["disposition"],
-                "original_message": reply_to_updated,
-            }
-        )
-    return tool_results.success(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        effect_summary=(
-            f"Sent one durable direct message from actor "
-            f"'{source_actor.actor_id}' to '{target_actor.actor_id}'."
-        ),
-        state_changed=True,
-        durability="durable",
-        created_ids=[message["id"]],
-        updated_ids=updated_ids,
-        state_changes=state_changes,
-        allowed_next_actions=[
-            "Use message.list to inspect delivered inbox messages when needed.",
-        ],
-        extra=extra,
+    result = send_im_message(
+        sender_participant={"kind": "actor", "actor_address": source_actor.to_payload()},
+        to={"kind": "actor", "actor_address": target},
+        content=str(args.get("content") or ""),
+        reply_to=args.get("reply_to") if isinstance(args.get("reply_to"), str) else None,
+        wake_actor=getattr(context.daemon, "wake_im_actor", None),
     )
+    if result.get("ok") is True:
+        result["action"] = "message.send"
+        result["active_actor"] = active_actor
+        result["active_role"] = active_role
+    return result

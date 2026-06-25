@@ -37,7 +37,7 @@ class RecordingHandler:
         self.handled: list[Any] = []
 
     def handles(self, trigger: Any) -> bool:
-        return trigger.type == "message.available"
+        return trigger.type == "example.ready"
 
     def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
         self.handled.append(trigger)
@@ -50,7 +50,7 @@ class FailingHandler:
     name = "failing"
 
     def handles(self, trigger: Any) -> bool:
-        return trigger.type == "message.available"
+        return trigger.type == "example.ready"
 
     def handle(self, _context: object, _state: object, _runtime: object, _trigger: Any) -> object:
         import daemon_core
@@ -62,7 +62,7 @@ class InvalidReturnHandler:
     name = "invalid_return"
 
     def handles(self, trigger: Any) -> bool:
-        return trigger.type == "message.available"
+        return trigger.type == "example.ready"
 
     def handle(self, _context: object, _state: object, _runtime: object, _trigger: Any) -> object:
         return object()
@@ -109,7 +109,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
     def _actor_address(self) -> dict[str, str]:
         return {"role_id": "dev", "actor_id": "act-dev-daemon"}
 
-    def _trigger(self, *, trigger_type: str = "message.available") -> Any:
+    def _trigger(self, *, trigger_type: str = "example.ready") -> Any:
         return self.triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal",
             type=trigger_type,
@@ -124,7 +124,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
         trigger = self._trigger()
 
         self.assertEqual(trigger.source, "mailbox_cross_actor_signal")
-        self.assertEqual(trigger.type, "message.available")
+        self.assertEqual(trigger.type, "example.ready")
         self.assertEqual(trigger.target_actor_address, self._actor_address())
         self.assertEqual(trigger.origin_id, "sig-readable")
         self.assertEqual(trigger.correlation_id, "corr-readable")
@@ -163,7 +163,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
     def test_cross_actor_signal_normalizes_to_daemon_trigger(self) -> None:
         signal = {
             "signal_id": "sig-readable",
-            "type": "message.available",
+            "type": "example.ready",
             "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
             "target_actor_address": self._actor_address(),
             "payload": {"message_id": "msg-readable"},
@@ -173,7 +173,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
         trigger = self.triggers.normalize_cross_actor_signal(signal)
 
         self.assertEqual(trigger.source, "mailbox_cross_actor_signal")
-        self.assertEqual(trigger.type, "message.available")
+        self.assertEqual(trigger.type, "example.ready")
         self.assertEqual(trigger.target_actor_address, self._actor_address())
         self.assertEqual(trigger.origin_id, "sig-readable")
         self.assertEqual(trigger.payload, {"message_id": "msg-readable"})

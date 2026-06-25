@@ -1343,22 +1343,64 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            message_dir = workspace_dir / "state" / "buddyswitch" / "objects" / "messages"
-            message_dir.mkdir(parents=True, exist_ok=True)
-            message_path = message_dir / "msg-live-projected-root.json"
-            message_path.write_text(
+            im_root = workspace_dir / "state" / "im"
+            for child in ("conversations", "messages", "message_states"):
+                (im_root / child).mkdir(parents=True, exist_ok=True)
+            message_id = "msg-live-projected-root"
+            conversation_id = "conv-live-projected-root"
+            sender_participant = {
+                "kind": "actor",
+                "actor_address": {"actor_id": "act-dev-bbbbbbbbbbbb", "role_id": "dev"},
+            }
+            target_participant = {
+                "kind": "actor",
+                "actor_address": {"actor_id": "act-pm-aaaaaaaaaaaa", "role_id": "pm"},
+            }
+            state_path = im_root / "message_states" / f"{message_id}--actor--pm--act-pm-aaaaaaaaaaaa.json"
+            (im_root / "conversations" / f"{conversation_id}.json").write_text(
                 json.dumps(
                     {
-                        "id": "msg-live-projected-root",
-                        "from_actor_address": {"actor_id": "act-dev-bbbbbbbbbbbb", "role_id": "dev"},
-                        "to_actor_address": {"actor_id": "act-pm-aaaaaaaaaaaa", "role_id": "pm"},
+                        "id": conversation_id,
+                        "type": "direct",
+                        "participants": [sender_participant, target_participant],
+                        "created_at": "2026-06-04T00:00:00Z",
+                        "updated_at": "2026-06-04T00:00:00Z",
+                        "last_message_id": message_id,
+                        "last_sequence": 1,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (im_root / "messages" / f"{message_id}.json").write_text(
+                json.dumps(
+                    {
+                        "id": message_id,
+                        "conversation_id": conversation_id,
+                        "from": sender_participant,
+                        "to": [target_participant],
                         "content": "This changes the active parent-thread objective.",
                         "reply_to": None,
                         "created_at": "2026-06-04T00:00:00Z",
+                        "sequence": 1,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "message_id": message_id,
+                        "participant": target_participant,
                         "disposition": "unseen",
-                        "disposition_reason": None,
-                        "disposition_updated_at": None,
-                        "processed_by_actor_address": None,
+                        "reason": None,
+                        "processed_by": None,
+                        "updated_at": "2026-06-04T00:00:00Z",
                     },
                     ensure_ascii=True,
                     indent=2,
@@ -1441,7 +1483,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                         "tool": "message",
                         "action": "mark",
                         "args": {
-                            "message_id": "msg-live-projected-root",
+                            "message_id": message_id,
                             "disposition": "needs_parent",
                             "reason": "This changes the active parent-thread objective.",
                         },
@@ -1463,15 +1505,15 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 self.assertIsInstance(response_parent_request, dict, msg=response)
                 assert isinstance(response_parent_request, dict)
                 self.assertEqual(response_parent_request["handler_name"], "message_mark")
-                self.assertEqual(response_parent_request["origin_id"], "msg-live-projected-root")
+                self.assertEqual(response_parent_request["origin_id"], message_id)
                 self.assertEqual(response_parent_request["interrupt_policy"], "ensure_stopped")
-                stored = json.loads(message_path.read_text(encoding="utf-8"))
+                stored = json.loads(state_path.read_text(encoding="utf-8"))
                 self.assertEqual(stored["disposition"], "needs_parent")
-                self.assertEqual(stored["disposition_reason"], "This changes the active parent-thread objective.")
+                self.assertEqual(stored["reason"], "This changes the active parent-thread objective.")
                 parent_request_path = workspace_dir / "runtime" / "parent-request.json"
                 parent_request = json.loads(parent_request_path.read_text(encoding="utf-8"))
                 self.assertEqual(parent_request["handler_name"], "message_mark")
-                self.assertEqual(parent_request["origin_id"], "msg-live-projected-root")
+                self.assertEqual(parent_request["origin_id"], message_id)
                 self.assertEqual(parent_request["interrupt_policy"], "ensure_stopped")
             finally:
                 self._run_broker_cli(

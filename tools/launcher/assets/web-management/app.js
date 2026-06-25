@@ -99,6 +99,8 @@
       mutationKey: '',
       openTuiMessage: '',
       openTuiCommand: '',
+      imParticipantToken: '',
+      imEventCursor: '',
     };
   }
 
@@ -330,8 +332,9 @@
     render(state, elements);
     try {
       const payload = await requestFactory();
-      state.message = payload && payload.message_id
-        ? 'Sent message ' + payload.message_id + (payload.delivery_status ? ' (' + payload.delivery_status + ').' : '.')
+      const imMessageId = payload && payload.message && payload.message.id ? payload.message.id : payload && payload.message_id;
+      state.message = imMessageId
+        ? 'Sent message ' + imMessageId + (payload.delivery_status ? ' (' + payload.delivery_status + ').' : '.')
         : payload && payload.turn_id
         ? 'Action completed for ' + state.selectedInstanceId + ' (' + payload.turn_id + ').'
         : 'Action completed.';
@@ -366,6 +369,44 @@
       state.createPending = false;
       render(state, elements);
     }
+  }
+
+  async function ensureImParticipant(state) {
+    if (state.imParticipantToken) {
+      return;
+    }
+    const payload = await fetchJson('/api/im/external-participants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_kind: 'web-management',
+        display_name: 'BuddySwitch Web',
+      }),
+    });
+    state.imParticipantToken = payload.participant_token;
+    state.imEventCursor = payload.event_cursor;
+  }
+
+  async function sendImDraft(state) {
+    await ensureImParticipant(state);
+    return fetchJson('/api/im/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + state.imParticipantToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: {
+          kind: 'actor',
+          actor_address: {
+            role_id: state.selectedInstance.role,
+            actor_id: state.selectedInstanceId,
+          },
+        },
+        content: state.draftText,
+        reply_to: null,
+      }),
+    });
   }
 
   function commandFromError(error) {
@@ -493,14 +534,7 @@
     });
     elements.sendButton.addEventListener('click', function () {
       runMutation(state, elements, 'messages', function () {
-        return fetchJson('/api/messages/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            actor_id: state.selectedInstanceId,
-            content: state.draftText,
-          }),
-        });
+        return sendImDraft(state);
       }).then(function () {
         state.draftText = '';
       });

@@ -725,7 +725,7 @@ class RepoConsistencyTests(unittest.TestCase):
             "buddyswitch/skills/test/smoke-test/SKILL.md",
             "framework/contracts",
             "tools/launcher/assets/roles",
-            "tools/launcher/message_available_handler.py",
+            "tools/launcher/im_wake_handler.py",
         ]
         completed = subprocess.run(
             [

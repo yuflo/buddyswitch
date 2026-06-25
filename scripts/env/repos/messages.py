@@ -23,6 +23,248 @@ _FORBIDDEN_MESSAGE_FIELDS = {
     "broadcast",
 }
 _VALID_DISPOSITIONS = {"unseen", "absorbed", "replied", "needs_parent"}
+INITIAL_IM_EVENT_CURSOR = "imev-000000000000"
+
+
+def im_root() -> Path:
+    return runtime_files.STATE_ROOT / "im"
+
+
+def _im_dir(name: str) -> Path:
+    return im_root() / name
+
+
+def im_participant_key(participant: dict[str, Any]) -> str:
+    kind = participant.get("kind")
+    if kind == "external":
+        external_id = runtime_files.require_id(str(participant.get("external_id") or ""), "external_id")
+        return f"external:{external_id}"
+    if kind == "actor":
+        actor = _actor_payload(participant.get("actor_address"), "participant.actor_address")
+        return f"actor:{actor['role_id']}:{actor['actor_id']}"
+    raise ValueError("participant.kind must be external or actor")
+
+
+def im_participant_ref(participant: dict[str, Any]) -> dict[str, Any]:
+    kind = participant.get("kind")
+    if kind == "external":
+        return {"kind": "external", "external_id": runtime_files.require_id(str(participant.get("external_id") or ""), "external_id")}
+    if kind == "actor":
+        return {"kind": "actor", "actor_address": _actor_payload(participant.get("actor_address"), "participant.actor_address")}
+    raise ValueError("participant.kind must be external or actor")
+
+
+def im_participant_filename_key(participant: dict[str, Any]) -> str:
+    return im_participant_key(participant).replace(":", "--")
+
+
+def save_im_participant(participant: dict[str, Any]) -> dict[str, Any]:
+    if participant.get("kind") != "external":
+        raise ValueError("only external participant profiles are persisted directly")
+    external_id = runtime_files.require_id(str(participant.get("external_id") or ""), "external_id")
+    normalized = dict(participant, kind="external", external_id=external_id)
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(_im_dir("participants") / f"{external_id}.json", normalized)
+    return normalized
+
+
+def save_im_session(session: dict[str, Any]) -> dict[str, Any]:
+    token_hash = _require_non_empty_text(session.get("token_hash"), "session.token_hash")
+    if not token_hash.startswith("sha256:"):
+        raise ValueError("session.token_hash must start with sha256:")
+    filename = token_hash.replace(":", "-", 1)
+    normalized = dict(session, token_hash=token_hash)
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(_im_dir("sessions") / f"{filename}.json", normalized)
+    return normalized
+
+
+def get_im_session_by_token_hash(token_hash: str) -> dict[str, Any] | None:
+    normalized = _require_non_empty_text(token_hash, "token_hash")
+    filename = normalized.replace(":", "-", 1)
+    path = _im_dir("sessions") / f"{filename}.json"
+    if not path.exists():
+        return None
+    return runtime_files.read_json_object(path)
+
+
+def save_im_cursor(cursor: dict[str, Any]) -> dict[str, Any]:
+    participant = cursor.get("participant")
+    if not isinstance(participant, dict):
+        raise ValueError("cursor.participant must be an object")
+    last_event_id = _require_non_empty_text(cursor.get("last_event_id"), "cursor.last_event_id")
+    normalized = dict(cursor, participant=dict(participant), last_event_id=last_event_id)
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(
+        _im_dir("cursors") / f"{im_participant_filename_key(participant)}.json",
+        normalized,
+    )
+    return normalized
+
+
+def next_im_sequence() -> int:
+    path = _im_dir("meta") / "sequence.json"
+    current = 0
+    if path.exists():
+        payload = runtime_files.read_json_object(path)
+        value = payload.get("value")
+        if isinstance(value, int) and value >= 0:
+            current = value
+    sequence = current + 1
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(path, {"value": sequence})
+    return sequence
+
+
+def save_im_conversation(conversation: dict[str, Any]) -> dict[str, Any]:
+    conversation_id = runtime_files.require_id(str(conversation.get("id") or ""), "conversation.id")
+    participants_raw = conversation.get("participants")
+    if not isinstance(participants_raw, list) or len(participants_raw) < 2:
+        raise ValueError("conversation.participants must contain at least two participants")
+    normalized = dict(conversation)
+    normalized["id"] = conversation_id
+    normalized["participants"] = [im_participant_ref(row) for row in participants_raw]
+    normalized["type"] = _require_non_empty_text(conversation.get("type"), "conversation.type")
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(_im_dir("conversations") / f"{conversation_id}.json", normalized)
+    return normalized
+
+
+def get_im_conversation(conversation_id: str) -> dict[str, Any] | None:
+    normalized_id = runtime_files.require_id(conversation_id, "conversation_id")
+    path = _im_dir("conversations") / f"{normalized_id}.json"
+    if not path.exists():
+        return None
+    return runtime_files.read_json_object(path)
+
+
+def find_im_direct_conversation(participants: list[dict[str, Any]]) -> dict[str, Any] | None:
+    expected = {im_participant_key(row) for row in participants}
+    conversations_dir = _im_dir("conversations")
+    if not conversations_dir.is_dir():
+        return None
+    for path in sorted(conversations_dir.glob("*.json")):
+        row = runtime_files.read_json_object(path)
+        if row.get("type") != "direct":
+            continue
+        rows = row.get("participants")
+        if not isinstance(rows, list):
+            continue
+        try:
+            actual = {im_participant_key(item) for item in rows if isinstance(item, dict)}
+        except ValueError:
+            continue
+        if actual == expected:
+            return row
+    return None
+
+
+def save_im_message(message: dict[str, Any]) -> dict[str, Any]:
+    message_id = runtime_files.require_id(str(message.get("id") or ""), "message.id")
+    conversation_id = runtime_files.require_id(str(message.get("conversation_id") or ""), "message.conversation_id")
+    recipients_raw = message.get("to")
+    if not isinstance(recipients_raw, list) or len(recipients_raw) != 1:
+        raise ValueError("message.to must contain exactly one recipient in Phase 1")
+    reply_to = message.get("reply_to")
+    if reply_to is not None:
+        runtime_files.require_id(str(reply_to), "message.reply_to")
+    normalized = dict(message)
+    normalized["id"] = message_id
+    normalized["conversation_id"] = conversation_id
+    normalized["from"] = im_participant_ref(message.get("from") if isinstance(message.get("from"), dict) else {})
+    normalized["to"] = [im_participant_ref(recipients_raw[0])]
+    normalized["content"] = _require_non_empty_text(message.get("content"), "message.content")
+    normalized["reply_to"] = reply_to
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(_im_dir("messages") / f"{message_id}.json", normalized)
+    return normalized
+
+
+def get_im_message(message_id: str) -> dict[str, Any] | None:
+    normalized_id = runtime_files.require_id(message_id, "message_id")
+    path = _im_dir("messages") / f"{normalized_id}.json"
+    if not path.exists():
+        return None
+    return runtime_files.read_json_object(path)
+
+
+def list_im_messages() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    messages_dir = _im_dir("messages")
+    if messages_dir.is_dir():
+        for path in messages_dir.glob("*.json"):
+            rows.append(runtime_files.read_json_object(path))
+    rows.sort(key=lambda row: (str(row.get("created_at") or ""), _im_sequence_value(row), str(row.get("id") or "")))
+    return rows
+
+
+def save_im_message_state(state: dict[str, Any]) -> dict[str, Any]:
+    message_id = runtime_files.require_id(str(state.get("message_id") or ""), "state.message_id")
+    participant = state.get("participant")
+    if not isinstance(participant, dict):
+        raise ValueError("state.participant must be an object")
+    disposition = state.get("disposition")
+    if disposition not in _VALID_DISPOSITIONS:
+        raise ValueError("state.disposition must be one of absorbed, needs_parent, replied, unseen")
+    normalized = dict(state)
+    normalized["message_id"] = message_id
+    normalized["participant"] = im_participant_ref(participant)
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(
+        _im_dir("message_states") / f"{message_id}--{im_participant_filename_key(participant)}.json",
+        normalized,
+    )
+    return normalized
+
+
+def get_im_message_state(message_id: str, participant: dict[str, Any]) -> dict[str, Any] | None:
+    normalized_id = runtime_files.require_id(message_id, "message_id")
+    path = _im_dir("message_states") / f"{normalized_id}--{im_participant_filename_key(participant)}.json"
+    if not path.exists():
+        return None
+    return runtime_files.read_json_object(path)
+
+
+def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
+    event_id = runtime_files.require_id(str(event.get("event_id") or ""), "event.event_id")
+    message_id = runtime_files.require_id(str(event.get("message_id") or ""), "event.message_id")
+    conversation_id = runtime_files.require_id(str(event.get("conversation_id") or ""), "event.conversation_id")
+    participant = event.get("participant")
+    if not isinstance(participant, dict):
+        raise ValueError("event.participant must be an object")
+    normalized = dict(event)
+    normalized["event_id"] = event_id
+    normalized["message_id"] = message_id
+    normalized["conversation_id"] = conversation_id
+    normalized["participant"] = im_participant_ref(participant)
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.write_json_object(
+        _im_dir("events") / f"{event_id}--{im_participant_filename_key(participant)}.json",
+        normalized,
+    )
+    return normalized
+
+
+def list_im_events_for_participant(participant: dict[str, Any]) -> list[dict[str, Any]]:
+    participant_ref = im_participant_ref(participant)
+    rows: list[dict[str, Any]] = []
+    events_dir = _im_dir("events")
+    if events_dir.is_dir():
+        for path in events_dir.glob("*.json"):
+            row = runtime_files.read_json_object(path)
+            try:
+                if im_participant_ref(row.get("participant") if isinstance(row.get("participant"), dict) else {}) != participant_ref:
+                    continue
+            except ValueError:
+                continue
+            rows.append(row)
+    rows.sort(key=lambda row: (str(row.get("created_at") or ""), _im_sequence_value(row), str(row.get("event_id") or "")))
+    return rows
+
+
+def _im_sequence_value(row: dict[str, Any]) -> int:
+    value = row.get("sequence")
+    return value if isinstance(value, int) and value >= 0 else 0
 
 
 def _require_non_empty_text(value: Any, field: str) -> str:
