@@ -218,7 +218,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
     def test_track_comment_handler_ignores_unknown_trigger_types(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime()
-        trigger = self._trigger(trigger_type="message.available", payload={"message_id": "msg-1"})
+        trigger = self._trigger(trigger_type="example.ready", payload={"message_id": "msg-1"})
 
         self.assertFalse(self.handler.handles(trigger))
         result = self.handler.handle(instance["context"], instance["state"], runtime, trigger)
@@ -440,7 +440,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
                 "nc.notification",
                 "daemon",
                 "mailbox",
-                "message.available",
+                "example.ready",
                 "absorbed",
                 "replied",
                 "needs_parent",
@@ -493,7 +493,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
                 "nc.notification",
                 "daemon",
                 "mailbox",
-                "message.available",
+                "example.ready",
                 "absorbed",
                 "replied",
                 "needs_parent",

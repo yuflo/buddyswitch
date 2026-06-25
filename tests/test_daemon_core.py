@@ -175,19 +175,19 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
 
             state.record_daemon_origin_turn(
                 "turn-daemon-1",
-                handler_name="message_available",
+                handler_name="example_handler",
                 origin_turn_id="msg-1",
             )
 
             saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
-            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "message_available")
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "example_handler")
             self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "msg-1")
             self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["turn_id"], "turn-daemon-1")
             self.assertRegex(saved["daemon_origin_turns"]["turn-daemon-1"]["created_at"], r"^\d{4}-\d{2}-\d{2}T")
-            self.assertEqual(state.daemon_turn_record("turn-daemon-1")["handler_name"], "message_available")
+            self.assertEqual(state.daemon_turn_record("turn-daemon-1")["handler_name"], "example_handler")
             self.assertTrue(state.is_daemon_origin_turn("turn-daemon-1"))
-            self.assertTrue(state.is_daemon_origin_turn_from("turn-daemon-1", "message_available"))
+            self.assertTrue(state.is_daemon_origin_turn_from("turn-daemon-1", "example_handler"))
             self.assertFalse(state.is_daemon_origin_turn_from("turn-daemon-1", "task_checkout"))
             self.assertFalse(state.is_daemon_origin_turn("turn-user-1"))
             self.assertNotIn("last_origin_turn_id", saved)
@@ -207,7 +207,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             self.assertTrue(state.is_daemon_origin_turn("turn-legacy-1"))
             self.assertIsNone(state.daemon_turn_record("turn-legacy-1"))
             self.assertTrue(state.is_daemon_origin_turn_from("turn-legacy-1", "task_checkout"))
-            self.assertFalse(state.is_daemon_origin_turn_from("turn-legacy-1", "message_available"))
+            self.assertFalse(state.is_daemon_origin_turn_from("turn-legacy-1", "example_handler"))
 
     def test_daemon_origin_turn_ids_keep_latest_50(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -735,7 +735,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
                 main_thread_id="thr-main",
             )
             record = state.record_runtime_call(
-                handler_name="message_available",
+                handler_name="example_handler",
                 origin_id="msg-1",
                 runtime_method="side_start",
                 parent_thread_id="thr-main",
@@ -761,10 +761,10 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
 
             payload = self.core.daemon_status(
                 instance["instance_json"],
-                handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "message_available"})()],
+                handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "example_handler"})()],
             )
 
-            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "message_available"])
+            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "example_handler"])
             item = payload["handlers"]["items"]["task_checkout"]
             self.assertIs(item["registered"], True)
             self.assertIs(item["enabled"], True)
@@ -774,7 +774,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIsNone(item["last_runtime_turn_id"])
             self.assertNotIn("last_" + "action" + "_turn_id", item)
             self.assertNotIn("mailbox_handlers", payload)
-            mailbox_item = payload["handlers"]["items"]["message_available"]
+            mailbox_item = payload["handlers"]["items"]["example_handler"]
             self.assertIs(mailbox_item["registered"], True)
             self.assertIs(mailbox_item["enabled"], True)
             self.assertIs(mailbox_item["active"], True)
@@ -793,9 +793,9 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             )
             state.record_handler_error("message", origin_turn_id="turn-user-1", message="message failed")
             state.record_handler_error(
-                "message_available",
+                "example_handler",
                 origin_turn_id="turn-user-2",
-                message="message available failed",
+                message="example handler failed",
             )
 
             class FakeHandler:
@@ -803,21 +803,21 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
 
             payload = self.core.daemon_status(
                 instance["instance_json"],
-                handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "message_available"})()],
+                handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "example_handler"})()],
             )
 
-            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "message_available"])
+            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "example_handler"])
             message_state = payload["handlers"]["items"]["message"]
             self.assertIs(message_state["registered"], False)
             self.assertIs(message_state["enabled"], False)
             self.assertIs(message_state["active"], False)
             self.assertEqual(message_state["last_error"]["message"], "message failed")
             self.assertNotIn("mailbox_handlers", payload)
-            mailbox_state = payload["handlers"]["items"]["message_available"]
+            mailbox_state = payload["handlers"]["items"]["example_handler"]
             self.assertIs(mailbox_state["registered"], True)
             self.assertIs(mailbox_state["enabled"], True)
             self.assertIs(mailbox_state["active"], True)
-            self.assertEqual(mailbox_state["last_error"]["message"], "message available failed")
+            self.assertEqual(mailbox_state["last_error"]["message"], "example handler failed")
 
 
 class FakeRunDaemonClient:

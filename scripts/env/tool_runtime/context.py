@@ -408,18 +408,6 @@ class DaemonAccess:
         }
         return daemon_client.deliver_signal(signal=signal)
 
-    def deliver_message_available(
-        self,
-        *,
-        message_id: str,
-        target_actor_address: ActorAddress | dict[str, Any],
-    ) -> dict[str, Any]:
-        return self.deliver_signal(
-            signal_type="message.available",
-            target_actor_address=target_actor_address,
-            payload={"message_id": message_id},
-        )
-
     def deliver_track_comment_added(
         self,
         *,
@@ -453,6 +441,9 @@ class DaemonAccess:
             origin_id=message_id,
             interrupt_policy="ensure_stopped",
         )
+
+    def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return daemon_client.wake_im_actor(payload)
 
 
 @dataclass(frozen=True)

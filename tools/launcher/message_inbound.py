@@ -14,26 +14,26 @@ for candidate in (HELPER_DIR, SCRIPTS):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import message_available_handler  # noqa: E402
+import im_wake_handler  # noqa: E402
 import notification_center  # noqa: E402
 
 
-MESSAGE_AVAILABLE_EVENT_TYPE = "message.available"
-MESSAGE_AVAILABLE_PAYLOAD_CONTRACT = {"required_fields": ("message_id",)}
+IM_MESSAGE_CREATED_EVENT_TYPE = "im.message.created"
+IM_MESSAGE_CREATED_PAYLOAD_CONTRACT = {"required_fields": ("message_id", "conversation_id", "event_id")}
 OWNER_MODULE = "message_inbound"
 
 
-def message_available_registration() -> notification_center.InboundSourceRegistration:
+def im_message_created_registration() -> notification_center.InboundSourceRegistration:
     return notification_center.InboundSourceRegistration(
-        event_type=MESSAGE_AVAILABLE_EVENT_TYPE,
-        payload_contract=MESSAGE_AVAILABLE_PAYLOAD_CONTRACT,
-        handler_factory=message_available_handler.MessageAvailableHandler,
+        event_type=IM_MESSAGE_CREATED_EVENT_TYPE,
+        payload_contract=IM_MESSAGE_CREATED_PAYLOAD_CONTRACT,
+        handler_factory=im_wake_handler.ImMessageCreatedHandler,
         owner_module=OWNER_MODULE,
     )
 
 
 def inbound_registrations() -> list[notification_center.InboundSourceRegistration]:
-    return [message_available_registration()]
+    return [im_message_created_registration()]
 
 
 if __name__ == "__main__":

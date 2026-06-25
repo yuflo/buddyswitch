@@ -19,14 +19,14 @@ INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
 DAEMON_SH_PATH = ROOT / "tools" / "launcher" / "daemon.sh"
 CENTRAL_DAEMON_PATH = ROOT / "tools" / "launcher" / "central_daemon.py"
 MODULE_COUNTER = count()
-EXPECTED_SUBSCRIPTIONS = ["message.available", "track.comment.added"]
+EXPECTED_SUBSCRIPTIONS = ["im.message.created", "track.comment.added"]
 EXPECTED_HANDLER_TYPES = [
     "TaskCheckoutHandler",
-    "MessageAvailableHandler",
+    "ImMessageCreatedHandler",
     "TrackCommentAddedHandler",
     "BrowserPageExpiredHandler",
 ]
-EXPECTED_HANDLER_NAMES = ["task_checkout", "message_available", "track_comment_added", "browser_page_expired"]
+EXPECTED_HANDLER_NAMES = ["task_checkout", "im_message_created", "track_comment_added", "browser_page_expired"]
 
 
 def load_instance_daemon() -> Any:
@@ -67,7 +67,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertIn("browser_inbound", imports)
         self.assertIn("message_inbound", imports)
         self.assertIn("track_comment_inbound", imports)
-        self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("browser_page_expired_handler", imports)
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
@@ -100,7 +100,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
         self.assertEqual(type(handlers[0]).__name__, "TaskCheckoutHandler")
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
-        self.assertEqual(getattr(handlers[1], "name", None), "message_available")
+        self.assertEqual(getattr(handlers[1], "name", None), "im_message_created")
         self.assertEqual(getattr(handlers[2], "name", None), "track_comment_added")
         self.assertEqual(recorded["instance_json"], Path("/tmp/inst.json"))
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)

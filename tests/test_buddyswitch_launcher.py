@@ -2512,12 +2512,12 @@ exec "$real_git" "$@"
             self.assertEqual(status_payload["daemon"]["ready_main_thread_id"], instance_payload["thread_id"])
             self.assertEqual(
                 status_payload["daemon"]["handlers"]["registered"],
-                ["task_checkout", "message_available", "track_comment_added", "browser_page_expired"],
+                ["task_checkout", "im_message_created", "track_comment_added", "browser_page_expired"],
             )
             task_checkout_status = status_payload["daemon"]["handlers"]["items"]["task_checkout"]
             self.assertIs(task_checkout_status["enabled"], True)
             self.assertIs(task_checkout_status["active"], True)
-            message_status = status_payload["daemon"]["handlers"]["items"]["message_available"]
+            message_status = status_payload["daemon"]["handlers"]["items"]["im_message_created"]
             self.assertIs(message_status["enabled"], True)
             self.assertIs(message_status["active"], True)
             track_comment_status = status_payload["daemon"]["handlers"]["items"]["track_comment_added"]
@@ -5127,10 +5127,10 @@ exec "$real_git" "$@"
             self.assertTrue(payload["daemon"]["state_path"].endswith("runtime/daemon/state.json"))
             self.assertEqual(
                 payload["daemon"]["handlers"]["registered"],
-                ["task_checkout", "message_available", "track_comment_added", "browser_page_expired"],
+                ["task_checkout", "im_message_created", "track_comment_added", "browser_page_expired"],
             )
             self.assertTrue(payload["daemon"]["handlers"]["items"]["task_checkout"]["active"])
-            self.assertTrue(payload["daemon"]["handlers"]["items"]["message_available"]["active"])
+            self.assertTrue(payload["daemon"]["handlers"]["items"]["im_message_created"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["track_comment_added"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["browser_page_expired"]["active"])
             self.assertEqual(payload["thread"]["status"], "idle")

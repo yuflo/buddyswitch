@@ -50,6 +50,7 @@ test('production html keeps all real control ids used by the web UI', () => {
     'copy-tui-command-button',
     'open-tui-command',
     'message-banner',
+    'im-conversation',
   ].forEach((id) => {
     assertIncludes(indexHtml, `id="${id}"`);
   });
@@ -90,7 +91,9 @@ test('production javascript keeps the real api surface', () => {
     '/api/health',
     '/api/roles',
     '/api/instances',
-    '/api/messages/send',
+    '/api/im/external-participants',
+    '/api/im/messages',
+    '/api/im/events',
     '/status',
     '/interrupt',
     '/stop',
@@ -105,6 +108,9 @@ test('production javascript keeps the real api surface', () => {
   assertIncludes(appJs, "method: 'DELETE'");
   assertIncludes(appJs, 'actor_id: state.selectedInstanceId');
   assertIncludes(appJs, 'content: state.draftText');
+  assertIncludes(appJs, "/api/im/messages/' + encodeURIComponent");
+  assertIncludes(appJs, 'buildImEventsUrl(state.imEventCursor, 15000)');
+  assertIncludes(appJs, "'&wait_ms='");
   assertExcludes(appJs, "selectedInstanceId) + '/messages'");
   assertExcludes(appJs, 'JSON.stringify({ text: state.draftText })');
   assertIncludes(combinedAssets, 'Copy command');

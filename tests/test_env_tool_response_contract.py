@@ -23,6 +23,7 @@ if str(SCRIPTS) not in sys.path:
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.repos import messages as message_repo  # noqa: E402
+from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from env.tool_runtime import results as tool_results  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
@@ -764,16 +765,15 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
         pm_actor_id = self._runtime_actor_id(role="pm", label="act-pm-parent-submit-contract")
         instance_json = self._instance_json(role="dev", actor_id="act-dev-parent-submit-contract")
-        seed = message_repo.save_message(
-            {
-                "id": "msg-parent-submit-contract",
-                "from_actor_address": {"actor_id": pm_actor_id, "role_id": "pm"},
-                "to_actor_address": {"actor_id": dev_actor_id, "role_id": "dev"},
-                "content": "This needs parent handling.",
-                "reply_to": None,
-                "created_at": "2026-06-05T00:00:00Z",
-            }
+        target_participant = {"kind": "actor", "actor_address": {"actor_id": dev_actor_id, "role_id": "dev"}}
+        seed_response = message_service.send_im_message(
+            sender_participant={"kind": "actor", "actor_address": {"actor_id": pm_actor_id, "role_id": "pm"}},
+            to=target_participant,
+            content="This needs parent handling.",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
+        self.assertTrue(seed_response.get("ok"), msg=seed_response)
+        message_id = seed_response["message"]["id"]
 
         with patch.object(
             runtime_context.DaemonAccess,
@@ -788,11 +788,11 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 tool="message",
                 action="mark",
                 args={
-                    "message_id": seed["id"],
+                    "message_id": message_id,
                     "disposition": "needs_parent",
                     "reason": "This changes the active parent-thread objective.",
                 },
-        )
+            )
 
         self._assert_rejection_contract(response)
         self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PARENT_REQUIRED_SUBMIT_FAILED")
@@ -800,7 +800,10 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(response.get("original_previous_disposition"), "unseen")
         self.assertEqual(response.get("original_final_disposition"), "unseen")
         self.assertIn("message.get", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
-        self.assertEqual(message_repo.get_message(seed["id"]), seed)
+        state = message_repo.get_im_message_state(message_id, target_participant)
+        self.assertIsInstance(state, dict, msg=response)
+        assert isinstance(state, dict)
+        self.assertEqual(state["disposition"], "unseen")
 
     def test_rejection_supports_canonical_field_errors(self) -> None:
         payload = tool_results.rejection(

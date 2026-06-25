@@ -211,10 +211,10 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "summarize", ("compact", "summary", "get")),
             ("context", "list_sources", ("source", "descriptor", "catalog")),
             ("message", "contacts", ("contact", "actor", "send")),
-            ("message", "send", ("inbox", "actor address", "track")),
+            ("message", "send", ("central im", "actor address", "track")),
             ("message", "get", ("exact", "message_id", "disposition")),
             ("message", "mark", ("absorbed", "needs_parent", "disposition")),
-            ("message", "list", ("inbox", "read", "track")),
+            ("message", "list", ("event", "cursor", "track")),
             ("track", "resolve_comment_thread", ("owner", "thread", "resolved")),
         ]
         for tool, action, snippets in checks:
@@ -426,12 +426,12 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             if key.startswith("message.")
         }
 
-        self.assertEqual(message_desc["title"], "Direct Actor Messages")
-        self.assertEqual(message_rows["message.send"]["authority"], "message.direct_actor_address_channel")
+        self.assertEqual(message_desc["title"], "Central IM Messages")
+        self.assertEqual(message_rows["message.send"]["authority"], "message.central_im_channel")
         self.assertEqual(message_rows["message.get"]["authority"], "message.active_actor_exact_message")
         self.assertEqual(message_rows["message.mark"]["authority"], "message.active_actor_message_disposition")
-        self.assertEqual(message_rows["message.list"]["authority"], "message.active_actor_inbox")
-        self.assertIn("active actor inbox", message_rows["message.list"]["visibility"])
+        self.assertEqual(message_rows["message.list"]["authority"], "message.central_im_participant_events")
+        self.assertIn("active actor Central IM participant event feed", message_rows["message.list"]["visibility"])
 
         send_requires = "\n".join(message_rows["message.send"]["requires"]).lower()
         get_requires = "\n".join(message_rows["message.get"]["requires"]).lower()
@@ -450,10 +450,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         ).lower()
         required = (
             "online actor contact discovery",
-            "direct actor-address sends",
+            "central im sends",
             "exact processable inbound reads",
-            "non-reply disposition marking",
+            "disposition marking",
             "reply_to",
+            "external",
             "replied",
             "previous disposition",
             "absorbed",

@@ -277,10 +277,6 @@ class ActorProfileTests(unittest.TestCase):
             context.daemon.check_reachability(
                 target_actor_address={"actor_id": "act-dev-daemon", "role_id": "dev"}
             )
-            context.daemon.deliver_message_available(
-                message_id="msg-123",
-                target_actor_address=ActorAddress("act-dev-daemon", "dev"),
-            )
             context.daemon.deliver_track_comment_added(
                 track_id="track-123",
                 comment_id="comment-123",
@@ -300,28 +296,7 @@ class ActorProfileTests(unittest.TestCase):
                 {"target_actor_address": {"actor_id": "act-dev-daemon", "role_id": "dev"}},
             ),
         )
-        signal = calls[2][1]["signal"]
-        self.assertEqual(
-            {
-                "type": signal["type"],
-                "source_actor_address": signal["source_actor_address"],
-                "target_actor_address": signal["target_actor_address"],
-                "payload": signal["payload"],
-            },
-            {
-                "type": "message.available",
-                "source_actor_address": {"actor_id": "act-design-daemon", "role_id": "design"},
-                "target_actor_address": {"actor_id": "act-dev-daemon", "role_id": "dev"},
-                "payload": {"message_id": "msg-123"},
-            },
-        )
-        self.assertRegex(signal["signal_id"], r"^sig-")
-        self.assertIsInstance(signal["created_at"], str)
-        self.assertNotIn("message_id", signal)
-        self.assertNotIn("to_role", signal)
-        self.assertNotIn("content", signal)
-
-        track_signal = calls[3][1]["signal"]
+        track_signal = calls[2][1]["signal"]
         self.assertEqual(
             {
                 "type": track_signal["type"],

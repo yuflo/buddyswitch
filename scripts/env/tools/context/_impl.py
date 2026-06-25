@@ -649,8 +649,8 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "artifact.list / artifact.get via runtime env tools",
         },
         "messages": {
-            "description": "Direct actor-address messages: inbox through message.list, bidirectional visible context through message.conversation.",
-            "scope": "active actor inbox and direct conversation communication",
+            "description": "Central IM messages: participant events through message.list, bidirectional visible context through message.conversation.",
+            "scope": "active actor Central IM events and direct conversation communication",
             "source_of_truth": "message.list and message.conversation via runtime env tools",
         },
         "comments": {

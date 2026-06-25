@@ -241,13 +241,13 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
 
             self.assertIsNone(previous_turn)
 
-    def test_message_available_daemon_origin_turn_is_accepted(self) -> None:
+    def test_im_message_created_daemon_origin_turn_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             state = self._state(instance["instance_root"])
             state.record_daemon_origin_turn(
                 "turn-daemon-1",
-                handler_name="message_available",
+                handler_name="im_message_created",
                 origin_turn_id="msg-1",
             )
 

@@ -277,3 +277,61 @@ test('mutation busy state disables open tui', () => {
     }
   );
 });
+
+test('im event URL uses cursor and bounded wait', () => {
+  assert.equal(
+    app.buildImEventsUrl('imev-abc 123', 15000),
+    '/api/im/events?cursor=imev-abc%20123&wait_ms=15000'
+  );
+});
+
+test('record sent IM message keeps compact delivery status', () => {
+  const state = app.createState();
+  app.recordImSent(state, {
+    message: { id: 'msg-sent-1' },
+    delivery_status: 'accepted',
+    wake_status: 'submitted',
+  }, 'ping');
+
+  assert.deepEqual(state.imConversation, [
+    {
+      id: 'msg-sent-1',
+      direction: 'sent',
+      participant: 'you',
+      content: 'ping',
+      deliveryStatus: 'accepted',
+      wakeStatus: 'submitted',
+      replyTo: '',
+    },
+  ]);
+});
+
+test('record fetched actor IM message appends reply and ignores external echo', () => {
+  const state = app.createState();
+  const actorReply = app.recordImFetchedMessage(state, {
+    id: 'msg-reply-1',
+    from: { kind: 'actor', actor_address: { role_id: 'market', actor_id: 'act-market-1' } },
+    content: 'pong',
+    reply_to: 'msg-sent-1',
+  });
+  const externalEcho = app.recordImFetchedMessage(state, {
+    id: 'msg-echo-1',
+    from: { kind: 'external', external_id: 'ext-1' },
+    content: 'ping',
+    reply_to: null,
+  });
+
+  assert.equal(actorReply, true);
+  assert.equal(externalEcho, false);
+  assert.deepEqual(state.imConversation, [
+    {
+      id: 'msg-reply-1',
+      direction: 'reply',
+      participant: 'market/act-market-1',
+      content: 'pong',
+      deliveryStatus: '',
+      wakeStatus: '',
+      replyTo: 'msg-sent-1',
+    },
+  ]);
+});

@@ -99,6 +99,12 @@
       mutationKey: '',
       openTuiMessage: '',
       openTuiCommand: '',
+      imParticipantToken: '',
+      imEventCursor: '',
+      imConversation: [],
+      imSeenMessageIds: {},
+      imPolling: false,
+      imPollTimer: null,
     };
   }
 
@@ -132,6 +138,96 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  function buildImEventsUrl(cursor, waitMs) {
+    const normalizedCursor = typeof cursor === 'string' && cursor ? cursor : '';
+    const normalizedWait = Number.isFinite(waitMs) && waitMs >= 0 ? Math.floor(waitMs) : 0;
+    return '/api/im/events?cursor=' + encodeURIComponent(normalizedCursor) + '&wait_ms=' + encodeURIComponent(String(normalizedWait));
+  }
+
+  function participantLabel(participant) {
+    if (!participant || typeof participant !== 'object') {
+      return '';
+    }
+    if (participant.kind === 'actor' && participant.actor_address) {
+      const roleId = participant.actor_address.role_id || '';
+      const actorId = participant.actor_address.actor_id || '';
+      return roleId && actorId ? roleId + '/' + actorId : '';
+    }
+    if (participant.kind === 'external') {
+      return 'you';
+    }
+    return '';
+  }
+
+  function rememberImEntry(state, entry) {
+    if (!entry.id || state.imSeenMessageIds[entry.id]) {
+      return false;
+    }
+    state.imSeenMessageIds[entry.id] = true;
+    state.imConversation.push(entry);
+    if (state.imConversation.length > 50) {
+      state.imConversation = state.imConversation.slice(-50);
+    }
+    return true;
+  }
+
+  function recordImSent(state, payload, content) {
+    const messageId = payload && payload.message && payload.message.id ? payload.message.id : '';
+    return rememberImEntry(state, {
+      id: messageId,
+      direction: 'sent',
+      participant: 'you',
+      content: typeof content === 'string' ? content : '',
+      deliveryStatus: payload && payload.delivery_status ? payload.delivery_status : '',
+      wakeStatus: payload && payload.wake_status ? payload.wake_status : '',
+      replyTo: '',
+    });
+  }
+
+  function recordImFetchedMessage(state, message) {
+    if (!message || typeof message !== 'object') {
+      return false;
+    }
+    const from = message.from && typeof message.from === 'object' ? message.from : {};
+    if (from.kind !== 'actor') {
+      return false;
+    }
+    return rememberImEntry(state, {
+      id: typeof message.id === 'string' ? message.id : '',
+      direction: 'reply',
+      participant: participantLabel(from),
+      content: typeof message.content === 'string' ? message.content : '',
+      deliveryStatus: '',
+      wakeStatus: '',
+      replyTo: typeof message.reply_to === 'string' ? message.reply_to : '',
+    });
+  }
+
+  function renderImConversation(state, elements) {
+    if (!elements.imConversation) {
+      return;
+    }
+    if (!state.imConversation.length) {
+      elements.imConversation.innerHTML = '';
+      return;
+    }
+    elements.imConversation.innerHTML = state.imConversation.map(function (entry) {
+      const status = [entry.deliveryStatus, entry.wakeStatus].filter(Boolean).join(' / ');
+      const meta = [
+        entry.direction === 'sent' ? 'sent' : 'reply',
+        entry.participant,
+        status,
+        entry.replyTo ? 'reply_to ' + entry.replyTo : '',
+      ].filter(Boolean).join(' · ');
+      return [
+        '<div class="im-row ' + escapeHtml(entry.direction) + '">',
+        '<div class="im-meta">' + escapeHtml(meta) + '</div>',
+        '<div class="im-content">' + escapeHtml(entry.content) + '</div>',
+        '</div>',
+      ].join('');
+    }).join('');
   }
 
   function renderTable(state, elements) {
@@ -247,6 +343,7 @@
 
     renderTable(state, elements);
     renderDetail(state, elements);
+    renderImConversation(state, elements);
 
     const actionState = computeInstanceActionState(state.selectedInstance, {
       draftText: state.draftText,
@@ -330,8 +427,9 @@
     render(state, elements);
     try {
       const payload = await requestFactory();
-      state.message = payload && payload.message_id
-        ? 'Sent message ' + payload.message_id + (payload.delivery_status ? ' (' + payload.delivery_status + ').' : '.')
+      const imMessageId = payload && payload.message && payload.message.id ? payload.message.id : payload && payload.message_id;
+      state.message = imMessageId
+        ? 'Sent message ' + imMessageId + (payload.delivery_status ? ' (' + payload.delivery_status + ').' : '.')
         : payload && payload.turn_id
         ? 'Action completed for ' + state.selectedInstanceId + ' (' + payload.turn_id + ').'
         : 'Action completed.';
@@ -366,6 +464,93 @@
       state.createPending = false;
       render(state, elements);
     }
+  }
+
+  async function ensureImParticipant(state, elements) {
+    if (state.imParticipantToken) {
+      startImPolling(state, elements);
+      return;
+    }
+    const payload = await fetchJson('/api/im/external-participants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_kind: 'web-management',
+        display_name: 'BuddySwitch Web',
+      }),
+    });
+    state.imParticipantToken = payload.participant_token;
+    state.imEventCursor = payload.event_cursor;
+    startImPolling(state, elements);
+  }
+
+  async function sendImDraft(state, elements) {
+    await ensureImParticipant(state, elements);
+    const content = state.draftText;
+    const payload = await fetchJson('/api/im/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + state.imParticipantToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: {
+          kind: 'actor',
+          actor_address: {
+            role_id: state.selectedInstance.role,
+            actor_id: state.selectedInstanceId,
+          },
+        },
+        content: state.draftText,
+        reply_to: null,
+      }),
+    });
+    recordImSent(state, payload, content);
+    return payload;
+  }
+
+  async function pollImEventsOnce(state, elements) {
+    if (!state.imParticipantToken) {
+      return;
+    }
+    const payload = await fetchJson(buildImEventsUrl(state.imEventCursor, 15000), {
+      headers: {
+        'Authorization': 'Bearer ' + state.imParticipantToken,
+      },
+    });
+    state.imEventCursor = payload.next_cursor || state.imEventCursor;
+    const events = Array.isArray(payload.events) ? payload.events : [];
+    for (const event of events) {
+      if (!event || event.type !== 'message.created' || typeof event.message_id !== 'string') {
+        continue;
+      }
+      const messagePayload = await fetchJson('/api/im/messages/' + encodeURIComponent(event.message_id), {
+        headers: {
+          'Authorization': 'Bearer ' + state.imParticipantToken,
+        },
+      });
+      recordImFetchedMessage(state, messagePayload.message);
+    }
+    render(state, elements);
+  }
+
+  function startImPolling(state, elements) {
+    if (!elements || !state.imParticipantToken || state.imPolling || state.imPollTimer) {
+      return;
+    }
+    state.imPollTimer = setTimeout(function () {
+      state.imPollTimer = null;
+      state.imPolling = true;
+      pollImEventsOnce(state, elements).catch(function (error) {
+        state.message = error.message;
+        render(state, elements);
+      }).finally(function () {
+        state.imPolling = false;
+        if (state.imParticipantToken) {
+          startImPolling(state, elements);
+        }
+      });
+    }, 0);
   }
 
   function commandFromError(error) {
@@ -467,6 +652,7 @@
       openTuiCommand: document.getElementById('open-tui-command'),
       copyTuiCommandButton: document.getElementById('copy-tui-command-button'),
       messageBanner: document.getElementById('message-banner'),
+      imConversation: document.getElementById('im-conversation'),
     };
 
     const state = createState();
@@ -493,14 +679,7 @@
     });
     elements.sendButton.addEventListener('click', function () {
       runMutation(state, elements, 'messages', function () {
-        return fetchJson('/api/messages/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            actor_id: state.selectedInstanceId,
-            content: state.draftText,
-          }),
-        });
+        return sendImDraft(state, elements);
       }).then(function () {
         state.draftText = '';
       });
@@ -577,8 +756,12 @@
   }
 
   return {
+    buildImEventsUrl,
     computeCreateEnabled,
     computeInstanceActionState,
     computeOpenTuiState,
+    createState,
+    recordImFetchedMessage,
+    recordImSent,
   };
 }));
