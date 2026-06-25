@@ -206,15 +206,19 @@ def schedule_trigger(
     trigger_type: str,
     payload: dict[str, Any],
     source_context: dict[str, Any] | None = None,
+    schedule_key: str | None = None,
 ) -> dict[str, Any]:
+    params = {
+        "delay_seconds": delay_seconds,
+        "type": trigger_type,
+        "payload": dict(payload),
+        "source_context": dict(source_context or {}),
+    }
+    if schedule_key is not None:
+        params["schedule_key"] = schedule_key
     envelope = request_mailbox(
         "mailbox.schedule_trigger",
-        {
-            "delay_seconds": delay_seconds,
-            "type": trigger_type,
-            "payload": dict(payload),
-            "source_context": dict(source_context or {}),
-        },
+        params,
         socket_path=mailbox_socket_path_for_instance_root(instance_root),
     )
     if envelope.get("ok") is not True:

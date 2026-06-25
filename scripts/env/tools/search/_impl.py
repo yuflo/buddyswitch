@@ -498,6 +498,26 @@ def _browser_page_limit_reached(
     )
 
 
+def _touch_browser_page_idle(
+    *,
+    instance_root: Path,
+    target_id: str,
+    target_url: str,
+) -> tuple[dict[str, Any], str | None]:
+    try:
+        idle_extra = browser_lifecycle.touch_page_idle(
+            instance_root=instance_root,
+            target_id=target_id,
+            target_url=target_url,
+        )
+    except Exception as exc:
+        return {"idle_refreshed": False, "idle_refresh_error": str(exc)}, None
+    idle_seconds = idle_extra.get("idle_seconds") if isinstance(idle_extra, dict) else None
+    if isinstance(idle_seconds, int):
+        return idle_extra, f"Browser page idle refreshed: {idle_seconds}s."
+    return idle_extra, None
+
+
 def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str, Any]) -> dict[str, Any]:
     permission = boundary.get("search_api")
     if permission == "user-approved-only":
@@ -771,12 +791,20 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
         )
     if page_gate.kind == "reuse":
         target_id = page_gate.target_id or ""
+        idle_extra, idle_summary = _touch_browser_page_idle(
+            instance_root=context["instance_json"].parent,
+            target_id=target_id,
+            target_url=target_url,
+        )
+        effect_summary = "Reused an existing browser page for the planned target URL; no new page was opened."
+        if idle_summary:
+            effect_summary = f"{effect_summary} {idle_summary}"
         return tool_results.success(
             tool="search",
             action="search.open_browser",
             active_actor=context["active_actor"],
             active_role=context["active_role"],
-            effect_summary="Reused an existing browser page for the planned target URL; no new page was opened.",
+            effect_summary=effect_summary,
             state_changed=False,
             durability="none",
             allowed_next_actions=[
@@ -794,6 +822,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
                 "browser_page_limit": BROWSER_PAGE_LIMIT,
                 "permission_boundary": "search.browser",
                 "mutates_product_state": False,
+                **idle_extra,
             },
         )
     opened, open_reason, target_id = _open_browser_page(browser_endpoint, target_url)
@@ -806,19 +835,13 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
         )
     hint = page_gate.hint_text()
     effect_summary = "Opened the planned target URL in launcher-managed browser session without writing product objects."
-    ttl_extra: dict[str, Any]
-    try:
-        ttl_extra = browser_lifecycle.register_browser_page_ttl(
-            instance_root=context["instance_json"].parent,
-            target_id=target_id or "",
-            target_url=target_url,
-        )
-        effect_summary = f"{effect_summary} Browser page TTL: {ttl_extra['ttl_seconds']}s."
-    except Exception as exc:
-        ttl_extra = {
-            "ttl_registered": False,
-            "ttl_registration_error": str(exc),
-        }
+    idle_extra, idle_summary = _touch_browser_page_idle(
+        instance_root=context["instance_json"].parent,
+        target_id=target_id or "",
+        target_url=target_url,
+    )
+    if idle_summary:
+        effect_summary = f"{effect_summary} {idle_summary}"
     if hint:
         effect_summary = f"{effect_summary} {hint}"
     return tool_results.success(
@@ -849,7 +872,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "browser_page_limit": BROWSER_PAGE_LIMIT,
             "permission_boundary": "search.browser",
             "mutates_product_state": False,
-            **ttl_extra,
+            **idle_extra,
         },
     )
 

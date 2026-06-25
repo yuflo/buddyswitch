@@ -38,22 +38,10 @@ def _payload(trigger: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("browser page expiry trigger payload must be an object")
     target_id = payload.get("target_id")
-    target_url = payload.get("target_url")
-    ttl_seconds = payload.get("ttl_seconds")
-    expiry_policy = payload.get("expiry_policy")
     if not isinstance(target_id, str) or not target_id.strip():
         raise ValueError("target_id is required")
-    if not isinstance(target_url, str) or not target_url.strip():
-        raise ValueError("target_url is required")
-    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
-        raise ValueError("ttl_seconds must be a positive integer")
-    if expiry_policy not in {"auto_close", "notify"}:
-        raise ValueError("expiry_policy must be auto_close or notify")
     return {
         "target_id": target_id.strip(),
-        "target_url": target_url.strip(),
-        "ttl_seconds": ttl_seconds,
-        "expiry_policy": expiry_policy,
     }
 
 
@@ -67,9 +55,16 @@ def _browser_endpoint(context: Any) -> str | None:
     return f"http://127.0.0.1:{port}"
 
 
-def _origin_id(trigger: Any) -> str | None:
-    value = getattr(trigger, "origin_id", None)
-    return value if isinstance(value, str) and value else None
+def _instance_root(context: Any) -> Path | None:
+    value = getattr(context, "instance_root", None)
+    if value is None:
+        return None
+    return Path(value)
+
+
+def _parent_turn_is_running(runtime: Any) -> bool:
+    activity = runtime.parent_activity() if callable(getattr(runtime, "parent_activity", None)) else {}
+    return isinstance(activity, dict) and activity.get("status") == "running"
 
 
 def _is_stale_browser_error(message: str) -> bool:
@@ -103,25 +98,19 @@ class BrowserPageExpiredHandler:
             if target_actor != local_actor:
                 raise PermissionError("wrong target actor for browser page expiry trigger")
             payload = _payload(trigger)
-            if payload["expiry_policy"] == "notify":
-                return self._notify(runtime, trigger, payload)
-            return self._auto_close(context, payload)
+            return self._handle_expiry(context, runtime, payload)
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))
 
-    def _notify(self, runtime: Any, trigger: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
-        prompt = (
-            "Browser page TTL expired.\n"
-            f"Target URL: {payload['target_url']}\n"
-            f"TTL: {payload['ttl_seconds']}s."
-        )
-        runtime.submit_parent_prompt(
-            prompt,
-            handler_name=self.name,
-            origin_id=_origin_id(trigger),
-            interrupt_policy="none",
-        )
-        return daemon_core.HandlerResult.handled()
+    def _handle_expiry(self, context: Any, runtime: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
+        root = _instance_root(context)
+        target_id = payload["target_id"]
+        if root is not None:
+            current_target_id = browser_lifecycle.current_target_id(root)
+            if current_target_id == target_id and _parent_turn_is_running(runtime):
+                browser_lifecycle.touch_page_idle(instance_root=root, target_id=target_id)
+                return daemon_core.HandlerResult.handled()
+        return self._auto_close(context, payload)
 
     def _auto_close(self, context: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
         browser_endpoint = _browser_endpoint(context)

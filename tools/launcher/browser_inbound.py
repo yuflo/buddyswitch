@@ -20,7 +20,7 @@ import notification_center  # noqa: E402
 
 BROWSER_PAGE_EXPIRED_EVENT_TYPE = "browser.page.expired"
 BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT = {
-    "required_fields": ("target_id", "target_url", "ttl_seconds", "expiry_policy"),
+    "required_fields": ("target_id",),
 }
 OWNER_MODULE = "browser_inbound"
 

@@ -170,6 +170,14 @@ def _string_field(payload: dict[str, Any], *names: str) -> str:
     return ""
 
 
+def _optional_non_empty_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string when provided")
+    return value.strip()
+
+
 def _notification_turn_id(notification: dict[str, Any]) -> str | None:
     params = notification.get("params")
     if not isinstance(params, dict):
@@ -406,6 +414,9 @@ class DaemonState:
                 "last_error": raw_schedule.get("last_error") if isinstance(raw_schedule.get("last_error"), str) else None,
                 "dispatch_result": raw_schedule.get("dispatch_result") if isinstance(raw_schedule.get("dispatch_result"), dict) else None,
             }
+            schedule_key = raw_schedule.get("schedule_key")
+            if isinstance(schedule_key, str) and schedule_key.strip():
+                schedules[schedule_id]["schedule_key"] = schedule_key.strip()
         payload["scheduled_trigger_ids"] = [item for item in payload["scheduled_trigger_ids"] if item in schedules]
         payload["scheduled_triggers"] = schedules
         return cls(path=path, payload=payload)
@@ -619,6 +630,7 @@ class DaemonState:
         trigger_type: str,
         payload: dict[str, Any],
         source_context: dict[str, Any] | None = None,
+        schedule_key: str | None = None,
         now: str | None = None,
     ) -> dict[str, Any]:
         if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, (int, float)) or delay_seconds < 0:
@@ -631,6 +643,7 @@ class DaemonState:
             source_context = {}
         if not isinstance(source_context, dict):
             raise ValueError("source_context must be an object")
+        normalized_schedule_key = _optional_non_empty_string(schedule_key, "schedule_key")
         created_at = now or _utc_now()
         created_dt = _parse_utc_timestamp(created_at)
         timestamp = _format_utc_timestamp(created_dt)
@@ -661,12 +674,75 @@ class DaemonState:
             "last_error": None,
             "dispatch_result": None,
         }
+        if normalized_schedule_key is not None:
+            row["schedule_key"] = normalized_schedule_key
         schedule_ids.append(schedule_id)
         schedules[schedule_id] = row
         self.payload["scheduled_trigger_ids"] = schedule_ids
         self.payload["scheduled_triggers"] = schedules
         self.save()
         return dict(row)
+
+    def upsert_schedule(
+        self,
+        *,
+        delay_seconds: int | float,
+        trigger_type: str,
+        payload: dict[str, Any],
+        schedule_key: str,
+        source_context: dict[str, Any] | None = None,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_schedule_key = _optional_non_empty_string(schedule_key, "schedule_key")
+        assert normalized_schedule_key is not None
+        if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, (int, float)) or delay_seconds < 0:
+            raise ValueError("delay_seconds must be a non-negative number")
+        if not isinstance(trigger_type, str) or not trigger_type.strip():
+            raise ValueError("trigger_type must be a non-empty string")
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        if source_context is None:
+            source_context = {}
+        if not isinstance(source_context, dict):
+            raise ValueError("source_context must be an object")
+        timestamp = _format_utc_timestamp(_parse_utc_timestamp(now or _utc_now()))
+        due_at = _format_utc_timestamp(_parse_utc_timestamp(timestamp) + timedelta(seconds=float(delay_seconds)))
+        schedule_ids = [
+            item for item in self.payload.get("scheduled_trigger_ids", []) if isinstance(item, str) and item
+        ]
+        schedules = self.payload.get("scheduled_triggers")
+        if not isinstance(schedules, dict):
+            schedules = {}
+        for schedule_id in schedule_ids:
+            row = schedules.get(schedule_id)
+            if (
+                isinstance(row, dict)
+                and row.get("status") == "pending"
+                and row.get("schedule_key") == normalized_schedule_key
+            ):
+                row.update(
+                    {
+                        "type": trigger_type.strip(),
+                        "payload": dict(payload),
+                        "source_context": dict(source_context),
+                        "updated_at": timestamp,
+                        "due_at": due_at,
+                        "last_error": None,
+                        "dispatch_result": None,
+                    }
+                )
+                schedules[schedule_id] = row
+                self.payload["scheduled_triggers"] = schedules
+                self.save()
+                return dict(row)
+        return self.create_schedule(
+            delay_seconds=delay_seconds,
+            trigger_type=trigger_type,
+            payload=payload,
+            source_context=source_context,
+            schedule_key=normalized_schedule_key,
+            now=timestamp,
+        )
 
     def due_schedules(self, *, now: str | None = None) -> list[dict[str, Any]]:
         timestamp = now or _utc_now()

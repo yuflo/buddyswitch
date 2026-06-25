@@ -440,6 +440,53 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["payload"], {"target_id": "target-ttl-1"})
 
+    def test_mailbox_schedule_trigger_upserts_by_schedule_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
+            instance_root.mkdir(parents=True, exist_ok=True)
+            state = self.core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-daemon",
+                main_thread_id="thr-main",
+            )
+            current_now = {"value": "2026-06-24T00:00:00Z"}
+            server = self.mailbox.DaemonMailboxServer(
+                socket_path=Path("/tmp/not-used.sock"),
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                handlers=[],
+                state=state,
+                now=lambda: current_now["value"],
+            )
+
+            request = {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-schedule",
+                "method": "mailbox.schedule_trigger",
+                "params": {
+                    "delay_seconds": 300,
+                    "type": "browser.page.expired",
+                    "payload": {"target_id": "target-1"},
+                    "source_context": {"owner": "browser", "attempt": 1},
+                    "schedule_key": "browser.page.idle:target-1",
+                },
+            }
+            first = server.dispatch(request)
+            current_now["value"] = "2026-06-24T00:04:00Z"
+            request["params"]["payload"] = {"target_id": "target-1", "refreshed": True}
+            request["params"]["source_context"] = {"owner": "browser", "attempt": 2}
+            second = server.dispatch(request)
+
+            self.assertTrue(first["ok"], msg=first)
+            self.assertTrue(second["ok"], msg=second)
+            self.assertEqual(first["result"]["schedule"]["schedule_id"], "schedule-1")
+            schedule = second["result"]["schedule"]
+            self.assertEqual(schedule["schedule_id"], "schedule-1")
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-1")
+            self.assertEqual(schedule["due_at"], "2026-06-24T00:09:00Z")
+            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["payload"], {"target_id": "target-1", "refreshed": True})
+
     def test_mailbox_schedule_trigger_rejects_invalid_payload_without_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
@@ -512,6 +559,44 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertEqual(result["schedule"]["schedule_id"], "schedule-1")
             saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["payload"], {"target_id": "target-ttl-1"})
+            self.assertFalse(thread.is_alive())
+
+    def test_daemon_client_schedule_trigger_posts_optional_schedule_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
+            instance_root.mkdir(parents=True, exist_ok=True)
+            socket_path = self.client.mailbox_socket_path_for_instance_root(instance_root)
+            state = self.core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-daemon",
+                main_thread_id="thr-main",
+            )
+            server = self.mailbox.DaemonMailboxServer(
+                socket_path=socket_path,
+                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                handlers=[],
+                state=state,
+                now=lambda: "2026-06-24T00:00:00Z",
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(server.close)
+
+            result = self.client.schedule_trigger(
+                instance_root=instance_root,
+                delay_seconds=300,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser"},
+                schedule_key="browser.page.idle:target-1",
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(result["schedule"]["schedule_id"], "schedule-1")
+            self.assertEqual(result["schedule"]["schedule_key"], "browser.page.idle:target-1")
+            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-1")
             self.assertFalse(thread.is_alive())
 
 

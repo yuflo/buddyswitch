@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import importlib.util
 import json
+import tempfile
 import threading
 import unittest
 from itertools import count
@@ -209,6 +211,80 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
 
         with self.assertRaisesRegex(self.lifecycle.BrowserLifecycleError, "simulated close failure"):
             self.lifecycle.close_page_target(browser_url, "target-close-1")
+
+    def test_touch_page_idle_writes_browser_state_and_keyed_schedule(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"schedule": {"schedule_id": "schedule-1"}}
+
+        self.lifecycle.daemon_client.schedule_trigger = fake_schedule_trigger
+        self.lifecycle._utc_now = lambda: datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-browser"
+
+            result = self.lifecycle.touch_page_idle(
+                instance_root=instance_root,
+                target_id="target-idle-1",
+                target_url="https://example.com/current",
+                page_id=7,
+            )
+
+            self.assertEqual(
+                result,
+                {
+                    "idle_refreshed": True,
+                    "idle_seconds": 300,
+                    "idle_expires_at": "2026-06-24T00:05:00Z",
+                },
+            )
+            self.assertEqual(
+                calls,
+                [
+                    {
+                        "instance_root": instance_root,
+                        "delay_seconds": 300,
+                        "trigger_type": "browser.page.expired",
+                        "payload": {"target_id": "target-idle-1"},
+                        "source_context": {"owner": "browser"},
+                        "schedule_key": "browser.page.idle:target-idle-1",
+                    }
+                ],
+            )
+            state_path = instance_root / "runtime" / "browser" / "page_idle.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["current_target_id"], "target-idle-1")
+            self.assertEqual(state["current_page_updated_at"], "2026-06-24T00:00:00Z")
+            self.assertEqual(state["page_id_to_target_id"], {"7": "target-idle-1"})
+            self.assertEqual(state["targets"]["target-idle-1"]["target_url"], "https://example.com/current")
+            self.assertEqual(state["targets"]["target-idle-1"]["last_used_at"], "2026-06-24T00:00:00Z")
+
+    def test_touch_page_idle_rejects_blank_target_before_scheduling(self) -> None:
+        calls: list[dict[str, object]] = []
+        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            with self.assertRaisesRegex(self.lifecycle.BrowserLifecycleError, "target_id"):
+                self.lifecycle.touch_page_idle(instance_root=Path(temp_root), target_id=" ")
+
+        self.assertEqual(calls, [])
+
+    def test_page_id_mapping_resolves_to_cdp_target_without_treating_page_id_as_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-browser"
+
+            self.lifecycle.set_current_page(
+                instance_root=instance_root,
+                target_id="target-cdp-1",
+                target_url="https://example.com/current",
+                page_id=7,
+            )
+
+            self.assertEqual(self.lifecycle.current_target_id(instance_root), "target-cdp-1")
+            self.assertEqual(self.lifecycle.target_id_for_page_id(instance_root, 7), "target-cdp-1")
+            self.assertIsNone(self.lifecycle.target_id_for_page_id(instance_root, "target-cdp-1"))
 
 
 if __name__ == "__main__":

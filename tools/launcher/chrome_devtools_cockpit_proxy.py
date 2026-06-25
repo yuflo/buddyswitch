@@ -25,6 +25,17 @@ from env.cdp_browser_session import BROWSER_PAGE_LIMIT_BLOCK_TEXT, evaluate_page
 DEFAULT_UPSTREAM_COMMAND = "npx chrome-devtools-mcp@1.1.1"
 UPSTREAM_EXIT_GRACE_SECONDS = 2.0
 FOCUS_METHODS = {"Page.bringToFront", "Target.activateTarget"}
+PAGE_SCOPED_USE_TOOLS = {
+    "take_snapshot",
+    "take_screenshot",
+    "click",
+    "type_text",
+    "evaluate_script",
+    "navigate_page",
+    "wait_for",
+    "fill",
+    "press_key",
+}
 
 
 def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -98,10 +109,46 @@ def focus_block_text(method: str) -> str:
     )
 
 
+def _instance_root_path(instance_root: str | None) -> Path | None:
+    if not isinstance(instance_root, str) or not instance_root.strip():
+        return None
+    return Path(instance_root.strip())
+
+
+def _idle_hint_from_result(result: dict[str, Any] | None) -> str:
+    idle_seconds = result.get("idle_seconds") if isinstance(result, dict) else None
+    if isinstance(idle_seconds, int):
+        return f"Browser page idle refreshed: {idle_seconds}s."
+    return "Browser page idle refreshed."
+
+
+def _touch_idle_hint(
+    *,
+    instance_root: str | None,
+    target_id: str,
+    target_url: str | None = None,
+    page_id: object | None = None,
+) -> str | None:
+    root = _instance_root_path(instance_root)
+    if root is None:
+        return "Browser page idle not refreshed."
+    try:
+        result = browser_lifecycle.touch_page_idle(
+            instance_root=root,
+            target_id=target_id,
+            target_url=target_url,
+            page_id=page_id,
+        )
+    except Exception:
+        return "Browser page idle not refreshed."
+    return _idle_hint_from_result(result)
+
+
 def mutate_tool_call(
     message: dict[str, Any],
     browser_url: str,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
+    instance_root: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, Any | None]:
     params = message.get("params")
     if not isinstance(params, dict):
         return message, None, None
@@ -133,9 +180,15 @@ def mutate_tool_call(
                 return None, tool_error_response(message, BROWSER_PAGE_LIMIT_BLOCK_TEXT), None
             if gate.kind == "reuse":
                 target_id = gate.target_id or "<unknown>"
+                idle_hint = _touch_idle_hint(
+                    instance_root=instance_root,
+                    target_id=target_id,
+                    target_url=target_url.strip(),
+                )
+                suffix = f" {idle_hint}" if idle_hint else ""
                 return None, tool_success_response(
                     message,
-                    f"Reused existing browser page {target_id}. No new page was opened.",
+                    f"Reused existing browser page {target_id}. No new page was opened.{suffix}",
                 ), None
             hint = gate.hint_text()
             try:
@@ -149,6 +202,7 @@ def mutate_tool_call(
         rewritten_params["arguments"] = rewritten_arguments
         if isinstance(target_url, str) and target_url.strip():
             return rewritten, None, {
+                "kind": "new_page",
                 "target_url": target_url.strip(),
                 "before_targets": before_targets,
                 "page_hint": hint,
@@ -161,7 +215,10 @@ def mutate_tool_call(
         rewritten_arguments = dict(arguments)
         rewritten_arguments["bringToFront"] = False
         rewritten_params["arguments"] = rewritten_arguments
-        return rewritten, None, None
+        return rewritten, None, {"kind": "select_page", "page_id": arguments.get("pageId")}
+
+    if name in PAGE_SCOPED_USE_TOOLS:
+        return message, None, {"kind": "current_page"}
 
     return message, None, None
 
@@ -169,12 +226,13 @@ def mutate_tool_call(
 def mutate_client_message(
     message: dict[str, Any],
     browser_url: str,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
+    instance_root: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, Any | None]:
     method = message.get("method")
     if method in FOCUS_METHODS and is_jsonrpc_request(message):
         return None, rpc_error_response(message, focus_block_text(str(method))), None
     if method == "tools/call":
-        return mutate_tool_call(message, browser_url)
+        return mutate_tool_call(message, browser_url, instance_root=instance_root)
     return message, None, None
 
 
@@ -256,7 +314,12 @@ def patch_tool_response_hint(message: dict[str, Any], hint: str) -> dict[str, An
     return patched
 
 
-def patch_tool_response_new_page_metadata(
+def _tool_response_succeeded(message: dict[str, Any]) -> bool:
+    result = message.get("result")
+    return isinstance(result, dict) and result.get("isError") is not True
+
+
+def patch_tool_response_page_use_metadata(
     message: dict[str, Any],
     metadata: dict[str, Any],
     *,
@@ -267,31 +330,54 @@ def patch_tool_response_new_page_metadata(
     page_hint = metadata.get("page_hint")
     if isinstance(page_hint, str) and page_hint:
         patched = patch_tool_response_hint(patched, page_hint)
-    result = message.get("result")
-    if not isinstance(result, dict) or result.get("isError") is True:
+    if not _tool_response_succeeded(message):
+        return patched
+    root = _instance_root_path(instance_root)
+    if root is None:
+        return patched
+    kind = metadata.get("kind")
+    if kind == "select_page":
+        page_id = metadata.get("page_id")
+        try:
+            target_id = browser_lifecycle.target_id_for_page_id(root, page_id)
+        except Exception:
+            return patched
+        if target_id is None:
+            return patched
+        hint = _touch_idle_hint(
+            instance_root=instance_root,
+            target_id=target_id,
+            page_id=page_id,
+        )
+        return patch_tool_response_hint(patched, hint) if hint else patched
+    if kind == "current_page":
+        try:
+            target_id = browser_lifecycle.current_target_id(root)
+        except Exception:
+            return patched
+        if target_id is None:
+            return patched
+        hint = _touch_idle_hint(instance_root=instance_root, target_id=target_id)
+        return patch_tool_response_hint(patched, hint) if hint else patched
+    if kind != "new_page":
         return patched
     before_targets = metadata.get("before_targets")
     target_url = metadata.get("target_url")
     if not isinstance(before_targets, list) or not isinstance(target_url, str) or not target_url:
-        return patch_tool_response_hint(patched, "Browser page TTL not registered.")
+        return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
     try:
         after_targets = browser_lifecycle.read_page_targets(browser_url)
         target_id = browser_lifecycle.new_page_target_id(before_targets, after_targets)
         if target_id is None:
-            return patch_tool_response_hint(patched, "Browser page TTL not registered.")
-        if not isinstance(instance_root, str) or not instance_root.strip():
-            return patch_tool_response_hint(patched, "Browser page TTL not registered.")
-        ttl = browser_lifecycle.register_browser_page_ttl(
-            instance_root=Path(instance_root.strip()),
+            return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
+        result = browser_lifecycle.touch_page_idle(
+            instance_root=root,
             target_id=target_id,
             target_url=target_url,
         )
     except Exception:
-        return patch_tool_response_hint(patched, "Browser page TTL not registered.")
-    ttl_seconds = ttl.get("ttl_seconds") if isinstance(ttl, dict) else None
-    if not isinstance(ttl_seconds, int):
-        ttl_seconds = browser_lifecycle.BROWSER_PAGE_TTL_SECONDS
-    return patch_tool_response_hint(patched, f"Browser page TTL: {ttl_seconds}s.")
+        return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
+    return patch_tool_response_hint(patched, _idle_hint_from_result(result))
 
 
 def write_json_line(message: dict[str, Any], output_lock: threading.Lock) -> None:
@@ -341,7 +427,7 @@ def upstream_to_client(
         if should_patch:
             message = patch_tool_list_message(message)
         if isinstance(response_hint, dict):
-            message = patch_tool_response_new_page_metadata(
+            message = patch_tool_response_page_use_metadata(
                 message,
                 response_hint,
                 browser_url=browser_url,
@@ -423,7 +509,11 @@ def run_proxy(upstream_argv: list[str], browser_url: str) -> int:
                 with ids_lock:
                     tools_list_ids.add(message.get("id"))
 
-            outbound, local_response, response_hint = mutate_client_message(message, browser_url)
+            outbound, local_response, response_hint = mutate_client_message(
+                message,
+                browser_url,
+                instance_root=os.environ.get("BUDDYSWITCH_INSTANCE_ROOT"),
+            )
             if local_response is not None:
                 write_json_line(local_response, output_lock)
                 continue

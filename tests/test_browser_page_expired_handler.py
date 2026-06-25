@@ -18,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
 
 HANDLER_PATH = ROOT / "tools" / "launcher" / "browser_page_expired_handler.py"
 TRIGGERS_PATH = ROOT / "tools" / "launcher" / "daemon_triggers.py"
+BROWSER_INBOUND_PATH = ROOT / "tools" / "launcher" / "browser_inbound.py"
 MODULE_COUNTER = count()
 
 
@@ -38,6 +39,7 @@ class FakeContext:
     actor_id = "act-dev-browser"
     role = "dev"
     instance_payload = {"browser_port": 9444}
+    instance_root = Path("/tmp/buddyswitch-test-instance")
 
 
 class FakeRuntime:
@@ -76,7 +78,6 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         self,
         *,
         target_actor_address: dict[str, str] | None = None,
-        expiry_policy: str = "auto_close",
     ) -> Any:
         return self.triggers.DaemonTrigger(
             source="scheduled_trigger",
@@ -84,12 +85,7 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
             origin_id="schedule-1",
             correlation_id=None,
-            payload={
-                "target_id": "target-ttl-1",
-                "target_url": "https://example.com/new",
-                "ttl_seconds": 600,
-                "expiry_policy": expiry_policy,
-            },
+            payload={"target_id": "target-idle-1"},
             source_context={"schedule_id": "schedule-1"},
         )
 
@@ -106,7 +102,7 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-ttl-1"}])
+        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-idle-1"}])
 
     def test_auto_close_missing_target_is_handled(self) -> None:
         def fake_close_page_target(_browser_url: str, target_id: str) -> dict[str, str]:
@@ -144,19 +140,66 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.message, "simulated close failure")
 
-    def test_notify_policy_submits_concise_parent_prompt(self) -> None:
-        runtime = FakeRuntime(activity_status="idle")
+    def test_current_page_with_running_parent_turn_refreshes_idle_without_closing(self) -> None:
+        close_calls: list[dict[str, object]] = []
+        touch_calls: list[dict[str, object]] = []
+
+        self.handler_module.browser_lifecycle.current_target_id = lambda _instance_root: "target-idle-1"
+
+        def fake_touch_page_idle(**kwargs: object) -> dict[str, object]:
+            touch_calls.append(kwargs)
+            return {"idle_refreshed": True, "idle_seconds": 300}
+
+        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
+            close_calls.append({"browser_url": browser_url, "target_id": target_id})
+            return {"status": "closed", "target_id": target_id}
+
+        self.handler_module.browser_lifecycle.touch_page_idle = fake_touch_page_idle
+        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
         handler = self.handler_module.BrowserPageExpiredHandler()
 
-        result = handler.handle(FakeContext(), state=object(), runtime=runtime, trigger=self._trigger(expiry_policy="notify"))
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(activity_status="running"), trigger=self._trigger())
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual(len(runtime.parent_prompts), 1)
-        prompt = runtime.parent_prompts[0]
-        self.assertEqual(prompt["handler_name"], "browser_page_expired")
-        self.assertEqual(prompt["origin_id"], "schedule-1")
-        self.assertIn("Browser page TTL expired", prompt["text"])
-        self.assertNotIn("schedule_id", prompt["text"])
+        self.assertEqual(close_calls, [])
+        self.assertEqual(touch_calls, [{"instance_root": FakeContext.instance_root, "target_id": "target-idle-1"}])
+
+    def test_non_current_page_closes_even_when_parent_turn_is_running(self) -> None:
+        calls: list[dict[str, object]] = []
+        self.handler_module.browser_lifecycle.current_target_id = lambda _instance_root: "target-other"
+
+        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
+            calls.append({"browser_url": browser_url, "target_id": target_id})
+            return {"status": "closed", "target_id": target_id}
+
+        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(activity_status="running"), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-idle-1"}])
+
+    def test_current_page_closes_when_parent_is_idle(self) -> None:
+        calls: list[dict[str, object]] = []
+        self.handler_module.browser_lifecycle.current_target_id = lambda _instance_root: "target-idle-1"
+
+        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
+            calls.append({"browser_url": browser_url, "target_id": target_id})
+            return {"status": "closed", "target_id": target_id}
+
+        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+        handler = self.handler_module.BrowserPageExpiredHandler()
+
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(activity_status="idle"), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-idle-1"}])
+
+    def test_inbound_contract_requires_only_target_id(self) -> None:
+        inbound = load_module(BROWSER_INBOUND_PATH)
+
+        self.assertEqual(inbound.BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT["required_fields"], ("target_id",))
 
     def test_handler_rejects_wrong_target_actor(self) -> None:
         handler = self.handler_module.BrowserPageExpiredHandler()

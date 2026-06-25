@@ -152,6 +152,23 @@ for raw_line in sys.stdin:
         response = {"jsonrpc": "2.0", "id": request_id, "result": {"tools": TOOLS}}
     elif method == "tools/call":
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        if arguments.get("forceError"):
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "failed " + str(params.get("name")),
+                        }
+                    ],
+                    "isError": True,
+                },
+            }
+            print(json.dumps(response, ensure_ascii=True), flush=True)
+            continue
         response = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -246,6 +263,32 @@ for raw_line in sys.stdin:
             },
         }
 
+    def _start_mailbox(self, instance_root: Path, *, now: str = "2026-06-24T00:00:00Z") -> tuple[Any, Any, threading.Thread]:
+        daemon_core = load_module(DAEMON_CORE_PATH)
+        daemon_mailbox = load_module(DAEMON_MAILBOX_PATH)
+        instance_root.mkdir(parents=True, exist_ok=True)
+        state = daemon_core.DaemonState.load(
+            instance_root=instance_root,
+            actor_id="act-dev-browser",
+            main_thread_id="thr-main",
+        )
+        server = daemon_mailbox.DaemonMailboxServer(
+            socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-browser"},
+            handlers=[],
+            state=state,
+            now=lambda: now,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.close)
+        return daemon_core, server, thread
+
+    def _write_page_idle_state(self, instance_root: Path, payload: dict[str, object]) -> None:
+        state_path = instance_root / "runtime" / "browser" / "page_idle.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
     def test_new_page_defaults_to_background(self) -> None:
         responses, forwarded, upstream_argv, _stderr = self._run_proxy(
             [self._single_call("new_page", {"url": "https://example.com"})]
@@ -272,31 +315,14 @@ for raw_line in sys.stdin:
         self.assertIs(arguments["background"], True)
         self.assertNotIn("Browser pages:", json.dumps(responses, ensure_ascii=True))
 
-    def test_new_page_registers_ttl_after_exactly_one_new_target(self) -> None:
-        daemon_core = load_module(DAEMON_CORE_PATH)
-        daemon_mailbox = load_module(DAEMON_MAILBOX_PATH)
+    def test_new_page_refreshes_idle_after_exactly_one_new_target(self) -> None:
         before = _page_targets(1)
         after = before + [{"id": "target-new-page", "type": "page", "url": "https://example.com/new"}]
         browser_url = self._start_cdp_list_server({"requests": [], "list_payloads": [before, before, after]})
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            instance_root.mkdir(parents=True, exist_ok=True)
-            state = daemon_core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-browser",
-                main_thread_id="thr-main",
-            )
-            server = daemon_mailbox.DaemonMailboxServer(
-                socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-browser"},
-                handlers=[],
-                state=state,
-                now=lambda: "2026-06-24T00:00:00Z",
-            )
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            self.addCleanup(server.close)
+            daemon_core, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
@@ -307,13 +333,156 @@ for raw_line in sys.stdin:
             thread.join(timeout=2)
 
             self.assertEqual(len(forwarded), 1)
-            self.assertIn("Browser page TTL: 600s.", json.dumps(responses, ensure_ascii=True))
+            self.assertIn("Browser page idle refreshed: 300s.", json.dumps(responses, ensure_ascii=True))
+            self.assertNotIn("TTL", json.dumps(responses, ensure_ascii=True))
             saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(schedule["type"], "browser.page.expired")
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-new-page")
             self.assertEqual(schedule["payload"]["target_id"], "target-new-page")
-            self.assertEqual(schedule["payload"]["target_url"], "https://example.com/new")
-            self.assertEqual(schedule["payload"]["ttl_seconds"], 600)
+            self.assertEqual(schedule["payload"], {"target_id": "target-new-page"})
+            self.assertFalse(thread.is_alive())
+
+    def test_new_page_reuse_refreshes_idle_without_forwarding(self) -> None:
+        target_url = "https://example.com/new"
+        targets = _page_targets(9) + [{"id": "target-existing-page", "type": "page", "url": target_url}]
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": targets})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": target_url})],
+                browser_url=browser_url,
+                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(forwarded, [])
+            self.assertIn("target-existing-page", json.dumps(responses, ensure_ascii=True))
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-existing-page")
+            self.assertEqual(schedule["payload"], {"target_id": "target-existing-page"})
+            self.assertFalse(thread.is_alive())
+
+    def test_select_page_refreshes_idle_for_resolved_page_id(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_idle_state(
+                instance_root,
+                {
+                    "current_target_id": "target-old",
+                    "current_page_updated_at": "2026-06-23T00:00:00Z",
+                    "targets": {
+                        "target-select": {
+                            "target_id": "target-select",
+                            "target_url": "https://example.com/select",
+                            "last_used_at": "2026-06-23T00:00:00Z",
+                            "page_id": "3",
+                        }
+                    },
+                    "page_id_to_target_id": {"3": "target-select"},
+                },
+            )
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("select_page", {"pageId": 3, "bringToFront": True})],
+                browser_url=browser_url,
+                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(responses[0]["id"], 1)
+            self.assertEqual(forwarded[0]["params"]["arguments"]["bringToFront"], False)
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-select")
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["current_target_id"], "target-select")
+            self.assertFalse(thread.is_alive())
+
+    def test_page_scoped_success_refreshes_current_page_idle(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_idle_state(
+                instance_root,
+                {
+                    "current_target_id": "target-current",
+                    "current_page_updated_at": "2026-06-23T00:00:00Z",
+                    "targets": {
+                        "target-current": {
+                            "target_id": "target-current",
+                            "target_url": "https://example.com/current",
+                            "last_used_at": "2026-06-23T00:00:00Z",
+                        }
+                    },
+                    "page_id_to_target_id": {},
+                },
+            )
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("take_snapshot", {})],
+                browser_url=browser_url,
+                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(responses[0]["id"], 1)
+            self.assertEqual(forwarded[0]["params"]["name"], "take_snapshot")
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-current")
+            self.assertEqual(schedule["payload"], {"target_id": "target-current"})
+            self.assertFalse(thread.is_alive())
+
+    def test_non_page_use_and_failed_page_response_do_not_refresh_idle(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_idle_state(
+                instance_root,
+                {
+                    "current_target_id": "target-current",
+                    "current_page_updated_at": "2026-06-23T00:00:00Z",
+                    "targets": {"target-current": {"target_id": "target-current", "last_used_at": "2026-06-23T00:00:00Z"}},
+                    "page_id_to_target_id": {},
+                },
+            )
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [
+                    {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                    {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_pages", "arguments": {}}},
+                    {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "close_page", "arguments": {"pageId": 3}}},
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 4,
+                        "method": "tools/call",
+                        "params": {"name": "take_snapshot", "arguments": {"forceError": True}},
+                    },
+                ],
+                browser_url=browser_url,
+                extra_env={"BUDDYSWITCH_INSTANCE_ROOT": str(instance_root)},
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual([response["id"] for response in responses], [1, 2, 3, 4])
+            self.assertEqual([item["params"]["name"] for item in forwarded if item.get("method") == "tools/call"], ["list_pages", "close_page", "take_snapshot"])
+            self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
             self.assertFalse(thread.is_alive())
 
     def test_new_page_reaching_hint_threshold_forwards_and_appends_page_hint(self) -> None:

@@ -244,12 +244,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             schedule = instance["state"].create_schedule(
                 delay_seconds=600,
                 trigger_type="browser.page.expired",
-                payload={
-                    "target_id": "target-ttl-1",
-                    "target_url": "https://example.com/new",
-                    "ttl_seconds": 600,
-                    "expiry_policy": "auto_close",
-                },
+                payload={"target_id": "target-idle-1"},
                 source_context={"owner": "browser"},
                 now="2026-06-24T00:00:00Z",
             )
@@ -261,12 +256,78 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(schedule["created_at"], "2026-06-24T00:00:00Z")
             self.assertEqual(schedule["updated_at"], "2026-06-24T00:00:00Z")
             self.assertEqual(schedule["last_error"], None)
-            self.assertEqual(schedule["payload"]["target_id"], "target-ttl-1")
+            self.assertEqual(schedule["payload"], {"target_id": "target-idle-1"})
             self.assertEqual(schedule["source_context"], {"owner": "browser"})
 
             saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"], schedule)
+
+    def test_keyed_schedule_upsert_replaces_pending_schedule_for_same_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+
+            first = instance["state"].upsert_schedule(
+                delay_seconds=300,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser", "attempt": 1},
+                schedule_key="browser.page.idle:target-1",
+                now="2026-06-24T00:00:00Z",
+            )
+            second = instance["state"].upsert_schedule(
+                delay_seconds=300,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1", "refreshed": True},
+                source_context={"owner": "browser", "attempt": 2},
+                schedule_key="browser.page.idle:target-1",
+                now="2026-06-24T00:04:00Z",
+            )
+
+            self.assertEqual(second["schedule_id"], first["schedule_id"])
+            self.assertEqual(second["schedule_key"], "browser.page.idle:target-1")
+            self.assertEqual(second["created_at"], "2026-06-24T00:00:00Z")
+            self.assertEqual(second["updated_at"], "2026-06-24T00:04:00Z")
+            self.assertEqual(second["due_at"], "2026-06-24T00:09:00Z")
+            self.assertEqual(second["payload"], {"target_id": "target-1", "refreshed": True})
+            self.assertEqual(second["source_context"], {"owner": "browser", "attempt": 2})
+
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"], second)
+            self.assertNotIn("browser_page_idle", saved)
+            self.assertNotIn("current_target_id", saved)
+
+    def test_keyed_schedule_upsert_does_not_reuse_non_pending_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            delivered = instance["state"].upsert_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1", "generation": 1},
+                schedule_key="browser.page.idle:target-1",
+                now="2026-06-24T00:00:00Z",
+            )
+            instance["state"].mark_schedule_delivered(
+                delivered["schedule_id"],
+                dispatch_result={"handling_status": "handled"},
+                now="2026-06-24T00:00:01Z",
+            )
+
+            pending = instance["state"].upsert_schedule(
+                delay_seconds=300,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1", "generation": 2},
+                schedule_key="browser.page.idle:target-1",
+                now="2026-06-24T00:01:00Z",
+            )
+
+            self.assertEqual(delivered["schedule_id"], "schedule-1")
+            self.assertEqual(pending["schedule_id"], "schedule-2")
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1", "schedule-2"])
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["status"], "delivered")
+            self.assertEqual(saved["scheduled_triggers"]["schedule-2"]["status"], "pending")
 
     def test_due_scheduled_trigger_dispatch_marks_delivered_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

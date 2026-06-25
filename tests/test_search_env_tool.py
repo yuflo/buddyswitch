@@ -498,24 +498,23 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(params.get("url"), target_url)
         self.assertIs(params.get("background"), True)
 
-    def test_search_open_browser_creates_ttl_schedule_after_new_target(self) -> None:
+    def test_search_open_browser_refreshes_idle_after_new_target(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
-        ttl_calls: list[dict[str, object]] = []
-        original_register = search_impl.browser_lifecycle.register_browser_page_ttl
+        idle_calls: list[dict[str, object]] = []
+        original_touch = search_impl.browser_lifecycle.touch_page_idle
 
-        def fake_register_browser_page_ttl(**kwargs: object) -> dict[str, object]:
-            ttl_calls.append(kwargs)
+        def fake_touch_page_idle(**kwargs: object) -> dict[str, object]:
+            idle_calls.append(kwargs)
             return {
-                "ttl_registered": True,
-                "ttl_seconds": 600,
-                "expires_at": "2026-06-24T00:10:00Z",
-                "expiry_policy": "auto_close",
+                "idle_refreshed": True,
+                "idle_seconds": 300,
+                "idle_expires_at": "2026-06-24T00:05:00Z",
             }
 
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "register_browser_page_ttl", original_register)
-        search_impl.browser_lifecycle.register_browser_page_ttl = fake_register_browser_page_ttl
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "touch_page_idle", original_touch)
+        search_impl.browser_lifecycle.touch_page_idle = fake_touch_page_idle
 
         response = self._dispatch(
             action="open_browser",
@@ -526,15 +525,17 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         target_url = "https://www.google.com/search?q=creator+analytics+pain"
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("page_opened"), True)
-        self.assertEqual(response.get("ttl_registered"), True)
-        self.assertEqual(response.get("ttl_seconds"), 600)
-        self.assertEqual(response.get("expires_at"), "2026-06-24T00:10:00Z")
-        self.assertEqual(response.get("expiry_policy"), "auto_close")
+        self.assertEqual(response.get("idle_refreshed"), True)
+        self.assertEqual(response.get("idle_seconds"), 300)
+        self.assertEqual(response.get("idle_expires_at"), "2026-06-24T00:05:00Z")
+        self.assertNotIn("ttl_registered", response)
+        self.assertNotIn("ttl_seconds", response)
+        self.assertNotIn("expiry_policy", response)
         self.assertNotIn("schedule", response)
         self.assertNotIn("schedule_id", json.dumps(response, ensure_ascii=True))
-        self.assertIn("Browser page TTL: 600s.", response.get("effect_summary", ""))
+        self.assertIn("Browser page idle refreshed: 300s.", response.get("effect_summary", ""))
         self.assertEqual(
-            ttl_calls,
+            idle_calls,
             [
                 {
                     "instance_root": instance_json.parent,
@@ -544,20 +545,20 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ],
         )
 
-    def test_search_open_browser_reports_ttl_registration_failure_without_rolling_back_open(self) -> None:
+    def test_search_open_browser_reports_idle_refresh_failure_without_rolling_back_open(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
-        original_register = search_impl.browser_lifecycle.register_browser_page_ttl
+        original_touch = search_impl.browser_lifecycle.touch_page_idle
 
-        def failing_register_browser_page_ttl(**_kwargs: object) -> dict[str, object]:
+        def failing_touch_page_idle(**_kwargs: object) -> dict[str, object]:
             raise search_impl.browser_lifecycle.daemon_client.DaemonClientError(
                 "daemon_socket_unavailable",
                 "daemon socket unavailable",
             )
 
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "register_browser_page_ttl", original_register)
-        search_impl.browser_lifecycle.register_browser_page_ttl = failing_register_browser_page_ttl
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "touch_page_idle", original_touch)
+        search_impl.browser_lifecycle.touch_page_idle = failing_touch_page_idle
 
         response = self._dispatch(
             action="open_browser",
@@ -567,12 +568,12 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("page_opened"), True, msg=response)
-        self.assertEqual(response.get("ttl_registered"), False, msg=response)
-        self.assertIn("daemon socket unavailable", response.get("ttl_registration_error", ""))
-        self.assertNotIn("Browser page TTL:", response.get("effect_summary", ""))
+        self.assertEqual(response.get("idle_refreshed"), False, msg=response)
+        self.assertIn("daemon socket unavailable", response.get("idle_refresh_error", ""))
+        self.assertNotIn("Browser page idle refreshed:", response.get("effect_summary", ""))
         self.assertEqual(len(state.get("rpc_requests", [])), 1, msg=state)
 
-    def test_search_reuse_does_not_register_or_refresh_ttl(self) -> None:
+    def test_search_reuse_refreshes_idle_for_reused_target(self) -> None:
         target_url = "https://www.google.com/search?q=creator+analytics+pain"
         state: dict[str, object] = {
             "requests": [],
@@ -580,13 +581,19 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         }
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
-        original_register = search_impl.browser_lifecycle.register_browser_page_ttl
+        idle_calls: list[dict[str, object]] = []
+        original_touch = search_impl.browser_lifecycle.touch_page_idle
 
-        def unexpected_register_browser_page_ttl(**_kwargs: object) -> dict[str, object]:
-            raise AssertionError("reuse must not register or refresh TTL")
+        def fake_touch_page_idle(**kwargs: object) -> dict[str, object]:
+            idle_calls.append(kwargs)
+            return {
+                "idle_refreshed": True,
+                "idle_seconds": 300,
+                "idle_expires_at": "2026-06-24T00:05:00Z",
+            }
 
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "register_browser_page_ttl", original_register)
-        search_impl.browser_lifecycle.register_browser_page_ttl = unexpected_register_browser_page_ttl
+        self.addCleanup(setattr, search_impl.browser_lifecycle, "touch_page_idle", original_touch)
+        search_impl.browser_lifecycle.touch_page_idle = fake_touch_page_idle
 
         response = self._dispatch(
             action="open_browser",
@@ -597,7 +604,20 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("page_opened"), False, msg=response)
         self.assertEqual(response.get("page_reused"), True, msg=response)
+        self.assertEqual(response.get("idle_refreshed"), True, msg=response)
         self.assertNotIn("ttl_registered", response)
+        self.assertNotIn("ttl_seconds", response)
+        self.assertNotIn("expiry_policy", response)
+        self.assertEqual(
+            idle_calls,
+            [
+                {
+                    "instance_root": instance_json.parent,
+                    "target_id": "target-existing-search",
+                    "target_url": target_url,
+                }
+            ],
+        )
         self.assertEqual(state.get("rpc_requests", []), [], msg=state)
 
     def test_search_open_browser_below_hint_threshold_opens_without_page_hint(self) -> None:

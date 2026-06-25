@@ -298,13 +298,28 @@ class DaemonMailboxServer:
                 source_context = {}
             if not isinstance(source_context, dict):
                 raise ValueError("source_context must be an object")
-            schedule = self.state.create_schedule(
-                delay_seconds=params.get("delay_seconds"),
-                trigger_type=params.get("type"),
-                payload=params.get("payload"),
-                source_context=source_context,
-                now=self._now_text(),
-            )
+            schedule_key = params.get("schedule_key")
+            if schedule_key is None:
+                schedule = self.state.create_schedule(
+                    delay_seconds=params.get("delay_seconds"),
+                    trigger_type=params.get("type"),
+                    payload=params.get("payload"),
+                    source_context=source_context,
+                    now=self._now_text(),
+                )
+            else:
+                if not isinstance(schedule_key, str) or not schedule_key.strip():
+                    raise ValueError("schedule_key must be a non-empty string when provided")
+                if not callable(getattr(self.state, "upsert_schedule", None)):
+                    raise ValueError("daemon state does not support keyed scheduled triggers")
+                schedule = self.state.upsert_schedule(
+                    delay_seconds=params.get("delay_seconds"),
+                    trigger_type=params.get("type"),
+                    payload=params.get("payload"),
+                    source_context=source_context,
+                    schedule_key=schedule_key.strip(),
+                    now=self._now_text(),
+                )
         except Exception as exc:
             return self._response(request_id, code="invalid_schedule_trigger", message=str(exc))
         return self._response(request_id, {"schedule": schedule})
