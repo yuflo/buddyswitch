@@ -160,6 +160,23 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "E_IM_PAYLOAD")
         self.assertIn("to", payload["error"]["message"])
 
+        status, payload = router.handle(
+            "POST",
+            "/api/im/messages",
+            json.dumps(
+                {
+                    "to": {"kind": "actor", "actor_address": {"role_id": "market"}},
+                    "content": "bad target",
+                }
+            ).encode("utf-8"),
+            {"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(status, 400)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_IM_PAYLOAD")
+        self.assertIn("actor_address", payload["error"]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

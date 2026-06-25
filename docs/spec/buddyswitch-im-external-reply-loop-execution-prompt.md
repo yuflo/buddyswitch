@@ -28,7 +28,7 @@ Execution:
 6. Add Web UI event polling/fetch rendering.
 7. Add tmp/im_reply_console.py only as an ignored local manual smoke harness, not an official BuddySwitch feature.
 8. Run:
-   - python -m pytest tests/test_im_external_reply_loop.py tests/test_message_tool_im_client.py tests/test_im_http_router.py tests/test_im_product_core.py tests/test_im_wake_handler.py tests/test_web_management.py tests/test_env_tool_schema_contract.py tests/test_env_tool_semantic_contract.py -q
+   - python -m pytest tests/test_im_external_reply_loop.py tests/test_message_tool_im_client.py tests/test_im_http_router.py tests/test_im_product_core.py tests/test_im_wake_handler.py tests/test_web_management.py -q
    - node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
    - python tmp/im_reply_console.py --help
    - rg "act-user-local|web-user|send_from_web_user|WebUserActorRuntime|/api/messages/send" tools scripts tests

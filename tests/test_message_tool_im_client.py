@@ -57,7 +57,7 @@ class _FakeImClient:
 
     def list(self, args: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("list", dict(args)))
-        return {"ok": True, "action": "message.list", "messages": []}
+        return {"ok": True, "action": "message.list", "events": [], "next_cursor": args.get("cursor")}
 
     def conversation(self, args: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("conversation", dict(args)))
@@ -122,7 +122,7 @@ class MessageToolImClientTests(unittest.TestCase):
             ("contacts", {"role": "pm"}, ("contacts", {"role": "pm"})),
             ("send", {"target_actor_address": target, "content": "hello"}, ("send", {"target_actor_address": target, "content": "hello"})),
             ("get", {"message_id": "msg-1"}, ("get", {"message_id": "msg-1"})),
-            ("list", {"limit": 5}, ("list", {"limit": 5})),
+            ("list", {"cursor": "imev-000000000001", "limit": 5}, ("list", {"cursor": "imev-000000000001", "limit": 5})),
             ("conversation", {"target_actor_address": target}, ("conversation", {"target_actor_address": target})),
             ("mark", {"message_id": "msg-1", "disposition": "absorbed"}, ("mark", {"message_id": "msg-1", "disposition": "absorbed"})),
         ]
@@ -135,6 +135,24 @@ class MessageToolImClientTests(unittest.TestCase):
 
 
 class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_send_with_invalid_target_actor_address_returns_payload_error(self) -> None:
+        actor = ActorAddress(
+            role_id="dev",
+            actor_id=self._runtime_actor_id(role="dev", label="act-dev-invalid-target"),
+        )
+        client = im_client_module.ActorImClient(_RealImContext(actor_address=actor, daemon=_RecordingWakeDaemon()))
+
+        response = client.send(
+            {
+                "target_actor_address": {"role_id": "market"},
+                "content": "hello",
+            }
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_IM_PAYLOAD")
+        self.assertIn("actor_address", response.get("error", {}).get("message", ""))
+
     def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
         actor = ActorAddress(
             role_id="dev",

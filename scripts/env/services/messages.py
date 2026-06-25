@@ -116,7 +116,7 @@ def _reject_scope(
         retry_guidance="Fix the scope issue and retry." if retryable else "This action cannot be retried as-is.",
         allowed_next_actions=[
             "Use message.contacts to discover online target actor addresses.",
-            "Use message.list to view available inbox messages.",
+            "Use message.list to view visible Central IM events.",
         ],
         correctable_fields=correctable_fields,
     )
@@ -156,6 +156,10 @@ def _reject_reachability(
             "target_actor_address": target_actor_address,
         },
     )
+
+
+def _im_payload_error(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": message}}
 
 
 def _manifest_role_ids(context: MessageSendContext) -> set[str]:
@@ -325,14 +329,20 @@ def send_im_message(
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    sender = message_repo.im_participant_ref(sender_participant)
+    try:
+        sender = message_repo.im_participant_ref(sender_participant)
+    except ValueError as exc:
+        return _im_payload_error(str(exc))
     normalized_content = content.strip() if isinstance(content, str) else ""
     if not normalized_content:
-        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "content must be a non-empty string"}}
+        return _im_payload_error("content must be a non-empty string")
     if reply_to is not None and (not isinstance(reply_to, str) or not reply_to.strip()):
-            return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "reply_to must be a non-empty string"}}
+        return _im_payload_error("reply_to must be a non-empty string")
     reply_to_id = reply_to.strip() if isinstance(reply_to, str) else None
-    target = message_repo.im_participant_ref(to) if isinstance(to, dict) and to else None
+    try:
+        target = message_repo.im_participant_ref(to) if isinstance(to, dict) and to else None
+    except ValueError as exc:
+        return _im_payload_error(str(exc))
 
     now = message_repo.runtime_files.now_iso()
     if reply_to_id is not None:
@@ -349,7 +359,7 @@ def send_im_message(
         created_at = str(resolved.get("created_at") or now)
     else:
         if target is None:
-            return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "to is required for a new message"}}
+            return _im_payload_error("to is required for a new message")
         existing = message_repo.find_im_direct_conversation([sender, target])
         if existing is None:
             conversation_id = _new_im_id("conv")

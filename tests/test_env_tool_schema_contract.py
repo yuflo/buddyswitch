@@ -143,6 +143,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         message_get = message_get_action.input_schema
         message_mark_action = catalog.get_action_definition("message", "mark")
         message_mark = message_mark_action.input_schema
+        message_list_action = catalog.get_action_definition("message", "list")
+        message_list = message_list_action.input_schema
         message_conversation_action = catalog.get_action_definition("message", "conversation")
         message_conversation = message_conversation_action.input_schema
         self.assertNotIn("comment", catalog.supported_tools())
@@ -267,6 +269,18 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(message_get.get("required"), ["message_id"])
         self.assertEqual(set(message_get.get("properties", {})), {"message_id"})
         self.assertEqual(message_get["properties"]["message_id"].get("type"), "string")
+
+        self.assertEqual(message_list_action.kind, "read")
+        self.assertEqual(message_list_action.mutates, "none")
+        self.assertEqual(message_list_action.required_permission, "message.list")
+        self.assertEqual(message_list_action.durability, "none")
+        self.assertEqual(message_list.get("required"), [])
+        message_list_properties = message_list.get("properties", {})
+        self.assertEqual(set(message_list_properties), {"cursor", "limit"})
+        self.assertEqual(message_list_properties["cursor"].get("type"), "string")
+        self.assertEqual(message_list_properties["limit"].get("type"), "integer")
+        self.assertNotIn("role", message_list_properties)
+        self.assertNotIn("q", message_list_properties)
 
         self.assertEqual(message_mark_action.kind, "write")
         self.assertEqual(message_mark_action.mutates, "runtime_objects")

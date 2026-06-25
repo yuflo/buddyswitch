@@ -78,7 +78,7 @@ def _build_definition() -> ToolDefinition:
                     'You need contact discovery for a target actor address before message.send.',
                 ),
                 do_not_use_when=(
-                    'You already have a current contact actor_address or need to read inbox messages.',
+                    'You already have a current contact actor_address or need to read Central IM events.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -235,7 +235,7 @@ def _build_definition() -> ToolDefinition:
                     'A prompt gives an exact message_id and you need to read that exact inbound message and its disposition metadata.',
                 ),
                 do_not_use_when=(
-                    'You need general inbox scanning (use message.list) or conversation context (use message.conversation).',
+                    'You need the Central IM event feed (use message.list) or conversation context (use message.conversation).',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -325,23 +325,19 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='list',
                 title='message.list',
-                description='List active actor inbox messages.',
+                description='Read active actor visible Central IM events after a cursor.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
                     'required': [],
                     'properties': {
-                        'role': {
+                        'cursor': {
                             'type': 'string',
-                            'description': 'Optional inbox role filter.',
-                        },
-                        'q': {
-                            'type': 'string',
-                            'description': 'Optional case-insensitive keyword filter over active actor inbox message content.',
+                            'description': 'Optional Central IM event cursor. Omit to read from the initial event cursor.',
                         },
                         'limit': {
                             'type': 'integer',
-                            'description': 'Optional maximum number of inbox messages to return.',
+                            'description': 'Optional maximum number of events to return.',
                             'minimum': 1,
                         },
                     },
@@ -353,14 +349,14 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.list',
-                authority='message.active_actor_inbox',
-                visibility='active actor inbox',
+                authority='message.central_im_participant_events',
+                visibility='active actor Central IM participant event feed',
                 durability='none',
-                result_content_level='message rows',
-                success_effect='Lists active actor inbox messages with optional filters.',
-                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                result_content_level='event rows and next_cursor',
+                success_effect='Returns active actor visible Central IM events after the supplied cursor.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state.',
                 reads=(
-                    'active actor inbox messages',
+                    'active actor visible Central IM participant events',
                 ),
                 writes=(),
                 does_not_write=(
@@ -375,12 +371,14 @@ def _build_definition() -> ToolDefinition:
                     'env.tool role-action policy allows this action for the active role',
                 ),
                 returns=(
-                    'messages',
+                    'events',
+                    'next_cursor',
                 ),
                 use_when=(
-                    'You need to read active actor inbox messages, optionally filtered by sender role, keyword, or bounded count.',
+                    'You need to read Central IM delivery events visible to the active actor from a cursor.',
                 ),
                 do_not_use_when=(
+                    'You need full message content for a specific event message_id (use message.get) or a direct conversation transcript (use message.conversation).',
                     'You need to create a new direct message (use message.send) or discuss a Track thread (use track.add_comment).',
                 ),
                 risk_hints={
@@ -466,7 +464,7 @@ def _build_definition() -> ToolDefinition:
                     'You need bidirectional context between the active actor and one target actor address.',
                 ),
                 do_not_use_when=(
-                    'You only need active actor inbox messages (use message.list) or need to send a new message (use message.send).',
+                    'You only need Central IM event notifications (use message.list) or need to send a new message (use message.send).',
                 ),
                 risk_hints={
                     'read_only': True,
