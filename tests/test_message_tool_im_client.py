@@ -103,6 +103,15 @@ class _FailingParentDaemon:
         raise RuntimeError("parent submit unavailable")
 
 
+class _RecordingWakeDaemon:
+    def __init__(self) -> None:
+        self.wake_calls: list[dict[str, Any]] = []
+
+    def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.wake_calls.append(dict(payload))
+        return {"wake_status": "submitted", "runtime_target": "parent", "error": None}
+
+
 class MessageToolImClientTests(unittest.TestCase):
     def test_all_message_actions_delegate_to_im_client(self) -> None:
         client = _FakeImClient()
@@ -126,6 +135,43 @@ class MessageToolImClientTests(unittest.TestCase):
 
 
 class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
+        actor = ActorAddress(
+            role_id="dev",
+            actor_id=self._runtime_actor_id(role="dev", label="act-dev-im-reply"),
+        )
+        registration = message_service.register_external_participant(
+            client_kind="script",
+            display_name="local smoke",
+        )
+        root = message_service.send_im_message(
+            sender_participant=registration["participant"],
+            to={"kind": "actor", "actor_address": actor.to_payload()},
+            content="ping",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
+        daemon = _RecordingWakeDaemon()
+        client = im_client_module.ActorImClient(_RealImContext(actor_address=actor, daemon=daemon))
+
+        reply = client.send({"content": "pong", "reply_to": root["message"]["id"]})
+
+        self.assertTrue(reply.get("ok"), msg=reply)
+        self.assertEqual(reply["message"]["reply_to"], root["message"]["id"])
+        self.assertEqual(reply["message"]["conversation_id"], root["message"]["conversation_id"])
+        self.assertEqual(reply["wake_status"], "not_applicable")
+        self.assertEqual(reply["original_message_id"], root["message"]["id"])
+        self.assertEqual(reply["original_final_disposition"], "replied")
+        self.assertEqual(daemon.wake_calls, [])
+
+        state_path = (
+            self.runtime_state_root
+            / "im"
+            / "message_states"
+            / f"{root['message']['id']}--actor--dev--{actor.actor_id}.json"
+        )
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["disposition"], "replied")
+
     def test_mark_needs_parent_submit_failure_leaves_im_state_unseen(self) -> None:
         active_actor = ActorAddress(
             role_id="dev",

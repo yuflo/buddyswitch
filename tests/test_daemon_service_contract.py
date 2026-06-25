@@ -474,7 +474,7 @@ class DaemonServiceContractTests(unittest.TestCase):
 
             result = runtime.submit_parent_prompt(
                 "parent prompt",
-                handler_name="message_available",
+                handler_name="im_message_created",
                 origin_id="msg-1",
                 interrupt_policy="before_submit",
             )
@@ -487,7 +487,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual([record["runtime_method"] for record in records], ["parent_interrupt", "parent_submit"])
             self.assertEqual(records[0]["interrupted_turn_id"], "turn-main-1")
             self.assertEqual(records[1]["turn_id"], "turn-daemon-1")
-            self.assertEqual(records[1]["handler_name"], "message_available")
+            self.assertEqual(records[1]["handler_name"], "im_message_created")
             self.assertEqual(records[1]["origin_id"], "msg-1")
             self.assertEqual(records[1]["status"], "succeeded")
             saved = self._saved_state(instance["instance_root"])
@@ -711,7 +711,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "interrupt_policy"):
                 runtime.submit_parent_prompt(
                     "parent prompt",
-                    handler_name="message_available",
+                    handler_name="im_message_created",
                     origin_id="msg-1",
                     interrupt_policy="after_submit",
                 )
@@ -739,7 +739,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             with self.assertRaisesRegex(self.core.launcher_submit_turn.SubmitTurnError, "submit failed"):
                 runtime.submit_parent_prompt(
                     "parent prompt",
-                    handler_name="message_available",
+                    handler_name="im_message_created",
                     origin_id="msg-1",
                     interrupt_policy="before_submit",
                 )
@@ -793,8 +793,8 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.core.app_server.side_start = fake_side_start
             self.core.app_server.input_turn = fake_input_turn
 
-            started = runtime.submit_side_triage_prompt("triage prompt", handler_name="message_available", origin_id="msg-1")
-            reused = runtime.submit_side_triage_prompt("follow up", handler_name="message_available", origin_id="msg-2")
+            started = runtime.submit_side_triage_prompt("triage prompt", handler_name="im_message_created", origin_id="msg-1")
+            reused = runtime.submit_side_triage_prompt("follow up", handler_name="im_message_created", origin_id="msg-2")
 
             self.assertEqual(started["side_thread_id"], "thr-side-1")
             self.assertEqual(reused["side_thread_id"], "thr-side-1")

@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shlex
 import subprocess
 import sys
 import threading
+import tempfile
 import unittest
+from unittest import mock
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -28,6 +31,13 @@ WEB_MANAGEMENT = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = WEB_MANAGEMENT
 SPEC.loader.exec_module(WEB_MANAGEMENT)
 NO_PROXY_OPENER = build_opener(ProxyHandler({}))
+
+
+def _restore_env_value(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
 
 
 class FakeRunner:
@@ -239,6 +249,41 @@ class WebManagementUnitTests(unittest.TestCase):
         self.assertLess(run_index, stop_index)
         self.assertIn('return "${status}"', block)
 
+    def test_web_runtime_binds_shared_state_for_central_im_without_actor_identity(self) -> None:
+        from env.repos import runtime_files
+
+        original_state_root = os.environ.get("BUDDYSWITCH_STATE_ROOT")
+        original_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+        original_actor_id = os.environ.get("BUDDYSWITCH_ACTOR_ID")
+        self.addCleanup(runtime_files.reset_runtime_root_override)
+        self.addCleanup(runtime_files.refresh_runtime_roots_from_env)
+        self.addCleanup(_restore_env_value, "BUDDYSWITCH_STATE_ROOT", original_state_root)
+        self.addCleanup(_restore_env_value, "BUDDYSWITCH_SHARED_ROOT", original_shared_root)
+        self.addCleanup(_restore_env_value, "BUDDYSWITCH_ACTOR_ID", original_actor_id)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / ".codex-buddyswitch"
+            shared_root.mkdir()
+            os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            os.environ.pop("BUDDYSWITCH_STATE_ROOT", None)
+            os.environ.pop("BUDDYSWITCH_ACTOR_ID", None)
+            runtime_files.reset_runtime_root_override()
+            runtime_files.refresh_runtime_roots_from_env()
+
+            WEB_MANAGEMENT.bind_web_runtime_state()
+            service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+            status, payload = service.handle_api(
+                "POST",
+                "/api/im/external-participants",
+                json.dumps({"client_kind": "script", "display_name": "probe"}).encode("utf-8"),
+                {},
+            )
+
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(os.environ.get("BUDDYSWITCH_STATE_ROOT"), str(shared_root / "state"))
+            self.assertNotIn("BUDDYSWITCH_ACTOR_ID", os.environ)
+
     def test_map_command_failure_uses_required_status_codes(self) -> None:
         cases = [
             (
@@ -299,6 +344,27 @@ class WebManagementUnitTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0, msg=result.stdout)
         self.assertIn("local", result.stderr)
+
+    def test_im_wake_delegates_to_runtime_wake_bridge(self) -> None:
+        runner = OrderedRunner([])
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        payload = {
+            "type": "im.message.created",
+            "target_actor_address": {"role_id": "pm", "actor_id": "act-pm-demo"},
+            "message_id": "msg-1",
+            "conversation_id": "conv-1",
+            "event_id": "imev-1",
+        }
+        with mock.patch.object(
+            WEB_MANAGEMENT.daemon_client,
+            "wake_im_actor",
+            return_value={"wake_status": "submitted", "runtime_target": "parent", "error": None},
+        ) as wake_im_actor:
+            result = service._wake_im_actor(payload)
+
+        self.assertEqual(result["wake_status"], "submitted")
+        wake_im_actor.assert_called_once_with(payload)
+        self.assertEqual(runner.calls, [])
 
 
 class WebManagementHTTPTests(WebManagementServerTestCase):

@@ -100,6 +100,19 @@ class ImHttpRouter:
             )
             return 200, result
 
+        if normalized_method == "GET" and route == "/api/im/conversations/direct":
+            kind = _first_query_value(query, "kind") or ""
+            if kind != "actor":
+                return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "kind=actor is required"}}
+            role_id = _first_query_value(query, "role_id") or ""
+            actor_id = _first_query_value(query, "actor_id") or ""
+            result = message_service.get_im_direct_conversation(
+                participant=participant,
+                target={"kind": "actor", "actor_address": {"role_id": role_id, "actor_id": actor_id}},
+                limit=_int_query_value(query, "limit", 20),
+            )
+            return (200 if result.get("ok") is True else 404), result
+
         message_prefix = "/api/im/messages/"
         if route.startswith(message_prefix):
             suffix = route[len(message_prefix) :]

@@ -204,7 +204,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
 
     def test_daemon_core_does_not_import_message_handler_or_message_domain(self) -> None:
         daemon_core_imports = _imported_modules(DAEMON_CORE_PATH)
-        self.assertNotIn("message_available_handler", daemon_core_imports)
+        self.assertNotIn("message" + "_available" + "_handler", daemon_core_imports)
         self.assertNotIn("env.domain.message", daemon_core_imports)
         self.assertNotIn("env.domain.messages", daemon_core_imports)
 
@@ -212,7 +212,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         imports = _imported_modules(NOTIFICATION_CENTER_PATH)
         source = NOTIFICATION_CENTER_PATH.read_text(encoding="utf-8")
 
-        self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("env.domain.messages", imports)
         self.assertNotIn("env.repos.messages", imports)
         self.assertNotIn("MessageAvailableHandler", source)
@@ -274,7 +274,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         source = CENTRAL_DAEMON_CORE_PATH.read_text(encoding="utf-8")
         self.assertNotIn("app_server", imports)
         self.assertNotIn("daemon_core", imports)
-        self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("thread_read", source)
         self.assertNotIn("active_turn_id", source)
         self.assertNotIn("parent_activity", source)

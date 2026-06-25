@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -18,10 +19,14 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 HELPER_DIR = Path(__file__).resolve().parent
-if str(HELPER_DIR) not in sys.path:
-    sys.path.insert(0, str(HELPER_DIR))
+SCRIPTS = HELPER_DIR.parents[1] / "scripts"
+for candidate in (HELPER_DIR, SCRIPTS):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
 import im_http_router
+from env.repos import runtime_files
+from env.tool_runtime import daemon_client
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -126,6 +131,14 @@ def load_command_json_object(stdout: str, *, message: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HttpError(status=502, code="COMMAND_FAILED", message=message)
     return payload
+
+
+def bind_web_runtime_state() -> None:
+    raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+    if isinstance(raw_shared_root, str) and raw_shared_root.strip():
+        shared_root = Path(raw_shared_root.strip()).expanduser()
+        os.environ["BUDDYSWITCH_STATE_ROOT"] = str(shared_root / "state")
+    runtime_files.refresh_runtime_roots_from_env()
 
 
 def map_command_failure(command_label: str, result: CommandResult) -> HttpError:
@@ -707,21 +720,7 @@ class WebManagementService:
         return rows
 
     def _wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
-        target = payload.get("target_actor_address")
-        if not isinstance(target, dict):
-            return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target_actor_address is required"}
-        actor_id = target.get("actor_id")
-        if not isinstance(actor_id, str) or not actor_id.strip():
-            return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target actor_id is required"}
-        try:
-            instance = self._get_instance_status(actor_id)
-        except HttpError as exc:
-            if exc.status == 404:
-                return {"wake_status": "target_not_online", "runtime_target": "none", "error": exc.message}
-            return {"wake_status": "wake_failed", "runtime_target": "none", "error": exc.message}
-        if instance.get("status") != "active":
-            return {"wake_status": "target_not_online", "runtime_target": "none", "error": "target actor is not active"}
-        return {"wake_status": "submitted", "runtime_target": "parent", "error": None}
+        return daemon_client.wake_im_actor(payload)
 
     def _get_instance_status(self, actor_id: str) -> dict[str, Any]:
         result = self._run_command(["instance", "status", actor_id, "--json"], timeout_seconds=10)
@@ -855,6 +854,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr, flush=True)
         return 2
+    bind_web_runtime_state()
     service = WebManagementService(repo_root=REPO_ROOT)
     server = create_server(args.host, args.port, service)
     print(f"BuddySwitch web management listening on http://{args.host}:{server.server_port}", flush=True)

@@ -246,10 +246,79 @@ def _new_im_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def _im_reply_target_error(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": "E_IM_REPLY_TARGET", "message": message}}
+
+
+def _direct_conversation_participants(message_repo: Any, conversation: dict[str, Any]) -> list[dict[str, Any]] | None:
+    if conversation.get("type") != "direct":
+        return None
+    participants = conversation.get("participants")
+    if not isinstance(participants, list) or len(participants) != 2:
+        return None
+    try:
+        return [message_repo.im_participant_ref(row) for row in participants if isinstance(row, dict)]
+    except ValueError:
+        return None
+
+
+def _resolve_reply_conversation(
+    *,
+    message_repo: Any,
+    sender: dict[str, Any],
+    target: dict[str, Any] | None,
+    reply_to_id: str,
+) -> dict[str, Any]:
+    original_message = message_repo.get_im_message(reply_to_id)
+    if original_message is None:
+        return _im_reply_target_error("reply_to message not found")
+    conversation = message_repo.get_im_conversation(str(original_message.get("conversation_id") or ""))
+    if conversation is None:
+        return _im_reply_target_error("reply_to conversation not found")
+    participants = _direct_conversation_participants(message_repo, conversation)
+    if participants is None:
+        return _im_reply_target_error("reply_to conversation is not a direct conversation")
+    sender_key = message_repo.im_participant_key(sender)
+    participant_keys = {message_repo.im_participant_key(row) for row in participants}
+    if sender_key not in participant_keys:
+        return _im_reply_target_error("active sender is not a participant in the reply_to conversation")
+    if target is None:
+        other = [row for row in participants if message_repo.im_participant_key(row) != sender_key]
+        if len(other) != 1:
+            return _im_reply_target_error("reply target cannot be derived from the direct conversation")
+        target = other[0]
+    else:
+        target_key = message_repo.im_participant_key(target)
+        if {sender_key, target_key} != participant_keys:
+            return _im_reply_target_error("reply_to must stay in the same direct conversation")
+    return {
+        "ok": True,
+        "target": target,
+        "conversation_id": str(conversation["id"]),
+        "created_at": str(conversation.get("created_at") or message_repo.runtime_files.now_iso()),
+    }
+
+
+def _mark_reply_source_replied(
+    *,
+    message_repo: Any,
+    participant: dict[str, Any],
+    message_id: str,
+) -> dict[str, Any] | None:
+    current = message_repo.get_im_message_state(message_id, participant)
+    if current is None:
+        return None
+    updated = dict(current)
+    updated["disposition"] = "replied"
+    updated["reason"] = None
+    updated["updated_at"] = message_repo.runtime_files.now_iso()
+    return message_repo.save_im_message_state(updated)
+
+
 def send_im_message(
     *,
     sender_participant: dict[str, Any],
-    to: dict[str, Any],
+    to: dict[str, Any] | None,
     content: str,
     reply_to: str | None = None,
     wake_actor: Any | None = None,
@@ -257,31 +326,30 @@ def send_im_message(
     from env.repos import messages as message_repo
 
     sender = message_repo.im_participant_ref(sender_participant)
-    target = message_repo.im_participant_ref(to)
     normalized_content = content.strip() if isinstance(content, str) else ""
     if not normalized_content:
         return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "content must be a non-empty string"}}
     if reply_to is not None and (not isinstance(reply_to, str) or not reply_to.strip()):
-        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "reply_to must be a non-empty string"}}
+            return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "reply_to must be a non-empty string"}}
     reply_to_id = reply_to.strip() if isinstance(reply_to, str) else None
+    target = message_repo.im_participant_ref(to) if isinstance(to, dict) and to else None
 
     now = message_repo.runtime_files.now_iso()
     if reply_to_id is not None:
-        original_message = message_repo.get_im_message(reply_to_id)
-        if original_message is None:
-            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to message not found"}}
-        conversation = message_repo.get_im_conversation(str(original_message.get("conversation_id") or ""))
-        if conversation is None:
-            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to conversation not found"}}
-        participants = conversation.get("participants")
-        if not isinstance(participants, list):
-            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to conversation is invalid"}}
-        participant_keys = {message_repo.im_participant_key(row) for row in participants if isinstance(row, dict)}
-        if {message_repo.im_participant_key(sender), message_repo.im_participant_key(target)} != participant_keys:
-            return {"ok": False, "error": {"code": "E_IM_REPLY_SCOPE", "message": "reply_to must stay in the same direct conversation"}}
-        conversation_id = str(conversation["id"])
-        created_at = str(conversation.get("created_at") or now)
+        resolved = _resolve_reply_conversation(
+            message_repo=message_repo,
+            sender=sender,
+            target=target,
+            reply_to_id=reply_to_id,
+        )
+        if resolved.get("ok") is not True:
+            return resolved
+        target = resolved["target"]
+        conversation_id = str(resolved["conversation_id"])
+        created_at = str(resolved.get("created_at") or now)
     else:
+        if target is None:
+            return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "to is required for a new message"}}
         existing = message_repo.find_im_direct_conversation([sender, target])
         if existing is None:
             conversation_id = _new_im_id("conv")
@@ -347,6 +415,13 @@ def send_im_message(
             "updated_at": now,
         }
     )
+    original_reply_state = None
+    if reply_to_id is not None:
+        original_reply_state = _mark_reply_source_replied(
+            message_repo=message_repo,
+            participant=sender,
+            message_id=reply_to_id,
+        )
 
     wake_status = "not_applicable"
     if target.get("kind") == "actor":
@@ -370,7 +445,7 @@ def send_im_message(
                 candidate = wake_result.get("wake_status") if isinstance(wake_result, dict) else None
                 wake_status = candidate if candidate in {"submitted", "target_not_online", "wake_failed", "not_applicable"} else "wake_failed"
 
-    return {
+    response = {
         "ok": True,
         "message": {
             "id": message["id"],
@@ -382,6 +457,12 @@ def send_im_message(
         "wake_status": wake_status,
         "next_cursor": event_id,
     }
+    if reply_to_id is not None:
+        response["original_message_id"] = reply_to_id
+        response["original_final_disposition"] = (
+            original_reply_state.get("disposition") if isinstance(original_reply_state, dict) else None
+        )
+    return response
 
 
 def read_im_events(
@@ -393,26 +474,32 @@ def read_im_events(
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    del wait_ms
     participant_ref = message_repo.im_participant_ref(participant)
     normalized_cursor = cursor.strip() if isinstance(cursor, str) and cursor.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
     normalized_limit = limit if isinstance(limit, int) and limit > 0 else 50
-    events = message_repo.list_im_events_for_participant(participant_ref)
-    if normalized_cursor == message_repo.INITIAL_IM_EVENT_CURSOR:
-        visible = events[:normalized_limit]
-    else:
-        visible = []
-        seen_cursor = False
-        for event in events:
-            if seen_cursor:
-                visible.append(event)
-                if len(visible) >= normalized_limit:
-                    break
-            elif event.get("event_id") == normalized_cursor:
-                seen_cursor = True
-    next_cursor = normalized_cursor
-    if visible:
-        next_cursor = str(visible[-1]["event_id"])
+    wait_seconds = min(wait_ms if isinstance(wait_ms, int) and wait_ms > 0 else 0, 30000) / 1000
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        events = message_repo.list_im_events_for_participant(participant_ref)
+        if normalized_cursor == message_repo.INITIAL_IM_EVENT_CURSOR:
+            visible = events[:normalized_limit]
+        else:
+            visible = []
+            seen_cursor = False
+            for event in events:
+                if seen_cursor:
+                    visible.append(event)
+                    if len(visible) >= normalized_limit:
+                        break
+                elif event.get("event_id") == normalized_cursor:
+                    seen_cursor = True
+        next_cursor = normalized_cursor
+        if visible:
+            next_cursor = str(visible[-1]["event_id"])
+            break
+        if wait_seconds <= 0 or time.monotonic() >= deadline:
+            break
+        time.sleep(min(0.05, max(0.001, deadline - time.monotonic())))
     return {
         "ok": True,
         "events": visible,
@@ -559,19 +646,20 @@ def send_from_actor(
             correctable_fields=None,
         )
     target = args.get("target_actor_address")
-    if not isinstance(target, dict):
+    reply_to = args.get("reply_to") if isinstance(args.get("reply_to"), str) else None
+    if not isinstance(target, dict) and reply_to is None:
         return _reject_payload(
             action="message.send",
             active_actor=active_actor,
             active_role=active_role,
-            message="target_actor_address must be an actor participant object",
+            message="target_actor_address is required for a new actor-directed message",
             correctable_fields=["target_actor_address"],
         )
     result = send_im_message(
         sender_participant={"kind": "actor", "actor_address": source_actor.to_payload()},
-        to={"kind": "actor", "actor_address": target},
+        to={"kind": "actor", "actor_address": target} if isinstance(target, dict) else None,
         content=str(args.get("content") or ""),
-        reply_to=args.get("reply_to") if isinstance(args.get("reply_to"), str) else None,
+        reply_to=reply_to,
         wake_actor=getattr(context.daemon, "wake_im_actor", None),
     )
     if result.get("ok") is True:

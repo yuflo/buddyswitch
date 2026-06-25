@@ -119,6 +119,15 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(mark["disposition"], "absorbed")
 
+        status, conversation = router.handle(
+            "GET",
+            f"/api/im/conversations/direct?kind=actor&role_id=market&actor_id={actor_address['actor_id']}&limit=20",
+            b"",
+            {"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(status, 200, msg=conversation)
+        self.assertEqual([row["id"] for row in conversation["messages"]], [message_id, reply_id])
+
     def test_old_messages_send_route_is_not_im_contract(self) -> None:
         router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [], wake_actor=lambda _payload: {})
 

@@ -201,27 +201,43 @@ def is_runtime_workspace(root: Path | None = None) -> bool:
 
 def require_runtime_workspace_write_root(root: Path | None = None) -> None:
     candidate = ROOT if root is None else root
-    shared_root_raw = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
-    state_root_raw = os.environ.get("BUDDYSWITCH_STATE_ROOT")
     actor_id_raw = os.environ.get("BUDDYSWITCH_ACTOR_ID")
 
     if is_runtime_workspace(candidate):
         return
     if isinstance(actor_id_raw, str) and actor_id_raw.strip():
-        if isinstance(shared_root_raw, str) and shared_root_raw.strip():
-            shared_root = Path(shared_root_raw.strip()).expanduser().resolve(strict=False)
-            session_state_root = (
-                Path(state_root_raw.strip()).expanduser().resolve(strict=False)
-                if isinstance(state_root_raw, str) and state_root_raw.strip()
-                else STATE_ROOT.resolve(strict=False)
-            )
-            expected_state_root = (shared_root / "state").resolve(strict=False)
-            if session_state_root == expected_state_root:
-                return
+        if shared_state_root_is_bound():
+            return
     raise ValueError(
         "BuddySwitch runtime writes are blocked in the source checkout. "
         "Start the launcher workspace with ./buddyswitch-codex instance start --role <role> and rerun there."
     )
+
+
+def require_central_im_write_root(root: Path | None = None) -> None:
+    candidate = ROOT if root is None else root
+    if is_runtime_workspace(candidate):
+        return
+    if shared_state_root_is_bound():
+        return
+    raise ValueError(
+        "BuddySwitch Central IM writes are blocked until BUDDYSWITCH_STATE_ROOT is bound to "
+        "BUDDYSWITCH_SHARED_ROOT/state."
+    )
+
+
+def shared_state_root_is_bound() -> bool:
+    shared_root_raw = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+    state_root_raw = os.environ.get("BUDDYSWITCH_STATE_ROOT")
+    if not isinstance(shared_root_raw, str) or not shared_root_raw.strip():
+        return False
+    shared_root = Path(shared_root_raw.strip()).expanduser().resolve(strict=False)
+    session_state_root = (
+        Path(state_root_raw.strip()).expanduser().resolve(strict=False)
+        if isinstance(state_root_raw, str) and state_root_raw.strip()
+        else STATE_ROOT.resolve(strict=False)
+    )
+    return session_state_root == (shared_root / "state").resolve(strict=False)
 
 
 def ensure_runtime_dirs() -> None:

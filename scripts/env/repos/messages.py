@@ -30,6 +30,10 @@ def im_root() -> Path:
     return runtime_files.STATE_ROOT / "im"
 
 
+def _require_im_write_root() -> None:
+    runtime_files.require_central_im_write_root()
+
+
 def _im_dir(name: str) -> Path:
     return im_root() / name
 
@@ -63,7 +67,7 @@ def save_im_participant(participant: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("only external participant profiles are persisted directly")
     external_id = runtime_files.require_id(str(participant.get("external_id") or ""), "external_id")
     normalized = dict(participant, kind="external", external_id=external_id)
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(_im_dir("participants") / f"{external_id}.json", normalized)
     return normalized
 
@@ -74,7 +78,7 @@ def save_im_session(session: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("session.token_hash must start with sha256:")
     filename = token_hash.replace(":", "-", 1)
     normalized = dict(session, token_hash=token_hash)
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(_im_dir("sessions") / f"{filename}.json", normalized)
     return normalized
 
@@ -94,7 +98,7 @@ def save_im_cursor(cursor: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("cursor.participant must be an object")
     last_event_id = _require_non_empty_text(cursor.get("last_event_id"), "cursor.last_event_id")
     normalized = dict(cursor, participant=dict(participant), last_event_id=last_event_id)
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(
         _im_dir("cursors") / f"{im_participant_filename_key(participant)}.json",
         normalized,
@@ -111,7 +115,7 @@ def next_im_sequence() -> int:
         if isinstance(value, int) and value >= 0:
             current = value
     sequence = current + 1
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(path, {"value": sequence})
     return sequence
 
@@ -125,7 +129,7 @@ def save_im_conversation(conversation: dict[str, Any]) -> dict[str, Any]:
     normalized["id"] = conversation_id
     normalized["participants"] = [im_participant_ref(row) for row in participants_raw]
     normalized["type"] = _require_non_empty_text(conversation.get("type"), "conversation.type")
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(_im_dir("conversations") / f"{conversation_id}.json", normalized)
     return normalized
 
@@ -175,7 +179,7 @@ def save_im_message(message: dict[str, Any]) -> dict[str, Any]:
     normalized["to"] = [im_participant_ref(recipients_raw[0])]
     normalized["content"] = _require_non_empty_text(message.get("content"), "message.content")
     normalized["reply_to"] = reply_to
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(_im_dir("messages") / f"{message_id}.json", normalized)
     return normalized
 
@@ -209,7 +213,7 @@ def save_im_message_state(state: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(state)
     normalized["message_id"] = message_id
     normalized["participant"] = im_participant_ref(participant)
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(
         _im_dir("message_states") / f"{message_id}--{im_participant_filename_key(participant)}.json",
         normalized,
@@ -237,7 +241,7 @@ def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
     normalized["message_id"] = message_id
     normalized["conversation_id"] = conversation_id
     normalized["participant"] = im_participant_ref(participant)
-    runtime_files.require_runtime_workspace_write_root()
+    _require_im_write_root()
     runtime_files.write_json_object(
         _im_dir("events") / f"{event_id}--{im_participant_filename_key(participant)}.json",
         normalized,

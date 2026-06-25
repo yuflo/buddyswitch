@@ -442,6 +442,9 @@ class DaemonAccess:
             interrupt_policy="ensure_stopped",
         )
 
+    def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return daemon_client.wake_im_actor(payload)
+
 
 @dataclass(frozen=True)
 class DomainAccess:

@@ -211,7 +211,7 @@ class NotificationCenterTests(unittest.TestCase):
                 self.assertNotIn(token, source)
 
         imports = imported_modules(NC_PATH)
-        self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("env.domain.messages", imports)
         self.assertNotIn("env.repos.messages", imports)

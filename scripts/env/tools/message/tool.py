@@ -13,15 +13,15 @@ from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE,
 def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
-        title='Direct Actor Messages',
-        description='Message tools cover online actor contact discovery, direct actor-address sends, exact processable inbound reads, and non-reply disposition marking.',
-        scope='direct runtime actor inbox messaging',
-        capability_boundary='Messages are direct runtime actor-address scope only.',
+        title='Central IM Messages',
+        description='Message tools cover online actor contact discovery, Central IM sends, exact processable inbound reads, replies, conversation context, and disposition marking.',
+        scope='Central IM participant messaging for the active actor',
+        capability_boundary='Messages use the Central IM participant/conversation/message/event model. External participants are valid conversation participants but are not actor contacts.',
         object_model=(
-            'Messages are direct actor-address inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, browser state, or actor private files.'
+            'Messages are Central IM conversation records with actor or external participants, durable message rows, participant-visible events, and per-participant dispositions. They do not mutate tracks, artifacts, tasks, comments, browser state, or actor private files.'
         ),
         use_when=(
-            'You need direct inbox messaging between online runtime actors.',
+            'You need Central IM messaging between the active actor and another actor or an external participant already present in a direct conversation.',
         ),
         do_not_use_when=(
             'You need object-level discussion; use comment tool actions.',
@@ -92,11 +92,11 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='send',
                 title='message.send',
-                description='Send one direct outbound message to an online runtime actor address, or reply to one processable inbound message with reply_to.',
+                description='Send one Central IM message: provide target_actor_address for a new actor-directed message, or provide reply_to only to reply inside the existing direct conversation.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
-                    'required': ['target_actor_address', 'content'],
+                    'required': ['content'],
                     'properties': {
                         'target_actor_address': {
                             'type': 'object',
@@ -112,7 +112,7 @@ def _build_definition() -> ToolDefinition:
                                     'description': 'Target runtime actor id.',
                                 },
                             },
-                            'description': 'Exact ActorAddress returned by message.contacts.',
+                            'description': 'Exact ActorAddress returned by message.contacts. Required only for a new actor-directed message; omit it when replying with reply_to.',
                         },
                         'content': {
                             'type': 'string',
@@ -120,7 +120,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'reply_to': {
                             'type': 'string',
-                            'description': 'Optional processable inbound message id addressed to the active actor. When reply_to is provided, success marks that original message as replied after delivery.',
+                            'description': 'Optional processable inbound message id addressed to the active actor. When reply_to is provided, Central IM derives the other direct participant, which can be external or actor, and success marks that original message as replied after delivery.',
                         },
                     },
                 },
@@ -131,18 +131,18 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.send',
-                authority='message.direct_actor_address_channel',
-                visibility='sender and recipient direct message visibility',
+                authority='message.central_im_channel',
+                visibility='sender and recipient Central IM conversation visibility',
                 durability='durable',
                 result_content_level='message id and delivery status',
-                success_effect='Creates and delivers one durable inbox message; when reply_to is provided, also transitions the original processable inbound message to replied.',
+                success_effect='Creates one durable Central IM message; target_actor_address is only required for new actor-directed messages, and when reply_to is provided the original processable inbound message transitions to replied.',
                 failure_state_guarantee='Reachability and payload rejections do not mutate state; delivery failures clean up the created message or report delivery cleanup uncertainty; reply disposition save failure can leave the delivered reply durable while the original remains in its previous disposition.',
                 reads=(
-                    'manifest role ids',
-                    'central daemon actor reachability',
+                    'Central IM direct conversation when reply_to is provided',
+                    'central daemon actor reachability for actor targets',
                 ),
                 writes=(
-                    'direct actor-address inbox message',
+                    'Central IM message',
                     'original message replied disposition when reply_to succeeds',
                 ),
                 does_not_write=(
@@ -154,9 +154,9 @@ def _build_definition() -> ToolDefinition:
                     'browser session',
                 ),
                 preconditions=(
-                    'target_actor_address.role_id is a declared manifest role',
-                    'target actor is online and is not the active full ActorAddress',
-                    'reply_to, when provided, references a processable inbound message addressed to the active actor',
+                    'content is non-empty',
+                    'target_actor_address is provided for a new actor-directed message',
+                    'reply_to, when provided without target_actor_address, references a processable inbound direct message visible to the active actor',
                 ),
                 returns=(
                     'message_id',
@@ -164,11 +164,12 @@ def _build_definition() -> ToolDefinition:
                     'original_message_id and original_final_disposition when reply_to is provided',
                 ),
                 use_when=(
-                    'You need to deliver a direct inbox message to a specific online actor address.',
-                    'You need to reply to one processable inbound message and mark the original replied after delivery.',
+                    'You need to deliver a new Central IM message to a specific online actor address.',
+                    'You need to reply to one processable inbound message, including external-origin messages, using only reply_to.',
                 ),
                 do_not_use_when=(
-                    'You only have a role id but no actor address (use message.contacts) or need Track discussion (use track.add_comment).',
+                    'You are starting a new actor-directed conversation and only have a role id but no actor address (use message.contacts).',
+                    'You need Track discussion; use track.add_comment instead of Central IM.',
                     'Use message.mark(absorbed) when no reply is needed.',
                     'Use message.mark(needs_parent) when side triage needs parent handling.',
                 ),

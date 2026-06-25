@@ -600,6 +600,37 @@ textarea:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.im-conversation {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.im-row {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.im-row.reply {
+  border-color: #c8e2d3;
+  background: var(--good-soft);
+}
+
+.im-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.im-content {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1080px) {
   .content-grid {
     grid-template-columns: minmax(0, 1fr);

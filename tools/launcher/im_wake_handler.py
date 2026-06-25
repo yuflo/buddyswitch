@@ -47,9 +47,7 @@ def _parent_prompt(message_id: str, conversation_id: str, event_id: str) -> str:
             "Steps:\n"
             f'1. Call message__get with message_id="{message_id}".\n'
             "2. If prior context is needed, call message__conversation for the sender from the message.\n"
-            "3. If a reply is needed, call message__send with:\n"
-            "   - target_actor_address = the sender actor address from the message\n"
-            "   - reply_to = the message id above\n"
+            f'3. If a reply is needed, call message__send(content=..., reply_to="{message_id}").\n'
             "4. If no reply is needed, call message__mark with disposition=\"absorbed\".",
             'Finish:\nFinish after the message is marked "absorbed" or "replied".',
         )
@@ -67,7 +65,7 @@ def _side_prompt(message_id: str, conversation_id: str, event_id: str) -> str:
             "Steps:\n"
             f'1. Call message__get with message_id="{message_id}".\n'
             "2. If prior context is needed, call message__conversation for the sender from the message.\n"
-            "3. Use message__send with: reply_to = the message id above when a reply is enough.\n"
+            f'3. Use message__send(content=..., reply_to="{message_id}") when a reply is enough.\n'
             "4. Use message__mark with disposition=\"needs_parent\" only when parent work is required.\n"
             "5. Otherwise use message__mark with disposition=\"absorbed\".",
             "Finish:\nFinish after exactly one disposition path succeeds.",

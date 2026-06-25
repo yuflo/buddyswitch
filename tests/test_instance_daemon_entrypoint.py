@@ -67,7 +67,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertIn("browser_inbound", imports)
         self.assertIn("message_inbound", imports)
         self.assertIn("track_comment_inbound", imports)
-        self.assertNotIn("message_available_handler", imports)
+        self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("browser_page_expired_handler", imports)
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)

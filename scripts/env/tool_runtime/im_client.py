@@ -48,10 +48,9 @@ class ActorImClient:
 
     def send(self, args: dict[str, Any]) -> dict[str, Any]:
         target = args.get("target_actor_address")
-        to = {"kind": "actor", "actor_address": target} if isinstance(target, dict) else target
         return message_service.send_im_message(
             sender_participant=self._actor,
-            to=to if isinstance(to, dict) else {},
+            to={"kind": "actor", "actor_address": target} if isinstance(target, dict) else None,
             content=str(args.get("content") or ""),
             reply_to=args.get("reply_to") if isinstance(args.get("reply_to"), str) else None,
             wake_actor=self._wake_actor,

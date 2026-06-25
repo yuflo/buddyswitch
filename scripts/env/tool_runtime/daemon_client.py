@@ -18,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from runtime_kernel import protocol  # noqa: E402
+from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
 
 CENTRAL_DAEMON_PROTOCOL = "buddyswitch-central-daemon/v1"
@@ -269,6 +270,96 @@ def check_reachability(*, target_actor_address: dict[str, Any], socket_path: Pat
         {"target_actor_address": target_actor_address},
         socket_path=socket_path,
     )
+
+
+def _non_empty_text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value.strip()
+
+
+def wake_im_actor(
+    payload: dict[str, Any],
+    *,
+    check_reachability_fn: Any | None = None,
+    request_mailbox_fn: Any | None = None,
+    socket_path: Path | None = None,
+) -> dict[str, Any]:
+    """Bridge durable Central IM acceptance into the target actor daemon mailbox."""
+
+    try:
+        if not isinstance(payload, dict):
+            raise ValueError("wake payload must be an object")
+        if payload.get("type") != "im.message.created":
+            return {"wake_status": "not_applicable", "runtime_target": "none", "error": "unsupported IM wake type"}
+        target_actor_address = ActorAddress.from_payload(payload.get("target_actor_address")).to_payload()
+        message_id = _non_empty_text(payload.get("message_id"), "message_id")
+        conversation_id = _non_empty_text(payload.get("conversation_id"), "conversation_id")
+        event_id = _non_empty_text(payload.get("event_id"), "event_id")
+        wake_id = _non_empty_text(payload.get("wake_id") or f"imwake-{uuid.uuid4().hex[:12]}", "wake_id")
+    except Exception as exc:
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": str(exc)}
+
+    reachability_call = check_reachability_fn or check_reachability
+    mailbox_call = request_mailbox_fn or request_mailbox
+    try:
+        reachability = reachability_call(
+            target_actor_address=target_actor_address,
+            socket_path=socket_path,
+        )
+    except Exception as exc:
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": str(exc)}
+    if not isinstance(reachability, dict):
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "reachability response must be an object"}
+    if reachability.get("reachability_status") != "online":
+        status = reachability.get("reachability_status")
+        return {
+            "wake_status": "target_not_online",
+            "runtime_target": "none",
+            "error": f"target actor is not online: {status}",
+            "reachability_status": status,
+        }
+
+    record = reachability.get("record")
+    endpoint = record.get("endpoint") if isinstance(record, dict) else None
+    if not isinstance(endpoint, dict) or endpoint.get("kind") != "daemon_mailbox_socket":
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target endpoint is not daemon_mailbox_socket"}
+    mailbox_socket = endpoint.get("socket_path")
+    if not isinstance(mailbox_socket, str) or not mailbox_socket.strip():
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target mailbox socket_path is required"}
+
+    try:
+        envelope = mailbox_call(
+            "mailbox.local_trigger",
+            {
+                "actor_address": target_actor_address,
+                "type": "im.message.created",
+                "payload": {
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "event_id": event_id,
+                },
+                "origin_id": message_id,
+                "correlation_id": wake_id,
+                "source_context": {"source": "central_im"},
+            },
+            socket_path=Path(mailbox_socket),
+        )
+    except Exception as exc:
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": str(exc)}
+    if not isinstance(envelope, dict):
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "mailbox response must be an object"}
+    if envelope.get("ok") is not True:
+        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+        message = error.get("message") if isinstance(error.get("message"), str) else "mailbox local trigger failed"
+        return {"wake_status": "wake_failed", "runtime_target": "none", "error": message}
+    result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
+    return {
+        "wake_status": "submitted",
+        "runtime_target": "daemon_mailbox",
+        "error": None,
+        "handling_status": result.get("handling_status") if isinstance(result.get("handling_status"), str) else None,
+    }
 
 
 def deliver_signal(*, signal: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:

@@ -248,7 +248,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(search_request["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
         self.assertEqual(search_open["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
 
-        self.assertEqual(set(message_send.get("required", [])), {"target_actor_address", "content"})
+        self.assertEqual(message_send.get("required", []), ["content"])
         self.assertNotIn("to_role", message_send.get("properties", {}))
         target_actor_address = message_send["properties"]["target_actor_address"]
         self.assertEqual(target_actor_address.get("type"), "object")
@@ -288,9 +288,11 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             )
         ).lower()
         for snippet in (
-            "direct outbound",
+            "central im message",
             "reply_to",
             "processable inbound",
+            "target_actor_address is only required for new actor-directed messages",
+            "external",
             "active actor",
             "replied",
             "disposition save failure",

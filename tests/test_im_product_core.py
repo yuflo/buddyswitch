@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -191,6 +193,47 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(event["reply_to"], None)
         self.assertEqual(after_cursor_read["events"], [])
         self.assertEqual(after_cursor_read["next_cursor"], send_response["event_id"])
+
+    def test_read_im_events_waits_for_new_visible_events_until_timeout(self) -> None:
+        registration = message_service.register_external_participant(
+            client_kind="script",
+            display_name="long poll smoke",
+        )
+        sender = registration["participant"]
+        sender_ref = {"kind": "external", "external_id": sender["external_id"]}
+        target = self._actor_participant()
+        created: list[dict[str, object]] = []
+
+        def create_message_later() -> None:
+            time.sleep(0.05)
+            created.append(
+                message_service.send_im_message(
+                    sender_participant=sender,
+                    to=target,
+                    content="ping after wait",
+                    reply_to=None,
+                    wake_actor=lambda _payload: {"wake_status": "submitted"},
+                )
+            )
+
+        thread = threading.Thread(target=create_message_later)
+        thread.start()
+        self.addCleanup(thread.join, 1)
+
+        started_at = time.monotonic()
+        events = message_service.read_im_events(
+            participant=sender_ref,
+            cursor=registration["event_cursor"],
+            limit=50,
+            wait_ms=500,
+        )
+        elapsed = time.monotonic() - started_at
+        thread.join(timeout=1)
+
+        self.assertTrue(events.get("ok"), msg=events)
+        self.assertEqual(len(created), 1)
+        self.assertLess(elapsed, 0.45)
+        self.assertEqual([event["message_id"] for event in events["events"]], [created[0]["message"]["id"]])
 
     def test_reply_uses_original_direct_conversation(self) -> None:
         registration = message_service.register_external_participant(

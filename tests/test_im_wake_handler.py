@@ -79,8 +79,8 @@ class ImWakeHandlerTests(unittest.TestCase):
         self.assertEqual(submitted["origin_id"], "msg-abc123")
         self.assertEqual(submitted["interrupt_policy"], "none")
         self.assertIn('message__get with message_id="msg-abc123"', submitted["prompt"])
-        self.assertIn('message__send with:', submitted["prompt"])
-        self.assertNotIn("content", submitted["prompt"].lower())
+        self.assertIn('message__send(content=..., reply_to="msg-abc123")', submitted["prompt"])
+        self.assertNotIn("target_actor_address", submitted["prompt"])
 
     def test_running_parent_receives_side_triage(self) -> None:
         actor = self._actor()
