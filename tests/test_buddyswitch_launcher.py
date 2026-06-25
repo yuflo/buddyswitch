@@ -1793,6 +1793,7 @@ exec "$real_git" "$@"
 
             command = (
                 "source tools/launcher/env.sh\n"
+                "export PATH=\"$4:${PATH}\"\n"
                 "BUDDYSWITCH_HOME=\"$1\"\n"
                 "BUDDYSWITCH_CODEX_HOME=\"$2\"\n"
                 "BUDDYSWITCH_XDG_CONFIG_HOME=\"$3\"\n"
@@ -1805,7 +1806,16 @@ exec "$real_git" "$@"
             env.pop("BUDDYSWITCH_ACTOR_ID", None)
 
             completed = subprocess.run(
-                ["bash", "-lc", command, "buddyswitch-run-codex-test", str(home), str(codex_home), str(xdg_config_home)],
+                [
+                    "bash",
+                    "-lc",
+                    command,
+                    "buddyswitch-run-codex-test",
+                    str(home),
+                    str(codex_home),
+                    str(xdg_config_home),
+                    str(fake_bin),
+                ],
                 cwd=ROOT,
                 env=env,
                 text=True,
