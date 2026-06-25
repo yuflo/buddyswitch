@@ -121,4 +121,3 @@ ps -axo pid,ppid,pgid,command | rg 'buddyswitch|fake_codex|chrome-devtools|runti
 ```
 
 Treat this command as an inspection step. Expected result is no unexplained residual process owned by the test run.
-

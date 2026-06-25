@@ -115,4 +115,3 @@ Run the focused command from the test plan first. If it passes and cleanup is cl
 - Current-page protection only applies while the actor main turn is running.
 - Tests describe product behavior, not implementation trivia.
 - Verification includes resource cleanup evidence.
-

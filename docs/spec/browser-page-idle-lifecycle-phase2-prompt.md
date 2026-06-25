@@ -27,4 +27,3 @@ Loop:
 9. Review the final diff against the memo and plans.
 10. Report changed files, verification commands, and remaining risk.
 ```
-

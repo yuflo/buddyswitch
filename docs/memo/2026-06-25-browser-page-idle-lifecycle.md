@@ -206,4 +206,3 @@ After implementation, browser pages behave like managed idle resources:
 - unused pages close without manual cleanup;
 - the page currently under active actor analysis is not closed mid-turn;
 - daemon-service remains a reusable scheduler rather than a browser lifecycle service.
-
