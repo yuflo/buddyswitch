@@ -386,6 +386,65 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertIsNone(row["last_error"])
             self.assertEqual(row["dispatch_result"]["handling_status"], "handled")
 
+    def test_due_scheduled_trigger_preserves_schedule_refreshed_during_handling(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            instance["state"].upsert_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-ttl-1"},
+                source_context={"owner": "browser", "generation": 1},
+                schedule_key="browser.page.idle:target-ttl-1",
+                now="2026-06-24T00:00:00Z",
+            )
+            handled: list[Any] = []
+            core = self.daemon_core
+
+            class RefreshingBrowserExpiryHandler:
+                name = "browser_page_expired"
+
+                def handles(self, trigger: Any) -> bool:
+                    return trigger.type == "browser.page.expired"
+
+                def handle(self, _context: object, state: Any, _runtime: object, trigger: Any) -> object:
+                    handled.append(trigger)
+                    state.upsert_schedule(
+                        delay_seconds=300,
+                        trigger_type="browser.page.expired",
+                        payload={"target_id": "target-ttl-1"},
+                        source_context={"owner": "browser", "generation": 2},
+                        schedule_key="browser.page.idle:target-ttl-1",
+                        now="2026-06-24T00:00:01Z",
+                    )
+                    return core.HandlerResult.handled()
+
+            first = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[RefreshingBrowserExpiryHandler()],
+                now="2026-06-24T00:00:01Z",
+            )
+            second = self.daemon_core.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[RefreshingBrowserExpiryHandler()],
+                now="2026-06-24T00:00:02Z",
+            )
+
+            self.assertEqual(first["swept_count"], 1)
+            self.assertEqual(first["delivered_count"], 0)
+            self.assertEqual(first["failed_count"], 0)
+            self.assertEqual(second["swept_count"], 0)
+            self.assertEqual(len(handled), 1)
+            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            row = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(row["status"], "pending")
+            self.assertEqual(row["due_at"], "2026-06-24T00:05:01Z")
+            self.assertEqual(row["source_context"], {"owner": "browser", "generation": 2})
+            self.assertEqual(row["payload"], {"target_id": "target-ttl-1"})
+
     def test_due_scheduled_trigger_with_no_handler_marks_failed_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)

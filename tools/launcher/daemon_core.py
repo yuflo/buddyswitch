@@ -209,6 +209,32 @@ def _handler_names(handlers: list[Any] | tuple[Any, ...] | None) -> list[str]:
     return names
 
 
+def _schedule_row(state: "DaemonState", schedule_id: str) -> dict[str, Any] | None:
+    schedules = state.payload.get("scheduled_triggers")
+    if not isinstance(schedules, dict):
+        return None
+    row = schedules.get(schedule_id)
+    if isinstance(row, dict):
+        return dict(row)
+    return None
+
+
+def _schedule_matches_dispatch_snapshot(current: dict[str, Any] | None, snapshot: dict[str, Any]) -> bool:
+    if current is None:
+        return False
+    fields = (
+        "schedule_id",
+        "type",
+        "payload",
+        "source_context",
+        "status",
+        "updated_at",
+        "due_at",
+        "schedule_key",
+    )
+    return all(current.get(field) == snapshot.get(field) for field in fields)
+
+
 def _notify_subscriptions_payload(notify_subscriptions: list[str] | tuple[str, ...] | None) -> list[str]:
     names: list[str] = []
     for value in notify_subscriptions or []:
@@ -1500,19 +1526,27 @@ def sweep_due_scheduled_triggers(
             and isinstance(dispatch_result.get("handled_count"), int)
             and dispatch_result.get("handled_count") > 0
         ):
-            updated = state.mark_schedule_delivered(schedule_id, dispatch_result=dispatch_result, now=timestamp)
-            delivered_count += 1
+            current_schedule = _schedule_row(state, schedule_id)
+            if _schedule_matches_dispatch_snapshot(current_schedule, schedule):
+                updated = state.mark_schedule_delivered(schedule_id, dispatch_result=dispatch_result, now=timestamp)
+                delivered_count += 1
+            else:
+                updated = current_schedule if current_schedule is not None else schedule
         else:
             error = dispatch_result.get("handling_error")
             if not isinstance(error, str) or not error:
                 error = "scheduled trigger had no matching handler"
-            updated = state.mark_schedule_failed(
-                schedule_id,
-                message=error,
-                dispatch_result=dispatch_result,
-                now=timestamp,
-            )
-            failed_count += 1
+            current_schedule = _schedule_row(state, schedule_id)
+            if _schedule_matches_dispatch_snapshot(current_schedule, schedule):
+                updated = state.mark_schedule_failed(
+                    schedule_id,
+                    message=error,
+                    dispatch_result=dispatch_result,
+                    now=timestamp,
+                )
+                failed_count += 1
+            else:
+                updated = current_schedule if current_schedule is not None else schedule
         results.append(updated)
     return {
         "swept_count": swept_count,

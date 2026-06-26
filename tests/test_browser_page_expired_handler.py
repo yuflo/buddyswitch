@@ -80,7 +80,11 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         self,
         *,
         target_actor_address: dict[str, str] | None = None,
+        due_at: str | None = None,
     ) -> Any:
+        source_context = {"schedule_id": "schedule-1"}
+        if due_at is not None:
+            source_context["due_at"] = due_at
         return self.triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.page.expired",
@@ -88,7 +92,7 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             origin_id="schedule-1",
             correlation_id=None,
             payload={"target_id": "target-idle-1"},
-            source_context={"schedule_id": "schedule-1"},
+            source_context=source_context,
         )
 
     def test_auto_close_closes_existing_target_by_target_id(self) -> None:
@@ -266,6 +270,45 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "handled")
         self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-idle-1"}])
+
+    def test_stale_due_trigger_does_not_close_recently_refreshed_target(self) -> None:
+        calls: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self.handler_module.browser_lifecycle._write_page_idle_state(
+                instance_root,
+                {
+                    "targets": {
+                        "target-idle-1": {
+                            "target_id": "target-idle-1",
+                            "target_url": "https://example.com/recent",
+                            "last_used_at": "2026-06-24T00:04:30Z",
+                        }
+                    },
+                    "page_id_to_target_id": {},
+                },
+            )
+            context = FakeContext()
+            context.instance_root = instance_root
+
+            def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
+                calls.append({"browser_url": browser_url, "target_id": target_id})
+                return {"status": "closed", "target_id": target_id}
+
+            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+            handler = self.handler_module.BrowserPageExpiredHandler()
+
+            result = handler.handle(
+                context,
+                state=object(),
+                runtime=FakeRuntime(activity_status="idle"),
+                trigger=self._trigger(due_at="2026-06-24T00:05:00Z"),
+            )
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(calls, [])
+            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertIn("target-idle-1", state["targets"])
 
     def test_inbound_contract_requires_only_target_id(self) -> None:
         inbound = load_module(BROWSER_INBOUND_PATH)

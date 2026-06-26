@@ -45,6 +45,16 @@ def _payload(trigger: Any) -> dict[str, Any]:
     }
 
 
+def _trigger_due_at(trigger: Any) -> str | None:
+    source_context = getattr(trigger, "source_context", None)
+    if not isinstance(source_context, dict):
+        return None
+    due_at = source_context.get("due_at")
+    if isinstance(due_at, str) and due_at.strip():
+        return due_at.strip()
+    return None
+
+
 def _browser_endpoint(context: Any) -> str | None:
     instance_payload = getattr(context, "instance_payload", None)
     if not isinstance(instance_payload, dict):
@@ -98,17 +108,30 @@ class BrowserPageExpiredHandler:
             if target_actor != local_actor:
                 raise PermissionError("wrong target actor for browser page expiry trigger")
             payload = _payload(trigger)
-            return self._handle_expiry(context, runtime, payload)
+            return self._handle_expiry(context, runtime, payload, due_at=_trigger_due_at(trigger))
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))
 
-    def _handle_expiry(self, context: Any, runtime: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
+    def _handle_expiry(
+        self,
+        context: Any,
+        runtime: Any,
+        payload: dict[str, Any],
+        *,
+        due_at: str | None = None,
+    ) -> daemon_core.HandlerResult:
         root = _instance_root(context)
         target_id = payload["target_id"]
         if root is not None:
             current_target_id = browser_lifecycle.current_target_id(root)
             if current_target_id == target_id and _parent_turn_is_running(runtime):
                 browser_lifecycle.refresh_current_page_idle(instance_root=root, target_id=target_id)
+                return daemon_core.HandlerResult.handled()
+            if browser_lifecycle.target_idle_expiry_after_due_at(
+                instance_root=root,
+                target_id=target_id,
+                due_at=due_at,
+            ):
                 return daemon_core.HandlerResult.handled()
         return self._auto_close(context, payload)
 
