@@ -72,38 +72,35 @@ def save_im_participant(participant: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def save_im_session(session: dict[str, Any]) -> dict[str, Any]:
-    token_hash = _require_non_empty_text(session.get("token_hash"), "session.token_hash")
-    if not token_hash.startswith("sha256:"):
-        raise ValueError("session.token_hash must start with sha256:")
-    filename = token_hash.replace(":", "-", 1)
-    normalized = dict(session, token_hash=token_hash)
+def save_im_connection(connection: dict[str, Any]) -> dict[str, Any]:
+    key_hash = _require_non_empty_text(connection.get("connection_key_hash"), "connection.connection_key_hash")
+    if not key_hash.startswith("sha256:"):
+        raise ValueError("connection.connection_key_hash must start with sha256:")
+    participant = connection.get("participant")
+    if not isinstance(participant, dict):
+        raise ValueError("connection.participant must be an object")
+    normalized = dict(
+        connection,
+        connection_key_hash=key_hash,
+        participant=im_participant_ref(participant),
+        display_name=_require_non_empty_text(connection.get("display_name"), "connection.display_name"),
+        last_event_id=_require_non_empty_text(connection.get("last_event_id"), "connection.last_event_id"),
+        created_at=_require_non_empty_text(connection.get("created_at"), "connection.created_at"),
+        last_used_at=_require_non_empty_text(connection.get("last_used_at"), "connection.last_used_at"),
+    )
     _require_im_write_root()
-    runtime_files.write_json_object(_im_dir("sessions") / f"{filename}.json", normalized)
+    runtime_files.write_json_object(_im_dir("connections") / f"{key_hash.replace(':', '-', 1)}.json", normalized)
     return normalized
 
 
-def get_im_session_by_token_hash(token_hash: str) -> dict[str, Any] | None:
-    normalized = _require_non_empty_text(token_hash, "token_hash")
-    filename = normalized.replace(":", "-", 1)
-    path = _im_dir("sessions") / f"{filename}.json"
+def get_im_connection_by_key_hash(key_hash: str) -> dict[str, Any] | None:
+    normalized = _require_non_empty_text(key_hash, "connection_key_hash")
+    if not normalized.startswith("sha256:"):
+        raise ValueError("connection_key_hash must start with sha256:")
+    path = _im_dir("connections") / f"{normalized.replace(':', '-', 1)}.json"
     if not path.exists():
         return None
     return runtime_files.read_json_object(path)
-
-
-def save_im_cursor(cursor: dict[str, Any]) -> dict[str, Any]:
-    participant = cursor.get("participant")
-    if not isinstance(participant, dict):
-        raise ValueError("cursor.participant must be an object")
-    last_event_id = _require_non_empty_text(cursor.get("last_event_id"), "cursor.last_event_id")
-    normalized = dict(cursor, participant=dict(participant), last_event_id=last_event_id)
-    _require_im_write_root()
-    runtime_files.write_json_object(
-        _im_dir("cursors") / f"{im_participant_filename_key(participant)}.json",
-        normalized,
-    )
-    return normalized
 
 
 def next_im_sequence() -> int:

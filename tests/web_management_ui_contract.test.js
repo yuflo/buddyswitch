@@ -91,7 +91,7 @@ test('production javascript keeps the real api surface', () => {
     '/api/health',
     '/api/roles',
     '/api/instances',
-    '/api/im/external-participants',
+    '/api/im/connections',
     '/api/im/messages',
     '/api/im/events',
     '/status',
@@ -109,8 +109,13 @@ test('production javascript keeps the real api surface', () => {
   assertIncludes(appJs, 'actor_id: state.selectedInstanceId');
   assertIncludes(appJs, 'content: state.draftText');
   assertIncludes(appJs, "/api/im/messages/' + encodeURIComponent");
-  assertIncludes(appJs, 'buildImEventsUrl(state.imEventCursor, 15000)');
-  assertIncludes(appJs, "'&wait_ms='");
+  assertIncludes(appJs, 'buildImEventsUrl(15000)');
+  assertIncludes(appJs, "'/api/im/events?wait_ms='");
+  assertExcludes(appJs, '/api/im/' + 'external-' + 'participants');
+  assertExcludes(appJs, 'participant_' + 'token');
+  assertExcludes(appJs, 'event_' + 'cursor');
+  assertExcludes(appJs, 'imEvent' + 'Cursor');
+  assertExcludes(appJs, 'cursor' + '=');
   assertExcludes(appJs, "selectedInstanceId) + '/messages'");
   assertExcludes(appJs, 'JSON.stringify({ text: state.draftText })');
   assertIncludes(combinedAssets, 'Copy command');

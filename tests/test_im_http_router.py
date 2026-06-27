@@ -45,22 +45,30 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             wake_actor=lambda payload: wake_calls.append(dict(payload)) or {"wake_status": "submitted"},
         )
 
-        status, registration = router.handle(
+        status, created = router.handle(
             "POST",
-            "/api/im/external-participants",
-            json.dumps({"client_kind": "script", "display_name": "local smoke"}).encode("utf-8"),
+            "/api/im/connections",
+            json.dumps({"display_name": "local smoke"}).encode("utf-8"),
             {},
         )
         self.assertEqual(status, 200)
-        self.assertTrue(registration["ok"], msg=registration)
-        token = registration["participant_token"]
-        cursor = registration["event_cursor"]
+        self.assertTrue(created["ok"], msg=created)
+        key = created["connection_key"]
+        self.assertTrue(key.startswith("imck-"))
+        self.assertNotIn("participant", created)
+        self.assertNotIn("participant_" + "token", created)
+        self.assertNotIn("event_" + "cursor", created)
+
+        old_route = "/api/im/" + "external-" + "participants"
+        status, old_registration = router.handle("POST", old_route, b"{}", {})
+        self.assertEqual(status, 404)
+        self.assertFalse(old_registration["ok"])
 
         status, actors = router.handle(
             "GET",
             "/api/im/actors?role_id=market",
             b"",
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(actors["count"], 1)
@@ -76,11 +84,12 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "reply_to": None,
                 }
             ).encode("utf-8"),
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(sent["delivery_status"], "accepted")
         self.assertEqual(sent["wake_status"], "submitted")
+        self.assertNotIn("next_cursor", sent)
         message_id = sent["message"]["id"]
         self.assertEqual(len(wake_calls), 1)
         self.assertEqual(wake_calls[0]["type"], "im.message.created")
@@ -88,36 +97,67 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         status, events = router.handle(
             "GET",
-            f"/api/im/events?cursor={cursor}&wait_ms=0",
+            "/api/im/events?wait_ms=0",
             b"",
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200)
-        self.assertEqual([event["message_id"] for event in events["events"]], [message_id])
+        self.assertEqual(events["events"], [])
+        self.assertNotIn("next_cursor", events)
+
+        status, cursor_rejected = router.handle(
+            "GET",
+            "/api/im/events?" + "cursor" + "=imev-old&wait_ms=0",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 400)
+        self.assertFalse(cursor_rejected["ok"])
+        self.assertEqual(cursor_rejected["error"]["code"], "E_IM_PAYLOAD")
 
         status, message = router.handle(
             "GET",
             f"/api/im/messages/{message_id}",
             b"",
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(message["message"]["content"], "ping")
 
+        auth = message_service.authenticate_external_connection_key(key)
+        self.assertTrue(auth["ok"], msg=auth)
         actor_reply = message_service.send_im_message(
             sender_participant={"kind": "actor", "actor_address": actor_address},
-            to={"kind": "external", "external_id": registration["participant"]["external_id"]},
+            to=auth["participant"],
             content="pong",
             reply_to=message_id,
             wake_actor=lambda _payload: {"wake_status": "not_applicable"},
         )
         reply_id = actor_reply["message"]["id"]
 
+        status, reply_events = router.handle(
+            "GET",
+            "/api/im/events?wait_ms=0",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual([event["message_id"] for event in reply_events["events"]], [reply_id])
+
+        status, repeated = router.handle(
+            "GET",
+            "/api/im/events?wait_ms=0",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(repeated["events"], [])
+
         status, mark = router.handle(
             "PATCH",
             f"/api/im/messages/{reply_id}/disposition",
             json.dumps({"disposition": "absorbed", "reason": "consumed"}).encode("utf-8"),
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(mark["disposition"], "absorbed")
@@ -126,7 +166,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "GET",
             f"/api/im/conversations/direct?kind=actor&role_id=market&actor_id={actor_address['actor_id']}&limit=20",
             b"",
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200, msg=conversation)
         self.assertEqual([row["id"] for row in conversation["messages"]], [message_id, reply_id])
@@ -142,20 +182,20 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_message_send_payload_errors_return_json_400(self) -> None:
         router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [], wake_actor=lambda _payload: {})
-        status, registration = router.handle(
+        status, created = router.handle(
             "POST",
-            "/api/im/external-participants",
-            json.dumps({"client_kind": "script", "display_name": "local smoke"}).encode("utf-8"),
+            "/api/im/connections",
+            json.dumps({"display_name": "local smoke"}).encode("utf-8"),
             {},
         )
         self.assertEqual(status, 200)
-        token = registration["participant_token"]
+        key = created["connection_key"]
 
         status, payload = router.handle(
             "POST",
             "/api/im/messages",
             json.dumps({"content": "missing target"}).encode("utf-8"),
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
 
         self.assertEqual(status, 400)
@@ -172,7 +212,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "content": "bad target",
                 }
             ).encode("utf-8"),
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
 
         self.assertEqual(status, 400)

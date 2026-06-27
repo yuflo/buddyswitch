@@ -158,12 +158,12 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role_id="dev",
             actor_id=self._runtime_actor_id(role="dev", label="act-dev-im-reply"),
         )
-        registration = message_service.register_external_participant(
-            client_kind="script",
-            display_name="local smoke",
-        )
+        created = message_service.create_external_connection(display_name="local smoke")
+        self.assertTrue(created.get("ok"), msg=created)
+        auth = message_service.authenticate_external_connection_key(str(created["connection_key"]))
+        self.assertTrue(auth.get("ok"), msg=auth)
         root = message_service.send_im_message(
-            sender_participant=registration["participant"],
+            sender_participant=auth["participant"],
             to={"kind": "actor", "actor_address": actor.to_payload()},
             content="ping",
             wake_actor=lambda _payload: {"wake_status": "submitted"},

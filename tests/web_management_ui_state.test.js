@@ -278,10 +278,10 @@ test('mutation busy state disables open tui', () => {
   );
 });
 
-test('im event URL uses cursor and bounded wait', () => {
+test('im event URL uses only bounded wait', () => {
   assert.equal(
-    app.buildImEventsUrl('imev-abc 123', 15000),
-    '/api/im/events?cursor=imev-abc%20123&wait_ms=15000'
+    app.buildImEventsUrl(15000),
+    '/api/im/events?wait_ms=15000'
   );
 });
 

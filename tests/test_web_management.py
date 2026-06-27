@@ -274,13 +274,14 @@ class WebManagementUnitTests(unittest.TestCase):
             service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
             status, payload = service.handle_api(
                 "POST",
-                "/api/im/external-participants",
-                json.dumps({"client_kind": "script", "display_name": "probe"}).encode("utf-8"),
+                "/api/im/connections",
+                json.dumps({"display_name": "probe"}).encode("utf-8"),
                 {},
             )
 
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
+            self.assertIn("connection_key", payload)
             self.assertEqual(os.environ.get("BUDDYSWITCH_STATE_ROOT"), str(shared_root / "state"))
             self.assertNotIn("BUDDYSWITCH_ACTOR_ID", os.environ)
 

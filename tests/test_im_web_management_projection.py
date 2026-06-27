@@ -32,11 +32,11 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         router = _RouterStub()
         service = web_management.WebManagementService(repo_root=ROOT, im_router=router)
 
-        status, payload = service.handle_api("POST", "/api/im/external-participants", b"{}", {})
+        status, payload = service.handle_api("POST", "/api/im/connections", b"{}", {})
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"ok": True, "route": "/api/im/external-participants"})
-        self.assertEqual(router.calls[0][0:3], ("POST", "/api/im/external-participants", b"{}"))
+        self.assertEqual(payload, {"ok": True, "route": "/api/im/connections"})
+        self.assertEqual(router.calls[0][0:3], ("POST", "/api/im/connections", b"{}"))
         with self.assertRaises(web_management.HttpError) as raised:
             old_route = "/api/messages" + "/send"
             service.handle_api("POST", old_route, b'{"actor_id":"act-dev-demo","content":"hello"}')

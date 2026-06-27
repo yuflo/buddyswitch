@@ -92,18 +92,21 @@ class _WakeHandlerDispatcher:
 
 
 class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _register_external(self, router: im_http_router.ImHttpRouter) -> dict[str, Any]:
-        status, registration = router.handle(
+    def _create_connection(self, router: im_http_router.ImHttpRouter) -> str:
+        status, created = router.handle(
             "POST",
-            "/api/im/external-participants",
-            json.dumps({"client_kind": "script", "display_name": "local acceptance"}).encode("utf-8"),
+            "/api/im/connections",
+            json.dumps({"display_name": "local acceptance"}).encode("utf-8"),
             {},
         )
-        self.assertEqual(status, 200, msg=registration)
-        self.assertTrue(registration.get("ok"), msg=registration)
-        return registration
+        self.assertEqual(status, 200, msg=created)
+        self.assertTrue(created.get("ok"), msg=created)
+        self.assertIsInstance(created.get("connection_key"), str, msg=created)
+        self.assertNotIn("participant_" + "token", created)
+        self.assertNotIn("event_" + "cursor", created)
+        return str(created["connection_key"])
 
-    def test_external_send_actor_reply_to_external_visible_via_cursor(self) -> None:
+    def test_external_send_actor_reply_to_external_visible_once_without_cursor(self) -> None:
         actor_address = ActorAddress(
             role_id="market",
             actor_id=self._runtime_actor_id(role="market", label="reply-loop"),
@@ -113,8 +116,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             actor_lister=lambda _role_id: [{"actor_address": actor_address.to_payload(), "status": "online"}],
             wake_actor=daemon.wake_im_actor,
         )
-        registration = self._register_external(router)
-        token = registration["participant_token"]
+        key = self._create_connection(router)
 
         status, sent = router.handle(
             "POST",
@@ -125,11 +127,12 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "content": "ping",
                 }
             ).encode("utf-8"),
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200, msg=sent)
         self.assertEqual(sent["delivery_status"], "accepted")
         self.assertEqual(sent["wake_status"], "submitted")
+        self.assertNotIn("next_cursor", sent)
         self.assertEqual(len(daemon.wake_calls), 1)
         original_message_id = sent["message"]["id"]
 
@@ -142,18 +145,28 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         status, events = router.handle(
             "GET",
-            f"/api/im/events?cursor={sent['next_cursor']}&wait_ms=0",
+            "/api/im/events?wait_ms=0",
             b"",
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200, msg=events)
         self.assertEqual([event["message_id"] for event in events["events"]], [reply["message"]["id"]])
+        self.assertNotIn("next_cursor", events)
+
+        status, repeated = router.handle(
+            "GET",
+            "/api/im/events?wait_ms=0",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200, msg=repeated)
+        self.assertEqual(repeated["events"], [])
 
         status, fetched = router.handle(
             "GET",
             f"/api/im/messages/{reply['message']['id']}",
             b"",
-            {"Authorization": f"Bearer {token}"},
+            {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200, msg=fetched)
         self.assertEqual(fetched["message"]["content"], "pong")

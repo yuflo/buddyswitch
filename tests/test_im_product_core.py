@@ -28,52 +28,72 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ).to_payload()
         return {"kind": "actor", "actor_address": actor_address}
 
-    def test_register_external_participant_writes_session_without_plaintext_token(self) -> None:
-        response = message_service.register_external_participant(
-            client_kind="script",
-            display_name="local smoke",
-        )
+    def _external_connection(
+        self,
+        *,
+        display_name: str = "local smoke",
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        created = message_service.create_external_connection(display_name=display_name)
+        self.assertTrue(created.get("ok"), msg=created)
+        connection_key = created.get("connection_key")
+        self.assertIsInstance(connection_key, str, msg=created)
+        assert isinstance(connection_key, str)
+        auth = message_service.authenticate_external_connection_key(connection_key)
+        self.assertTrue(auth.get("ok"), msg=auth)
+        connection = auth.get("connection")
+        participant = auth.get("participant")
+        self.assertIsInstance(connection, dict, msg=auth)
+        self.assertIsInstance(participant, dict, msg=auth)
+        assert isinstance(connection, dict)
+        assert isinstance(participant, dict)
+        return created, connection, participant
+
+    def test_create_external_connection_returns_only_connection_key_and_persists_internal_state(self) -> None:
+        response = message_service.create_external_connection(display_name="local smoke")
 
         self.assertTrue(response.get("ok"), msg=response)
-        participant = response.get("participant")
-        self.assertIsInstance(participant, dict, msg=response)
+        connection_key = response.get("connection_key")
+        self.assertIsInstance(connection_key, str, msg=response)
+        assert isinstance(connection_key, str)
+        self.assertTrue(connection_key.startswith("imck-"), msg=response)
+        self.assertNotIn("participant", response)
+        self.assertNotIn("participant_" + "token", response)
+        self.assertNotIn("event_" + "cursor", response)
+        self.assertNotIn("client_kind", response)
+
+        auth = message_service.authenticate_external_connection_key(connection_key)
+        self.assertTrue(auth.get("ok"), msg=auth)
+        participant = auth.get("participant")
+        connection = auth.get("connection")
+        self.assertIsInstance(participant, dict, msg=auth)
+        self.assertIsInstance(connection, dict, msg=auth)
         assert isinstance(participant, dict)
+        assert isinstance(connection, dict)
         self.assertEqual(participant.get("kind"), "external")
         external_id = participant.get("external_id")
-        self.assertIsInstance(external_id, str, msg=response)
+        self.assertIsInstance(external_id, str, msg=auth)
         assert isinstance(external_id, str)
-        self.assertTrue(external_id.startswith("ext-"), msg=response)
-        token = response.get("participant_token")
-        self.assertIsInstance(token, str, msg=response)
-        assert isinstance(token, str)
-        self.assertTrue(token.startswith("impt-"), msg=response)
-        self.assertEqual(response.get("event_cursor"), "imev-000000000000")
 
         participant_path = self.runtime_state_root / "im" / "participants" / f"{external_id}.json"
         self.assertTrue(participant_path.is_file())
         participant_row = json.loads(participant_path.read_text(encoding="utf-8"))
         self.assertEqual(participant_row["external_id"], external_id)
         self.assertEqual(participant_row["display_name"], "local smoke")
+        self.assertNotIn("client_kind", participant_row)
 
-        session_files = sorted((self.runtime_state_root / "im" / "sessions").glob("*.json"))
-        self.assertEqual(len(session_files), 1)
-        session_text = session_files[0].read_text(encoding="utf-8")
-        self.assertNotIn(token, session_text)
-        session_row = json.loads(session_text)
-        self.assertEqual(session_row["participant"], {"kind": "external", "external_id": external_id})
-        self.assertTrue(str(session_row["token_hash"]).startswith("sha256:"))
-
-        cursor_path = self.runtime_state_root / "im" / "cursors" / f"external--{external_id}.json"
-        self.assertTrue(cursor_path.is_file())
-        cursor_row = json.loads(cursor_path.read_text(encoding="utf-8"))
-        self.assertEqual(cursor_row["last_event_id"], "imev-000000000000")
+        connection_files = sorted((self.runtime_state_root / "im" / "connections").glob("*.json"))
+        self.assertEqual(len(connection_files), 1)
+        connection_text = connection_files[0].read_text(encoding="utf-8")
+        self.assertNotIn(connection_key, connection_text)
+        connection_row = json.loads(connection_text)
+        self.assertEqual(connection_row["participant"], {"kind": "external", "external_id": external_id})
+        self.assertEqual(connection_row["display_name"], "local smoke")
+        self.assertEqual(connection_row["last_event_id"], "imev-000000000000")
+        self.assertTrue(str(connection_row["connection_key_hash"]).startswith("sha256:"))
+        self.assertEqual(auth["participant"], {"kind": "external", "external_id": external_id})
 
     def test_send_im_message_persists_durable_objects_when_wake_fails(self) -> None:
-        registration = message_service.register_external_participant(
-            client_kind="script",
-            display_name="local smoke",
-        )
-        sender = registration["participant"]
+        _created, _connection, sender = self._external_connection()
         sender_ref = {"kind": "external", "external_id": sender["external_id"]}
         target = self._actor_participant()
         wake_calls: list[dict[str, object]] = []
@@ -103,7 +123,6 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         message_id = message_ref["id"]
         conversation_id = message_ref["conversation_id"]
         self.assertEqual(message_ref.get("reply_to"), None)
-        self.assertEqual(response.get("next_cursor"), response.get("event_id"))
 
         message_path = self.runtime_state_root / "im" / "messages" / f"{message_id}.json"
         self.assertTrue(message_path.is_file())
@@ -147,72 +166,67 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(wake_calls[0]["target_actor_address"], target["actor_address"])
         self.assertNotIn("content", wake_calls[0])
 
-    def test_read_im_events_is_participant_scoped_and_cursor_stable(self) -> None:
-        registration = message_service.register_external_participant(
-            client_kind="script",
-            display_name="local smoke",
-        )
-        sender = registration["participant"]
+    def test_external_connection_reads_actor_reply_once_without_client_cursor(self) -> None:
+        _created, connection, sender = self._external_connection()
         sender_ref = {"kind": "external", "external_id": sender["external_id"]}
+        actor = self._actor_participant()
         send_response = message_service.send_im_message(
             sender_participant=sender,
-            to=self._actor_participant(),
+            to=actor,
             content="ping",
             reply_to=None,
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
-        start_cursor = registration["event_cursor"]
-
-        first_read = message_service.read_im_events(
-            participant=sender_ref,
-            cursor=start_cursor,
-            limit=50,
+        connection["last_event_id"] = send_response["event_id"]
+        actor_reply = message_service.send_im_message(
+            sender_participant=actor,
+            to=sender_ref,
+            content="pong",
+            reply_to=send_response["message"]["id"],
+            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
+        )
+        first_read = message_service.read_external_connection_events(
+            connection=connection,
             wait_ms=0,
         )
-        second_read = message_service.read_im_events(
-            participant=sender_ref,
-            cursor=start_cursor,
-            limit=50,
-            wait_ms=0,
-        )
-        after_cursor_read = message_service.read_im_events(
-            participant=sender_ref,
-            cursor=send_response["event_id"],
-            limit=50,
+        second_read = message_service.read_external_connection_events(
+            connection=connection,
             wait_ms=0,
         )
 
         self.assertTrue(first_read.get("ok"), msg=first_read)
-        self.assertEqual(first_read, second_read)
-        self.assertEqual(first_read["next_cursor"], send_response["event_id"])
+        self.assertNotIn("next_cursor", first_read)
+        self.assertNotIn("participant", first_read)
         self.assertEqual(len(first_read["events"]), 1)
         event = first_read["events"][0]
-        self.assertEqual(event["event_id"], send_response["event_id"])
+        self.assertEqual(event["event_id"], actor_reply["event_id"])
+        self.assertEqual(event["message_id"], actor_reply["message"]["id"])
         self.assertEqual(event["participant"], sender_ref)
         self.assertEqual(event["type"], "message.created")
-        self.assertEqual(event["reply_to"], None)
-        self.assertEqual(after_cursor_read["events"], [])
-        self.assertEqual(after_cursor_read["next_cursor"], send_response["event_id"])
+        self.assertEqual(event["reply_to"], send_response["message"]["id"])
+        self.assertEqual(second_read["events"], [])
 
-    def test_read_im_events_waits_for_new_visible_events_until_timeout(self) -> None:
-        registration = message_service.register_external_participant(
-            client_kind="script",
-            display_name="long poll smoke",
-        )
-        sender = registration["participant"]
+    def test_external_connection_events_waits_for_new_visible_events_until_timeout(self) -> None:
+        _created, connection, sender = self._external_connection(display_name="long poll smoke")
         sender_ref = {"kind": "external", "external_id": sender["external_id"]}
         target = self._actor_participant()
+        root = message_service.send_external_connection_message(
+            connection=connection,
+            to=target,
+            content="ping before wait",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
         created: list[dict[str, object]] = []
 
         def create_message_later() -> None:
             time.sleep(0.05)
             created.append(
                 message_service.send_im_message(
-                    sender_participant=sender,
-                    to=target,
-                    content="ping after wait",
-                    reply_to=None,
-                    wake_actor=lambda _payload: {"wake_status": "submitted"},
+                    sender_participant=target,
+                    to=sender_ref,
+                    content="pong after wait",
+                    reply_to=root["message"]["id"],
+                    wake_actor=lambda _payload: {"wake_status": "not_applicable"},
                 )
             )
 
@@ -221,10 +235,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.addCleanup(thread.join, 1)
 
         started_at = time.monotonic()
-        events = message_service.read_im_events(
-            participant=sender_ref,
-            cursor=registration["event_cursor"],
-            limit=50,
+        events = message_service.read_external_connection_events(
+            connection=connection,
             wait_ms=500,
         )
         elapsed = time.monotonic() - started_at
@@ -234,13 +246,10 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(len(created), 1)
         self.assertLess(elapsed, 0.45)
         self.assertEqual([event["message_id"] for event in events["events"]], [created[0]["message"]["id"]])
+        self.assertNotIn("next_cursor", events)
 
     def test_reply_uses_original_direct_conversation(self) -> None:
-        registration = message_service.register_external_participant(
-            client_kind="script",
-            display_name="local smoke",
-        )
-        external = registration["participant"]
+        _created, _connection, external = self._external_connection()
         external_ref = {"kind": "external", "external_id": external["external_id"]}
         actor = self._actor_participant()
         root = message_service.send_im_message(
@@ -274,11 +283,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(reply_states[0]["disposition"], "unseen")
 
     def test_message_replies_and_disposition_are_participant_scoped(self) -> None:
-        registration = message_service.register_external_participant(
-            client_kind="script",
-            display_name="local smoke",
-        )
-        external = registration["participant"]
+        _created, _connection, external = self._external_connection()
         external_ref = {"kind": "external", "external_id": external["external_id"]}
         actor = self._actor_participant()
         root = message_service.send_im_message(
@@ -295,10 +300,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             reply_to=root["message"]["id"],
             wake_actor=lambda _payload: {"wake_status": "not_applicable"},
         )
-        outsider = message_service.register_external_participant(
-            client_kind="script",
-            display_name="other smoke",
-        )["participant"]
+        _other_created, _other_connection, outsider = self._external_connection(display_name="other smoke")
 
         read_reply = message_service.get_im_message(
             participant=external_ref,
@@ -340,11 +342,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(state["reason"], "reply consumed by local script")
 
     def test_direct_conversation_read_returns_visible_messages_in_order(self) -> None:
-        registration = message_service.register_external_participant(
-            client_kind="script",
-            display_name="local smoke",
-        )
-        external = registration["participant"]
+        _created, _connection, external = self._external_connection()
         external_ref = {"kind": "external", "external_id": external["external_id"]}
         actor = self._actor_participant()
         root = message_service.send_im_message(
