@@ -19,14 +19,18 @@
         </div>
 
         <nav class="sidebar-nav" aria-label="Primary">
-          <span class="nav-item is-active">
+          <button id="actor-nav-button" class="nav-item is-active" type="button">
             <span class="nav-glyph" aria-hidden="true"></span>
-            Control room
-          </span>
+            Actors
+          </button>
+          <button id="tracks-nav-button" class="nav-item" type="button">
+            <span class="nav-glyph track-glyph" aria-hidden="true"></span>
+            Tracks
+          </button>
         </nav>
 
         <section class="sidebar-section create-section" aria-labelledby="create-heading">
-          <div class="sidebar-heading" id="create-heading">Create Instance</div>
+          <div class="sidebar-heading" id="create-heading">Create Actor</div>
           <label class="field compact-field">
             <span>Role</span>
             <select id="role-select"></select>
@@ -35,13 +39,13 @@
         </section>
       </aside>
 
-      <main class="workspace-page" data-api-instances="/api/instances">
+      <main class="workspace-page">
         <header class="page-header">
           <div class="breadcrumb">BuddySwitch / Web management</div>
           <div class="title-row">
             <div>
-              <h1>Instance control room</h1>
-              <p class="page-summary">Create, inspect, message, and recover local actor instances from one workspace.</p>
+              <h1>Actor Console</h1>
+              <p class="page-summary">Select an actor, inspect runtime and task state, message directly, and use lifecycle controls in one place.</p>
             </div>
             <div class="header-actions">
               <span id="server-status" class="status-pill">Checking</span>
@@ -50,48 +54,46 @@
           </div>
         </header>
 
-        <section class="content-grid">
-          <section class="block-panel instance-panel" aria-labelledby="instances-heading">
-            <div class="panel-heading">
-              <div>
-                <h2 id="instances-heading">Instances</h2>
-                <p class="panel-subtitle">Stored local actor instances</p>
-              </div>
-            </div>
-            <div class="table-wrap">
-              <table class="instances-table">
-                <thead>
-                  <tr>
-                    <th>Instance</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th>App Server</th>
-                    <th>Thread</th>
-                    <th>Browser</th>
-                    <th>Updated</th>
-                  </tr>
-                </thead>
-                <tbody id="instances-body"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <aside class="detail-column" aria-label="Selected instance controls">
-            <section class="block-panel detail-panel" aria-labelledby="detail-heading">
-              <div class="panel-heading compact">
+        <section id="actor-view" class="view-section actor-view">
+          <div class="actor-console-grid">
+            <section class="workspace-panel actor-roster-panel" aria-labelledby="actors-heading">
+              <div class="panel-heading">
                 <div>
-                  <h2 id="detail-heading">Selected instance</h2>
-                  <p class="panel-subtitle">Current runtime and workspace details</p>
+                  <h2 id="actors-heading">Actors</h2>
+                  <p class="panel-subtitle">Runtime actors available to the Web interface</p>
                 </div>
               </div>
-              <dl id="instance-detail" class="detail-grid"></dl>
+              <div id="actors-list" class="actor-list" aria-live="polite"></div>
             </section>
 
-            <section class="block-panel action-panel" aria-labelledby="action-heading">
+            <section id="actor-console" class="workspace-panel console-column" aria-labelledby="console-heading">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="console-heading">Selected actor</h2>
+                  <p class="panel-subtitle">Runtime, task, Track, and direct message context</p>
+                </div>
+              </div>
+              <div class="console-stack">
+                <section class="console-section" aria-labelledby="runtime-heading">
+                  <h3 id="runtime-heading">Runtime</h3>
+                  <dl id="actor-runtime-detail" class="detail-grid"></dl>
+                </section>
+                <section class="console-section" aria-labelledby="task-heading">
+                  <h3 id="task-heading">Task</h3>
+                  <div id="actor-task-summary" class="summary-stack"></div>
+                </section>
+                <section class="console-section" aria-labelledby="actor-tracks-heading">
+                  <h3 id="actor-tracks-heading">Track summary</h3>
+                  <div id="actor-track-summary" class="summary-stack"></div>
+                </section>
+              </div>
+            </section>
+
+            <aside class="workspace-panel runtime-column" aria-label="Selected actor actions">
               <div class="panel-heading compact">
                 <div>
-                  <h2 id="action-heading">Actions</h2>
-                  <p class="panel-subtitle">Direct message and lifecycle controls</p>
+                  <h2>Actions</h2>
+                  <p class="panel-subtitle">Message and runtime controls</p>
                 </div>
               </div>
               <div class="action-body">
@@ -99,7 +101,7 @@
                   <span>Message</span>
                   <textarea id="instruction-input" rows="6" placeholder="Send a direct message to the selected actor."></textarea>
                 </label>
-                <div class="action-group" aria-label="Main thread actions">
+                <div class="action-group" aria-label="Message and interruption actions">
                   <button id="send-button" class="button primary" type="button">Send</button>
                   <button id="interrupt-button" class="button secondary" type="button">Interrupt</button>
                 </div>
@@ -119,11 +121,36 @@
                   <button id="resume-button" class="button secondary" type="button">Resume</button>
                   <button id="delete-button" class="button danger" type="button">Delete</button>
                 </div>
+                <p id="action-availability-status" class="inline-status action-availability-status" aria-live="polite"></p>
                 <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
                 <div id="im-conversation" class="im-conversation" aria-live="polite"></div>
               </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="track-view" class="view-section track-view" hidden>
+          <div class="track-workspace-grid">
+            <section class="workspace-panel track-list-panel" aria-labelledby="tracks-heading">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="tracks-heading">Track workspace</h2>
+                  <p class="panel-subtitle">Shared Track pages for coordination and review</p>
+                </div>
+              </div>
+              <div id="tracks-list" class="track-list" aria-live="polite"></div>
             </section>
-          </aside>
+
+            <section class="workspace-panel track-detail-panel" aria-labelledby="track-detail-heading">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="track-detail-heading">Track detail</h2>
+                  <p class="panel-subtitle">Outcome, current state, materials, proofs, updates, and comments</p>
+                </div>
+              </div>
+              <div id="track-detail" class="track-detail" aria-live="polite"></div>
+            </section>
+          </div>
         </section>
       </main>
     </div>

@@ -34,10 +34,16 @@ test('production html keeps all real control ids used by the web UI', () => {
   [
     'server-status',
     'refresh-button',
+    'actor-nav-button',
+    'tracks-nav-button',
     'role-select',
     'create-button',
-    'instances-body',
-    'instance-detail',
+    'actors-list',
+    'actor-console',
+    'actor-runtime-detail',
+    'actor-task-summary',
+    'tracks-list',
+    'track-detail',
     'instruction-input',
     'send-button',
     'interrupt-button',
@@ -45,6 +51,7 @@ test('production html keeps all real control ids used by the web UI', () => {
     'clear-button',
     'resume-button',
     'delete-button',
+    'action-availability-status',
     'open-tui-button',
     'open-tui-status',
     'copy-tui-command-button',
@@ -56,29 +63,35 @@ test('production html keeps all real control ids used by the web UI', () => {
   });
 });
 
-test('production html uses the first-version workspace control layout', () => {
+test('production html uses the actor-console workspace layout', () => {
   [
     'class="app-shell"',
     'class="sidebar"',
     'class="workspace-page"',
-    'class="content-grid"',
-    'class="detail-column"',
-    'class="block-panel instance-panel"',
-    'class="block-panel detail-panel"',
-    'class="block-panel action-panel"',
+    'class="view-section actor-view"',
+    'class="view-section track-view"',
+    'class="actor-console-grid"',
+    'console-column',
+    'runtime-column',
+    'class="workspace-panel actor-roster-panel"',
+    'class="workspace-panel track-list-panel"',
   ].forEach((marker) => {
     assertIncludes(indexHtml, marker);
   });
 });
 
-test('production stylesheet supports the first-version control-room states', () => {
+test('production stylesheet supports actor console and track workspace states', () => {
   [
     '.app-shell',
     '.sidebar',
     '.workspace-page',
-    '.content-grid',
-    '.detail-column',
-    '.instances-table tbody tr.is-selected',
+    '.view-section[hidden]',
+    '.actor-console-grid',
+    '.console-column',
+    '.runtime-column',
+    '.actor-list',
+    '.track-list',
+    '.selectable-row.is-selected',
     '.button.danger',
     '@media (max-width: 860px)',
   ].forEach((marker) => {
@@ -90,15 +103,19 @@ test('production javascript keeps the real api surface', () => {
   [
     '/api/health',
     '/api/roles',
+    '/api/actors',
+    '/api/actors/',
+    '/console',
+    '/api/tracks',
     '/api/instances',
-    '/api/im/external-participants',
-    '/api/im/messages',
-    '/api/im/events',
-    '/status',
-    '/interrupt',
-    '/stop',
-    '/clear',
-    '/resume',
+    '/api/web/im/session',
+    '/api/web/im/messages',
+    '/api/web/im/events',
+    '/api/web/im/conversations/direct',
+    "'interrupt'",
+    "'stop'",
+    "'clear'",
+    "'resume'",
     '/open-tui',
     'X-BuddySwitch-Web',
   ].forEach((apiPath) => {
@@ -106,22 +123,44 @@ test('production javascript keeps the real api surface', () => {
   });
 
   assertIncludes(appJs, "method: 'DELETE'");
-  assertIncludes(appJs, 'actor_id: state.selectedInstanceId');
+  assertIncludes(appJs, 'actor_id: state.selectedActorId');
   assertIncludes(appJs, 'content: state.draftText');
-  assertIncludes(appJs, "/api/im/messages/' + encodeURIComponent");
-  assertIncludes(appJs, 'buildImEventsUrl(state.imEventCursor, 15000)');
+  assertIncludes(appJs, 'buildWebImConversationUrl');
+  assertIncludes(appJs, 'buildImEventsUrl(actorAddress.role_id, actorAddress.actor_id, state.imEventCursor, 15000)');
   assertIncludes(appJs, "'&wait_ms='");
-  assertExcludes(appJs, "selectedInstanceId) + '/messages'");
+  assertIncludes(appJs, 'buildActorConsoleUrl');
+  assertIncludes(appJs, 'buildTrackDetailUrl');
+  assertIncludes(appJs, 'actionAvailabilityStatus.textContent');
+  assertIncludes(appJs, 'shouldRefreshSelectedActorConsole');
+  assertExcludes(appJs, "selectedActorId) + '/messages'");
   assertExcludes(appJs, 'JSON.stringify({ text: state.draftText })');
   assertIncludes(combinedAssets, 'Copy command');
-  assertExcludes(appJs, "selectedInstanceId) + '/input'");
+  assertExcludes(appJs, "selectedActorId) + '/input'");
+  assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tasks'");
+  assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tracks'");
+  assertExcludes(appJs, "/api/tracks/' + encodeURIComponent(state.selectedTrackId) + '/comments'");
+  assertExcludes(appJs, '/api/im');
+  assertExcludes(appJs, 'external-participants');
+  assertExcludes(appJs, 'imParticipantToken');
+  assertExcludes(appJs, 'participant_token');
+  assertExcludes(appJs, 'Authorization');
+  assertExcludes(appJs, 'env.tool');
+  assertExcludes(appJs, 'env.repos');
+  assertExcludes(appJs, 'env.tools.track');
 });
 
-test('production assets present role-configured actor instance wording', () => {
+test('production assets present actor-centered console wording', () => {
   assertIncludes(indexHtml, '>Role<');
-  assertIncludes(indexHtml, 'Stored local actor instances');
+  assertIncludes(indexHtml, 'Actor Console');
+  assertIncludes(indexHtml, 'Actors');
+  assertIncludes(indexHtml, 'Tracks');
+  assertIncludes(indexHtml, 'Runtime');
+  assertIncludes(indexHtml, 'Task');
+  assertIncludes(indexHtml, 'Track workspace');
   assertIncludes(indexHtml, '>Message<');
   assertIncludes(indexHtml, 'Send a direct message to the selected actor.');
+  assertExcludes(combinedAssets, 'Instance control room');
+  assertExcludes(combinedAssets, 'Control room');
   assertExcludes(combinedAssets, '>' + 'Buddy' + '<');
   assertExcludes(combinedAssets, 'selected' + 'Buddy');
   assertExcludes(combinedAssets, 'Stored local ' + 'role instances');

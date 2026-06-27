@@ -20,6 +20,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import ProxyHandler, Request, build_opener
 
+from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin
+
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "buddyswitch-codex"
@@ -31,6 +33,8 @@ WEB_MANAGEMENT = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = WEB_MANAGEMENT
 SPEC.loader.exec_module(WEB_MANAGEMENT)
 NO_PROXY_OPENER = build_opener(ProxyHandler({}))
+
+from env.services import messages as message_service  # noqa: E402
 
 
 def _restore_env_value(name: str, value: str | None) -> None:
@@ -121,16 +125,6 @@ class FakeTerminalOpener:
             raise self.error
 
 
-class FakeWebMessageSender:
-    def __init__(self, result: dict[str, object]) -> None:
-        self.result = result
-        self.calls: list[dict[str, object]] = []
-
-    def send(self, *, target_actor_address: dict[str, object], content: str) -> dict[str, object]:
-        self.calls.append({"target_actor_address": target_actor_address, "content": content})
-        return dict(self.result)
-
-
 class OrderedRunner:
     def __init__(self, steps: list[CommandStep]) -> None:
         self.steps = list(steps)
@@ -153,7 +147,6 @@ class WebManagementServerTestCase(unittest.TestCase):
         *,
         terminal_opener: Callable[[str], None] | None = None,
         platform_name: str | None = None,
-        web_message_sender: Callable[..., dict[str, object]] | None = None,
     ) -> tuple[FakeRunner, str]:
         fake_runner = runner or FakeRunner()
         service_kwargs: dict[str, object] = {}
@@ -161,8 +154,6 @@ class WebManagementServerTestCase(unittest.TestCase):
             service_kwargs["terminal_opener"] = terminal_opener
         if platform_name is not None:
             service_kwargs["platform_name"] = platform_name
-        if web_message_sender is not None:
-            service_kwargs["web_message_sender"] = web_message_sender
         service = WEB_MANAGEMENT.WebManagementService(
             repo_root=ROOT,
             command_runner=fake_runner.run,
@@ -249,7 +240,7 @@ class WebManagementUnitTests(unittest.TestCase):
         self.assertLess(run_index, stop_index)
         self.assertIn('return "${status}"', block)
 
-    def test_web_runtime_binds_shared_state_for_central_im_without_actor_identity(self) -> None:
+    def test_web_runtime_binds_shared_state_for_server_owned_web_im_identity(self) -> None:
         from env.repos import runtime_files
 
         original_state_root = os.environ.get("BUDDYSWITCH_STATE_ROOT")
@@ -272,17 +263,15 @@ class WebManagementUnitTests(unittest.TestCase):
 
             WEB_MANAGEMENT.bind_web_runtime_state()
             service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
-            status, payload = service.handle_api(
-                "POST",
-                "/api/im/external-participants",
-                json.dumps({"client_kind": "script", "display_name": "probe"}).encode("utf-8"),
-                {},
-            )
+            status, payload = service.handle_api("GET", "/api/web/im/session", b"", {})
 
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
+            self.assertEqual(payload["participant"]["kind"], "external")
+            self.assertNotIn("participant_token", payload)
             self.assertEqual(os.environ.get("BUDDYSWITCH_STATE_ROOT"), str(shared_root / "state"))
             self.assertNotIn("BUDDYSWITCH_ACTOR_ID", os.environ)
+            self.assertTrue((shared_root / "state" / "buddyswitch" / "local" / "web-management" / "im-session.json").is_file())
 
     def test_map_command_failure_uses_required_status_codes(self) -> None:
         cases = [
@@ -1082,6 +1071,480 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
+    def test_web_management_product_api_boundaries_do_not_import_tool_handlers_or_track_service(self) -> None:
+        source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
+
+        for forbidden in (
+            "env.tools.track" + "._impl",
+            "env.services" + ".tracks",
+            "dispatch_env_tool_request",
+            "dispatch_runtime_request",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+
+        self.assertFalse((ROOT / "scripts/env/services/tracks.py").exists())
+
+    def test_web_management_product_api_does_not_split_first_cut_subpanel_routes(self) -> None:
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+
+        for path in (
+            "/api/actors/act-pm-demo/tasks",
+            "/api/actors/act-pm-demo/tracks",
+            "/api/tracks/track-alpha/comments",
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                    service.handle_api("GET", path, b"")
+                self.assertEqual(raised.exception.status, 404)
+
+
+class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _service(self) -> WEB_MANAGEMENT.WebManagementService:
+        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+
+    def _identity_path(self) -> Path:
+        return self.runtime_state_root / "buddyswitch" / "local" / "web-management" / "im-session.json"
+
+    def _participant_files(self) -> list[Path]:
+        participants_dir = self.runtime_state_root / "im" / "participants"
+        return sorted(participants_dir.glob("*.json")) if participants_dir.is_dir() else []
+
+    def test_web_im_session_creates_one_stable_identity_per_runtime(self) -> None:
+        first = self._service()
+        first_status, first_payload = first.handle_api("GET", "/api/web/im/session", b"", {})
+        second = self._service()
+        second_status, second_payload = second.handle_api("GET", "/api/web/im/session", b"", {})
+
+        self.assertEqual(first_status, 200)
+        self.assertEqual(second_status, 200)
+        self.assertTrue(first_payload["ok"])
+        self.assertEqual(first_payload["participant"], second_payload["participant"])
+        self.assertEqual(first_payload["participant"]["kind"], "external")
+        self.assertNotIn("participant_token", first_payload)
+        self.assertNotIn("participant_token", second_payload)
+        self.assertEqual(len(self._participant_files()), 1)
+        identity = json.loads(self._identity_path().read_text(encoding="utf-8"))
+        self.assertEqual(identity["client_kind"], "web-management")
+        self.assertEqual(identity["display_name"], "BuddySwitch Web")
+        self.assertEqual(identity["participant"], first_payload["participant"])
+        self.assertIn("participant_token", identity)
+        self.assertNotIn("messages", identity)
+        self.assertNotIn("conversation", identity)
+        self.assertNotIn("actor_history", identity)
+
+    def test_invalid_web_im_identity_is_replaced_once_then_reused(self) -> None:
+        first_status, first_payload = self._service().handle_api("GET", "/api/web/im/session", b"", {})
+        self.assertEqual(first_status, 200)
+        first_external_id = first_payload["participant"]["external_id"]
+        identity_path = self._identity_path()
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        identity["participant_token"] = "impt-invalid"
+        identity_path.write_text(json.dumps(identity, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+        replaced_status, replaced_payload = self._service().handle_api("GET", "/api/web/im/session", b"", {})
+        reused_status, reused_payload = self._service().handle_api("GET", "/api/web/im/session", b"", {})
+
+        self.assertEqual(replaced_status, 200)
+        self.assertEqual(reused_status, 200)
+        self.assertNotEqual(replaced_payload["participant"]["external_id"], first_external_id)
+        self.assertEqual(replaced_payload["participant"], reused_payload["participant"])
+        self.assertEqual(len(self._participant_files()), 2)
+
+    def test_web_im_routes_send_read_events_and_restore_direct_history_without_browser_token(self) -> None:
+        actor_address = {
+            "role_id": "market",
+            "actor_id": self._runtime_actor_id(role="market", label="web-im-history"),
+        }
+        service = self._service()
+        status, session = service.handle_api("GET", "/api/web/im/session", b"", {})
+        self.assertEqual(status, 200)
+        web_participant = session["participant"]
+
+        with mock.patch.object(
+            WEB_MANAGEMENT.daemon_client,
+            "wake_im_actor",
+            return_value={"wake_status": "submitted", "runtime_target": "parent", "error": None},
+        ) as wake_im_actor:
+            status, sent = service.handle_api(
+                "POST",
+                "/api/web/im/messages",
+                json.dumps(
+                    {
+                        "to": {"kind": "actor", "actor_address": actor_address},
+                        "content": "ping",
+                        "reply_to": None,
+                    }
+                ).encode("utf-8"),
+                {},
+            )
+
+        self.assertEqual(status, 200, msg=sent)
+        self.assertEqual(sent["delivery_status"], "accepted")
+        self.assertEqual(sent["wake_status"], "submitted")
+        wake_im_actor.assert_called_once()
+        sent_message_id = sent["message"]["id"]
+
+        reply = message_service.send_im_message(
+            sender_participant={"kind": "actor", "actor_address": actor_address},
+            to=web_participant,
+            content="pong",
+            reply_to=sent_message_id,
+            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
+        )
+        self.assertTrue(reply["ok"], msg=reply)
+
+        status, history = service.handle_api(
+            "GET",
+            f"/api/web/im/conversations/direct?role_id=market&actor_id={actor_address['actor_id']}&limit=20",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=history)
+        self.assertEqual([row["id"] for row in history["messages"]], [sent_message_id, reply["message"]["id"]])
+
+        status, events = service.handle_api(
+            "GET",
+            f"/api/web/im/events?role_id=market&actor_id={actor_address['actor_id']}&cursor={sent['next_cursor']}&wait_ms=0",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=events)
+        self.assertEqual(events["next_cursor"], reply["event_id"])
+        self.assertEqual([event["message_id"] for event in events["events"]], [reply["message"]["id"]])
+        self.assertEqual([row["content"] for row in events["messages"]], ["pong"])
+        self.assertNotIn("participant_token", events)
+
+    def test_web_im_events_are_scoped_to_requested_actor_conversation(self) -> None:
+        market_actor = {
+            "role_id": "market",
+            "actor_id": self._runtime_actor_id(role="market", label="web-im-market"),
+        }
+        dev_actor = {
+            "role_id": "dev",
+            "actor_id": self._runtime_actor_id(role="dev", label="web-im-dev"),
+        }
+        service = self._service()
+        for actor_address, content in (
+            (market_actor, "market ping"),
+            (dev_actor, "dev ping"),
+        ):
+            status, payload = service.handle_api(
+                "POST",
+                "/api/web/im/messages",
+                json.dumps(
+                    {
+                        "to": {"kind": "actor", "actor_address": actor_address},
+                        "content": content,
+                        "reply_to": None,
+                    }
+                ).encode("utf-8"),
+                {},
+            )
+            self.assertEqual(status, 200, msg=payload)
+
+        status, events = service.handle_api(
+            "GET",
+            f"/api/web/im/events?role_id=dev&actor_id={dev_actor['actor_id']}&cursor=imev-000000000000&wait_ms=0&limit=50",
+            b"",
+            {},
+        )
+
+        self.assertEqual(status, 200, msg=events)
+        self.assertEqual([row["content"] for row in events["messages"]], ["dev ping"])
+        self.assertEqual(
+            [
+                event["to"][0]["actor_address"]["actor_id"]
+                for event in events["events"]
+                if isinstance(event.get("to"), list) and event["to"]
+            ],
+            [dev_actor["actor_id"]],
+        )
+
+    def test_web_im_events_requires_actor_scope(self) -> None:
+        service = self._service()
+        service.handle_api("GET", "/api/web/im/session", b"", {})
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("GET", "/api/web/im/events?cursor=imev-000000000000&wait_ms=0", b"", {})
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+
+
+class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _service(self, runner: FakeRunner | OrderedRunner | None = None) -> WEB_MANAGEMENT.WebManagementService:
+        command_runner = runner.run if runner is not None else FakeRunner().run
+        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=command_runner)
+
+    @staticmethod
+    def _instance_list_payload() -> dict[str, object]:
+        return {
+            "instances": [
+                {
+                    "actor_id": "act-pm-demo",
+                    "role": "pm",
+                    "status": "active",
+                    "app_server_health": "healthy",
+                    "thread_id": "thread-main",
+                    "browser_port": 9222,
+                    "updated_at": "2026-06-26T10:00:00Z",
+                    "workspace_dir": "/tmp/buddyswitch/instances/act-pm-demo/workspace",
+                },
+                {
+                    "actor_id": "act-dev-demo",
+                    "role": "dev",
+                    "status": "inactive",
+                    "app_server_health": "unhealthy",
+                    "thread_id": None,
+                    "browser_port": None,
+                    "updated_at": "2026-06-26T10:05:00Z",
+                    "workspace_dir": "/tmp/buddyswitch/instances/act-dev-demo/workspace",
+                },
+            ]
+        }
+
+    @staticmethod
+    def _instance_status_payload() -> dict[str, object]:
+        return {
+            "actor_id": "act-pm-demo",
+            "role": "pm",
+            "status": "active",
+            "workspace_dir": "/tmp/buddyswitch/instances/act-pm-demo/workspace",
+            "browser_port": 9222,
+            "updated_at": "2026-06-26T10:00:00Z",
+            "thread_id": "thread-main",
+            "app_server_health": "healthy",
+            "app_server": {"healthy": True},
+            "thread": {"status": "idle", "raw": {}},
+        }
+
+    def _seed_track_pages(self) -> None:
+        from env.repos import track_comments as track_comment_repo
+        from env.repos import tracks as track_repo
+
+        actor = {"role_id": "pm", "actor_id": "act-pm-demo"}
+        track_repo.save_track(
+            {
+                "id": "track-alpha",
+                "title": "Actor console",
+                "outcome": "Ship actor-centered Web management.",
+                "owner_actor": actor,
+                "state": "active",
+                "now": {"next": "Implement Web DTOs.", "blocker": None},
+                "acceptance_criteria": ["Actor is the primary object."],
+                "non_goals": ["Do not add lower actor.tasks API."],
+                "artifact_relations": [
+                    {
+                        "type": "artifact",
+                        "relation_id": "rel-material",
+                        "artifact_id": "artifact-material",
+                        "role": "material",
+                        "label": "Brief",
+                        "template": "markdown",
+                        "from_actor": actor,
+                        "summary": "Source brief.",
+                        "current": True,
+                        "created_at": "2026-06-26T09:00:00Z",
+                    },
+                    {
+                        "type": "artifact",
+                        "relation_id": "rel-proof",
+                        "artifact_id": "artifact-proof",
+                        "role": "proof",
+                        "label": "Plan",
+                        "template": "markdown",
+                        "from_actor": actor,
+                        "summary": "Implementation plan.",
+                        "current": True,
+                        "created_at": "2026-06-26T09:10:00Z",
+                    },
+                ],
+                "updates": [
+                    {
+                        "id": "upd-plan",
+                        "by_actor": actor,
+                        "summary": "Phase two boundary confirmed.",
+                        "kind": "decision",
+                        "refs": [{"type": "artifact", "id": "artifact-proof"}],
+                        "created_at": "2026-06-26T09:15:00Z",
+                    }
+                ],
+                "created_at": "2026-06-26T08:00:00Z",
+                "updated_at": "2026-06-26T10:00:00Z",
+                "archived_at": None,
+            }
+        )
+        track_repo.save_track(
+            {
+                "id": "track-archived",
+                "title": "Archived work",
+                "outcome": "Do not show archived Track pages.",
+                "owner_actor": actor,
+                "state": "active",
+                "now": {"next": "Archived.", "blocker": None},
+                "acceptance_criteria": [],
+                "non_goals": [],
+                "artifact_relations": [],
+                "updates": [],
+                "created_at": "2026-06-25T08:00:00Z",
+                "updated_at": "2026-06-25T10:00:00Z",
+                "archived_at": "2026-06-25T11:00:00Z",
+            }
+        )
+        track_comment_repo.save_track_comment(
+            {
+                "id": "comment-root",
+                "track_id": "track-alpha",
+                "thread_id": "thread-open",
+                "by_actor": {"role_id": "dev", "actor_id": "act-dev-demo"},
+                "content": "Need Track detail to include comments.",
+                "reply_to": None,
+                "mentioned_actors": [actor],
+                "status": "open",
+                "created_at": "2026-06-26T10:01:00Z",
+                "resolved_by_actor": None,
+                "resolved_at": None,
+                "resolution_summary": None,
+            }
+        )
+        track_comment_repo.save_track_comment(
+            {
+                "id": "comment-reply",
+                "track_id": "track-alpha",
+                "thread_id": "thread-open",
+                "by_actor": actor,
+                "content": "Comments stay inside Track detail for phase two.",
+                "reply_to": "comment-root",
+                "mentioned_actors": [],
+                "status": "open",
+                "created_at": "2026-06-26T10:02:00Z",
+                "resolved_by_actor": None,
+                "resolved_at": None,
+                "resolution_summary": None,
+            }
+        )
+        track_comment_repo.save_track_comment(
+            {
+                "id": "comment-resolved",
+                "track_id": "track-alpha",
+                "thread_id": "thread-resolved",
+                "by_actor": actor,
+                "content": "Resolved discussion.",
+                "reply_to": None,
+                "mentioned_actors": [],
+                "status": "resolved",
+                "created_at": "2026-06-26T10:03:00Z",
+                "resolved_by_actor": actor,
+                "resolved_at": "2026-06-26T10:04:00Z",
+                "resolution_summary": "Closed.",
+            }
+        )
+
+    def test_actor_roster_api_projects_instance_list_as_actor_rows(self) -> None:
+        runner = FakeRunner()
+        runner.add(["instance", "list", "--json"], command_json(self._instance_list_payload()))
+        service = self._service(runner)
+
+        status, payload = service.handle_api("GET", "/api/actors", b"")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual([row["actor_id"] for row in payload["actors"]], ["act-pm-demo", "act-dev-demo"])
+        self.assertEqual(payload["actors"][0]["runtime"]["status"], "active")
+        self.assertEqual(payload["actors"][0]["runtime"]["app_server_health"], "healthy")
+        self.assertEqual(payload["actors"][1]["runtime"]["status"], "inactive")
+        self.assertEqual(runner.calls, [["instance", "list", "--json"]])
+
+    def test_actor_console_api_composes_runtime_task_track_and_im_projection(self) -> None:
+        from env.domain import task_management
+
+        self._seed_track_pages()
+        runner = FakeRunner()
+        runner.add(["instance", "status", "act-pm-demo", "--json"], command_json(self._instance_status_payload()))
+        service = self._service(runner)
+        task_view = {
+            "owner_actor": {"actor_id": "act-pm-demo", "role_id": "pm"},
+            "current_anchor": None,
+            "task_state": "none",
+            "shelf": [],
+            "warnings": [],
+        }
+
+        with mock.patch.object(task_management, "current_view", return_value=task_view) as current_view:
+            status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
+
+        self.assertEqual(status, 200)
+        console = payload["console"]
+        self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
+        self.assertEqual(console["runtime"]["thread_status"], "idle")
+        self.assertEqual(console["task"], task_view)
+        self.assertEqual(console["im"]["target"]["actor_address"], {"role_id": "pm", "actor_id": "act-pm-demo"})
+        self.assertEqual([row["id"] for row in console["tracks"]["items"]], ["track-alpha"])
+        current_view.assert_called_once()
+        call_kwargs = current_view.call_args.kwargs
+        self.assertEqual(call_kwargs["active_role"], "pm")
+        self.assertEqual(call_kwargs["active_actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
+        self.assertEqual(call_kwargs["instance_payload"]["actor_id"], "act-pm-demo")
+
+    def test_actor_console_api_rejects_invalid_actor_ids(self) -> None:
+        service = self._service()
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("GET", "/api/actors/not-an-actor/console", b"")
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+
+    def test_track_list_api_returns_non_archived_track_summaries(self) -> None:
+        self._seed_track_pages()
+        service = self._service()
+
+        status, payload = service.handle_api("GET", "/api/tracks", b"")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual([row["id"] for row in payload["tracks"]], ["track-alpha"])
+        summary = payload["tracks"][0]
+        self.assertEqual(summary["title"], "Actor console")
+        self.assertEqual(summary["comment_summary"]["comment_count"], 3)
+        self.assertEqual(summary["comment_summary"]["open_thread_count"], 1)
+
+    def test_track_detail_api_includes_materials_proofs_updates_and_comment_threads(self) -> None:
+        self._seed_track_pages()
+        service = self._service()
+
+        status, payload = service.handle_api("GET", "/api/tracks/track-alpha", b"")
+
+        self.assertEqual(status, 200)
+        track = payload["track"]
+        self.assertEqual(track["id"], "track-alpha")
+        self.assertEqual([row["artifact_id"] for row in track["materials"]], ["artifact-material"])
+        self.assertEqual([row["artifact_id"] for row in track["proofs"]], ["artifact-proof"])
+        self.assertEqual([row["id"] for row in track["updates"]], ["upd-plan"])
+        self.assertEqual(track["comment_summary"]["comment_count"], 3)
+        self.assertEqual(track["comment_summary"]["open_thread_count"], 1)
+        self.assertEqual(track["comment_summary"]["resolved_thread_count"], 1)
+        self.assertEqual([row["thread_id"] for row in track["comment_threads"]], ["thread-resolved", "thread-open"])
+        open_thread = next(row for row in track["comment_threads"] if row["thread_id"] == "thread-open")
+        self.assertEqual(open_thread["status"], "open")
+        self.assertEqual(open_thread["comment_count"], 2)
+        self.assertEqual(open_thread["latest_comment_id"], "comment-reply")
+        self.assertEqual(open_thread["latest_comment_preview"], "Comments stay inside Track detail for phase two.")
+
+    def test_track_detail_api_returns_not_found_for_missing_or_archived_tracks(self) -> None:
+        self._seed_track_pages()
+        service = self._service()
+
+        for track_id in ("track-missing", "track-archived"):
+            with self.subTest(track_id=track_id):
+                with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                    service.handle_api("GET", f"/api/tracks/{track_id}", b"")
+                self.assertEqual(raised.exception.status, 404)
+                self.assertEqual(raised.exception.code, "NOT_FOUND")
+
+
+class WebManagementHTTPActionTests(WebManagementServerTestCase):
     def test_side_create_route_delegates_and_reports_side_thread_id(self) -> None:
         runner = OrderedRunner(
             [
@@ -1492,11 +1955,14 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         css_status, css = self._request_text(base_url, method="GET", path="/static/styles.css")
         self.assertEqual(html_status, 200)
         self.assertIn("BuddySwitch Web Management", html)
-        self.assertIn("/api/instances", html)
+        self.assertIn("Actor Console", html)
+        self.assertIn("Track workspace", html)
         self.assertEqual(js_status, 200)
-        self.assertIn("computeInstanceActionState", js)
+        self.assertIn("buildActorConsoleUrl", js)
+        self.assertIn("/api/instances", js)
         self.assertEqual(css_status, 200)
         self.assertIn(".app-shell", css)
+        self.assertIn(".actor-console-grid", css)
 
 
 if __name__ == "__main__":

@@ -18,25 +18,24 @@ sys.path.insert(0, str(ROOT))
 from tools.launcher import web_management  # noqa: E402
 
 
-class _RouterStub:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, bytes, object]] = []
-
-    def handle(self, method: str, path: str, body: bytes, headers: object) -> tuple[int, dict[str, object]]:
-        self.calls.append((method, path, body, headers))
-        return 200, {"ok": True, "route": path}
-
-
 class ImWebManagementProjectionTests(unittest.TestCase):
-    def test_web_management_delegates_im_routes_and_removes_old_message_send_route(self) -> None:
-        router = _RouterStub()
-        service = web_management.WebManagementService(repo_root=ROOT, im_router=router)
+    def test_web_management_does_not_expose_lower_im_routes(self) -> None:
+        service = web_management.WebManagementService(repo_root=ROOT)
 
-        status, payload = service.handle_api("POST", "/api/im/external-participants", b"{}", {})
+        for method, path in (
+            ("POST", "/api/im/external-participants"),
+            ("POST", "/api/im/messages"),
+            ("GET", "/api/im/events?cursor=imev-000000000000&wait_ms=0"),
+            ("GET", "/api/im/conversations/direct?kind=actor&role_id=dev&actor_id=act-dev-demo"),
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(web_management.HttpError) as raised:
+                    service.handle_api(method, path, b"{}", {})
+                self.assertEqual(raised.exception.status, 404)
 
-        self.assertEqual(status, 200)
-        self.assertEqual(payload, {"ok": True, "route": "/api/im/external-participants"})
-        self.assertEqual(router.calls[0][0:3], ("POST", "/api/im/external-participants", b"{}"))
+    def test_web_management_removes_old_message_send_route(self) -> None:
+        service = web_management.WebManagementService(repo_root=ROOT)
+
         with self.assertRaises(web_management.HttpError) as raised:
             old_route = "/api/messages" + "/send"
             service.handle_api("POST", old_route, b'{"actor_id":"act-dev-demo","content":"hello"}')
