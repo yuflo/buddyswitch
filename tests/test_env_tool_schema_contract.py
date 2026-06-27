@@ -212,10 +212,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(set(variant_by_type["note"]["required"]), {"type", "label"})
         self.assertEqual(artifact_create["properties"]["read_claim"].get("type"), "string")
 
-        mentions = track_add_comment["properties"]["mentioned_actors"]
+        mentions = track_add_comment["properties"]["mentioned_identity_ids"]
         self.assertEqual(mentions.get("type"), "array")
-        self.assertEqual(mentions.get("items", {}).get("type"), "object")
-        self.assertEqual(set(mentions.get("items", {}).get("required", [])), {"actor_id", "role_id"})
+        self.assertEqual(mentions.get("items", {}).get("type"), "string")
         self.assertEqual(set(track_add_comment.get("required", [])), {"track_id", "content"})
         self.assertNotIn("target_type", track_add_comment["properties"])
         self.assertNotIn("target_id", track_add_comment["properties"])
@@ -252,12 +251,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
 
         self.assertEqual(message_send.get("required", []), ["content"])
         self.assertNotIn("to_role", message_send.get("properties", {}))
-        target_actor_address = message_send["properties"]["target_actor_address"]
-        self.assertEqual(target_actor_address.get("type"), "object")
-        self.assertIs(target_actor_address.get("additionalProperties"), False)
-        self.assertEqual(set(target_actor_address.get("required", [])), {"role_id", "actor_id"})
-        self.assertEqual(target_actor_address.get("properties", {}).get("role_id", {}).get("type"), "string")
-        self.assertEqual(target_actor_address.get("properties", {}).get("actor_id", {}).get("type"), "string")
+        self.assertNotIn("target_actor_address", message_send.get("properties", {}))
+        target_identity_id = message_send["properties"]["target_identity_id"]
+        self.assertEqual(target_identity_id.get("type"), "string")
         message_contacts = catalog.get_action_definition("message", "contacts").input_schema
         self.assertEqual(message_contacts.get("required"), [])
         self.assertEqual(set(message_contacts.get("properties", {})), {"role"})
@@ -305,7 +301,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             "central im message",
             "reply_to",
             "processable inbound",
-            "target_actor_address is only required for new actor-directed messages",
+            "target_identity_id is only required for new actor-directed messages",
             "external",
             "active actor",
             "replied",
@@ -335,26 +331,22 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             "generic disposition editor",
         ):
             self.assertIn(snippet, mark_contract_text)
-        self.assertIn("full actoraddress", str(message_contacts_action.description).lower())
+        self.assertIn("identity", str(message_contacts_action.description).lower())
         self.assertIn("self", str(message_contacts_action.description).lower())
 
         self.assertEqual(message_conversation_action.kind, "read")
         self.assertEqual(message_conversation_action.mutates, "none")
         self.assertEqual(message_conversation_action.required_permission, "message.conversation")
         self.assertEqual(message_conversation_action.durability, "none")
-        self.assertEqual(message_conversation.get("required"), ["target_actor_address"])
+        self.assertEqual(message_conversation.get("required"), ["target_identity_id"])
         conversation_properties = message_conversation.get("properties", {})
-        self.assertEqual(set(conversation_properties), {"target_actor_address", "q", "limit"})
+        self.assertEqual(set(conversation_properties), {"target_identity_id", "q", "limit"})
         self.assertNotIn("box", conversation_properties)
         self.assertNotIn("role", conversation_properties)
         self.assertNotIn("to_role", conversation_properties)
         self.assertNotIn("from_role", conversation_properties)
-        conversation_target = conversation_properties["target_actor_address"]
-        self.assertEqual(conversation_target.get("type"), "object")
-        self.assertIs(conversation_target.get("additionalProperties"), False)
-        self.assertEqual(set(conversation_target.get("required", [])), {"role_id", "actor_id"})
-        self.assertEqual(conversation_target.get("properties", {}).get("role_id", {}).get("type"), "string")
-        self.assertEqual(conversation_target.get("properties", {}).get("actor_id", {}).get("type"), "string")
+        conversation_target = conversation_properties["target_identity_id"]
+        self.assertEqual(conversation_target.get("type"), "string")
 
         self.assertEqual(set(track_resolve_comment.get("required", [])), {"track_id", "comment_id", "resolution_summary"})
 
@@ -367,8 +359,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         assert isinstance(properties, dict)
         self.assertEqual(
             set(properties),
-            {"track_id", "created_by_role", "template", "q", "limit"},
+            {"track_id", "created_by_identity_id", "template", "q", "limit"},
         )
+        self.assertNotIn("created_by_role", properties)
+        self.assertEqual(properties["created_by_identity_id"].get("type"), "string")
         self.assertEqual(
             properties["template"].get("enum"),
             ["brief", "proposal", "design", "decision", "proof", "note"],

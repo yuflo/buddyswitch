@@ -16,11 +16,17 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.services import messages as message_service  # noqa: E402
+from env.repos import messages as message_repo  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
 class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_central_im_repo_does_not_export_legacy_actor_address_message_apis(self) -> None:
+        for name in ("create_message", "save_message", "list_messages", "get_message", "delete_message"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(message_repo, name))
+
     def _actor_participant(self, *, role: str = "market", label: str = "target") -> dict[str, object]:
         actor_address = ActorAddress(
             role_id=role,
@@ -86,11 +92,12 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         connection_text = connection_files[0].read_text(encoding="utf-8")
         self.assertNotIn(connection_key, connection_text)
         connection_row = json.loads(connection_text)
-        self.assertEqual(connection_row["participant"], {"kind": "external", "external_id": external_id})
+        self.assertEqual(connection_row["identity_id"], external_id)
+        self.assertNotIn("participant", connection_row)
         self.assertEqual(connection_row["display_name"], "local smoke")
         self.assertEqual(connection_row["last_event_id"], "imev-000000000000")
         self.assertTrue(str(connection_row["connection_key_hash"]).startswith("sha256:"))
-        self.assertEqual(auth["participant"], {"kind": "external", "external_id": external_id})
+        self.assertEqual(auth["identity"], {"id": external_id, "type": "external"})
 
     def test_send_im_message_persists_durable_objects_when_wake_fails(self) -> None:
         _created, _connection, sender = self._external_connection()
@@ -129,8 +136,10 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         message = json.loads(message_path.read_text(encoding="utf-8"))
         self.assertEqual(message["id"], message_id)
         self.assertEqual(message["conversation_id"], conversation_id)
-        self.assertEqual(message["from"], sender_ref)
-        self.assertEqual(message["to"], [target])
+        self.assertEqual(message["from_identity_id"], sender_ref["external_id"])
+        self.assertEqual(message["to_identity_id"], target["actor_address"]["actor_id"])
+        self.assertNotIn("from", message)
+        self.assertNotIn("to", message)
         self.assertEqual(message["content"], "ping")
         self.assertIsNone(message["reply_to"])
 
@@ -139,7 +148,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         conversation = json.loads(conversation_path.read_text(encoding="utf-8"))
         self.assertEqual(conversation["type"], "direct")
         self.assertEqual(conversation["last_message_id"], message_id)
-        self.assertEqual(conversation["participants"], [sender_ref, target])
+        self.assertEqual(conversation["identity_ids"], [sender_ref["external_id"], target["actor_address"]["actor_id"]])
+        self.assertNotIn("participants", conversation)
 
         states = [
             json.loads(path.read_text(encoding="utf-8"))
@@ -147,7 +157,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ]
         self.assertEqual(len(states), 1)
         self.assertEqual(states[0]["message_id"], message_id)
-        self.assertEqual(states[0]["participant"], target)
+        self.assertEqual(states[0]["owner_identity_id"], target["actor_address"]["actor_id"])
+        self.assertNotIn("participant", states[0])
         self.assertEqual(states[0]["disposition"], "unseen")
 
         events = [
@@ -155,7 +166,15 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for path in sorted((self.runtime_state_root / "im" / "events").glob("*.json"))
         ]
         self.assertEqual(len(events), 2)
-        self.assertEqual({event["participant"]["kind"] for event in events}, {"actor", "external"})
+        self.assertEqual(
+            {event["visible_to_identity_id"] for event in events},
+            {sender_ref["external_id"], target["actor_address"]["actor_id"]},
+        )
+        self.assertTrue(all("participant" not in event for event in events))
+        self.assertTrue(all(event["from_identity_id"] == sender_ref["external_id"] for event in events))
+        self.assertTrue(all(event["to_identity_id"] == target["actor_address"]["actor_id"] for event in events))
+        self.assertTrue(all("from" not in event for event in events))
+        self.assertTrue(all("to" not in event for event in events))
         self.assertTrue(all(event["message_id"] == message_id for event in events))
         self.assertTrue(all(event["conversation_id"] == conversation_id for event in events))
 
@@ -201,7 +220,10 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         event = first_read["events"][0]
         self.assertEqual(event["event_id"], actor_reply["event_id"])
         self.assertEqual(event["message_id"], actor_reply["message"]["id"])
-        self.assertEqual(event["participant"], sender_ref)
+        self.assertEqual(event["visible_to_identity_id"], sender_ref["external_id"])
+        self.assertEqual(event["from_identity_id"], actor["actor_address"]["actor_id"])
+        self.assertEqual(event["to_identity_id"], sender_ref["external_id"])
+        self.assertNotIn("participant", event)
         self.assertEqual(event["type"], "message.created")
         self.assertEqual(event["reply_to"], send_response["message"]["id"])
         self.assertEqual(second_read["events"], [])
@@ -279,7 +301,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ]
         reply_states = [row for row in states if row["message_id"] == reply["message"]["id"]]
         self.assertEqual(len(reply_states), 1)
-        self.assertEqual(reply_states[0]["participant"], external_ref)
+        self.assertEqual(reply_states[0]["owner_identity_id"], external_ref["external_id"])
+        self.assertNotIn("participant", reply_states[0])
         self.assertEqual(reply_states[0]["disposition"], "unseen")
 
     def test_message_replies_and_disposition_are_participant_scoped(self) -> None:
@@ -335,11 +358,12 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.runtime_state_root
             / "im"
             / "message_states"
-            / f"{reply['message']['id']}--external--{external['external_id']}.json"
+            / f"{reply['message']['id']}--{external['external_id']}.json"
         )
         state = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(state["disposition"], "absorbed")
         self.assertEqual(state["reason"], "reply consumed by local script")
+        self.assertEqual(state["owner_identity_id"], external["external_id"])
 
     def test_direct_conversation_read_returns_visible_messages_in_order(self) -> None:
         _created, _connection, external = self._external_connection()

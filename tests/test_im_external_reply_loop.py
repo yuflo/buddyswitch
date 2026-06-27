@@ -123,7 +123,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "/api/im/messages",
             json.dumps(
                 {
-                    "to": {"kind": "actor", "actor_address": actor_address.to_payload()},
+                    "target_identity_id": actor_address.actor_id,
                     "content": "ping",
                 }
             ).encode("utf-8"),

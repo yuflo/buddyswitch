@@ -116,14 +116,14 @@ class MessageToolImClientTests(unittest.TestCase):
     def test_all_message_actions_delegate_to_im_client(self) -> None:
         client = _FakeImClient()
         context = _Context(client)
-        target = {"role_id": "pm", "actor_id": "act-pm-tool"}
+        target_identity_id = "act-pm-tool"
 
         cases = [
             ("contacts", {"role": "pm"}, ("contacts", {"role": "pm"})),
-            ("send", {"target_actor_address": target, "content": "hello"}, ("send", {"target_actor_address": target, "content": "hello"})),
+            ("send", {"target_identity_id": target_identity_id, "content": "hello"}, ("send", {"target_identity_id": target_identity_id, "content": "hello"})),
             ("get", {"message_id": "msg-1"}, ("get", {"message_id": "msg-1"})),
             ("list", {"cursor": "imev-000000000001", "limit": 5}, ("list", {"cursor": "imev-000000000001", "limit": 5})),
-            ("conversation", {"target_actor_address": target}, ("conversation", {"target_actor_address": target})),
+            ("conversation", {"target_identity_id": target_identity_id}, ("conversation", {"target_identity_id": target_identity_id})),
             ("mark", {"message_id": "msg-1", "disposition": "absorbed"}, ("mark", {"message_id": "msg-1", "disposition": "absorbed"})),
         ]
 
@@ -135,7 +135,7 @@ class MessageToolImClientTests(unittest.TestCase):
 
 
 class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_send_with_invalid_target_actor_address_returns_payload_error(self) -> None:
+    def test_send_with_invalid_target_identity_id_returns_payload_error(self) -> None:
         actor = ActorAddress(
             role_id="dev",
             actor_id=self._runtime_actor_id(role="dev", label="act-dev-invalid-target"),
@@ -144,14 +144,14 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         response = client.send(
             {
-                "target_actor_address": {"role_id": "market"},
+                "target_identity_id": "",
                 "content": "hello",
             }
         )
 
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_IM_PAYLOAD")
-        self.assertIn("actor_address", response.get("error", {}).get("message", ""))
+        self.assertIn("target_identity_id", response.get("error", {}).get("message", ""))
 
     def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
         actor = ActorAddress(
@@ -185,9 +185,10 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.runtime_state_root
             / "im"
             / "message_states"
-            / f"{root['message']['id']}--actor--dev--{actor.actor_id}.json"
+            / f"{root['message']['id']}--{actor.actor_id}.json"
         )
         persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["owner_identity_id"], actor.actor_id)
         self.assertEqual(persisted["disposition"], "replied")
 
     def test_mark_needs_parent_submit_failure_leaves_im_state_unseen(self) -> None:
@@ -230,9 +231,10 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.runtime_state_root
             / "im"
             / "message_states"
-            / f"{message_id}--actor--dev--{active_actor.actor_id}.json"
+            / f"{message_id}--{active_actor.actor_id}.json"
         )
         persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["owner_identity_id"], active_actor.actor_id)
         self.assertEqual(persisted["disposition"], "unseen")
 
 

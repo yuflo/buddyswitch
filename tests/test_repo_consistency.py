@@ -87,6 +87,8 @@ class RepoConsistencyTests(unittest.TestCase):
         path_text, _sep, _rest = line.partition(":")
         if not path_text.startswith("docs/spec/"):
             return False
+        if path_text.startswith("docs/spec/identity-redesign/"):
+            return True
         name = Path(path_text).name
         return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
 

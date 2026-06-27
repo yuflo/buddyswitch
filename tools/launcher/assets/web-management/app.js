@@ -185,17 +185,15 @@
     return '/api/tracks/' + encodeURIComponent(trackId);
   }
 
-  function buildImEventsUrl(roleId, actorId, waitMs) {
+  function buildImEventsUrl(identityId, waitMs) {
     const normalizedWait = Number.isFinite(waitMs) && waitMs >= 0 ? Math.floor(waitMs) : 0;
-    return '/api/web/im/events?role_id=' + encodeURIComponent(roleId || '')
-      + '&actor_id=' + encodeURIComponent(actorId || '')
+    return '/api/web/im/events?identity_id=' + encodeURIComponent(identityId || '')
       + '&wait_ms=' + encodeURIComponent(String(normalizedWait));
   }
 
-  function buildWebImConversationUrl(roleId, actorId, limit) {
+  function buildWebImConversationUrl(identityId, limit) {
     const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 20;
-    return '/api/web/im/conversations/direct?role_id=' + encodeURIComponent(roleId || '')
-      + '&actor_id=' + encodeURIComponent(actorId || '')
+    return '/api/web/im/conversations/direct?identity_id=' + encodeURIComponent(identityId || '')
       + '&limit=' + encodeURIComponent(String(normalizedLimit));
   }
 
@@ -295,27 +293,25 @@
       return null;
     }
     return {
-      kind: 'actor',
-      actor_address: {
-        role_id: actor.role,
-        actor_id: state.selectedActorId,
-      },
+      identity: { id: state.selectedActorId, type: 'actor' },
+      identity_id: state.selectedActorId,
+      role_id: actor.role,
     };
   }
 
-  function participantLabel(participant) {
-    if (!participant || typeof participant !== 'object') {
+  function identityLabel(identityId) {
+    if (typeof identityId !== 'string' || !identityId) {
       return '';
     }
-    if (participant.kind === 'actor' && participant.actor_address) {
-      const roleId = participant.actor_address.role_id || '';
-      const actorId = participant.actor_address.actor_id || '';
-      return roleId && actorId ? roleId + '/' + actorId : '';
+    if (identityId.indexOf('act-') === 0) {
+      const parts = identityId.split('-');
+      const roleId = parts.length > 2 ? parts[1] : '';
+      return roleId ? roleId + '/' + identityId : identityId;
     }
-    if (participant.kind === 'external') {
+    if (identityId.indexOf('ext-') === 0) {
       return 'you';
     }
-    return '';
+    return identityId;
   }
 
   function rememberImEntry(state, entry) {
@@ -335,7 +331,7 @@
     return rememberImEntry(state, {
       id: messageId,
       direction: 'sent',
-      participant: 'you',
+      sender: 'you',
       content: typeof content === 'string' ? content : '',
       deliveryStatus: payload && payload.delivery_status ? payload.delivery_status : '',
       wakeStatus: payload && payload.wake_status ? payload.wake_status : '',
@@ -347,14 +343,15 @@
     if (!message || typeof message !== 'object') {
       return false;
     }
-    const from = message.from && typeof message.from === 'object' ? message.from : {};
-    if (from.kind !== 'actor' && from.kind !== 'external') {
+    const fromIdentityId = typeof message.from_identity_id === 'string' ? message.from_identity_id : '';
+    if (!fromIdentityId) {
       return false;
     }
+    const sent = fromIdentityId.indexOf('ext-') === 0;
     return rememberImEntry(state, {
       id: typeof message.id === 'string' ? message.id : '',
-      direction: from.kind === 'external' ? 'sent' : 'reply',
-      participant: participantLabel(from),
+      direction: sent ? 'sent' : 'reply',
+      sender: sent ? 'you' : identityLabel(fromIdentityId),
       content: typeof message.content === 'string' ? message.content : '',
       deliveryStatus: '',
       wakeStatus: '',
@@ -598,7 +595,7 @@
       const status = [entry.deliveryStatus, entry.wakeStatus].filter(Boolean).join(' / ');
       const meta = [
         entry.direction === 'sent' ? 'sent' : 'reply',
-        entry.participant,
+        entry.sender,
         status,
         entry.replyTo ? 'reply_to ' + entry.replyTo : '',
       ].filter(Boolean).join(' · ');
@@ -727,12 +724,12 @@
 
   async function refreshSelectedActorConversation(state) {
     const target = selectedActorImTarget(state);
-    if (!target || !target.actor_address) {
+    if (!target || !target.identity_id) {
       applyImConversationPayload(state, { messages: [] });
       return;
     }
     const payload = await fetchJson(
-      buildWebImConversationUrl(target.actor_address.role_id, target.actor_address.actor_id, 50)
+      buildWebImConversationUrl(target.identity_id, 50)
     );
     applyImConversationPayload(state, payload);
   }
@@ -897,13 +894,7 @@
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        to: {
-          kind: 'actor',
-          actor_address: {
-            role_id: target.actor_address.role_id,
-            actor_id: state.selectedActorId,
-          },
-        },
+        target_identity_id: target.identity_id,
         content: state.draftText,
         reply_to: null,
       }),
@@ -917,14 +908,13 @@
       return;
     }
     const target = selectedActorImTarget(state);
-    if (!target || !target.actor_address) {
+    if (!target || !target.identity_id) {
       return;
     }
-    const actorAddress = target.actor_address;
     const payload = await fetchJson(
-      buildImEventsUrl(actorAddress.role_id, actorAddress.actor_id, 15000)
+      buildImEventsUrl(target.identity_id, 15000)
     );
-    if (state.selectedActorId !== actorAddress.actor_id) {
+    if (state.selectedActorId !== target.identity_id) {
       return;
     }
     const events = Array.isArray(payload.events) ? payload.events : [];

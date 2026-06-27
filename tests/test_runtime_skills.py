@@ -472,8 +472,8 @@ class RuntimeSkillsTests(unittest.TestCase):
         )
 
         self.assertIn("message__contacts", message_skill)
-        self.assertIn("target_actor_address", message_skill)
-        self.assertIn("contact.actor_address", message_skill)
+        self.assertIn("target_identity_id", message_skill)
+        self.assertIn("contact.identity_id", message_skill)
         self.assertIn("message__get", message_skill)
         self.assertIn("message__send", message_skill)
         self.assertIn("message__mark", message_skill)

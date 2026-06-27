@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
 from env.tool_runtime import auth_feedback  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
+from env.domain.identity import IdentityRef  # noqa: E402
 from env.tool_runtime.actor_profile import Actor  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from env.tool_runtime.actor_profile import AuthSubject  # noqa: E402
@@ -28,6 +30,51 @@ from env.tool_runtime.role_auth import AuthDecision  # noqa: E402
 
 
 class ActorProfileTests(unittest.TestCase):
+    def test_identity_ref_serializes_stable_payload_and_validates_type(self) -> None:
+        actor_identity = IdentityRef(id="  act-dev-daemon  ", type="actor")
+        external_identity = IdentityRef(id="  ext-local-web  ", type="external")
+
+        self.assertEqual(actor_identity.id, "act-dev-daemon")
+        self.assertEqual(actor_identity.type, "actor")
+        self.assertEqual(actor_identity.to_payload(), {"id": "act-dev-daemon", "type": "actor"})
+        self.assertEqual(external_identity.to_payload(), {"id": "ext-local-web", "type": "external"})
+
+        with self.assertRaisesRegex(ValueError, "identity.id"):
+            IdentityRef(id=" ", type="actor")
+        with self.assertRaisesRegex(ValueError, "identity.type"):
+            IdentityRef(id="act-dev-daemon", type="role")
+
+    def test_identity_helpers_resolve_actor_external_and_route_projection(self) -> None:
+        from env.domain.identity import actor_identity
+        from env.domain.identity import external_identity
+        from env.domain.identity import identity_from_im_participant
+        from env.tool_runtime.actor_profile import actor_identity_to_address
+
+        actor_ref = actor_identity("  act-dev-daemon  ")
+        external_ref = external_identity("  ext-local-web  ")
+
+        self.assertEqual(actor_ref, IdentityRef(id="act-dev-daemon", type="actor"))
+        self.assertEqual(external_ref, IdentityRef(id="ext-local-web", type="external"))
+        self.assertEqual(
+            identity_from_im_participant(
+                {
+                    "kind": "actor",
+                    "actor_address": {"actor_id": "act-dev-daemon", "role_id": "dev"},
+                }
+            ),
+            actor_ref,
+        )
+        self.assertEqual(
+            identity_from_im_participant({"kind": "external", "external_id": "ext-local-web"}),
+            external_ref,
+        )
+        self.assertEqual(
+            actor_identity_to_address(actor_ref, role_id="dev"),
+            ActorAddress(actor_id="act-dev-daemon", role_id="dev"),
+        )
+        with self.assertRaisesRegex(ValueError, "actor identity"):
+            actor_identity_to_address(external_ref, role_id="dev")
+
     def test_actor_address_serializes_stable_payload(self) -> None:
         address = ActorAddress(
             actor_id="  act-dev-daemon  ",
@@ -96,6 +143,8 @@ class ActorProfileTests(unittest.TestCase):
 
         self.assertEqual(profile.actor_id, "act-dev-1a2b3c4d5e6f")
         self.assertEqual(profile.role_id, "dev")
+        self.assertEqual(profile.current_identity, IdentityRef(id="act-dev-1a2b3c4d5e6f", type="actor"))
+        self.assertEqual(profile.current_identity.to_payload(), {"id": "act-dev-1a2b3c4d5e6f", "type": "actor"})
         self.assertEqual(profile.active_actor, Actor(actor_id="act-dev-1a2b3c4d5e6f", role_id="dev"))
         self.assertEqual(profile.active_role, Role(role_id="dev"))
         self.assertEqual(profile.actor_address, ActorAddress("act-dev-1a2b3c4d5e6f", "dev"))
@@ -180,10 +229,12 @@ class ActorProfileTests(unittest.TestCase):
 
         self.assertEqual(context.active_actor, Actor(actor_id="act-dev-1a2b3c4d5e6f", role_id="dev"))
         self.assertEqual(context.active_role, Role(role_id="dev"))
+        self.assertEqual(context.current_identity, IdentityRef(id="act-dev-1a2b3c4d5e6f", type="actor"))
         self.assertEqual(context.actor_id, "act-dev-1a2b3c4d5e6f")
         self.assertEqual(context.role_id, "dev")
         self.assertEqual(context.actor_address, ActorAddress("act-dev-1a2b3c4d5e6f", "dev"))
         self.assertEqual(context.auth_subject, AuthSubject(role_id="dev"))
+        self.assertEqual(context["current_identity"], {"id": "act-dev-1a2b3c4d5e6f", "type": "actor"})
         self.assertEqual(context["active_actor"], {"actor_id": "act-dev-1a2b3c4d5e6f", "role_id": "dev"})
         self.assertEqual(context["active_role"], "dev")
         self.assertEqual(context["actor_id"], "act-dev-1a2b3c4d5e6f")
@@ -191,6 +242,8 @@ class ActorProfileTests(unittest.TestCase):
         self.assertEqual(context["instance_json"], instance_json)
         self.assertEqual(context["manifest"], manifest)
         self.assertNotIn("auth_subject", list(context))
+        self.assertFalse(hasattr(context.objects, "send_message"))
+        self.assertFalse(hasattr(context.objects, "list_messages"))
 
         preview = context.runtime_policy_preview(
             {
@@ -202,6 +255,25 @@ class ActorProfileTests(unittest.TestCase):
         self.assertIn("track.list", preview.get("available_actions", []))
         self.assertIn("track.create", preview.get("available_actions", []))
         self.assertEqual(preview.get("restricted_actions"), [])
+
+    def test_daemon_access_derives_route_from_current_identity_and_trusted_role(self) -> None:
+        daemon = runtime_context.DaemonAccess(
+            current_identity=IdentityRef(id="act-dev-route", type="actor"),
+            role_id="dev",
+            instance_json=ROOT / "tmp" / "act-dev-route" / "instance.json",
+        )
+
+        with mock.patch.object(runtime_context.daemon_client, "deliver_signal", return_value={"ok": True}) as deliver:
+            daemon.deliver_signal(
+                signal_type="probe",
+                target_actor_address={"actor_id": "act-pm-route", "role_id": "pm"},
+                payload={"message_id": "msg-route"},
+            )
+
+        signal = deliver.call_args.kwargs["signal"]
+        self.assertEqual(daemon.current_identity, IdentityRef(id="act-dev-route", type="actor"))
+        self.assertEqual(signal["source_actor_address"], {"actor_id": "act-dev-route", "role_id": "dev"})
+        self.assertEqual(signal["target_actor_address"], {"actor_id": "act-pm-route", "role_id": "pm"})
 
     def test_actor_private_file_summaries_are_actor_owned(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

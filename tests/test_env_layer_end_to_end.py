@@ -425,7 +425,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"artifact_id": "art-pm-private-r1", "summary": "mutate"},
         )
         self.assertFalse(denied["ok"])
-        self.assertEqual(denied["permission_boundary"], "artifact.actor_scope")
+        self.assertEqual(denied["permission_boundary"], "artifact.creator_identity_id")
         self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_SCOPE")
 
     def test_pm_comment_resolution_flow(self) -> None:

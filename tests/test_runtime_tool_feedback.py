@@ -196,7 +196,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"artifact_id": "art-pm-owner-scope-r1", "summary": "rewrite"},
         )
         self._assert_rejection_contract(payload)
-        self.assertEqual(payload["permission_boundary"], "artifact.actor_scope")
+        self.assertEqual(payload["permission_boundary"], "artifact.creator_identity_id")
 
     def test_artifact_direct_publish_rejection_has_structured_feedback(self) -> None:
         track = self._dispatch(

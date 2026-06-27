@@ -256,22 +256,18 @@ def _build_source_workspace(
     return source_workspace
 
 
-def _same_actor_address(left: Any, right: Any) -> bool:
-    return (
-        isinstance(left, dict)
-        and isinstance(right, dict)
-        and left.get("actor_id") == right.get("actor_id")
-        and left.get("role_id") == right.get("role_id")
-    )
+def _actor_identity_id(active_actor: dict[str, Any]) -> str | None:
+    actor_id = active_actor.get("actor_id") if isinstance(active_actor, dict) else None
+    return actor_id if isinstance(actor_id, str) and actor_id else None
 
 
 def _candidate_track_row(*, track: dict[str, Any], active_actor: dict[str, Any]) -> dict[str, Any]:
-    relation = "owner" if _same_actor_address(track.get("owner_actor"), active_actor) else "collaborator"
+    relation = "owner" if track.get("owner_identity_id") == _actor_identity_id(active_actor) else "collaborator"
     return {
         "track_id": track.get("id"),
         "title": track.get("title"),
         "outcome": track.get("outcome", ""),
-        "owner_actor": track.get("owner_actor"),
+        "owner_identity_id": track.get("owner_identity_id"),
         "state": track.get("state"),
         "now": track.get("now"),
         "acceptance_criteria": track.get("acceptance_criteria"),
@@ -443,7 +439,7 @@ def _open_comment_thread_rows(
                 "thread_id": thread_id,
                 "track_id": latest.get("track_id"),
                 "latest_comment_id": latest.get("id"),
-                "latest_by_actor": latest.get("by_actor"),
+                "latest_by_identity_id": latest.get("by_identity_id"),
                 "open_comment_count": open_count,
                 "updated_at": latest.get("created_at"),
             }
@@ -473,7 +469,7 @@ def _recent_update_rows(
                     "update_id": update.get("id"),
                     "kind": update.get("kind"),
                     "summary": update.get("summary"),
-                    "by_actor": update.get("by_actor"),
+                    "by_identity_id": update.get("by_identity_id"),
                     "ref_count": ref_count,
                     "created_at": update.get("created_at"),
                 }
@@ -482,31 +478,65 @@ def _recent_update_rows(
     return rows[:limit_value]
 
 
+def _current_identity_id(context: ContextServiceContext) -> str | None:
+    current_identity = getattr(context, "current_identity", None)
+    identity_id = getattr(current_identity, "id", None)
+    if isinstance(identity_id, str) and identity_id.strip():
+        return identity_id.strip()
+    raw_identity = context.get("current_identity") if hasattr(context, "get") else None
+    if isinstance(raw_identity, dict) and isinstance(raw_identity.get("id"), str) and raw_identity["id"].strip():
+        return raw_identity["id"].strip()
+    actor_address = getattr(context, "actor_address", None)
+    actor_id = getattr(actor_address, "actor_id", None)
+    if isinstance(actor_id, str) and actor_id.strip():
+        return actor_id.strip()
+    if isinstance(actor_address, dict) and isinstance(actor_address.get("actor_id"), str) and actor_address["actor_id"].strip():
+        return actor_address["actor_id"].strip()
+    return None
+
+
 def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[str, Any]:
-    active_actor_address = context.actor_address
-    inbox = context.rules.message.filter_inbox_messages(
-        messages=context.repos.message.list_messages(),
-        active_actor_address=active_actor_address,
-        sender_role=None,
-        q=None,
-        limit=limit_value,
-    )
+    active_identity_id = _current_identity_id(context)
+    if active_identity_id is None:
+        inbox: list[dict[str, Any]] = []
+    else:
+        actor_address = context.actor_address.to_payload()
+        events = context.repos.message.list_im_events_for_participant(
+            {"kind": "actor", "actor_address": actor_address}
+        )
+        inbox = [
+            row
+            for row in events
+            if row.get("to_identity_id") == active_identity_id
+            and row.get("visible_to_identity_id") == active_identity_id
+        ]
+        inbox.sort(
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                int(row.get("sequence") or 0) if isinstance(row.get("sequence"), int) else 0,
+                str(row.get("event_id") or ""),
+            ),
+            reverse=True,
+        )
     latest = [
         {
-            "message_id": row.get("id"),
-            "from_actor_address": row.get("from_actor_address"),
-            "to_actor_address": row.get("to_actor_address"),
+            "event_id": row.get("event_id"),
+            "message_id": row.get("message_id"),
+            "conversation_id": row.get("conversation_id"),
+            "from_identity_id": row.get("from_identity_id"),
+            "to_identity_id": row.get("to_identity_id"),
+            "visible_to_identity_id": row.get("visible_to_identity_id"),
             "reply_to": row.get("reply_to"),
             "created_at": row.get("created_at"),
         }
-        for row in inbox
+        for row in inbox[:limit_value]
     ]
     return {
         "count": len(inbox),
         "latest_inbox": latest,
         "inbox_source_of_truth": "message.list",
         "conversation_source_of_truth": "message.conversation",
-        "target_discovery": "Use message.contacts to discover online target actor addresses.",
+        "target_discovery": "Use message.contacts to discover online target identities.",
     }
 
 
@@ -556,7 +586,7 @@ def _current_context_sections(
         tracks=visible_tracks,
         limit_value=limit_value,
     )
-    actor_address = context.actor_address.to_payload()
+    current_identity = context.current_identity.to_payload()
     message_cues = _message_cues(limit_value=limit_value, context=context)
     source_workspace = _build_source_workspace(
         active_role=active_role,
@@ -583,7 +613,7 @@ def _current_context_sections(
         "open_comment_threads": open_comment_threads,
         "recent_updates": recent_updates,
         "message_cues": message_cues,
-        "actor_address": actor_address,
+        "current_identity": current_identity,
         "source_workspace": source_workspace,
         "capability_snapshot": _capability_snapshot(
             context=context,
@@ -749,7 +779,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "recent_updates": sections["recent_updates"],
         "message_cues": sections["message_cues"],
         "context_sources": context_sources_desc(),
-        "actor_address": sections["actor_address"],
+        "current_identity": sections["current_identity"],
         "writable_surfaces": sections["writable_surfaces"],
         "tool_affordances": tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
         "capability_snapshot": sections["capability_snapshot"],

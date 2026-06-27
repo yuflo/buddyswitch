@@ -7,169 +7,11 @@ import hashlib
 import secrets
 import time
 import uuid
-from typing import Any, Protocol
-
-from env.tool_runtime import results as tool_results
-
-
-MESSAGE_MUTATION_RETRY_DELAYS_SECONDS = (0.0, 0.1, 0.25)
-SEND_ALLOWED_FIELDS = {"target_actor_address", "content", "reply_to"}
-
-
-class MessageSendContext(Protocol):
-    actor_address: Any
-    daemon: Any
-    manifest: dict[str, Any]
-    repos: Any
-    rules: Any
-
-    def __getitem__(self, key: str) -> Any: ...
-
-    def get(self, key: str, default: Any = None) -> Any: ...
-
-
-def _sleep_for_message_mutation_retry(seconds: float) -> None:
-    time.sleep(seconds)
-
-
-def _run_message_mutation_with_retry(operation: Any) -> Any:
-    last_exc: Exception | None = None
-    for delay in MESSAGE_MUTATION_RETRY_DELAYS_SECONDS:
-        if delay > 0:
-            _sleep_for_message_mutation_retry(delay)
-        try:
-            return operation()
-        except Exception as exc:
-            last_exc = exc
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError("message mutation retry did not run")
-
-
-def _guess_correctable_fields(message: str) -> list[str] | None:
-    if "unsupported payload fields:" in message:
-        suffix = message.split("unsupported payload fields:", 1)[1].strip()
-        if suffix:
-            return [row.strip() for row in suffix.split(",") if row.strip()]
-    for field in ("target_actor_address", "content", "reply_to"):
-        if field in message:
-            return [field]
-    return None
-
-
-def _reject_payload(
-    *,
-    action: str,
-    active_actor: dict[str, Any],
-    active_role: str,
-    message: str,
-    correctable_fields: list[str] | None = None,
-) -> dict[str, Any]:
-    return tool_results.rejection(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        code="E_MESSAGE_PAYLOAD",
-        message=message,
-        permission_boundary="request-payload",
-        human_summary="Message request payload is invalid.",
-        why_blocked=message,
-        impact="No messages were created or changed.",
-        state_changed=False,
-        retryable=True,
-        retry_guidance="Fix the message payload fields and retry.",
-        allowed_next_actions=[
-            "Use message.contacts to discover online target actor addresses.",
-            "Retry with only documented message payload fields.",
-        ],
-        correctable_fields=correctable_fields if correctable_fields is not None else _guess_correctable_fields(message),
-    )
-
-
-def _reject_scope(
-    *,
-    action: str,
-    active_actor: dict[str, Any],
-    active_role: str,
-    code: str,
-    message: str,
-    permission_boundary: str,
-    human_summary: str,
-    why_blocked: str,
-    retryable: bool,
-    correctable_fields: list[str] | None,
-) -> dict[str, Any]:
-    return tool_results.rejection(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        code=code,
-        message=message,
-        permission_boundary=permission_boundary,
-        human_summary=human_summary,
-        why_blocked=why_blocked,
-        impact="No messages were created or changed.",
-        state_changed=False,
-        retryable=retryable,
-        retry_guidance="Fix the scope issue and retry." if retryable else "This action cannot be retried as-is.",
-        allowed_next_actions=[
-            "Use message.contacts to discover online target actor addresses.",
-            "Use message.list to view visible Central IM events.",
-        ],
-        correctable_fields=correctable_fields,
-    )
-
-
-def _reject_reachability(
-    *,
-    action: str,
-    active_actor: dict[str, Any],
-    active_role: str,
-    reachability_status: str,
-    target_actor_address: dict[str, Any],
-    message: str,
-) -> dict[str, Any]:
-    return tool_results.rejection(
-        tool="message",
-        action=action,
-        active_actor=active_actor,
-        active_role=active_role,
-        code="E_MESSAGE_TARGET_NOT_ONLINE",
-        message=message,
-        permission_boundary="message.reachability",
-        human_summary="Target actor is not currently reachable.",
-        why_blocked=message,
-        impact="No readable message was created.",
-        state_changed=False,
-        durability="none",
-        retryable=True,
-        retry_guidance="Refresh message.contacts or retry after the target daemon is online.",
-        allowed_next_actions=[
-            "Use message.contacts to refresh the target actor address.",
-            "Retry message.send only after target reachability is online.",
-        ],
-        correctable_fields=["target_actor_address"],
-        extra={
-            "reachability_status": reachability_status,
-            "target_actor_address": target_actor_address,
-        },
-    )
+from typing import Any
 
 
 def _im_payload_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": message}}
-
-
-def _manifest_role_ids(context: MessageSendContext) -> set[str]:
-    return context.rules.message.manifest_role_ids(context.get("manifest"))
-
-
-def _actor_address_from_any(context: MessageSendContext, value: Any) -> Any:
-    if hasattr(value, "to_payload"):
-        return value
-    return context.rules.message.ActorAddress.from_payload(value)
 
 
 def create_external_connection(*, display_name: str) -> dict[str, Any]:
@@ -194,7 +36,7 @@ def create_external_connection(*, display_name: str) -> dict[str, Any]:
     message_repo.save_im_connection(
         {
             "connection_key_hash": connection_key_hash,
-            "participant": {"kind": "external", "external_id": external_id},
+            "identity_id": external_id,
             "display_name": normalized_display_name,
             "last_event_id": message_repo.INITIAL_IM_EVENT_CURSOR,
             "created_at": now,
@@ -219,18 +61,28 @@ def authenticate_external_connection_key(connection_key: str) -> dict[str, Any]:
     connection = message_repo.get_im_connection_by_key_hash(_im_connection_key_hash(connection_key.strip()))
     if connection is None:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection_key is invalid"}}
-    participant = connection.get("participant")
-    if not isinstance(participant, dict):
-        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection participant is invalid"}}
+    identity_id = connection.get("identity_id")
+    if not isinstance(identity_id, str) or not identity_id.strip():
+        participant = connection.get("participant")
+        if not isinstance(participant, dict):
+            return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection identity is invalid"}}
+        identity_id = str(participant.get("external_id") or "")
+    participant = {"kind": "external", "external_id": identity_id.strip()}
     try:
         participant_ref = message_repo.im_participant_ref(participant)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     updated = dict(connection)
-    updated["participant"] = participant_ref
+    updated["identity_id"] = participant_ref["external_id"]
+    updated.pop("participant", None)
     updated["last_used_at"] = message_repo.runtime_files.now_iso()
     saved = message_repo.save_im_connection(updated)
-    return {"ok": True, "participant": participant_ref, "connection": saved}
+    return {
+        "ok": True,
+        "identity": {"id": participant_ref["external_id"], "type": "external"},
+        "participant": participant_ref,
+        "connection": saved,
+    }
 
 
 def _new_im_id(prefix: str) -> str:
@@ -241,16 +93,26 @@ def _im_reply_target_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_REPLY_TARGET", "message": message}}
 
 
-def _direct_conversation_participants(message_repo: Any, conversation: dict[str, Any]) -> list[dict[str, Any]] | None:
+def _direct_conversation_identity_ids(message_repo: Any, conversation: dict[str, Any]) -> list[str] | None:
     if conversation.get("type") != "direct":
         return None
+    identity_ids = conversation.get("identity_ids")
+    if isinstance(identity_ids, list) and len(identity_ids) == 2:
+        try:
+            return [message_repo.im_identity_id_for_row(row, "conversation.identity_ids[]") for row in identity_ids]
+        except ValueError:
+            return None
     participants = conversation.get("participants")
-    if not isinstance(participants, list) or len(participants) != 2:
-        return None
-    try:
-        return [message_repo.im_participant_ref(row) for row in participants if isinstance(row, dict)]
-    except ValueError:
-        return None
+    if isinstance(participants, list) and len(participants) == 2:
+        try:
+            return [message_repo.im_identity_id_for_row(row, "conversation.participants[]") for row in participants]
+        except ValueError:
+            return None
+    return None
+
+
+def _external_participant_for_identity(message_repo: Any, identity_id: str) -> dict[str, Any] | None:
+    return message_repo.get_im_external_participant(identity_id)
 
 
 def _resolve_reply_conversation(
@@ -266,21 +128,23 @@ def _resolve_reply_conversation(
     conversation = message_repo.get_im_conversation(str(original_message.get("conversation_id") or ""))
     if conversation is None:
         return _im_reply_target_error("reply_to conversation not found")
-    participants = _direct_conversation_participants(message_repo, conversation)
-    if participants is None:
+    identity_ids = _direct_conversation_identity_ids(message_repo, conversation)
+    if identity_ids is None:
         return _im_reply_target_error("reply_to conversation is not a direct conversation")
     sender_key = message_repo.im_participant_key(sender)
-    participant_keys = {message_repo.im_participant_key(row) for row in participants}
-    if sender_key not in participant_keys:
+    identity_set = set(identity_ids)
+    if sender_key not in identity_set:
         return _im_reply_target_error("active sender is not a participant in the reply_to conversation")
     if target is None:
-        other = [row for row in participants if message_repo.im_participant_key(row) != sender_key]
+        other = [row for row in identity_ids if row != sender_key]
         if len(other) != 1:
             return _im_reply_target_error("reply target cannot be derived from the direct conversation")
-        target = other[0]
+        target = _external_participant_for_identity(message_repo, other[0])
+        if target is None:
+            return _im_reply_target_error("reply target cannot be derived from identity projection")
     else:
         target_key = message_repo.im_participant_key(target)
-        if {sender_key, target_key} != participant_keys:
+        if {sender_key, target_key} != identity_set:
             return _im_reply_target_error("reply_to must stay in the same direct conversation")
     return {
         "ok": True,
@@ -458,10 +322,13 @@ def send_im_message(
 def _connection_participant_ref(connection: dict[str, Any]) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    participant = connection.get("participant")
-    if not isinstance(participant, dict):
-        raise ValueError("connection.participant must be an object")
-    return message_repo.im_participant_ref(participant)
+    identity_id = connection.get("identity_id")
+    if not isinstance(identity_id, str) or not identity_id.strip():
+        participant = connection.get("participant")
+        if not isinstance(participant, dict):
+            raise ValueError("connection.identity_id must be a non-empty string")
+        return message_repo.im_participant_ref(participant)
+    return {"kind": "external", "external_id": identity_id.strip()}
 
 
 def _save_connection_last_event(connection: dict[str, Any], event_id: str) -> dict[str, Any]:
@@ -585,10 +452,15 @@ def _participant_can_see_message(message_repo: Any, participant: dict[str, Any],
     conversation = message_repo.get_im_conversation(str(message.get("conversation_id") or ""))
     if conversation is None:
         return False
+    participant_key = message_repo.im_participant_key(participant)
+    if isinstance(conversation.get("identity_ids"), list):
+        return participant_key in {
+            message_repo.im_identity_id_for_row(row, "conversation.identity_ids[]")
+            for row in conversation["identity_ids"]
+        }
     rows = conversation.get("participants")
     if not isinstance(rows, list):
         return False
-    participant_key = message_repo.im_participant_key(participant)
     return participant_key in {message_repo.im_participant_key(row) for row in rows if isinstance(row, dict)}
 
 
@@ -683,52 +555,3 @@ def update_im_disposition(
         "state_changed": previous != disposition or current.get("reason") != updated["reason"],
     }
 
-
-def send_from_actor(
-    *,
-    args: dict[str, Any],
-    context: MessageSendContext,
-    source_actor_address: Any,
-    active_actor: dict[str, Any],
-    active_role: str,
-    require_active_role_manifest: bool = True,
-    action: str = "message.send",
-) -> dict[str, Any]:
-    del action
-    manifest_roles = _manifest_role_ids(context)
-    source_actor = _actor_address_from_any(context, source_actor_address)
-    if require_active_role_manifest and active_role not in manifest_roles:
-        return _reject_scope(
-            action="message.send",
-            active_actor=active_actor,
-            active_role=active_role,
-            code="E_MESSAGE_SCOPE",
-            message=f"active role '{active_role}' is not declared in manifest",
-            permission_boundary="message.manifest_role",
-            human_summary="Active role is not part of the manifest-declared message scope.",
-            why_blocked="message actions require active_role to be declared in manifest.roles.",
-            retryable=False,
-            correctable_fields=None,
-        )
-    target = args.get("target_actor_address")
-    reply_to = args.get("reply_to") if isinstance(args.get("reply_to"), str) else None
-    if not isinstance(target, dict) and reply_to is None:
-        return _reject_payload(
-            action="message.send",
-            active_actor=active_actor,
-            active_role=active_role,
-            message="target_actor_address is required for a new actor-directed message",
-            correctable_fields=["target_actor_address"],
-        )
-    result = send_im_message(
-        sender_participant={"kind": "actor", "actor_address": source_actor.to_payload()},
-        to={"kind": "actor", "actor_address": target} if isinstance(target, dict) else None,
-        content=str(args.get("content") or ""),
-        reply_to=reply_to,
-        wake_actor=getattr(context.daemon, "wake_im_actor", None),
-    )
-    if result.get("ok") is True:
-        result["action"] = "message.send"
-        result["active_actor"] = active_actor
-        result["active_role"] = active_role
-    return result

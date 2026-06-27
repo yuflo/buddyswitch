@@ -211,7 +211,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "summarize", ("compact", "summary", "get")),
             ("context", "list_sources", ("source", "descriptor", "catalog")),
             ("message", "contacts", ("contact", "actor", "send")),
-            ("message", "send", ("central im", "actor address", "track")),
+            ("message", "send", ("central im", "actor identity", "track")),
             ("message", "get", ("exact", "message_id", "disposition")),
             ("message", "mark", ("absorbed", "needs_parent", "disposition")),
             ("message", "list", ("event", "cursor", "track")),
@@ -416,7 +416,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertNotIn(text, combined)
         self.assertIn("env.tool role-action policy allows this action for the active role", combined)
 
-    def test_message_catalog_uses_actor_address_identity_language(self) -> None:
+    def test_message_catalog_uses_identity_language(self) -> None:
         desc = self._desc()
         message_desc = desc["message"]
         operation_rows = catalog.operation_semantics()
@@ -430,8 +430,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertEqual(message_rows["message.send"]["authority"], "message.central_im_channel")
         self.assertEqual(message_rows["message.get"]["authority"], "message.active_actor_exact_message")
         self.assertEqual(message_rows["message.mark"]["authority"], "message.active_actor_message_disposition")
-        self.assertEqual(message_rows["message.list"]["authority"], "message.central_im_participant_events")
-        self.assertIn("active actor Central IM participant event feed", message_rows["message.list"]["visibility"])
+        self.assertEqual(message_rows["message.list"]["authority"], "message.central_im_identity_events")
+        self.assertIn("active actor Central IM identity event feed", message_rows["message.list"]["visibility"])
 
         send_requires = "\n".join(message_rows["message.send"]["requires"]).lower()
         get_requires = "\n".join(message_rows["message.get"]["requires"]).lower()
@@ -461,7 +461,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "needs_parent",
             "message.send(reply_to=...)",
             "generic disposition editor",
-            "full actoraddress",
+            "target_identity_id",
         )
         for token in required:
             with self.subTest(required=token):
@@ -545,7 +545,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         task_model = str(desc["task"].get("object_model", "")).lower()
         artifact_model = str(desc["artifact"].get("object_model", "")).lower()
 
-        self.assertIn("owner_actor", track_model)
+        self.assertIn("owner_identity_id", track_model)
         self.assertIn("collaboration facts", track_model)
         self.assertIn("comments are the only actor-attention", track_model)
         self.assertIn("private work item", task_model)

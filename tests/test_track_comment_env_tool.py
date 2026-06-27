@@ -185,6 +185,27 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self.addCleanup(restore)
         return calls
 
+    def _patch_daemon_contacts(self, contacts: list[dict[str, Any]]) -> None:
+        original_list_contacts = runtime_context.daemon_client.list_contacts
+
+        def fake_list_contacts(*, role_id: str | None = None, socket_path: Path | None = None) -> dict[str, object]:
+            del socket_path
+            rows = []
+            for row in contacts:
+                actor_address = row.get("actor_address") if isinstance(row, dict) else None
+                if not isinstance(actor_address, dict):
+                    continue
+                if role_id is not None and actor_address.get("role_id") != role_id:
+                    continue
+                rows.append(dict(row))
+            return {"contacts": rows, "count": len(rows)}
+
+        def restore() -> None:
+            runtime_context.daemon_client.list_contacts = original_list_contacts
+
+        runtime_context.daemon_client.list_contacts = fake_list_contacts
+        self.addCleanup(restore)
+
     def _seed_track(self, track_id: str) -> dict[str, object]:
         return track_repo.create_track(
             track_id,
@@ -201,7 +222,8 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             "actor_id": self._runtime_actor_id(role="dev", label="act-dev-track-delivery"),
             "role_id": "dev",
         }
-        target_pm = {"actor_id": "act-pm-track-mentioned", "role_id": "pm"}
+        target_pm = {"actor_id": "act-route-track-mentioned", "role_id": "pm"}
+        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
 
         response = self._dispatch(
             actor_id="act-dev-track-delivery",
@@ -211,7 +233,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             args={
                 "track_id": "track-comment-delivery-mentions",
                 "content": "Please review this Track point.",
-                "mentioned_actors": [target_pm, dict(target_pm), source_actor],
+                "mentioned_identity_ids": [target_pm["actor_id"], target_pm["actor_id"], source_actor["actor_id"]],
             },
         )
 
@@ -244,7 +266,8 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         results = response.get("delivery_results")
         self.assertIsInstance(results, list, msg=response)
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].get("target_actor_address"), target_pm)
+        self.assertEqual(results[0].get("target_identity_id"), target_pm["actor_id"])
+        self.assertNotIn("target_actor_address", results[0])
         self.assertEqual(results[0].get("delivery_status"), "delivered")
 
     def test_add_comment_reply_notifies_parent_author_once(self) -> None:
@@ -262,6 +285,11 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self.assertIsInstance(root_comment, dict, msg=root)
         assert isinstance(root_comment, dict)
         self.assertEqual(calls, [])
+        root_author = {
+            "actor_id": self._runtime_actor_id(role="dev", label="act-dev-track-reply-source"),
+            "role_id": "dev",
+        }
+        self._patch_daemon_contacts([{"actor_address": root_author, "status": "online"}])
 
         reply = self._dispatch(
             actor_id="act-pm-track-reply-author",
@@ -272,7 +300,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
                 "track_id": "track-comment-delivery-reply",
                 "content": "Reply for the original author.",
                 "reply_to": root_comment["id"],
-                "mentioned_actors": [root_comment["by_actor"], root_comment["by_actor"]],
+                "mentioned_identity_ids": [root_author["actor_id"], root_author["actor_id"]],
             },
         )
 
@@ -281,7 +309,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self.assertIsInstance(reply_comment, dict, msg=reply)
         assert isinstance(reply_comment, dict)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["target_actor_address"], root_comment["by_actor"])
+        self.assertEqual(calls[0]["target_actor_address"], root_author)
         self.assertEqual(
             calls[0]["payload"],
             {
@@ -296,11 +324,11 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             {"target_count": 1, "delivered_count": 1, "failed_count": 0},
         )
 
-    def test_add_comment_deduplicates_targets_by_actor_address(self) -> None:
+    def test_add_comment_deduplicates_targets_by_identity_id(self) -> None:
         self._seed_track("track-comment-delivery-address-dedupe")
         calls = self._patch_daemon_delivery()
-        target_pm = {"actor_id": "act-shared-track-target", "role_id": "pm"}
-        target_design = {"actor_id": "act-shared-track-target", "role_id": "design"}
+        target_pm = {"actor_id": "act-pm-shared-track-target", "role_id": "pm"}
+        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
 
         response = self._dispatch(
             actor_id="act-dev-track-address-dedupe",
@@ -309,19 +337,19 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             action="add_comment",
             args={
                 "track_id": "track-comment-delivery-address-dedupe",
-                "content": "Two concrete actor addresses need this.",
-                "mentioned_actors": [target_pm, dict(target_pm), target_design],
+                "content": "One actor identity appears twice.",
+                "mentioned_identity_ids": [target_pm["actor_id"], target_pm["actor_id"]],
             },
         )
 
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(
             [signal["target_actor_address"] for signal in calls],
-            [target_pm, target_design],
+            [target_pm],
         )
         self.assertEqual(
             response.get("delivery_summary"),
-            {"target_count": 2, "delivered_count": 2, "failed_count": 0},
+            {"target_count": 1, "delivered_count": 1, "failed_count": 0},
         )
 
     def test_add_comment_without_attention_creates_state_without_delivery(self) -> None:
@@ -352,6 +380,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
     def test_add_comment_delivery_failure_keeps_comment_and_reports_status(self) -> None:
         self._seed_track("track-comment-delivery-failed")
         target_pm = {"actor_id": "act-pm-track-offline", "role_id": "pm"}
+        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "offline"}])
         self._patch_daemon_delivery(
             delivery={
                 "delivery_status": "target_not_online",
@@ -368,7 +397,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             args={
                 "track_id": "track-comment-delivery-failed",
                 "content": "Delivery may fail but state should remain.",
-                "mentioned_actors": [target_pm],
+                "mentioned_identity_ids": [target_pm["actor_id"]],
             },
         )
 
@@ -384,13 +413,15 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         )
         results = response.get("delivery_results")
         self.assertIsInstance(results, list, msg=response)
-        self.assertEqual(results[0].get("target_actor_address"), target_pm)
+        self.assertEqual(results[0].get("target_identity_id"), target_pm["actor_id"])
+        self.assertNotIn("target_actor_address", results[0])
         self.assertEqual(results[0].get("delivery_status"), "target_not_online")
         self.assertEqual(results[0].get("reachability_status"), "registered_offline")
 
     def test_add_comment_delivery_exception_keeps_comment_and_reports_signal_error(self) -> None:
         self._seed_track("track-comment-delivery-exception")
         target_pm = {"actor_id": "act-pm-track-exception", "role_id": "pm"}
+        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
         self._patch_daemon_delivery(exc=RuntimeError("socket gone"))
 
         response = self._dispatch(
@@ -401,7 +432,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             args={
                 "track_id": "track-comment-delivery-exception",
                 "content": "Delivery exception should be visible.",
-                "mentioned_actors": [target_pm],
+                "mentioned_identity_ids": [target_pm["actor_id"]],
             },
         )
 
@@ -413,13 +444,16 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self.assertEqual(response.get("delivery_status"), "failed")
         results = response.get("delivery_results")
         self.assertIsInstance(results, list, msg=response)
-        self.assertEqual(results[0].get("target_actor_address"), target_pm)
+        self.assertEqual(results[0].get("target_identity_id"), target_pm["actor_id"])
+        self.assertNotIn("target_actor_address", results[0])
         self.assertEqual(results[0].get("delivery_status"), "delivery_failed")
         self.assertIn("socket gone", str(results[0].get("signal_error")))
 
     def test_add_list_reply_and_open_are_track_native(self) -> None:
         self._seed_track("track-comment-a")
         self._seed_track("track-comment-b")
+        target_pm = {"actor_id": "act-pm-mentioned", "role_id": "pm"}
+        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
 
         root = self._dispatch(
             actor_id="act-dev-track-comment",
@@ -429,7 +463,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             args={
                 "track_id": "track-comment-a",
                 "content": "Root Track A",
-                "mentioned_actors": [{"actor_id": "act-pm-mentioned", "role_id": "pm"}],
+                "mentioned_identity_ids": ["act-pm-mentioned"],
             },
         )
         self.assertTrue(root.get("ok"), msg=root)
@@ -533,7 +567,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         )
         self.assertFalse(non_pm.get("ok"), msg=non_pm)
         self.assertEqual((non_pm.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
-        self.assertEqual(non_pm.get("permission_boundary"), "track.owner_actor")
+        self.assertEqual(non_pm.get("permission_boundary"), "track.owner_identity_id")
 
         cross_track = self._dispatch(
             actor_id="act-pm-resolve-comment",

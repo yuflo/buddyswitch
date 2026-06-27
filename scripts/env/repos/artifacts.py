@@ -29,7 +29,6 @@ _LEGACY_ARTIFACT_FIELDS = {
     "blocks",
     "figma_file",
 }
-_KNOWN_ROLE_IDS = {"pm", "design", "dev", "market", "test"}
 _SHA256_HEX_LENGTH = 64
 
 
@@ -61,18 +60,17 @@ def _normalize_actor(value: Any, field: str) -> dict[str, str]:
         raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
 
 
-def _actor_role(value: dict[str, Any]) -> str:
-    role = value.get("role_id")
-    if not isinstance(role, str) or role not in _KNOWN_ROLE_IDS:
-        raise ValueError("actor role_id must be one of known role ids")
-    return role
+def _actor_identity_id(value: Any, field: str) -> str:
+    return _normalize_actor(value, field)["actor_id"]
 
 
-def _normalize_source_refs(
-    raw_refs: Any,
-    *,
-    active_role: str | None = None,
-) -> list[dict[str, Any]] | None:
+def _identity_id(value: Any, field: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return runtime_files.require_id(value.strip(), field)
+    return _actor_identity_id(value, field)
+
+
+def _normalize_source_refs(raw_refs: Any) -> list[dict[str, Any]] | None:
     if raw_refs is None:
         return None
     if not isinstance(raw_refs, list):
@@ -140,8 +138,10 @@ def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
         sha256 = _require_non_empty_text(raw.get("sha256"), "attachment.sha256")
         if len(sha256) != _SHA256_HEX_LENGTH or any(ch not in "0123456789abcdef" for ch in sha256):
             raise ValueError("attachment.sha256 must be 64 lowercase hex chars")
-        created_by_actor = _normalize_actor(raw.get("created_by_actor"), "attachment.created_by_actor")
-        _actor_role(created_by_actor)
+        created_by_identity_id = _identity_id(
+            raw.get("created_by_identity_id", raw.get("created_by_actor")),
+            "attachment.created_by_identity_id",
+        )
         created_at = _require_non_empty_text(raw.get("created_at"), "attachment.created_at")
         rows.append(
             {
@@ -150,7 +150,7 @@ def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
                 "content_type": content_type,
                 "size_bytes": size_bytes,
                 "sha256": sha256,
-                "created_by_actor": created_by_actor,
+                "created_by_identity_id": created_by_identity_id,
                 "created_at": created_at,
             }
         )
@@ -234,15 +234,14 @@ def create_artifact_revision(
     if get_artifact(resolved_id):
         raise ValueError(f"artifact already exists: {resolved_id}")
 
-    creator = _normalize_actor(created_by_actor, "created_by_actor")
-    creator_role = _actor_role(creator)
+    creator_identity_id = _actor_identity_id(created_by_actor, "created_by_actor")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("body must be a non-empty string")
     if template not in VALID_ARTIFACT_TEMPLATES:
         raise ValueError(f"template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
     if not isinstance(summary, str):
         raise ValueError("summary must be a string")
-    normalized_refs = _normalize_source_refs(source_refs, active_role=creator_role)
+    normalized_refs = _normalize_source_refs(source_refs)
 
     revision = 1
     supersedes_id: str | None = None
@@ -265,13 +264,12 @@ def create_artifact_revision(
         validate_artifact(previous_patch)
         demote_previous = previous_patch
 
-    author_rows = [creator]
+    author_identity_ids = [creator_identity_id]
     if isinstance(author_actors, list):
         for row in author_actors:
-            actor = _normalize_actor(row, "author_actors[]")
-            _actor_role(actor)
-            if actor not in author_rows:
-                author_rows.append(actor)
+            identity_id = _actor_identity_id(row, "author_actors[]")
+            if identity_id not in author_identity_ids:
+                author_identity_ids.append(identity_id)
 
     timestamp = now_iso()
     artifact = {
@@ -283,8 +281,8 @@ def create_artifact_revision(
         "revision": revision,
         "is_current": new_is_current,
         "supersedes_artifact_id": supersedes_id,
-        "created_by_actor": creator,
-        "author_actors": author_rows,
+        "created_by_identity_id": creator_identity_id,
+        "author_identity_ids": author_identity_ids,
         "source_refs": normalized_refs,
         "attachments": [],
         "created_at": timestamp,
@@ -317,6 +315,7 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         "is_current",
         "revision",
         "author_actors",
+        "author_identity_ids",
     }
     for key, value in patch.items():
         if key not in allowed:
@@ -354,8 +353,7 @@ def adopt_local_attachment(
     if not raw:
         raise ValueError("source_path must reference a non-empty file")
 
-    creator = _normalize_actor(created_by_actor, "created_by_actor")
-    _actor_role(creator)
+    creator_identity_id = _actor_identity_id(created_by_actor, "created_by_actor")
     attachment_id = f"att-{uuid.uuid4().hex[:10]}"
     inferred_content_type = mimetypes.guess_type(resolved_source.name)[0] or "application/octet-stream"
     content_type_value = content_type.strip() if isinstance(content_type, str) and content_type.strip() else inferred_content_type
@@ -366,7 +364,7 @@ def adopt_local_attachment(
         "content_type": content_type_value,
         "size_bytes": len(raw),
         "sha256": hashlib.sha256(raw).hexdigest(),
-        "created_by_actor": creator,
+        "created_by_identity_id": creator_identity_id,
         "created_at": timestamp,
     }
 
@@ -412,9 +410,11 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     title = _require_non_empty_text(artifact.get("title"), "artifact.title")
 
     if "created_by" in artifact or "authors" in artifact:
-        raise ValueError("artifact.created_by/artifact.authors are retired; use created_by_actor/author_actors")
-    created_by_actor = _normalize_actor(artifact.get("created_by_actor"), "artifact.created_by_actor")
-    created_by_role = _actor_role(created_by_actor)
+        raise ValueError("artifact.created_by/artifact.authors are retired; use created_by_identity_id/author_identity_ids")
+    created_by_identity_id = _identity_id(
+        artifact.get("created_by_identity_id", artifact.get("created_by_actor")),
+        "artifact.created_by_identity_id",
+    )
 
     body = artifact.get("body")
     if not isinstance(body, str) or not body.strip():
@@ -429,7 +429,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(summary, str):
         raise ValueError("artifact.summary must be a string")
 
-    source_refs = _normalize_source_refs(artifact.get("source_refs"), active_role=created_by_role)
+    source_refs = _normalize_source_refs(artifact.get("source_refs"))
 
     revision = artifact.get("revision")
     if not isinstance(revision, int) or revision <= 0:
@@ -443,16 +443,21 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(is_current, bool):
         raise ValueError("artifact.is_current must be a boolean")
 
-    authors_raw = artifact.get("author_actors")
-    authors: list[dict[str, str]] = []
+    author_identity_ids: list[str] = []
+    authors_raw = artifact.get("author_identity_ids")
     if isinstance(authors_raw, list):
         for row in authors_raw:
-            actor = _normalize_actor(row, "artifact.author_actors[]")
-            _actor_role(actor)
-            if actor not in authors:
-                authors.append(actor)
-    if created_by_actor not in authors:
-        authors.insert(0, created_by_actor)
+            identity_id = _identity_id(row, "artifact.author_identity_ids[]")
+            if identity_id not in author_identity_ids:
+                author_identity_ids.append(identity_id)
+    legacy_authors_raw = artifact.get("author_actors")
+    if isinstance(legacy_authors_raw, list):
+        for row in legacy_authors_raw:
+            identity_id = _actor_identity_id(row, "artifact.author_actors[]")
+            if identity_id not in author_identity_ids:
+                author_identity_ids.append(identity_id)
+    if created_by_identity_id not in author_identity_ids:
+        author_identity_ids.insert(0, created_by_identity_id)
 
     attachments = _normalize_attachment_rows(artifact.get("attachments"))
     created_at = _require_non_empty_text(artifact.get("created_at"), "artifact.created_at")
@@ -467,8 +472,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "revision": revision,
         "is_current": is_current,
         "supersedes_artifact_id": supersedes_artifact_id,
-        "created_by_actor": created_by_actor,
-        "author_actors": authors,
+        "created_by_identity_id": created_by_identity_id,
+        "author_identity_ids": author_identity_ids,
         "source_refs": source_refs,
         "attachments": attachments,
         "created_at": created_at,

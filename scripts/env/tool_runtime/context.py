@@ -15,11 +15,11 @@ import uuid
 from env.domain import artifact_relations as _artifact_relations_domain
 from env.domain import artifact_visibility as _artifact_visibility_domain
 from env.domain import actor_private_workspace as _actor_private_workspace_domain
-from env.domain import messages as _message_domain
 from env.domain import source_refs as _source_ref_domain
 from env.domain import tasks as _task_domain
 from env.domain import track_comments as _track_comment_domain
 from env.domain import track_artifact_relations as _track_artifact_relations_domain
+from env.domain.identity import IdentityRef
 import env_profiles
 from env_manifest import DEFAULT_MANIFEST
 from env.repos import artifacts as _artifact_repo
@@ -34,7 +34,9 @@ from env.tool_runtime.actor_profile import ActorAddress
 from env.tool_runtime.actor_profile import ActorProfile
 from env.tool_runtime.actor_profile import AuthSubject
 from env.tool_runtime.actor_profile import Role
+from env.tool_runtime.actor_profile import actor_identity_to_address
 from env.tool_runtime import daemon_client
+from env.tool_runtime import role_auth as _role_auth
 
 
 def _load_registry_module():
@@ -168,31 +170,6 @@ class RuntimeObjectAccess:
             rows = [row for row in rows if row.get("status") == status]
         return rows
 
-    def send_message(
-        self,
-        from_actor_address: ActorAddress | dict[str, Any],
-        to_actor_address: ActorAddress | dict[str, Any],
-        content: str,
-        reply_to: str | None,
-    ) -> dict[str, Any]:
-        return _message_repo.create_message(
-            from_actor_address=from_actor_address,
-            to_actor_address=to_actor_address,
-            content=content,
-            reply_to=reply_to,
-        )
-
-    def list_messages(self, role: str | None) -> list[dict[str, Any]]:
-        rows = _message_repo.list_messages()
-        if isinstance(role, str) and role.strip():
-            rows = [
-                row
-                for row in rows
-                if isinstance(row.get("from_actor_address"), dict)
-                and row["from_actor_address"].get("role_id") == role
-            ]
-        return rows
-
     def runtime_sources(self) -> dict[str, Any]:
         return {
             "tracks": "track.list / track.open",
@@ -214,7 +191,7 @@ class ActorPrivateAccess:
         self._instance_payload = instance_payload
 
     def _role_ids(self) -> set[str]:
-        ids = _message_domain.manifest_role_ids(self._manifest)
+        ids = set(_role_auth.manifest_role_ids(self._manifest))
         ids.add(self._active_role)
         return ids
 
@@ -379,8 +356,9 @@ def _launcher_dir_for_runtime() -> Path:
 class DaemonAccess:
     """Explicit central daemon access for runtime tools."""
 
-    def __init__(self, *, actor_address: ActorAddress, instance_json: Path) -> None:
-        self._actor_address = actor_address
+    def __init__(self, *, current_identity: IdentityRef, role_id: str, instance_json: Path) -> None:
+        self.current_identity = current_identity
+        self._actor_address = actor_identity_to_address(current_identity, role_id=role_id)
         self._instance_json = instance_json
 
     def list_contacts(self, *, role_id: str | None = None) -> dict[str, Any]:
@@ -453,7 +431,6 @@ class DomainAccess:
     artifact_relations: Any = field(default_factory=lambda: _artifact_relations_domain)
     artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
     actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
-    message: Any = field(default_factory=lambda: _message_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
     task: Any = field(default_factory=lambda: _task_domain)
     track_comment: Any = field(default_factory=lambda: _track_comment_domain)
@@ -477,6 +454,7 @@ class RepoAccess:
 class ToolContext(Mapping[str, Any]):
     """Host-owned runtime context object passed to each tool invoke."""
 
+    current_identity: IdentityRef
     active_actor: Actor
     active_role: Role
     actor_id: str
@@ -512,7 +490,15 @@ class ToolContext(Mapping[str, Any]):
                 manifest_path=self.manifest_path,
             ),
         )
-        object.__setattr__(self, "daemon", DaemonAccess(actor_address=self.actor_address, instance_json=self.instance_json))
+        object.__setattr__(
+            self,
+            "daemon",
+            DaemonAccess(
+                current_identity=self.current_identity,
+                role_id=self.role_id,
+                instance_json=self.instance_json,
+            ),
+        )
 
     @classmethod
     def from_actor_profile(
@@ -525,6 +511,7 @@ class ToolContext(Mapping[str, Any]):
         manifest_path: Path | None = None,
     ) -> "ToolContext":
         return cls(
+            current_identity=actor_profile.current_identity,
             active_actor=actor_profile.active_actor,
             active_role=actor_profile.active_role,
             actor_id=actor_profile.actor_id,
@@ -550,6 +537,8 @@ class ToolContext(Mapping[str, Any]):
         return f"{head}-{uuid.uuid4().hex[:10]}"
 
     def __getitem__(self, key: str) -> Any:
+        if key == "current_identity":
+            return self.current_identity.to_payload()
         if key == "active_actor":
             return self.active_actor.to_payload()
         if key == "active_role":
@@ -569,6 +558,7 @@ class ToolContext(Mapping[str, Any]):
         raise KeyError(key)
 
     def __iter__(self) -> Iterator[str]:
+        yield "current_identity"
         yield "active_actor"
         yield "active_role"
         yield "actor_id"
@@ -579,7 +569,7 @@ class ToolContext(Mapping[str, Any]):
         yield "manifest_path"
 
     def __len__(self) -> int:
-        return 8
+        return 9
 
     def get(self, key: str, default: Any = None) -> Any:
         try:

@@ -45,7 +45,8 @@ class WebImIdentityProvider:
             authenticated = self._authenticate_record(record) if record is not None else None
             if record is not None and authenticated is not None:
                 updated = dict(record)
-                updated["participant"] = authenticated["participant"]
+                updated["identity"] = authenticated["identity"]
+                updated.pop("participant", None)
                 updated["updated_at"] = runtime_files.now_iso()
                 self._write(updated)
                 updated["connection"] = authenticated["connection"]
@@ -64,19 +65,19 @@ class WebImIdentityProvider:
 
     def _authenticate_record(self, record: dict[str, Any]) -> dict[str, Any] | None:
         connection_key = record.get("connection_key")
-        participant = record.get("participant")
-        if not isinstance(connection_key, str) or not connection_key.strip() or not isinstance(participant, dict):
+        identity = record.get("identity")
+        if not isinstance(connection_key, str) or not connection_key.strip() or not isinstance(identity, dict):
             return None
         auth = message_service.authenticate_external_connection_key(connection_key)
         if auth.get("ok") is not True:
             return None
-        authenticated = auth.get("participant")
+        authenticated = auth.get("identity")
         connection = auth.get("connection")
         if not isinstance(authenticated, dict) or not isinstance(connection, dict):
             return None
-        if _external_id(participant) != _external_id(authenticated):
+        if _external_id(identity) != _external_id(authenticated):
             return None
-        return {"participant": authenticated, "connection": connection}
+        return {"identity": authenticated, "connection": connection}
 
     def _register_new(self) -> dict[str, Any]:
         result = message_service.create_external_connection(display_name=DISPLAY_NAME)
@@ -90,15 +91,15 @@ class WebImIdentityProvider:
         authenticated = message_service.authenticate_external_connection_key(connection_key)
         if authenticated.get("ok") is not True:
             raise WebImIdentityError("Web Management IM connection could not be authenticated.")
-        participant = authenticated.get("participant")
+        identity = authenticated.get("identity")
         connection = authenticated.get("connection")
-        if not isinstance(participant, dict) or not isinstance(connection, dict):
+        if not isinstance(identity, dict) or not isinstance(connection, dict):
             raise WebImIdentityError("Web Management IM authentication returned an invalid identity.")
         record = {
             "schema_version": SCHEMA_VERSION,
             "client_kind": CLIENT_KIND,
             "display_name": DISPLAY_NAME,
-            "participant": participant,
+            "identity": identity,
             "connection_key": connection_key,
             "created_at": now,
             "updated_at": now,
@@ -126,8 +127,8 @@ class WebImIdentityProvider:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _external_id(participant: dict[str, Any]) -> str:
-    if participant.get("kind") != "external":
+def _external_id(identity: dict[str, Any]) -> str:
+    if identity.get("type") != "external":
         return ""
-    value = participant.get("external_id")
+    value = identity.get("id")
     return value if isinstance(value, str) and value.strip() else ""

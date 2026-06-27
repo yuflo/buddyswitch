@@ -26,6 +26,7 @@ _ACTION_DEFINITION_MAP = {
 
 class TrackServiceContext(TypedDict):
     active_role: str
+    active_actor: dict[str, Any]
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -146,13 +147,13 @@ def _reject_authority(*, action: str, active_actor: dict[str, Any], active_role:
         active_role=active_role,
         code="E_TRACK_AUTHORITY",
         message=message,
-        permission_boundary="track.owner_actor",
+        permission_boundary="track.owner_identity_id",
         human_summary="Track owner authority is required.",
         why_blocked=message,
         impact="No owner-only Track state changed.",
         state_changed=False,
         retryable=False,
-        retry_guidance="Ask the exact Track owner_actor to perform this action.",
+        retry_guidance="Ask the exact Track owner identity to perform this action.",
         allowed_next_actions=["Use track.list to inspect current state."],
         correctable_fields=["active_actor"],
     )
@@ -248,7 +249,7 @@ def _reject_track_comment_scope(
 def _delivery_row_from_result(target_actor: dict[str, str], result: dict[str, Any]) -> dict[str, Any]:
     status = result.get("delivery_status") if isinstance(result.get("delivery_status"), str) else "delivery_failed"
     row: dict[str, Any] = {
-        "target_actor_address": dict(target_actor),
+        "target_identity_id": target_actor["actor_id"],
         "delivery_status": status,
     }
     for key in ("handling_status", "reachability_status", "signal_error"):
@@ -285,10 +286,15 @@ def _deliver_track_comment_added(
     *,
     comment: dict[str, Any],
     reply_to_comment: dict[str, Any] | None,
+    identity_routes: dict[str, dict[str, str]] | None = None,
     context: TrackServiceContext,
 ) -> dict[str, Any]:
     payload = context.rules.track_comment.track_comment_added_payload(comment)
-    targets = context.rules.track_comment.track_comment_targets(comment, reply_to_comment=reply_to_comment)
+    targets = context.rules.track_comment.track_comment_targets(
+        comment,
+        reply_to_comment=reply_to_comment,
+        identity_routes=identity_routes,
+    )
     results: list[dict[str, Any]] = []
     for target in targets:
         try:
@@ -302,7 +308,7 @@ def _deliver_track_comment_added(
         except Exception as exc:
             results.append(
                 {
-                    "target_actor_address": dict(target),
+                    "target_identity_id": target["actor_id"],
                     "delivery_status": "delivery_failed",
                     "handling_status": "ignored",
                     "signal_error": str(exc),
@@ -353,22 +359,6 @@ def _require_track_id(action: str, args: dict[str, Any], active_actor: dict[str,
     return track_id.strip(), None
 
 
-def _manifest_roles(manifest: dict[str, Any]) -> set[str]:
-    roles = manifest.get("roles")
-    if isinstance(roles, dict):
-        return {key for key in roles if isinstance(key, str) and key}
-    if isinstance(roles, list):
-        ids: set[str] = set()
-        for row in roles:
-            if not isinstance(row, dict):
-                continue
-            role_id = row.get("id")
-            if isinstance(role_id, str) and role_id:
-                ids.add(role_id)
-        return ids
-    return set()
-
-
 def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an object")
@@ -384,29 +374,38 @@ def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
     return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
 
 
-def _same_actor_address(left: Any, right: Any) -> bool:
+def _active_identity_id(active_actor: dict[str, Any]) -> str | None:
     try:
-        return _actor_address_payload(left, "left") == _actor_address_payload(right, "right")
+        return _actor_address_payload(active_actor, "active_actor")["actor_id"]
     except ValueError:
-        return False
+        return None
 
 
-def _require_owner_actor(
+def _comment_author_identity_id(comment: dict[str, Any]) -> str | None:
+    identity_id = comment.get("by_identity_id")
+    if isinstance(identity_id, str) and identity_id:
+        return identity_id
+    actor = comment.get("by_actor")
+    if isinstance(actor, dict) and isinstance(actor.get("actor_id"), str):
+        return actor["actor_id"]
+    return None
+
+
+def _require_owner_identity(
     *,
     action: str,
     track: dict[str, Any],
     active_actor: dict[str, Any],
     active_role: str,
 ) -> dict[str, Any] | None:
-    owner_actor = track.get("owner_actor")
-    if _same_actor_address(owner_actor, active_actor):
+    if track.get("owner_identity_id") == _active_identity_id(active_actor):
         return None
     return _reject_authority(
         action=action,
         active_actor=active_actor,
         active_role=active_role,
         message=(
-            "only the exact Track owner_actor can mutate requirement facts, lifecycle, "
+            "only the exact Track owner identity can mutate requirement facts, lifecycle, "
             "comment thread resolution, or archive state"
         ),
     )
@@ -423,68 +422,97 @@ def _normalize_text_list_payload(value: Any, field: str) -> list[str]:
     return rows
 
 
-def _normalize_mentioned_actors(
+def _actor_routes_for_mentions(*, context: Any, active_actor: dict[str, Any]) -> dict[str, dict[str, str]]:
+    routes: dict[str, dict[str, str]] = {}
+    try:
+        active_route = _actor_address_payload(active_actor, "active_actor")
+    except ValueError:
+        active_route = None
+    if active_route is not None:
+        routes[active_route["actor_id"]] = active_route
+
+    daemon = getattr(context, "daemon", None)
+    list_contacts = getattr(daemon, "list_contacts", None)
+    if not callable(list_contacts):
+        return routes
+    try:
+        raw = list_contacts(role_id=None)
+    except Exception:
+        return routes
+    rows = raw.get("contacts") if isinstance(raw, dict) and isinstance(raw.get("contacts"), list) else []
+    for row in rows:
+        actor_address = row.get("actor_address") if isinstance(row, dict) else None
+        if not isinstance(actor_address, dict):
+            continue
+        try:
+            route = _actor_address_payload(actor_address, "contact.actor_address")
+        except ValueError:
+            continue
+        routes[route["actor_id"]] = route
+    return routes
+
+
+def _normalize_mentioned_identity_ids(
     *,
-    mentioned_actors: Any,
+    mentioned_identity_ids: Any,
     active_actor: dict[str, Any],
     active_role: str,
     action: str,
-    manifest: dict[str, Any],
-) -> list[dict[str, str]] | dict[str, Any]:
-    if mentioned_actors is None:
-        return []
-    if not isinstance(mentioned_actors, list):
+    context: Any,
+) -> tuple[list[str], dict[str, dict[str, str]]] | dict[str, Any]:
+    if mentioned_identity_ids is None:
+        return [], {}
+    if not isinstance(mentioned_identity_ids, list):
         return _reject_track_comment_payload(
             action=action,
             active_actor=active_actor,
             active_role=active_role,
-            message="mentioned_actors must be a list",
-            correctable_fields=["mentioned_actors"],
+            message="mentioned_identity_ids must be a list",
+            correctable_fields=["mentioned_identity_ids"],
             field_errors=[
                 {
-                    "path": "mentioned_actors",
-                    "message": "mentioned_actors must be a list of actor address payloads",
-                    "expected": [{"actor_id": "act-pm-example", "role_id": "pm"}],
-                    "example": [{"actor_id": "act-pm-example", "role_id": "pm"}],
+                    "path": "mentioned_identity_ids",
+                    "message": "mentioned_identity_ids must be a list of actor identity id strings",
+                    "expected": ["act-pm-example"],
+                    "example": ["act-pm-example"],
                 }
             ],
         )
-    roles = _manifest_roles(manifest)
-    normalized: list[dict[str, str]] = []
-    seen_actor_addresses: set[tuple[str, str]] = set()
-    for row in mentioned_actors:
-        try:
-            actor = _actor_address_payload(row, "mentioned_actors entry")
-        except ValueError as exc:
+    resolvable_routes = _actor_routes_for_mentions(context=context, active_actor=active_actor)
+    normalized: list[str] = []
+    routes: dict[str, dict[str, str]] = dict(resolvable_routes)
+    seen: set[str] = set()
+    for index, row in enumerate(mentioned_identity_ids):
+        if not isinstance(row, str) or not row.strip():
             return _reject_track_comment_payload(
                 action=action,
                 active_actor=active_actor,
                 active_role=active_role,
-                message=f"mentioned_actors entries must be actor address payloads: {exc}",
-                correctable_fields=["mentioned_actors"],
-            )
-        role = actor["role_id"]
-        if role not in roles:
+                message="mentioned_identity_ids entries must be non-empty strings",
+                correctable_fields=["mentioned_identity_ids"],
+        )
+        identity_id = row.strip()
+        route = resolvable_routes.get(identity_id)
+        if route is None:
             return _reject_track_comment_payload(
                 action=action,
                 active_actor=active_actor,
                 active_role=active_role,
-                message=f"unknown mentioned actor role: {role}",
-                correctable_fields=["mentioned_actors"],
+                message=f"mentioned_identity_ids[{index}] must be a reachable actor identity id",
+                correctable_fields=["mentioned_identity_ids"],
                 field_errors=[
                     {
-                        "path": "mentioned_actors",
-                        "message": f"unknown mentioned actor role: {role}",
-                        "allowed_values": sorted(roles),
-                        "example": [{"actor_id": f"act-{sorted(roles)[0]}-example", "role_id": sorted(roles)[0]}],
+                        "path": f"mentioned_identity_ids[{index}]",
+                        "message": "actor identity id must resolve to an active actor route",
+                        "example": active_actor.get("actor_id") if isinstance(active_actor.get("actor_id"), str) else "act-example",
                     }
                 ],
             )
-        actor_key = (actor["actor_id"], actor["role_id"])
-        if actor_key not in seen_actor_addresses:
-            seen_actor_addresses.add(actor_key)
-            normalized.append(actor)
-    return normalized
+        if identity_id not in seen:
+            seen.add(identity_id)
+            normalized.append(identity_id)
+            routes[identity_id] = route
+    return normalized, routes
 
 
 def _attachment_projection_for_ref(
@@ -549,10 +577,11 @@ def _track_comment_cues(
         return content[:120]
 
     def _mentions_me(row: dict[str, Any]) -> bool:
-        mentions = row.get("mentioned_actors")
+        active_identity_id = _active_identity_id(active_actor)
+        mentions = row.get("mentioned_identity_ids")
         if not isinstance(mentions, list):
             return False
-        return any(isinstance(item, dict) and _same_actor_address(item, active_actor) for item in mentions)
+        return any(item == active_identity_id for item in mentions)
 
     def _replies_to_me(row: dict[str, Any]) -> bool:
         reply_to = row.get("reply_to")
@@ -561,7 +590,7 @@ def _track_comment_cues(
         parent = by_id.get(reply_to)
         if not isinstance(parent, dict):
             return False
-        return _same_actor_address(parent.get("by_actor"), active_actor)
+        return _comment_author_identity_id(parent) == _active_identity_id(active_actor)
 
     recent = sorted(
         comments,
@@ -581,7 +610,7 @@ def _track_comment_cues(
                     "thread_id": thread_id,
                     "latest_comment_id": latest.get("id"),
                     "latest_comment_preview": _preview(latest),
-                    "latest_by_actor": latest.get("by_actor"),
+                    "latest_by_identity_id": latest.get("by_identity_id"),
                     "comment_count": len(rows),
                     "status": thread_status,
                     "mentions_me": any(_mentions_me(row) for row in rows),
@@ -594,7 +623,7 @@ def _track_comment_cues(
         return {
             "comment_id": row.get("id"),
             "thread_id": row.get("thread_id"),
-            "by_actor": row.get("by_actor"),
+            "by_identity_id": row.get("by_identity_id"),
             "status": row.get("status"),
             "created_at": row.get("created_at"),
             "preview": _preview(row),
@@ -638,7 +667,7 @@ def _track_summary(track: dict[str, Any]) -> dict[str, Any]:
         "id": track.get("id"),
         "title": track.get("title"),
         "outcome": track.get("outcome"),
-        "owner_actor": track.get("owner_actor"),
+        "owner_identity_id": track.get("owner_identity_id"),
         "state": track.get("state"),
         "now": track.get("now"),
         "acceptance_criteria": track.get("acceptance_criteria"),
@@ -756,15 +785,17 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
             correctable_fields=["reply_to"],
         )
 
-    mentioned_actors = _normalize_mentioned_actors(
-        mentioned_actors=args.get("mentioned_actors"),
+    mentioned_identity_payload = _normalize_mentioned_identity_ids(
+        mentioned_identity_ids=args.get("mentioned_identity_ids"),
         active_actor=active_actor,
         active_role=active_role,
         action=action,
-        manifest=context["manifest"],
+        context=context,
     )
-    if isinstance(mentioned_actors, dict):
-        return mentioned_actors
+    if isinstance(mentioned_identity_payload, dict):
+        return mentioned_identity_payload
+    mentioned_identity_ids, identity_routes = mentioned_identity_payload
+    mentioned_actor_routes = [identity_routes[identity_id] for identity_id in mentioned_identity_ids]
 
     reply_to_comment: dict[str, Any] | None = None
     try:
@@ -774,7 +805,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
                 reply_to=reply_to.strip(),
                 by_actor=active_actor,
                 content=content.strip(),
-                mentioned_actors=mentioned_actors,
+                mentioned_actors=mentioned_actor_routes,
             )
             reply_to_comment = context.repos.track_comment.get_track_comment(track_id, reply_to.strip())
         else:
@@ -782,7 +813,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
                 track_id=track_id,
                 by_actor=active_actor,
                 content=content.strip(),
-                mentioned_actors=mentioned_actors,
+                mentioned_actors=mentioned_actor_routes,
             )
     except ValueError as exc:
         message = str(exc)
@@ -807,6 +838,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     delivery_metadata = _deliver_track_comment_added(
         comment=comment,
         reply_to_comment=reply_to_comment,
+        identity_routes=identity_routes,
         context=context,
     )
 
@@ -921,7 +953,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
-    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
     if owner_error is not None:
         return owner_error
 
@@ -1135,7 +1167,7 @@ def update_requirements_for_owner(*, args: dict[str, Any], context: TrackService
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
-    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
     if owner_error is not None:
         return owner_error
 
@@ -1194,7 +1226,7 @@ def update_status_for_owner(*, args: dict[str, Any], context: TrackServiceContex
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
-    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
     if owner_error is not None:
         return owner_error
 
@@ -1523,7 +1555,7 @@ def archive_track_for_owner(*, args: dict[str, Any], context: TrackServiceContex
     track = context.repos.track.get_track(track_id)
     if track is None:
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"track not found: {track_id}")
-    owner_error = _require_owner_actor(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
     if owner_error is not None:
         return owner_error
 

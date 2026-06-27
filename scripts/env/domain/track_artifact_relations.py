@@ -36,6 +36,20 @@ def _actor_payload_or_none(value: Any) -> dict[str, str] | None:
         return None
 
 
+def _actor_identity_id(value: ActorAddress | dict[str, Any]) -> str:
+    if isinstance(value, ActorAddress):
+        return value.actor_id
+    return _actor_payload(value)["actor_id"]
+
+
+def _relation_identity_id(row: dict[str, Any]) -> str | None:
+    identity_id = row.get("from_identity_id")
+    if isinstance(identity_id, str) and identity_id:
+        return identity_id
+    actor = _actor_payload_or_none(row.get("from_actor"))
+    return actor.get("actor_id") if isinstance(actor, dict) else None
+
+
 def _load_track(track_id: str) -> dict[str, Any]:
     track = track_repo.get_track(track_id)
     if track is None:
@@ -49,7 +63,7 @@ def _load_owned_artifact(artifact_id: str, actor: ActorAddress) -> dict[str, Any
     artifact = artifact_repo.get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_actor") != actor.to_payload():
+    if artifact.get("created_by_identity_id") != actor.actor_id:
         raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
     if not isinstance(artifact.get("template"), str) or not artifact.get("template"):
         raise ValueError("artifact.template is required for track artifact relation")
@@ -61,7 +75,7 @@ def _same_relation_slot(*, row: dict[str, Any], role: str, label: str, template:
         row.get("role") == role
         and row.get("label") == label
         and row.get("template") == template
-        and _actor_payload_or_none(row.get("from_actor")) == actor.to_payload()
+        and _relation_identity_id(row) == actor.actor_id
     )
 
 
@@ -81,7 +95,7 @@ def _relation_row(
         "role": role,
         "label": label,
         "template": template,
-        "from_actor": from_actor,
+        "from_identity_id": _actor_identity_id(from_actor),
         "summary": summary,
         "current": True,
         "created_at": track_repo.now_iso(),

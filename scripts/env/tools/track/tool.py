@@ -38,17 +38,12 @@ _REFS_ITEM_SCHEMA = {
     },
 }
 
-_MENTIONED_ACTORS_SCHEMA = {
+_MENTIONED_IDENTITIES_SCHEMA = {
     "type": "array",
-    "description": "Optional list of concrete ActorAddress payloads to mention in the Track comment.",
+    "description": "Optional list of actor identity ids to mention in the Track comment.",
     "items": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["actor_id", "role_id"],
-        "properties": {
-            "actor_id": {"type": "string", "description": "Mentioned actor id."},
-            "role_id": {"type": "string", "description": "Mentioned actor role id."},
-        },
+        "type": "string",
+        "description": "Mentioned actor identity id.",
     },
 }
 
@@ -136,9 +131,9 @@ def _build_definition() -> ToolDefinition:
         title="Track Pages",
         description="Operate shared Track requirement facts, collaboration facts, proof, and comments.",
         scope="shared Track requirement collaboration pages, artifact relations, timeline facts, proof, and comments",
-        capability_boundary="Any actor can create and add collaboration facts; only the exact owner_actor mutates requirement facts, lifecycle, thread resolution, or archive state.",
+        capability_boundary="Any actor can create and add collaboration facts; only the exact owner identity mutates requirement facts, lifecycle, thread resolution, or archive state.",
         object_model=(
-            "A Track is shared requirement facts owned by one exact owner_actor plus scattered collaboration facts. "
+            "A Track is shared requirement facts owned by one exact owner_identity_id plus scattered collaboration facts. "
             "Comments are the only actor-attention mechanism; proof is structured evidence that the owner accepts through status."
         ),
         use_when=("You need to operate shared collaboration on a non-archived Track.",),
@@ -146,7 +141,7 @@ def _build_definition() -> ToolDefinition:
         actions=(
             _action(
                 name="create",
-                description="Create one active Track owned by the active actor address.",
+                description="Create one active Track owned by the active actor identity.",
                 input_schema=_object_schema(
                     required=["track_id", "title", "outcome", "now"],
                     properties={
@@ -162,11 +157,11 @@ def _build_definition() -> ToolDefinition:
                 mutates="runtime_objects",
                 task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission="track.create",
-                authority="track.owner_actor_create",
+                authority="track.owner_identity_create",
                 visibility="shared to roles with Track read access",
                 durability="durable",
                 result_content_level="track page",
-                success_effect="Creates one active Track with owner_actor set to the active actor address.",
+                success_effect="Creates one active Track with owner_identity_id set to the active actor identity.",
                 failure_state_guarantee=write_failure,
                 reads=("existing track ids",),
                 writes=("shared track page",),
@@ -238,7 +233,7 @@ def _build_definition() -> ToolDefinition:
                         "track_id": _track_id_property(),
                         "content": {"type": "string", "description": "Track comment body text."},
                         "reply_to": {"type": "string", "description": "Optional parent Track comment id in the same Track."},
-                        "mentioned_actors": _MENTIONED_ACTORS_SCHEMA,
+                        "mentioned_identity_ids": _MENTIONED_IDENTITIES_SCHEMA,
                     },
                 ),
                 kind="write",
@@ -313,7 +308,7 @@ def _build_definition() -> ToolDefinition:
                 reads=("one non-archived Track page", "one Track-local comment thread"),
                 writes=("track comment thread status",),
                 does_not_write=("track timeline", "track lifecycle", "artifact body", "task state", "direct message state"),
-                preconditions=("active actor is the exact Track owner_actor", "thread has at least one open comment row"),
+                preconditions=("active actor identity is the exact Track owner_identity_id", "thread has at least one open comment row"),
                 returns=("comments", "updated_ids"),
                 use_when=("The Track owner wants durable resolved closure state for a discussion thread.",),
                 do_not_use_when=("You need to continue discussion; use track.add_comment.",),
@@ -345,7 +340,7 @@ def _build_definition() -> ToolDefinition:
                 reads=("one non-archived Track page",),
                 writes=("Track title/outcome/acceptance criteria/non-goals",),
                 does_not_write=("track lifecycle", "track now", "artifact relations", "timeline updates", "comments"),
-                preconditions=("active actor is the exact Track owner_actor",),
+                preconditions=("active actor identity is the exact Track owner_identity_id",),
                 returns=("track",),
                 use_when=("The Track owner needs to clarify shared requirement facts.",),
                 do_not_use_when=("You need to change state or now; use track.update_status.",),
@@ -375,7 +370,7 @@ def _build_definition() -> ToolDefinition:
                 reads=("one non-archived Track page", "current proof relations"),
                 writes=("track state", "track now"),
                 does_not_write=("requirement facts", "artifact relations", "timeline updates", "comments", "notifications"),
-                preconditions=("active actor is the exact Track owner_actor",),
+                preconditions=("active actor identity is the exact Track owner_identity_id",),
                 returns=("track",),
                 use_when=("The Track owner accepts a blocker, clears a blocker, or accepts proof as done.",),
                 do_not_use_when=("You are reporting a blocker fact; use track.add_update kind=blocker.",),
@@ -491,7 +486,7 @@ def _build_definition() -> ToolDefinition:
                 reads=("one Track page",),
                 writes=("track archived_at",),
                 does_not_write=("artifact body", "artifact relations", "task state", "direct message state", "comments", "notifications"),
-                preconditions=("active actor is the exact Track owner_actor",),
+                preconditions=("active actor identity is the exact Track owner_identity_id",),
                 returns=("track",),
                 use_when=("The Track owner needs to close a Track lifecycle from active collaboration flows.",),
                 do_not_use_when=("You only need to reflect blockage or completion; use track.update_status.",),

@@ -32,6 +32,16 @@ def _normalize_actor(value: Any, field: str) -> dict[str, str]:
         raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
 
 
+def _actor_identity_id(value: Any, field: str) -> str:
+    return _normalize_actor(value, field)["actor_id"]
+
+
+def _identity_id(value: Any, field: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return runtime_files.require_id(value.strip(), field)
+    return _actor_identity_id(value, field)
+
+
 def _normalize_refs(value: Any) -> list[dict[str, Any]]:
     if value is None:
         return []
@@ -88,10 +98,10 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
     if forbidden:
         raise ValueError(f"legacy task fields are retired: {', '.join(forbidden)}")
     if "role" in task:
-        raise ValueError("task.role is retired; use task.owner_actor")
+        raise ValueError("task.role is retired; use task.owner_identity_id")
 
     task_id = runtime_files.require_id(task.get("id", ""), "task.id")
-    owner_actor = _normalize_actor(task.get("owner_actor"), "task.owner_actor")
+    owner_identity_id = _identity_id(task.get("owner_identity_id", task.get("owner_actor")), "task.owner_identity_id")
     title = _require_non_empty_text(task.get("title"), "task.title")
     summary = task.get("summary", "")
     if not isinstance(summary, str):
@@ -122,7 +132,7 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
 
     return {
         "id": task_id,
-        "owner_actor": owner_actor,
+        "owner_identity_id": owner_identity_id,
         "title": title,
         "summary": summary,
         "body": body,
@@ -431,7 +441,7 @@ def create_task(
     now = runtime_files.now_iso()
     task = {
         "id": task_id,
-        "owner_actor": active_actor,
+        "owner_identity_id": _actor_identity_id(active_actor, "active_actor"),
         "title": title,
         "summary": summary,
         "body": body,

@@ -15,9 +15,6 @@ from env.tool_runtime.definition import ActionDefinition
 from env.tool_runtime.definition import TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED
 from env.tool_runtime.definition import ToolDefinition
 from env.tool_runtime.definition import validate_definition
-from env.tool_runtime import actor_profile
-from env.tool_runtime import auth_feedback
-from env.tool_runtime import role_auth
 from env.tool_runtime import results as tool_results
 
 _DEFINITION_CACHE: dict[str, ToolDefinition] = {}
@@ -469,6 +466,8 @@ def dispatch_env_tool_request(
     manifest: dict[str, Any],
     manifest_path: Path | None = None,
 ) -> dict[str, Any]:
+    from env.tool_runtime import actor_profile
+
     instance_record = actor_profile.runtime_actor_record_from_dispatch(
         actor_id=actor_id,
         role_id=active_role,
@@ -583,6 +582,9 @@ def dispatch_env_tool_request(
         )
 
     action_definition = get_action_definition(tool, action)
+    from env.tool_runtime import auth_feedback
+    from env.tool_runtime import role_auth
+
     auth_decision = role_auth.authorize(action_definition.required_permission, runtime_actor.auth_subject, manifest)
     if not auth_decision.allowed:
         return auth_feedback.role_auth_rejection(

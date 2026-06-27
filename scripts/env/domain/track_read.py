@@ -25,6 +25,21 @@ def _same_actor(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None)
     return left.get("actor_id") == right.get("actor_id") and left.get("role_id") == right.get("role_id")
 
 
+def _identity_id_from_actor(actor: Mapping[str, Any] | None) -> str | None:
+    if actor is None:
+        return None
+    actor_id = actor.get("actor_id")
+    return actor_id if isinstance(actor_id, str) and actor_id else None
+
+
+def _comment_author_identity_id(comment: Mapping[str, Any]) -> str | None:
+    identity_id = comment.get("by_identity_id")
+    if isinstance(identity_id, str) and identity_id:
+        return identity_id
+    actor = comment.get("by_actor")
+    return _identity_id_from_actor(actor) if isinstance(actor, Mapping) else None
+
+
 def comment_threads(
     comments: Iterable[Mapping[str, Any]],
     *,
@@ -42,6 +57,7 @@ def comment_threads(
         grouped.setdefault(thread_id, []).append(row)
 
     rows: list[dict[str, Any]] = []
+    active_identity_id = _identity_id_from_actor(active_actor)
     for thread_id, thread_comments in grouped.items():
         thread_comments.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
         latest = thread_comments[-1] if thread_comments else {}
@@ -53,9 +69,13 @@ def comment_threads(
                 "comment_count": len(thread_comments),
                 "latest_comment_id": latest.get("id"),
                 "latest_comment_preview": _preview(latest.get("content")),
-                "latest_by_actor": latest.get("by_actor"),
-                "mentions_me": any(_same_actor(active_actor, row) for comment in thread_comments for row in comment.get("mentioned_actors", [])),
-                "replies_to_me": any(_same_actor(active_actor, comment.get("by_actor")) for comment in thread_comments if comment.get("reply_to")),
+                "latest_by_identity_id": latest.get("by_identity_id"),
+                "mentions_me": any(
+                    active_identity_id in comment.get("mentioned_identity_ids", [])
+                    for comment in thread_comments
+                    if isinstance(comment.get("mentioned_identity_ids"), list)
+                ),
+                "replies_to_me": any(_comment_author_identity_id(comment) == active_identity_id for comment in thread_comments if comment.get("reply_to")),
                 "comments": thread_comments,
             }
         )
@@ -83,7 +103,7 @@ def track_summary(
         "id": track.get("id"),
         "title": track.get("title"),
         "outcome": track.get("outcome"),
-        "owner_actor": track.get("owner_actor"),
+        "owner_identity_id": track.get("owner_identity_id"),
         "state": track.get("state"),
         "now": track.get("now"),
         "acceptance_criteria": track.get("acceptance_criteria"),
@@ -116,10 +136,11 @@ def track_detail(
 
 def list_track_summaries(*, owner_actor: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    owner_identity_id = _identity_id_from_actor(owner_actor)
     for track in track_repo.list_tracks():
         if track.get("archived_at") is not None:
             continue
-        if owner_actor is not None and not _same_actor(track.get("owner_actor"), owner_actor):
+        if owner_actor is not None and track.get("owner_identity_id") != owner_identity_id:
             continue
         track_id = track.get("id")
         comments = track_comment_repo.comments_for_track(track_id) if isinstance(track_id, str) else []

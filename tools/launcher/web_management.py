@@ -394,7 +394,7 @@ class WebManagementService:
             record = self.ensure_web_im_identity()
             return 200, {
                 "ok": True,
-                "participant": dict(record["participant"]),
+                "identity": dict(record["identity"]),
                 "client_kind": web_im_identity.CLIENT_KIND,
                 "display_name": web_im_identity.DISPLAY_NAME,
             }
@@ -408,10 +408,10 @@ class WebManagementService:
 
     def _web_im_participant(self) -> dict[str, Any]:
         record = self.ensure_web_im_identity()
-        participant = record.get("participant")
-        if not isinstance(participant, dict):
-            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity participant is invalid.")
-        return participant
+        identity = record.get("identity")
+        if not isinstance(identity, dict) or identity.get("type") != "external" or not isinstance(identity.get("id"), str):
+            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity is invalid.")
+        return {"kind": "external", "external_id": identity["id"]}
 
     def _web_im_connection(self) -> dict[str, Any]:
         record = self.ensure_web_im_identity()
@@ -422,9 +422,7 @@ class WebManagementService:
 
     def _web_im_send_message(self, body: bytes) -> tuple[int, dict[str, Any]]:
         payload = self._parse_json_body(body)
-        target = payload.get("to")
-        if not isinstance(target, dict):
-            raise HttpError(status=400, code="INVALID_REQUEST", message="to must be an object.")
+        target = self._actor_participant_from_identity_id(payload.get("target_identity_id"), field="target_identity_id")
         result = message_service.send_external_connection_message(
             connection=self._web_im_connection(),
             to=target,
@@ -438,10 +436,8 @@ class WebManagementService:
         if "cursor" in query:
             raise HttpError(status=400, code="INVALID_REQUEST", message="cursor is internal to the Web IM session.")
         connection = self._web_im_connection()
-        participant = connection.get("participant")
-        if not isinstance(participant, dict):
-            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity participant is invalid.")
-        actor_address = self._web_im_actor_address_from_query(query)
+        participant = self._web_im_participant()
+        target_identity_id = self._actor_identity_id_from_query(query)
         result = message_service.read_external_connection_events(
             connection=connection,
             limit=_int_query_value(query, "limit", 50),
@@ -452,7 +448,7 @@ class WebManagementService:
         for event in result.get("events") if isinstance(result.get("events"), list) else []:
             if not isinstance(event, dict):
                 continue
-            if not _im_event_targets_actor(event, actor_address):
+            if not _im_event_targets_identity(event, target_identity_id):
                 continue
             message_id = event.get("message_id")
             if not isinstance(message_id, str) or not message_id:
@@ -467,10 +463,10 @@ class WebManagementService:
         return payload
 
     def _web_im_direct_conversation(self, query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
-        actor_address = self._web_im_actor_address_from_query(query)
+        target = self._actor_participant_from_identity_id(_first_query_value(query, "identity_id"), field="identity_id")
         result = message_service.get_im_direct_conversation(
             participant=self._web_im_participant(),
-            target={"kind": "actor", "actor_address": actor_address},
+            target=target,
             limit=_int_query_value(query, "limit", 20),
         )
         if result.get("ok") is True:
@@ -480,17 +476,37 @@ class WebManagementService:
             return 200, {"ok": True, "conversation": None, "messages": [], "count": 0}
         return 400, result
 
-    def _web_im_actor_address_from_query(self, query: dict[str, list[str]]) -> dict[str, str]:
-        role_id = _first_query_value(query, "role_id") or ""
-        actor_id = _first_query_value(query, "actor_id") or ""
-        if not role_id.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="role_id is required.")
+    def _actor_identity_id_from_query(self, query: dict[str, list[str]]) -> str:
+        return self._actor_identity_id(_first_query_value(query, "identity_id"), field="identity_id")
+
+    def _actor_participant_from_identity_id(self, value: Any, *, field: str) -> dict[str, Any]:
+        identity_id = self._actor_identity_id(value, field=field)
+        actor_address = self._actor_route_from_identity_id(identity_id, field=field)
+        return {"kind": "actor", "actor_address": actor_address}
+
+    def _actor_identity_id(self, value: Any, *, field: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message=f"{field} is required.")
+        identity_id = value.strip()
         try:
-            runtime_files.require_id(role_id, "role_id")
-            validate_actor_id(actor_id)
+            validate_actor_id(identity_id)
         except ValueError as exc:
             raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
-        return {"role_id": role_id, "actor_id": actor_id}
+        return identity_id
+
+    def _actor_route_from_identity_id(self, identity_id: str, *, field: str) -> dict[str, str]:
+        for row in self._list_actor_rows():
+            if row.get("actor_id") != identity_id:
+                continue
+            role_id = row.get("role")
+            try:
+                return {
+                    "actor_id": validate_actor_id(identity_id),
+                    "role_id": runtime_files.require_id(role_id, "role_id"),
+                }
+            except ValueError as exc:
+                raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
+        raise HttpError(status=400, code="INVALID_REQUEST", message=f"{field} is not a reachable actor identity: {identity_id}")
 
     def _create_instance(self, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
@@ -917,8 +933,9 @@ class WebManagementService:
             },
             "im": {
                 "target": {
-                    "kind": "actor",
-                    "actor_address": {"role_id": role, "actor_id": actor_id},
+                    "identity": {"id": actor_id, "type": "actor"},
+                    "identity_id": actor_id,
+                    "role_id": role,
                 }
             },
         }
@@ -1008,20 +1025,8 @@ def _int_query_value(query: dict[str, list[str]], name: str, default: int) -> in
     return value if value >= 0 else default
 
 
-def _im_event_targets_actor(event: dict[str, Any], actor_address: dict[str, str]) -> bool:
-    if _im_participant_is_actor(event.get("from"), actor_address):
-        return True
-    recipients = event.get("to")
-    if not isinstance(recipients, list):
-        return False
-    return any(_im_participant_is_actor(row, actor_address) for row in recipients)
-
-
-def _im_participant_is_actor(value: Any, actor_address: dict[str, str]) -> bool:
-    if not isinstance(value, dict) or value.get("kind") != "actor":
-        return False
-    participant_address = value.get("actor_address")
-    return isinstance(participant_address, dict) and participant_address == actor_address
+def _im_event_targets_identity(event: dict[str, Any], identity_id: str) -> bool:
+    return event.get("from_identity_id") == identity_id or event.get("to_identity_id") == identity_id
 
 
 def _hostname_from_host_header(value: str | None) -> str | None:

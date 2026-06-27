@@ -40,7 +40,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "last_seen_at": "2026-06-25T00:00:00Z",
                 }
             ]
-            if role_id == "market"
+            if role_id in {None, "market"}
             else [],
             wake_actor=lambda payload: wake_calls.append(dict(payload)) or {"wake_status": "submitted"},
         )
@@ -72,14 +72,18 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(actors["count"], 1)
-        self.assertEqual(actors["actors"][0]["participant"], {"kind": "actor", "actor_address": actor_address})
+        self.assertEqual(actors["actors"][0]["identity"], {"id": actor_address["actor_id"], "type": "actor"})
+        self.assertEqual(actors["actors"][0]["identity_id"], actor_address["actor_id"])
+        self.assertEqual(actors["actors"][0]["role_id"], "market")
+        self.assertNotIn("participant", actors["actors"][0])
+        self.assertNotIn("actor_address", actors["actors"][0])
 
         status, sent = router.handle(
             "POST",
             "/api/im/messages",
             json.dumps(
                 {
-                    "to": {"kind": "actor", "actor_address": actor_address},
+                    "target_identity_id": actor_address["actor_id"],
                     "content": "ping",
                     "reply_to": None,
                 }
@@ -164,12 +168,22 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         status, conversation = router.handle(
             "GET",
-            f"/api/im/conversations/direct?kind=actor&role_id=market&actor_id={actor_address['actor_id']}&limit=20",
+            f"/api/im/conversations/direct?identity_id={actor_address['actor_id']}&limit=20",
             b"",
             {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200, msg=conversation)
         self.assertEqual([row["id"] for row in conversation["messages"]], [message_id, reply_id])
+
+        status, missing_identity = router.handle(
+            "GET",
+            "/api/im/conversations/direct?limit=20",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 400)
+        self.assertFalse(missing_identity["ok"])
+        self.assertEqual(missing_identity["error"]["message"], "identity_id is required")
 
     def test_old_messages_send_route_is_not_im_contract(self) -> None:
         router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [], wake_actor=lambda _payload: {})
@@ -201,14 +215,14 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "E_IM_PAYLOAD")
-        self.assertIn("to", payload["error"]["message"])
+        self.assertIn("target_identity_id", payload["error"]["message"])
 
         status, payload = router.handle(
             "POST",
             "/api/im/messages",
             json.dumps(
                 {
-                    "to": {"kind": "actor", "actor_address": {"role_id": "market"}},
+                    "target_identity_id": "act-market-missing",
                     "content": "bad target",
                 }
             ).encode("utf-8"),
@@ -218,7 +232,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "E_IM_PAYLOAD")
-        self.assertIn("actor_address", payload["error"]["message"])
+        self.assertIn("target_identity_id", payload["error"]["message"])
 
 
 if __name__ == "__main__":

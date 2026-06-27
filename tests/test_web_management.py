@@ -267,8 +267,9 @@ class WebManagementUnitTests(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
-            self.assertEqual(payload["participant"]["kind"], "external")
+            self.assertEqual(payload["identity"]["type"], "external")
             self.assertNotIn("participant_token", payload)
+            self.assertNotIn("participant", payload)
             self.assertNotIn("connection_key", payload)
             self.assertNotIn("event_cursor", payload)
             self.assertEqual(os.environ.get("BUDDYSWITCH_STATE_ROOT"), str(shared_root / "state"))
@@ -1102,8 +1103,9 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
 
 class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _service(self) -> WEB_MANAGEMENT.WebManagementService:
-        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+    def _service(self, runner: FakeRunner | None = None) -> WEB_MANAGEMENT.WebManagementService:
+        command_runner = runner.run if runner is not None else FakeRunner().run
+        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=command_runner)
 
     def _identity_path(self) -> Path:
         return self.runtime_state_root / "buddyswitch" / "local" / "web-management" / "im-session.json"
@@ -1111,6 +1113,24 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
     def _participant_files(self) -> list[Path]:
         participants_dir = self.runtime_state_root / "im" / "participants"
         return sorted(participants_dir.glob("*.json")) if participants_dir.is_dir() else []
+
+    @staticmethod
+    def _instance_list_for_actor_addresses(actor_addresses: list[dict[str, str]]) -> dict[str, object]:
+        return {
+            "instances": [
+                {
+                    "actor_id": actor["actor_id"],
+                    "role": actor["role_id"],
+                    "status": "active",
+                    "app_server_health": "healthy",
+                    "thread_id": f"thread-{index}",
+                    "browser_port": None,
+                    "updated_at": "2026-06-26T10:10:00Z",
+                    "workspace_dir": f"/tmp/buddyswitch/instances/{actor['actor_id']}/workspace",
+                }
+                for index, actor in enumerate(actor_addresses)
+            ]
+        }
 
     def test_web_im_session_creates_one_stable_identity_per_runtime(self) -> None:
         first = self._service()
@@ -1121,8 +1141,11 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(first_status, 200)
         self.assertEqual(second_status, 200)
         self.assertTrue(first_payload["ok"])
-        self.assertEqual(first_payload["participant"], second_payload["participant"])
-        self.assertEqual(first_payload["participant"]["kind"], "external")
+        self.assertEqual(first_payload["identity"], second_payload["identity"])
+        self.assertEqual(first_payload["identity"]["type"], "external")
+        self.assertNotIn("role_id", first_payload["identity"])
+        self.assertNotIn("participant", first_payload)
+        self.assertNotIn("participant", second_payload)
         self.assertNotIn("participant_token", first_payload)
         self.assertNotIn("participant_token", second_payload)
         self.assertNotIn("connection_key", first_payload)
@@ -1133,8 +1156,9 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         identity = json.loads(self._identity_path().read_text(encoding="utf-8"))
         self.assertEqual(identity["client_kind"], "web-management")
         self.assertEqual(identity["display_name"], "BuddySwitch Web")
-        self.assertEqual(identity["participant"], first_payload["participant"])
+        self.assertEqual(identity["identity"], first_payload["identity"])
         self.assertIn("connection_key", identity)
+        self.assertNotIn("participant", identity)
         self.assertNotIn("participant_token", identity)
         self.assertNotIn("event_cursor", identity)
         self.assertNotIn("messages", identity)
@@ -1144,7 +1168,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
     def test_invalid_web_im_identity_is_replaced_once_then_reused(self) -> None:
         first_status, first_payload = self._service().handle_api("GET", "/api/web/im/session", b"", {})
         self.assertEqual(first_status, 200)
-        first_external_id = first_payload["participant"]["external_id"]
+        first_external_id = first_payload["identity"]["id"]
         identity_path = self._identity_path()
         identity = json.loads(identity_path.read_text(encoding="utf-8"))
         identity["connection_key"] = "imck-invalid"
@@ -1155,8 +1179,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         self.assertEqual(replaced_status, 200)
         self.assertEqual(reused_status, 200)
-        self.assertNotEqual(replaced_payload["participant"]["external_id"], first_external_id)
-        self.assertEqual(replaced_payload["participant"], reused_payload["participant"])
+        self.assertNotEqual(replaced_payload["identity"]["id"], first_external_id)
+        self.assertEqual(replaced_payload["identity"], reused_payload["identity"])
         self.assertEqual(len(self._participant_files()), 2)
 
     def test_web_im_routes_send_read_events_and_restore_direct_history_without_browser_token(self) -> None:
@@ -1164,10 +1188,12 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-history"),
         }
-        service = self._service()
+        runner = FakeRunner()
+        runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_actor_addresses([actor_address])))
+        service = self._service(runner)
         status, session = service.handle_api("GET", "/api/web/im/session", b"", {})
         self.assertEqual(status, 200)
-        web_participant = session["participant"]
+        web_participant = {"kind": "external", "external_id": session["identity"]["id"]}
 
         with mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
@@ -1179,7 +1205,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                 "/api/web/im/messages",
                 json.dumps(
                     {
-                        "to": {"kind": "actor", "actor_address": actor_address},
+                        "target_identity_id": actor_address["actor_id"],
                         "content": "ping",
                         "reply_to": None,
                     }
@@ -1204,7 +1230,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         status, history = service.handle_api(
             "GET",
-            f"/api/web/im/conversations/direct?role_id=market&actor_id={actor_address['actor_id']}&limit=20",
+            f"/api/web/im/conversations/direct?identity_id={actor_address['actor_id']}&limit=20",
             b"",
             {},
         )
@@ -1213,7 +1239,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         status, events = service.handle_api(
             "GET",
-            f"/api/web/im/events?role_id=market&actor_id={actor_address['actor_id']}&wait_ms=0",
+            f"/api/web/im/events?identity_id={actor_address['actor_id']}&wait_ms=0",
             b"",
             {},
         )
@@ -1233,10 +1259,12 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             "role_id": "dev",
             "actor_id": self._runtime_actor_id(role="dev", label="web-im-dev"),
         }
-        service = self._service()
+        runner = FakeRunner()
+        runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_actor_addresses([market_actor, dev_actor])))
+        service = self._service(runner)
         session_status, session = service.handle_api("GET", "/api/web/im/session", b"", {})
         self.assertEqual(session_status, 200)
-        web_participant = session["participant"]
+        web_participant = {"kind": "external", "external_id": session["identity"]["id"]}
         sent_by_actor: dict[str, dict[str, object]] = {}
         for actor_address, content in (
             (market_actor, "market ping"),
@@ -1247,7 +1275,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                 "/api/web/im/messages",
                 json.dumps(
                     {
-                        "to": {"kind": "actor", "actor_address": actor_address},
+                        "target_identity_id": actor_address["actor_id"],
                         "content": content,
                         "reply_to": None,
                     }
@@ -1272,7 +1300,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         status, events = service.handle_api(
             "GET",
-            f"/api/web/im/events?role_id=dev&actor_id={dev_actor['actor_id']}&wait_ms=0&limit=50",
+            f"/api/web/im/events?identity_id={dev_actor['actor_id']}&wait_ms=0&limit=50",
             b"",
             {},
         )
@@ -1280,11 +1308,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(status, 200, msg=events)
         self.assertEqual([row["content"] for row in events["messages"]], ["dev pong"])
         self.assertEqual(
-            [
-                event["from"]["actor_address"]["actor_id"]
-                for event in events["events"]
-                if isinstance(event.get("from"), dict)
-            ],
+            [event["from_identity_id"] for event in events["events"]],
             [dev_actor["actor_id"]],
         )
 
@@ -1306,7 +1330,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api(
                 "GET",
-                f"/api/web/im/events?role_id=market&actor_id={actor_id}&cursor=imev-000000000000&wait_ms=0",
+                f"/api/web/im/events?identity_id={actor_id}&cursor=imev-000000000000&wait_ms=0",
                 b"",
                 {},
             )
@@ -1499,6 +1523,49 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(payload["actors"][1]["runtime"]["status"], "inactive")
         self.assertEqual(runner.calls, [["instance", "list", "--json"]])
 
+    def test_web_im_send_resolves_actor_route_from_instance_list_not_identity_id_text(self) -> None:
+        target_identity_id = "act-web-identity-route"
+        runner = FakeRunner()
+        runner.add(
+            ["instance", "list", "--json"],
+            command_json(
+                {
+                    "instances": [
+                        {
+                            "actor_id": target_identity_id,
+                            "role": "market",
+                            "status": "active",
+                            "app_server_health": "healthy",
+                            "thread_id": "thread-market",
+                            "browser_port": None,
+                            "updated_at": "2026-06-26T10:10:00Z",
+                            "workspace_dir": "/tmp/buddyswitch/instances/act-web-identity-route/workspace",
+                        }
+                    ]
+                }
+            ),
+        )
+        service = self._service(runner)
+
+        with mock.patch.object(
+            WEB_MANAGEMENT.daemon_client,
+            "wake_im_actor",
+            return_value={"wake_status": "submitted", "runtime_target": "parent", "error": None},
+        ) as wake_im_actor:
+            status, payload = service.handle_api(
+                "POST",
+                "/api/web/im/messages",
+                json.dumps({"target_identity_id": target_identity_id, "content": "ping"}).encode("utf-8"),
+                {},
+            )
+
+        self.assertEqual(status, 200, msg=payload)
+        wake_im_actor.assert_called_once()
+        self.assertEqual(
+            wake_im_actor.call_args.args[0]["target_actor_address"],
+            {"actor_id": target_identity_id, "role_id": "market"},
+        )
+
     def test_actor_console_api_composes_runtime_task_track_and_im_projection(self) -> None:
         from env.domain import task_management
 
@@ -1522,7 +1589,10 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
         self.assertEqual(console["runtime"]["thread_status"], "idle")
         self.assertEqual(console["task"], task_view)
-        self.assertEqual(console["im"]["target"]["actor_address"], {"role_id": "pm", "actor_id": "act-pm-demo"})
+        self.assertEqual(console["im"]["target"]["identity"], {"id": "act-pm-demo", "type": "actor"})
+        self.assertEqual(console["im"]["target"]["identity_id"], "act-pm-demo")
+        self.assertEqual(console["im"]["target"]["role_id"], "pm")
+        self.assertNotIn("actor_address", console["im"]["target"])
         self.assertEqual([row["id"] for row in console["tracks"]["items"]], ["track-alpha"])
         current_view.assert_called_once()
         call_kwargs = current_view.call_args.kwargs

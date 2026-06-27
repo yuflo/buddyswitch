@@ -137,7 +137,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     self.assertIs(response.get("state_changed"), False, msg=response)
                     self.assertIn("__unexpected_payload_field__", json.dumps(response, ensure_ascii=True))
 
-    def test_services_and_message_domain_do_not_define_duplicate_payload_field_sets(self) -> None:
+    def test_services_do_not_define_duplicate_payload_field_sets_and_legacy_message_domain_is_retired(self) -> None:
         service_root = ROOT / "scripts" / "env" / "tools"
         violations: list[str] = []
         for path in sorted(service_root.glob("*/service.py")):
@@ -152,13 +152,8 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: {target.id}")
 
         message_domain = ROOT / "scripts" / "env" / "domain" / "messages.py"
-        message_tree = ast.parse(message_domain.read_text(encoding="utf-8"), filename=str(message_domain))
-        for node in ast.walk(message_tree):
-            if not isinstance(node, ast.Assign):
-                continue
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id in {"_SEND_FIELDS", "_LIST_FIELDS"}:
-                    violations.append(f"{message_domain.relative_to(ROOT)}:{node.lineno}: {target.id}")
+        if message_domain.exists():
+            violations.append(f"{message_domain.relative_to(ROOT)}: legacy actor-address message domain must stay retired")
 
         self.assertEqual(violations, [], msg="\n".join(violations))
 

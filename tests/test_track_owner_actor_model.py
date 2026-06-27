@@ -141,7 +141,7 @@ class TrackOwnerActorModelTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
 
-    def test_track_definition_exposes_owner_actor_surface_only(self) -> None:
+    def test_track_definition_exposes_owner_identity_surface_only(self) -> None:
         action_names = [row.name for row in TRACK_DEFINITION.actions]
         self.assertEqual(
             action_names,
@@ -184,10 +184,8 @@ class TrackOwnerActorModelTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 track = created.get("track")
                 self.assertIsInstance(track, dict, msg=created)
                 assert isinstance(track, dict)
-                self.assertEqual(
-                    track.get("owner_actor"),
-                    {"actor_id": self._runtime_actor_id(role=role, label=actor_label), "role_id": role},
-                )
+                self.assertEqual(track.get("owner_identity_id"), self._runtime_actor_id(role=role, label=actor_label))
+                self.assertNotIn("owner_actor", track)
                 self.assertEqual(track.get("state"), "active")
                 self.assertEqual(track.get("now"), {"next": "start collaboration", "blocker": None})
                 self.assertEqual(track.get("acceptance_criteria"), [])

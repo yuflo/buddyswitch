@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -402,7 +403,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertIn("owner_actor", row)
+            self.assertIn("owner_identity_id", row)
+            self.assertNotIn("owner_actor", row)
             self.assertNotIn("owner_role", row)
             self.assertNotIn("created_by_actor", row)
             self.assertIn(row.get("active_actor_relation"), {"owner", "collaborator"})
@@ -573,37 +575,65 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("art-context-own-private-draft", full_ids)
         self.assertNotIn("art-context-other-private-draft", full_ids)
 
-    def test_context_summarize_includes_compact_active_inbox_message_cues(self) -> None:
+    def test_context_summarize_includes_compact_identity_inbox_message_cues(self) -> None:
         dev = {"role_id": "dev", "actor_id": self._runtime_actor_id(role="dev", label="act-dev-context")}
         pm = {"role_id": "pm", "actor_id": self._runtime_actor_id(role="pm", label="act-pm-context")}
         design = {"role_id": "design", "actor_id": self._runtime_actor_id(role="design", label="act-design-context")}
         market = {"role_id": "market", "actor_id": self._runtime_actor_id(role="market", label="act-market-context")}
-        root = env_store.create_message(from_actor_address=pm, to_actor_address=dev, content="Need proof asset")
-        reply = env_store.create_message(from_actor_address=design, to_actor_address=dev, content="Screenshot ready", reply_to=root["id"])
-        env_store.create_message(from_actor_address=dev, to_actor_address=pm, content="Sent by dev only")
-        env_store.create_message(from_actor_address=market, to_actor_address=pm, content="Not dev inbox")
+        dev_participant = {"kind": "actor", "actor_address": dev}
+        pm_participant = {"kind": "actor", "actor_address": pm}
+        design_participant = {"kind": "actor", "actor_address": design}
+        market_participant = {"kind": "actor", "actor_address": market}
+        root = message_service.send_im_message(
+            sender_participant=pm_participant,
+            to=dev_participant,
+            content="Need proof asset",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
+        reply = message_service.send_im_message(
+            sender_participant=design_participant,
+            to=dev_participant,
+            content="Screenshot ready",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
+        message_service.send_im_message(
+            sender_participant=dev_participant,
+            to=pm_participant,
+            content="Sent by dev only",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
+        message_service.send_im_message(
+            sender_participant=market_participant,
+            to=pm_participant,
+            content="Not dev inbox",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
 
         instance_json = self._instance_json()
         payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         self.assertTrue(payload.get("ok"), msg=payload)
-        self.assertEqual(payload.get("actor_address"), dev)
+        self.assertEqual(payload.get("current_identity"), {"id": dev["actor_id"], "type": "actor"})
+        self.assertNotIn("actor_address", payload)
         cues = payload.get("message_cues")
         self.assertIsInstance(cues, dict, msg=payload)
         assert isinstance(cues, dict)
         self.assertEqual(cues.get("inbox_source_of_truth"), "message.list")
         self.assertEqual(cues.get("conversation_source_of_truth"), "message.conversation")
-        self.assertIn("message.contacts", cues.get("target_discovery", ""))
+        self.assertIn("target identities", cues.get("target_discovery", ""))
         rows = cues.get("latest_inbox")
         self.assertIsInstance(rows, list, msg=cues)
         assert isinstance(rows, list)
         ids = [row.get("message_id") for row in rows if isinstance(row, dict)]
-        self.assertIn(root["id"], ids)
-        self.assertIn(reply["id"], ids)
+        self.assertIn(root["message"]["id"], ids)
+        self.assertIn(reply["message"]["id"], ids)
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertEqual(row.get("to_actor_address"), dev)
-            self.assertIn(row.get("from_actor_address"), [pm, design])
+            self.assertEqual(row.get("to_identity_id"), dev["actor_id"])
+            self.assertIn(row.get("from_identity_id"), [pm["actor_id"], design["actor_id"]])
+            self.assertEqual(row.get("visible_to_identity_id"), dev["actor_id"])
+            self.assertNotIn("from_actor_address", row)
+            self.assertNotIn("to_actor_address", row)
             self.assertNotIn("content", row)
         self.assertGreaterEqual(cues.get("count", 0), 2)
         message_source = payload.get("context_sources", {}).get("messages", {})
@@ -882,7 +912,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         track_catalog = payload.get("tool_catalog", {}).get("track", {})
         track_model = str(track_catalog.get("object_model", "")).lower()
-        self.assertIn("owner_actor", track_model)
+        self.assertIn("owner_identity_id", track_model)
         self.assertIn("collaboration facts", track_model)
         track_create = track_catalog.get("action_semantics", {}).get("create", {})
         self.assertIn("visibility", track_create)

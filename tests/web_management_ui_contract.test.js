@@ -125,9 +125,12 @@ test('production javascript keeps the real api surface', () => {
   assertIncludes(appJs, "method: 'DELETE'");
   assertIncludes(appJs, 'actor_id: state.selectedActorId');
   assertIncludes(appJs, 'content: state.draftText');
+  assertIncludes(appJs, 'target_identity_id: target.identity_id');
   assertIncludes(appJs, 'buildWebImConversationUrl');
-  assertIncludes(appJs, 'buildImEventsUrl(actorAddress.role_id, actorAddress.actor_id, 15000)');
+  assertIncludes(appJs, 'buildImEventsUrl(target.identity_id, 15000)');
   assertIncludes(appJs, "'&wait_ms='");
+  assertExcludes(appJs, "role_id=' + encodeURIComponent");
+  assertExcludes(appJs, "actor_id=' + encodeURIComponent");
   assertIncludes(appJs, 'buildActorConsoleUrl');
   assertIncludes(appJs, 'buildTrackDetailUrl');
   assertIncludes(appJs, 'actionAvailabilityStatus.textContent');

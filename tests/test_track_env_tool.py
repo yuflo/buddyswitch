@@ -163,10 +163,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = created.get("track")
         self.assertIsInstance(track, dict, msg=created)
         assert isinstance(track, dict)
-        self.assertEqual(
-            track.get("owner_actor"),
-            {"actor_id": self._runtime_actor_id(role="pm", label="act-pm-track"), "role_id": "pm"},
-        )
+        self.assertEqual(track.get("owner_identity_id"), self._runtime_actor_id(role="pm", label="act-pm-track"))
+        self.assertNotIn("owner_actor", track)
         self.assertEqual(track.get("state"), "active")
         self.assertEqual(track.get("acceptance_criteria"), [])
         self.assertEqual(track.get("non_goals"), [])
@@ -198,10 +196,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = created.get("track")
         self.assertIsInstance(track, dict, msg=created)
         assert isinstance(track, dict)
-        self.assertEqual(
-            track.get("owner_actor"),
-            {"actor_id": self._runtime_actor_id(role="design", label="act-design-track"), "role_id": "design"},
-        )
+        self.assertEqual(track.get("owner_identity_id"), self._runtime_actor_id(role="design", label="act-design-track"))
+        self.assertNotIn("owner_actor", track)
 
     def test_update_requirements_rejects_owner_role_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
@@ -423,10 +419,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(relation.get("role"), "material")
         self.assertEqual(relation.get("template"), "brief")
         self.assertEqual(relation.get("label"), "Brief")
-        self.assertEqual(
-            relation.get("from_actor"),
-            {"actor_id": self._runtime_actor_id(role="pm", label="act-pm-track"), "role_id": "pm"},
-        )
+        self.assertEqual(relation.get("from_identity_id"), self._runtime_actor_id(role="pm", label="act-pm-track"))
+        self.assertNotIn("from_actor", relation)
         self.assertNotIn("from_role", relation)
         self.assertEqual(relation.get("summary"), "Shared PM brief")
         self.assertTrue(bool(relation.get("current")), msg=relation)
@@ -989,7 +983,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(denied.get("ok"), msg=denied)
         self.assertEqual((denied.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
-        self.assertEqual(denied.get("permission_boundary"), "track.owner_actor")
+        self.assertEqual(denied.get("permission_boundary"), "track.owner_identity_id")
         self.assertEqual(denied.get("active_role"), "design")
         self.assertIs(denied.get("state_changed"), False)
         after_denied_archive = env_store.get_track("track-archive")

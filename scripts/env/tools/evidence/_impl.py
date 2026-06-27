@@ -153,14 +153,15 @@ def _resolve_target(
                 active_role=active_role,
                 message=f"artifact not found: {target_id}",
             )
-        authors = artifact.get("author_actors") if isinstance(artifact.get("author_actors"), list) else []
         active_actor = context["active_actor"]
-        if active_actor not in [row for row in authors if isinstance(row, dict)]:
+        active_identity_id = active_actor.get("actor_id") if isinstance(active_actor, dict) else None
+        authors = artifact.get("author_identity_ids") if isinstance(artifact.get("author_identity_ids"), list) else []
+        if active_identity_id not in [row for row in authors if isinstance(row, str)]:
             return None, _reject_scope(
                 action=action,
                 active_actor=active_actor,
                 active_role=active_role,
-                boundary="artifact.author_actors",
+                boundary="artifact.author_identity_ids",
                 code="E_EVIDENCE_TARGET_SCOPE",
                 message=f"artifact '{target_id}' is not authored by the active actor",
             )
@@ -188,7 +189,7 @@ def _issue_token(
         "token_id": f"evidence-{uuid.uuid4().hex[:16]}",
         "target_type": target_type,
         "target_id": target_id,
-        "issued_by_actor": dict(active_actor),
+        "issued_by_identity_id": active_actor["actor_id"],
         "mode": mode or "default",
         "evidence_kind": kind,
         "issued_at": context.repos.runtime_files.now_iso(),

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Mapping
 import re
 
+from env.domain.identity import IdentityRef
+
 
 def _require_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -105,6 +107,7 @@ class ActorProfile:
 
     actor_id: str
     role_id: str
+    current_identity: IdentityRef
     active_actor: Actor
     active_role: Role
     actor_address: ActorAddress
@@ -141,9 +144,16 @@ def resolve_actor_profile(record: RuntimeActorRecord) -> ActorProfile:
     return ActorProfile(
         actor_id=actor.actor_id,
         role_id=role.role_id,
+        current_identity=IdentityRef(id=actor.actor_id, type="actor"),
         active_actor=actor,
         active_role=role,
         actor_address=actor_address,
         auth_subject=auth_subject,
         actor_record=normalized_record,
     )
+
+
+def actor_identity_to_address(identity: IdentityRef, *, role_id: str) -> ActorAddress:
+    if not isinstance(identity, IdentityRef) or identity.type != "actor":
+        raise ValueError("actor identity is required for actor routing projection")
+    return ActorAddress(actor_id=identity.id, role_id=role_id)

@@ -107,6 +107,7 @@ class TrackCommentAddedHandler:
                 target_actor,
                 comment,
                 reply_to_comment=reply_to_comment,
+                identity_routes={target_actor.actor_id: target_actor.to_payload()},
             ):
                 raise PermissionError("target actor is not an intended recipient for this Track comment")
             self._ensure_track_readable(payload["track_id"])

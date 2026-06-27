@@ -100,7 +100,7 @@ def _build_definition() -> ToolDefinition:
         scope='private drafts and published track material/proof artifacts',
         capability_boundary='Private drafts are owner-scoped until published on a non-archived track.',
         object_model=(
-            'Artifacts are role-authored product content records. Draft revisions are owner-scoped until track.add_material or track.add_proof publishes them to shared track state; artifact.get returns full body content only for readable artifact ids.'
+            'Artifacts are identity-authored product content records. Draft revisions are owner-scoped until track.add_material or track.add_proof publishes them to shared track state; artifact.get returns full body content only for readable artifact ids.'
         ),
         use_when=(
             'You need full body reads or private draft artifact mutation.',
@@ -122,9 +122,9 @@ def _build_definition() -> ToolDefinition:
                             'type': 'string',
                             'description': 'Optional readable track id filter.',
                         },
-                        'created_by_role': {
+                        'created_by_identity_id': {
                             'type': 'string',
-                            'description': 'Optional creator role id filter.',
+                            'description': 'Optional creator identity id filter.',
                         },
                         'template': {
                             'type': 'string',

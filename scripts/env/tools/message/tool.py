@@ -15,13 +15,13 @@ def _build_definition() -> ToolDefinition:
         id='message',
         title='Central IM Messages',
         description='Message tools cover online actor contact discovery, Central IM sends, exact processable inbound reads, replies, conversation context, and disposition marking.',
-        scope='Central IM participant messaging for the active actor',
-        capability_boundary='Messages use the Central IM participant/conversation/message/event model. External participants are valid conversation participants but are not actor contacts.',
+        scope='Central IM identity messaging for the active actor',
+        capability_boundary='Messages use identity-addressed Central IM conversations, messages, events, and per-identity dispositions. External identities are valid conversation peers but are not actor contacts.',
         object_model=(
-            'Messages are Central IM conversation records with actor or external participants, durable message rows, participant-visible events, and per-participant dispositions. They do not mutate tracks, artifacts, tasks, comments, browser state, or actor private files.'
+            'Messages are Central IM conversation records with actor or external identity ids, durable message rows, identity-visible events, and per-identity dispositions. They do not mutate tracks, artifacts, tasks, comments, browser state, or actor private files.'
         ),
         use_when=(
-            'You need Central IM messaging between the active actor and another actor or an external participant already present in a direct conversation.',
+            'You need Central IM messaging between the active actor identity and another actor identity or an external identity already present in a direct conversation.',
         ),
         do_not_use_when=(
             'You need object-level discussion; use comment tool actions.',
@@ -30,7 +30,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='contacts',
                 title='message.contacts',
-                description='List online actor contacts for direct sends; only the active full ActorAddress row is not sendable as self.',
+                description='List online actor identity contacts for direct sends; the active actor identity is not sendable as self.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -52,8 +52,8 @@ def _build_definition() -> ToolDefinition:
                 authority='message.actor_contact_discovery',
                 visibility='online actor contact summary',
                 durability='none',
-                result_content_level='actor address contact rows',
-                success_effect='Returns online actor addresses discovered through central daemon contacts.',
+                result_content_level='actor identity contact rows',
+                success_effect='Returns online actor identities discovered through central daemon contacts.',
                 failure_state_guarantee='Rejected contact reads do not mutate runtime state.',
                 reads=(
                     'central daemon online contacts',
@@ -75,10 +75,10 @@ def _build_definition() -> ToolDefinition:
                     'count',
                 ),
                 use_when=(
-                    'You need contact discovery for a target actor address before message.send.',
+                    'You need contact discovery for a target actor identity before message.send.',
                 ),
                 do_not_use_when=(
-                    'You already have a current contact actor_address or need to read Central IM events.',
+                    'You already have a target identity id or need to read Central IM events.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -92,27 +92,15 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='send',
                 title='message.send',
-                description='Send one Central IM message: provide target_actor_address for a new actor-directed message, or provide reply_to only to reply inside the existing direct conversation.',
+                description='Send one Central IM message: provide target_identity_id for a new actor-directed message, or provide reply_to only to reply inside the existing direct conversation.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
                     'required': ['content'],
                     'properties': {
-                        'target_actor_address': {
-                            'type': 'object',
-                            'additionalProperties': False,
-                            'required': ['role_id', 'actor_id'],
-                            'properties': {
-                                'role_id': {
-                                    'type': 'string',
-                                    'description': 'Target runtime actor role id.',
-                                },
-                                'actor_id': {
-                                    'type': 'string',
-                                    'description': 'Target runtime actor id.',
-                                },
-                            },
-                            'description': 'Exact ActorAddress returned by message.contacts. Required only for a new actor-directed message; omit it when replying with reply_to.',
+                        'target_identity_id': {
+                            'type': 'string',
+                            'description': 'Target actor identity id. Required only for a new actor-directed message; omit it when replying with reply_to.',
                         },
                         'content': {
                             'type': 'string',
@@ -120,7 +108,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'reply_to': {
                             'type': 'string',
-                            'description': 'Optional processable inbound message id addressed to the active actor. When reply_to is provided, Central IM derives the other direct participant, which can be external or actor, and success marks that original message as replied after delivery.',
+                            'description': 'Optional processable inbound message id addressed to the active actor identity. When reply_to is provided, Central IM derives the other direct identity, which can be external or actor, and success marks that original message as replied after delivery.',
                         },
                     },
                 },
@@ -135,7 +123,7 @@ def _build_definition() -> ToolDefinition:
                 visibility='sender and recipient Central IM conversation visibility',
                 durability='durable',
                 result_content_level='message id and delivery status',
-                success_effect='Creates one durable Central IM message; target_actor_address is only required for new actor-directed messages, and when reply_to is provided the original processable inbound message transitions to replied.',
+                success_effect='Creates one durable Central IM message; target_identity_id is only required for new actor-directed messages, and when reply_to is provided the original processable inbound message transitions to replied.',
                 failure_state_guarantee='Reachability and payload rejections do not mutate state; delivery failures clean up the created message or report delivery cleanup uncertainty; reply disposition save failure can leave the delivered reply durable while the original remains in its previous disposition.',
                 reads=(
                     'Central IM direct conversation when reply_to is provided',
@@ -155,8 +143,8 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=(
                     'content is non-empty',
-                    'target_actor_address is provided for a new actor-directed message',
-                    'reply_to, when provided without target_actor_address, references a processable inbound direct message visible to the active actor',
+                    'target_identity_id is provided for a new actor-directed message',
+                    'reply_to, when provided without target_identity_id, references a processable inbound direct message visible to the active actor',
                 ),
                 returns=(
                     'message_id',
@@ -164,11 +152,11 @@ def _build_definition() -> ToolDefinition:
                     'original_message_id and original_final_disposition when reply_to is provided',
                 ),
                 use_when=(
-                    'You need to deliver a new Central IM message to a specific online actor address.',
+                    'You need to deliver a new Central IM message to a specific actor identity.',
                     'You need to reply to one processable inbound message, including external-origin messages, using only reply_to.',
                 ),
                 do_not_use_when=(
-                    'You are starting a new actor-directed conversation and only have a role id but no actor address (use message.contacts).',
+                    'You are starting a new actor-directed conversation and do not have a target identity id (use message.contacts).',
                     'You need Track discussion; use track.add_comment instead of Central IM.',
                     'Use message.mark(absorbed) when no reply is needed.',
                     'Use message.mark(needs_parent) when side triage needs parent handling.',
@@ -349,14 +337,14 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.list',
-                authority='message.central_im_participant_events',
-                visibility='active actor Central IM participant event feed',
+                authority='message.central_im_identity_events',
+                visibility='active actor Central IM identity event feed',
                 durability='none',
                 result_content_level='event rows and next_cursor',
                 success_effect='Returns active actor visible Central IM events after the supplied cursor.',
                 failure_state_guarantee='Rejected reads do not mutate runtime state.',
                 reads=(
-                    'active actor visible Central IM participant events',
+                    'active actor visible Central IM identity events',
                 ),
                 writes=(),
                 does_not_write=(
@@ -393,27 +381,15 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='conversation',
                 title='message.conversation',
-                description='Read active actor visible bidirectional direct messages with one target actor address.',
+                description='Read active actor visible bidirectional direct messages with one target identity.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
-                    'required': ['target_actor_address'],
+                    'required': ['target_identity_id'],
                     'properties': {
-                        'target_actor_address': {
-                            'type': 'object',
-                            'additionalProperties': False,
-                            'required': ['role_id', 'actor_id'],
-                            'properties': {
-                                'role_id': {
-                                    'type': 'string',
-                                    'description': 'Target runtime actor role id.',
-                                },
-                                'actor_id': {
-                                    'type': 'string',
-                                    'description': 'Target runtime actor id.',
-                                },
-                            },
-                            'description': 'Exact ActorAddress for the other conversation participant.',
+                        'target_identity_id': {
+                            'type': 'string',
+                            'description': 'Identity id for the other conversation peer.',
                         },
                         'q': {
                             'type': 'string',
@@ -437,7 +413,7 @@ def _build_definition() -> ToolDefinition:
                 visibility='active actor visible direct conversation messages',
                 durability='none',
                 result_content_level='message rows',
-                success_effect='Lists active actor visible bidirectional direct messages for the selected target actor address.',
+                success_effect='Lists active actor visible bidirectional direct messages for the selected target identity.',
                 failure_state_guarantee='Rejected reads do not mutate runtime state and do not create messages.',
                 reads=(
                     'active actor visible direct messages',
@@ -452,8 +428,8 @@ def _build_definition() -> ToolDefinition:
                     'actor_private files',
                 ),
                 preconditions=(
-                    'target_actor_address is provided and is a declared manifest role actor address',
-                    'target_actor_address must not be the active actor',
+                    'target_identity_id is provided',
+                    'target_identity_id must not be the active actor identity',
                 ),
                 returns=(
                     'messages',
@@ -461,7 +437,7 @@ def _build_definition() -> ToolDefinition:
                     'selector',
                 ),
                 use_when=(
-                    'You need bidirectional context between the active actor and one target actor address.',
+                    'You need bidirectional context between the active actor and one target identity.',
                 ),
                 do_not_use_when=(
                     'You only need Central IM event notifications (use message.list) or need to send a new message (use message.send).',

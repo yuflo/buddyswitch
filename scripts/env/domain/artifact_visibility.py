@@ -16,6 +16,35 @@ def _active_actor_id(active_actor: dict[str, Any]) -> str | None:
     return actor_id if isinstance(actor_id, str) and actor_id else None
 
 
+def _actor_payload_identity_id(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    actor_id = value.get("actor_id")
+    return actor_id if isinstance(actor_id, str) and actor_id else None
+
+
+def _artifact_creator_identity_id(artifact: dict[str, Any]) -> str | None:
+    identity_id = artifact.get("created_by_identity_id")
+    if isinstance(identity_id, str) and identity_id:
+        return identity_id
+    return _actor_payload_identity_id(artifact.get("created_by_actor"))
+
+
+def _artifact_author_identity_ids(artifact: dict[str, Any]) -> list[str]:
+    raw = artifact.get("author_identity_ids")
+    if isinstance(raw, list):
+        return [row for row in raw if isinstance(row, str) and row]
+    legacy = artifact.get("author_actors")
+    if not isinstance(legacy, list):
+        return []
+    rows: list[str] = []
+    for actor in legacy:
+        identity_id = _actor_payload_identity_id(actor)
+        if identity_id and identity_id not in rows:
+            rows.append(identity_id)
+    return rows
+
+
 def _track_history_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
     for row in track.get("artifact_relations", []):
         if not isinstance(row, dict):
@@ -60,8 +89,7 @@ def assert_supersedes_target_for_revision(
 
 def artifact_read_decision(artifact: dict[str, Any], active_actor: dict[str, Any]) -> dict[str, Any]:
     artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
-    created_by_actor = artifact.get("created_by_actor") if isinstance(artifact.get("created_by_actor"), dict) else {}
-    owner_actor_id = created_by_actor.get("actor_id")
+    owner_actor_id = _artifact_creator_identity_id(artifact)
     active_actor_id = _active_actor_id(active_actor)
 
     if isinstance(owner_actor_id, str) and owner_actor_id == active_actor_id:
@@ -201,9 +229,8 @@ def artifact_summary_row(
         "summary": artifact.get("summary", ""),
         "body": artifact.get("body"),
         "template": artifact.get("template"),
-        "from_role": (artifact.get("created_by_actor") or {}).get("role_id") if isinstance(artifact.get("created_by_actor"), dict) else None,
-        "created_by_actor": artifact.get("created_by_actor"),
-        "author_actors": artifact.get("author_actors"),
+        "created_by_identity_id": _artifact_creator_identity_id(artifact),
+        "author_identity_ids": _artifact_author_identity_ids(artifact),
         "source_refs": artifact.get("source_refs"),
         "attachments": attachment_summary_rows(artifact),
         "revision": artifact.get("revision"),
@@ -247,7 +274,7 @@ def attachment_summary_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
                 "content_type": row.get("content_type"),
                 "size_bytes": row.get("size_bytes"),
                 "sha256": row.get("sha256"),
-                "created_by_actor": row.get("created_by_actor"),
+                "created_by_identity_id": row.get("created_by_identity_id") or _actor_payload_identity_id(row.get("created_by_actor")),
                 "created_at": row.get("created_at"),
             }
         )
@@ -276,8 +303,8 @@ def artifact_list_row(
         "relation": relation,
         "track_id": decision.get("track_id"),
         "track_ids": decision.get("track_ids", []),
-        "created_by_actor": artifact.get("created_by_actor"),
-        "author_actors": artifact.get("author_actors"),
+        "created_by_identity_id": _artifact_creator_identity_id(artifact),
+        "author_identity_ids": _artifact_author_identity_ids(artifact),
         "revision": artifact.get("revision"),
         "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
         "source_refs_summary": source_refs_domain.source_ref_summary(artifact.get("source_refs")),
@@ -311,7 +338,7 @@ def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any])
                 "artifact_id": artifact_id,
                 "template": ref.get("template"),
                 "label": ref.get("label"),
-                "from_actor": ref.get("from_actor"),
+                "from_identity_id": ref.get("from_identity_id") or _actor_payload_identity_id(ref.get("from_actor")),
                 "summary": ref.get("summary", ""),
                 "currentness": "current",
                 "created_at": ref.get("created_at"),
@@ -345,7 +372,7 @@ def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[di
                 "artifact_id": artifact_id,
                 "template": ref.get("template"),
                 "label": ref.get("label"),
-                "from_actor": ref.get("from_actor"),
+                "from_identity_id": ref.get("from_identity_id") or _actor_payload_identity_id(ref.get("from_actor")),
                 "summary": ref.get("summary", ""),
                 "currentness": "proof",
                 "created_at": ref.get("created_at"),

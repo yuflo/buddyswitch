@@ -1047,7 +1047,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "source_path",
             ),
             (
-                "track.add_comment.mentioned_actors",
+                "track.add_comment.mentioned_identity_ids",
                 self._dispatch(
                     instance_json=pm_instance_json,
                     actor_id=pm_actor_id,
@@ -1057,10 +1057,10 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                     args={
                         "track_id": "track-field-errors",
                         "content": "check mentions",
-                        "mentioned_actors": "pm",
+                        "mentioned_identity_ids": "act-pm-field-errors",
                     },
                 ),
-                "mentioned_actors",
+                "mentioned_identity_ids",
             ),
         ]
 

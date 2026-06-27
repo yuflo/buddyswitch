@@ -99,6 +99,11 @@ def _allowed_templates_for_active_role(context: ArtifactServiceContext) -> tuple
     return ()
 
 
+def _active_identity_id(active_actor: dict[str, Any]) -> str | None:
+    actor_id = active_actor.get("actor_id") if isinstance(active_actor, dict) else None
+    return actor_id if isinstance(actor_id, str) and actor_id else None
+
+
 def _reject_template_permission(
     *,
     action: str,
@@ -351,26 +356,17 @@ def _normalize_list_filters(
             )
         track_id = normalized_track_id
 
-    created_by_role: str | None = None
-    if "created_by_role" in args:
-        raw_created_by = args.get("created_by_role")
+    created_by_identity_id: str | None = None
+    if "created_by_identity_id" in args:
+        raw_created_by = args.get("created_by_identity_id")
         if not isinstance(raw_created_by, str) or not raw_created_by.strip():
             return None, _reject_payload(
                 action=action,
                 active_actor=context["active_actor"],
                 active_role=active_role,
-                message="created_by_role must be a non-empty string",
+                message="created_by_identity_id must be a non-empty string",
             )
-        normalized_created_by = raw_created_by.strip()
-        manifest_ids = context.rules.message.manifest_role_ids(context["manifest"])
-        if normalized_created_by not in manifest_ids:
-            return None, _reject_payload(
-                action=action,
-                active_actor=context["active_actor"],
-                active_role=active_role,
-                message="created_by_role must be one of manifest roles",
-            )
-        created_by_role = normalized_created_by
+        created_by_identity_id = raw_created_by.strip()
 
     template: str | None = None
     if "template" in args:
@@ -409,7 +405,7 @@ def _normalize_list_filters(
     return (
         {
             "track_id": track_id,
-            "created_by_role": created_by_role,
+            "created_by_identity_id": created_by_identity_id,
             "template": template,
             "q": q,
             "limit": limit,
@@ -443,8 +439,7 @@ def list_artifacts_for_active_actor(*, args: dict[str, Any], context: ArtifactSe
             decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
         if not bool(decision.get("allowed")):
             continue
-        created_by_actor = artifact.get("created_by_actor") if isinstance(artifact.get("created_by_actor"), dict) else {}
-        if isinstance(filters.get("created_by_role"), str) and created_by_actor.get("role_id") != filters.get("created_by_role"):
+        if isinstance(filters.get("created_by_identity_id"), str) and artifact.get("created_by_identity_id") != filters.get("created_by_identity_id"):
             continue
         if isinstance(filters.get("template"), str) and artifact.get("template") != filters.get("template"):
             continue
@@ -728,12 +723,12 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if artifact is None:
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_actor") != active_actor:
+    if artifact.get("created_by_identity_id") != _active_identity_id(active_actor):
         return _reject_scope(
             action=action,
             active_actor=active_actor,
             active_role=active_role,
-            boundary="artifact.actor_scope",
+            boundary="artifact.creator_identity_id",
             message=f"artifact '{artifact_id}' is owned by another actor",
             code="E_ARTIFACT_SCOPE",
         )
@@ -860,12 +855,12 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if artifact is None:
         return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_actor") != active_actor:
+    if artifact.get("created_by_identity_id") != _active_identity_id(active_actor):
         return _reject_scope(
             action=action,
             active_actor=active_actor,
             active_role=active_role,
-            boundary="artifact.actor_scope",
+            boundary="artifact.creator_identity_id",
             message=f"artifact '{artifact_id}' is owned by another actor",
             code="E_ARTIFACT_SCOPE",
         )

@@ -47,8 +47,8 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "revision",
             "is_current",
             "supersedes_artifact_id",
-            "created_by_actor",
-            "author_actors",
+            "created_by_identity_id",
+            "author_identity_ids",
             "source_refs",
             "attachments",
             "created_at",
@@ -56,8 +56,8 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         }
         self.assertEqual(set(artifact.keys()), expected_keys)
         self.assertEqual(artifact["template"], "brief")
-        self.assertEqual(artifact["created_by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
-        self.assertEqual(artifact["author_actors"], [{"actor_id": "act-pm-legacy", "role_id": "pm"}])
+        self.assertEqual(artifact["created_by_identity_id"], "act-pm-legacy")
+        self.assertEqual(artifact["author_identity_ids"], ["act-pm-legacy"])
         self.assertEqual(artifact["attachments"], [])
         self.assertEqual(artifact["body"], "## Context\n\nSeed")
 
@@ -433,12 +433,12 @@ class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertEqual(created["track_id"], "track-helper-comments")
-        self.assertEqual(created["by_actor"], {"actor_id": "act-pm-legacy", "role_id": "pm"})
+        self.assertEqual(created["by_identity_id"], "act-pm-legacy")
         self.assertNotIn("target_type", created)
         self.assertNotIn("target_id", created)
         self.assertEqual(created["thread_id"], created["id"])
         self.assertEqual(created["status"], "open")
-        self.assertEqual(created["mentioned_actors"], [])
+        self.assertEqual(created["mentioned_identity_ids"], [])
 
         persisted = env_store.get_track_comment("track-helper-comments", created["id"])
         self.assertEqual(persisted, created)

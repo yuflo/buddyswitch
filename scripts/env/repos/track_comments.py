@@ -36,6 +36,16 @@ def _normalize_actor(value: Any, field: str) -> dict[str, str]:
         raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
 
 
+def _actor_identity_id(value: Any, field: str) -> str:
+    return _normalize_actor(value, field)["actor_id"]
+
+
+def _identity_id(value: Any, field: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return runtime_files.require_id(value.strip(), field)
+    return _actor_identity_id(value, field)
+
+
 def track_comment_file(track_id: str, comment_id: str) -> Path:
     return (
         runtime_files.TRACK_COMMENTS_DIR
@@ -55,7 +65,10 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
 
     comment_id = runtime_files.require_id(comment.get("id", ""), "comment.id")
     track_id = runtime_files.require_id(comment.get("track_id"), "comment.track_id")
-    by_actor = _normalize_actor(comment.get("by_actor"), "comment.by_actor")
+    by_identity_id = _identity_id(
+        comment.get("by_identity_id", comment.get("by_actor")),
+        "comment.by_identity_id",
+    )
     content = _require_non_empty_text(comment.get("content"), "comment.content")
 
     thread_id_raw = comment.get("thread_id")
@@ -75,33 +88,22 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if status not in _COMMENT_STATUSES:
         raise ValueError("comment.status must be one of open|resolved")
 
-    resolved_by_actor = comment.get("resolved_by_actor")
+    resolved_by_identity_id = comment.get("resolved_by_identity_id", comment.get("resolved_by_actor"))
     resolved_at = comment.get("resolved_at")
     resolution_summary = comment.get("resolution_summary")
     if status == "resolved":
-        resolved_by_actor = _normalize_actor(resolved_by_actor, "comment.resolved_by_actor")
+        resolved_by_identity_id = _identity_id(resolved_by_identity_id, "comment.resolved_by_identity_id")
         resolved_at = _require_non_empty_text(resolved_at, "comment.resolved_at")
         resolution_summary = _require_non_empty_text(resolution_summary, "comment.resolution_summary")
     else:
-        resolved_by_actor = None
+        resolved_by_identity_id = None
         resolved_at = None
         resolution_summary = None
 
-    mentioned_raw = comment.get("mentioned_actors", [])
-    if mentioned_raw is None:
-        mentioned_actors: list[dict[str, str]] = []
-    else:
-        if not isinstance(mentioned_raw, list):
-            raise ValueError("comment.mentioned_actors must be a list when provided")
-        mentioned_actors = []
-        seen: set[tuple[str, str]] = set()
-        for idx, row in enumerate(mentioned_raw):
-            actor = _normalize_actor(row, f"comment.mentioned_actors[{idx}]")
-            actor_key = (actor["actor_id"], actor["role_id"])
-            if actor_key in seen:
-                continue
-            seen.add(actor_key)
-            mentioned_actors.append(actor)
+    mentioned_identity_ids = _normalize_mentioned_identity_ids(
+        comment.get("mentioned_identity_ids", comment.get("mentioned_actors", [])),
+        field="comment.mentioned_identity_ids",
+    )
 
     created_at = _require_non_empty_text(comment.get("created_at"), "comment.created_at")
 
@@ -109,13 +111,13 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
         "id": comment_id,
         "track_id": track_id,
         "thread_id": thread_id,
-        "by_actor": by_actor,
+        "by_identity_id": by_identity_id,
         "content": content,
         "reply_to": reply_to,
-        "mentioned_actors": mentioned_actors,
+        "mentioned_identity_ids": mentioned_identity_ids,
         "status": status,
         "created_at": created_at,
-        "resolved_by_actor": resolved_by_actor,
+        "resolved_by_identity_id": resolved_by_identity_id,
         "resolved_at": resolved_at,
         "resolution_summary": resolution_summary,
     }
@@ -177,20 +179,23 @@ def save_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _normalize_mentioned_actors(mentioned_actors: list[dict[str, Any]] | None) -> list[dict[str, str]]:
-    if mentioned_actors is None:
+def _normalize_mentioned_identity_ids(
+    mentioned_identities: list[Any] | None,
+    *,
+    field: str = "mentioned_identity_ids",
+) -> list[str]:
+    if mentioned_identities is None:
         return []
-    if not isinstance(mentioned_actors, list):
-        raise ValueError("mentioned_actors must be a list when provided")
-    normalized: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for idx, row in enumerate(mentioned_actors):
-        actor = _normalize_actor(row, f"mentioned_actors[{idx}]")
-        actor_key = (actor["actor_id"], actor["role_id"])
-        if actor_key in seen:
+    if not isinstance(mentioned_identities, list):
+        raise ValueError(f"{field} must be a list when provided")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for idx, row in enumerate(mentioned_identities):
+        identity_id = _identity_id(row, f"{field}[{idx}]")
+        if identity_id in seen:
             continue
-        seen.add(actor_key)
-        normalized.append(actor)
+        seen.add(identity_id)
+        normalized.append(identity_id)
     return normalized
 
 
@@ -205,7 +210,7 @@ def create_track_comment(
     status: str = "open",
 ) -> dict[str, Any]:
     normalized_track_id = runtime_files.require_id(track_id, "track_id")
-    author = _normalize_actor(by_actor, "by_actor")
+    author_identity_id = _actor_identity_id(by_actor, "by_actor")
     content_text = _require_non_empty_text(content, "content")
     if reply_to is not None:
         runtime_files.require_id(reply_to, "reply_to")
@@ -221,13 +226,13 @@ def create_track_comment(
             "id": comment_id,
             "track_id": normalized_track_id,
             "thread_id": thread_id or comment_id,
-            "by_actor": author,
+            "by_identity_id": author_identity_id,
             "content": content_text,
             "reply_to": reply_to,
-            "mentioned_actors": _normalize_mentioned_actors(mentioned_actors),
+            "mentioned_identity_ids": _normalize_mentioned_identity_ids(mentioned_actors),
             "status": status,
             "created_at": runtime_files.now_iso(),
-            "resolved_by_actor": None,
+            "resolved_by_identity_id": None,
             "resolved_at": None,
             "resolution_summary": None,
         }
@@ -269,7 +274,7 @@ def resolve_track_comment_thread(
 ) -> list[dict[str, Any]]:
     normalized_track_id = runtime_files.require_id(track_id, "track_id")
     normalized_comment_id = runtime_files.require_id(comment_id, "comment_id")
-    normalized_resolved_by_actor = _normalize_actor(resolved_by_actor, "resolved_by_actor")
+    normalized_resolved_by_identity_id = _actor_identity_id(resolved_by_actor, "resolved_by_actor")
     normalized_summary = _require_non_empty_text(resolution_summary, "resolution_summary")
 
     seed = get_track_comment(normalized_track_id, normalized_comment_id)
@@ -290,7 +295,7 @@ def resolve_track_comment_thread(
     for row in thread_rows:
         updated = dict(row)
         updated["status"] = "resolved"
-        updated["resolved_by_actor"] = normalized_resolved_by_actor
+        updated["resolved_by_identity_id"] = normalized_resolved_by_identity_id
         updated["resolved_at"] = now
         updated["resolution_summary"] = normalized_summary
         normalized_updates.append(validate_track_comment(updated))

@@ -147,10 +147,8 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(evidence, dict)
         self.assertEqual(evidence.get("target_type"), "artifact")
         self.assertEqual(evidence.get("target_id"), artifact_id)
-        self.assertEqual(
-            evidence.get("issued_by_actor"),
-            {"actor_id": self._runtime_actor_id(role="market", label="act-market-evidence"), "role_id": "market"},
-        )
+        self.assertEqual(evidence.get("issued_by_identity_id"), self._runtime_actor_id(role="market", label="act-market-evidence"))
+        self.assertNotIn("issued_by_actor", evidence)
         self.assertNotIn("active_role", evidence)
         self.assertNotIn("run_id", evidence)
 
@@ -193,10 +191,8 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(evidence, dict)
         self.assertEqual(evidence.get("target_type"), "artifact")
         self.assertEqual(evidence.get("target_id"), artifact_id)
-        self.assertEqual(
-            evidence.get("issued_by_actor"),
-            {"actor_id": self._runtime_actor_id(role="market", label="act-market-downgrade"), "role_id": "market"},
-        )
+        self.assertEqual(evidence.get("issued_by_identity_id"), self._runtime_actor_id(role="market", label="act-market-downgrade"))
+        self.assertNotIn("issued_by_actor", evidence)
         self.assertNotIn("active_role", evidence)
         self.assertEqual(evidence.get("reason"), "Manual fallback approved.")
 
@@ -213,7 +209,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(denied.get("ok"), msg=denied)
         self.assertEqual((denied.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_SCOPE")
-        self.assertEqual(denied.get("permission_boundary"), "artifact.author_actors")
+        self.assertEqual(denied.get("permission_boundary"), "artifact.author_identity_ids")
 
     def test_missing_artifact_target_is_rejected_without_token(self) -> None:
         instance_json = self._instance_json(role="market", actor_id="act-market-missing-target")
@@ -255,7 +251,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_SCOPE")
-        self.assertEqual(rejected.get("permission_boundary"), "artifact.author_actors")
+        self.assertEqual(rejected.get("permission_boundary"), "artifact.author_identity_ids")
         self.assertNotIn("tool_evidence", rejected)
 
 

@@ -393,7 +393,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertFalse(response["ok"])
         self.assertEqual((response.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
-        self.assertEqual(response["permission_boundary"], "track.owner_actor")
+        self.assertEqual(response["permission_boundary"], "track.owner_identity_id")
         self.assertEqual(response.get("active_role"), "design")
 
     def test_pm_page_prototype_decision_surface_prefers_direct_private_actor_private_directory_without_phrase_rule(self) -> None:

@@ -86,7 +86,7 @@ test('selected actor runtime drives existing lifecycle controls', () => {
       },
       task: { task_state: 'none' },
       tracks: { items: [] },
-      im: { target: { kind: 'actor', actor_address: { role_id: 'pm', actor_id: 'act-pm-demo' } } },
+      im: { target: { identity: { id: 'act-pm-demo', type: 'actor' }, identity_id: 'act-pm-demo', role_id: 'pm' } },
     },
   });
 
@@ -411,15 +411,15 @@ test('mutation busy state disables open tui', () => {
 
 test('im event URL targets selected actor with bounded wait only', () => {
   assert.equal(
-    app.buildImEventsUrl('market', 'act-market demo', 15000),
-    '/api/web/im/events?role_id=market&actor_id=act-market%20demo&wait_ms=15000'
+    app.buildImEventsUrl('act-market demo', 15000),
+    '/api/web/im/events?identity_id=act-market%20demo&wait_ms=15000'
   );
 });
 
 test('im conversation URL targets selected actor without lower im route leakage', () => {
   assert.equal(
-    app.buildWebImConversationUrl('market', 'act-market demo', 20),
-    '/api/web/im/conversations/direct?role_id=market&actor_id=act-market%20demo&limit=20'
+    app.buildWebImConversationUrl('act-market demo', 20),
+    '/api/web/im/conversations/direct?identity_id=act-market%20demo&limit=20'
   );
 });
 
@@ -435,7 +435,7 @@ test('record sent IM message keeps compact delivery status', () => {
     {
       id: 'msg-sent-1',
       direction: 'sent',
-      participant: 'you',
+      sender: 'you',
       content: 'ping',
       deliveryStatus: 'accepted',
       wakeStatus: 'submitted',
@@ -448,13 +448,15 @@ test('record projected IM messages keeps sent and reply directions', () => {
   const state = app.createState();
   const sentEcho = app.recordImProjectedMessage(state, {
     id: 'msg-sent-1',
-    from: { kind: 'external', external_id: 'ext-1' },
+    from_identity_id: 'ext-1',
+    to_identity_id: 'act-market-1',
     content: 'ping',
     reply_to: null,
   });
   const actorReply = app.recordImProjectedMessage(state, {
     id: 'msg-reply-1',
-    from: { kind: 'actor', actor_address: { role_id: 'market', actor_id: 'act-market-1' } },
+    from_identity_id: 'act-market-1',
+    to_identity_id: 'ext-1',
     content: 'pong',
     reply_to: 'msg-sent-1',
   });
@@ -465,7 +467,7 @@ test('record projected IM messages keeps sent and reply directions', () => {
     {
       id: 'msg-sent-1',
       direction: 'sent',
-      participant: 'you',
+      sender: 'you',
       content: 'ping',
       deliveryStatus: '',
       wakeStatus: '',
@@ -474,7 +476,7 @@ test('record projected IM messages keeps sent and reply directions', () => {
     {
       id: 'msg-reply-1',
       direction: 'reply',
-      participant: 'market/act-market-1',
+      sender: 'market/act-market-1',
       content: 'pong',
       deliveryStatus: '',
       wakeStatus: '',
@@ -495,13 +497,15 @@ test('direct conversation payload replaces local render cache with persisted his
     messages: [
       {
         id: 'msg-sent-1',
-        from: { kind: 'external', external_id: 'ext-web' },
+        from_identity_id: 'ext-web',
+        to_identity_id: 'act-market-1',
         content: 'ping',
         reply_to: null,
       },
       {
         id: 'msg-reply-1',
-        from: { kind: 'actor', actor_address: { role_id: 'market', actor_id: 'act-market-1' } },
+        from_identity_id: 'act-market-1',
+        to_identity_id: 'ext-web',
         content: 'pong',
         reply_to: 'msg-sent-1',
       },
@@ -522,7 +526,8 @@ test('web im event payload appends projected messages without browser cursor sta
     messages: [
       {
         id: 'msg-reply-1',
-        from: { kind: 'actor', actor_address: { role_id: 'market', actor_id: 'act-market-1' } },
+        from_identity_id: 'act-market-1',
+        to_identity_id: 'ext-web',
         content: 'pong',
         reply_to: null,
       },

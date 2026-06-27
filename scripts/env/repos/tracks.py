@@ -46,6 +46,16 @@ def _normalize_actor(value: Any, field: str) -> dict[str, str]:
         raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
 
 
+def _actor_identity_id(value: Any, field: str) -> str:
+    return _normalize_actor(value, field)["actor_id"]
+
+
+def _identity_id(value: Any, field: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return runtime_files.require_id(value.strip(), field)
+    return _actor_identity_id(value, field)
+
+
 def _normalize_text_list(value: Any, field: str) -> list[str]:
     if value is None:
         return []
@@ -92,7 +102,10 @@ def _normalize_artifact_relation(row: Any) -> dict[str, Any]:
         "role": role,
         "label": _require_non_empty_text(row.get("label"), "track.artifact_relations[].label"),
         "template": _require_non_empty_text(row.get("template"), "track.artifact_relations[].template"),
-        "from_actor": _normalize_actor(row.get("from_actor"), "track.artifact_relations[].from_actor"),
+        "from_identity_id": _identity_id(
+            row.get("from_identity_id", row.get("from_actor")),
+            "track.artifact_relations[].from_identity_id",
+        ),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
         "current": bool(row.get("current", False)),
         "created_at": _require_non_empty_text(row.get("created_at"), "track.artifact_relations[].created_at"),
@@ -120,7 +133,7 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
     created_at = _require_non_empty_text(row.get("created_at"), "track.updates[].created_at")
     return {
         "id": _require_non_empty_text(row.get("id"), "track.updates[].id"),
-        "by_actor": _normalize_actor(row.get("by_actor"), "track.updates[].by_actor"),
+        "by_identity_id": _identity_id(row.get("by_identity_id", row.get("by_actor")), "track.updates[].by_identity_id"),
         "summary": _require_non_empty_text(row.get("summary"), "track.updates[].summary"),
         "kind": kind,
         "refs": [_normalize_update_ref(item) for item in refs],
@@ -215,7 +228,7 @@ def create_track(
         "id": track_id,
         "title": title,
         "outcome": outcome,
-        "owner_actor": owner_actor,
+        "owner_identity_id": _actor_identity_id(owner_actor, "owner_actor"),
         "state": "active",
         "now": now,
         "acceptance_criteria": acceptance_criteria or [],
@@ -269,7 +282,7 @@ def append_track_update(
 
     row = {
         "id": update_id or f"upd-{uuid.uuid4().hex[:8]}",
-        "by_actor": by_actor,
+        "by_identity_id": _actor_identity_id(by_actor, "by_actor"),
         "summary": summary,
         "kind": kind,
         "refs": refs or [],
@@ -294,7 +307,7 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     track_id = runtime_files.require_id(track.get("id", ""), "track.id")
     title = _require_non_empty_text(track.get("title"), "track.title")
     outcome = _require_non_empty_text(track.get("outcome"), "track.outcome")
-    owner_actor = _normalize_actor(track.get("owner_actor"), "track.owner_actor")
+    owner_identity_id = _identity_id(track.get("owner_identity_id", track.get("owner_actor")), "track.owner_identity_id")
     state = track.get("state")
     if state not in VALID_TRACK_STATE:
         raise ValueError(f"track.state must be one of {', '.join(VALID_TRACK_STATE)}")
@@ -322,7 +335,7 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "id": track_id,
         "title": title,
         "outcome": outcome,
-        "owner_actor": owner_actor,
+        "owner_identity_id": owner_identity_id,
         "state": state,
         "now": now,
         "acceptance_criteria": _normalize_text_list(track.get("acceptance_criteria", []), "track.acceptance_criteria"),

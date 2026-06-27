@@ -211,7 +211,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         invalid_rows = (
             {"attachment_id": "att-unsafe", "filename": "../escape.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_actor": {"actor_id": "act-pm-attachment", "role_id": "pm"}, "created_at": "2026-05-22T10:00:00+08:00"},
             {"attachment_id": "att-missing-hash", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "created_by_actor": {"actor_id": "act-pm-attachment", "role_id": "pm"}, "created_at": "2026-05-22T10:00:00+08:00"},
-            {"attachment_id": "att-bad-role", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_actor": {"actor_id": "act-unknown-attachment", "role_id": "unknown"}, "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-bad-route", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_actor": {"actor_id": "act-attachment", "role_id": ""}, "created_at": "2026-05-22T10:00:00+08:00"},
         )
         for row in invalid_rows:
             with self.subTest(row=row):
@@ -318,6 +318,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("task_id", artifact)
         self.assertNotIn("kind", artifact)
         self.assertNotIn("content", artifact)
+        self.assertNotIn("from_role", artifact)
 
     def test_create_revision_enforces_role_template_allowlist(self) -> None:
         role_cases = (
@@ -353,14 +354,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     self.assertIsInstance(stored, dict, msg=created)
                     assert isinstance(stored, dict)
                     self.assertEqual(stored.get("template"), template)
-                    self.assertEqual(
-                        stored.get("created_by_actor"),
-                        {"actor_id": self._runtime_actor_id(role=role, label=actor_id), "role_id": role},
-                    )
-                    self.assertEqual(
-                        stored.get("author_actors"),
-                        [{"actor_id": self._runtime_actor_id(role=role, label=actor_id), "role_id": role}],
-                    )
+                    expected_identity_id = self._runtime_actor_id(role=role, label=actor_id)
+                    self.assertEqual(stored.get("created_by_identity_id"), expected_identity_id)
+                    self.assertEqual(stored.get("author_identity_ids"), [expected_identity_id])
+                    self.assertNotIn("created_by_actor", stored)
+                    self.assertNotIn("author_actors", stored)
                     self.assertNotIn("created_by", stored)
                     self.assertNotIn("authors", stored)
 
@@ -1592,12 +1590,19 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="pm",
             tool="artifact",
             action="list",
-            args={"created_by_role": "design"},
+            args={"created_by_identity_id": self._runtime_actor_id(role="design", label=shared_actor_id)},
         )
         self.assertTrue(created_by_design.get("ok"), msg=created_by_design)
+        created_by_design_ids = {
+            str(row.get("artifact_id"))
+            for row in (created_by_design.get("artifacts") or [])
+            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+        }
+        self.assertEqual(created_by_design_ids, {"art-alpha-design"})
         for row in created_by_design.get("artifacts", []):
             if isinstance(row, dict):
-                self.assertEqual((row.get("created_by_actor") or {}).get("role_id"), "design", msg=row)
+                self.assertNotIn("from_role", row, msg=row)
+                self.assertEqual(row.get("created_by_identity_id"), self._runtime_actor_id(role="design", label=shared_actor_id), msg=row)
 
         template_brief = self._dispatch(
             instance_json=instance_pm,
