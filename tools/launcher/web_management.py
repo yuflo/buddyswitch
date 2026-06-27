@@ -395,7 +395,6 @@ class WebManagementService:
             return 200, {
                 "ok": True,
                 "participant": dict(record["participant"]),
-                "event_cursor": str(record.get("event_cursor") or ""),
                 "client_kind": web_im_identity.CLIENT_KIND,
                 "display_name": web_im_identity.DISPLAY_NAME,
             }
@@ -414,13 +413,20 @@ class WebManagementService:
             raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity participant is invalid.")
         return participant
 
+    def _web_im_connection(self) -> dict[str, Any]:
+        record = self.ensure_web_im_identity()
+        connection = record.get("connection")
+        if not isinstance(connection, dict):
+            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity connection is invalid.")
+        return connection
+
     def _web_im_send_message(self, body: bytes) -> tuple[int, dict[str, Any]]:
         payload = self._parse_json_body(body)
         target = payload.get("to")
         if not isinstance(target, dict):
             raise HttpError(status=400, code="INVALID_REQUEST", message="to must be an object.")
-        result = message_service.send_im_message(
-            sender_participant=self._web_im_participant(),
+        result = message_service.send_external_connection_message(
+            connection=self._web_im_connection(),
             to=target,
             content=str(payload.get("content") or ""),
             reply_to=payload.get("reply_to") if payload.get("reply_to") is not None else None,
@@ -429,11 +435,15 @@ class WebManagementService:
         return (200 if result.get("ok") is True else 400), result
 
     def _web_im_events(self, query: dict[str, list[str]]) -> dict[str, Any]:
-        participant = self._web_im_participant()
+        if "cursor" in query:
+            raise HttpError(status=400, code="INVALID_REQUEST", message="cursor is internal to the Web IM session.")
+        connection = self._web_im_connection()
+        participant = connection.get("participant")
+        if not isinstance(participant, dict):
+            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity participant is invalid.")
         actor_address = self._web_im_actor_address_from_query(query)
-        result = message_service.read_im_events(
-            participant=participant,
-            cursor=_first_query_value(query, "cursor") or "",
+        result = message_service.read_external_connection_events(
+            connection=connection,
             limit=_int_query_value(query, "limit", 50),
             wait_ms=_int_query_value(query, "wait_ms", 0),
         )

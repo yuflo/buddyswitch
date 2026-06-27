@@ -16,11 +16,13 @@ GET /api/tracks/{track_id}
 Reuse these existing route families:
 
 ```text
-/api/im/*
+/api/web/im/*
 /api/instances/*
 /api/health
 /api/roles
 ```
+
+`/api/im/*` remains the lower external Central IM contract and is not exposed directly to Browser JavaScript through Web Management.
 
 Do not add these first-cut routes:
 

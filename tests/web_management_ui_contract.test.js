@@ -126,7 +126,7 @@ test('production javascript keeps the real api surface', () => {
   assertIncludes(appJs, 'actor_id: state.selectedActorId');
   assertIncludes(appJs, 'content: state.draftText');
   assertIncludes(appJs, 'buildWebImConversationUrl');
-  assertIncludes(appJs, 'buildImEventsUrl(actorAddress.role_id, actorAddress.actor_id, state.imEventCursor, 15000)');
+  assertIncludes(appJs, 'buildImEventsUrl(actorAddress.role_id, actorAddress.actor_id, 15000)');
   assertIncludes(appJs, "'&wait_ms='");
   assertIncludes(appJs, 'buildActorConsoleUrl');
   assertIncludes(appJs, 'buildTrackDetailUrl');
@@ -143,6 +143,9 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, 'external-participants');
   assertExcludes(appJs, 'imParticipantToken');
   assertExcludes(appJs, 'participant_token');
+  assertExcludes(appJs, 'event_cursor');
+  assertExcludes(appJs, 'imEventCursor');
+  assertExcludes(appJs, 'cursor=');
   assertExcludes(appJs, 'Authorization');
   assertExcludes(appJs, 'env.tool');
   assertExcludes(appJs, 'env.repos');

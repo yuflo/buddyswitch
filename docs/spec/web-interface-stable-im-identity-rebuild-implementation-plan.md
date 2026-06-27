@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rebuild Web Management IM so one shared runtime has exactly one stable server-owned WebUI external participant, with no Browser token registration and no WebUI `/api/im/*` compatibility path.
+**Goal:** Rebuild Web Management IM so one shared runtime has exactly one stable server-owned WebUI external connection, with no Browser credential registration and no WebUI `/api/im/*` compatibility path.
 
 **Architecture:** Web-interface owns a small local IM identity provider and exposes first-party `/api/web/im/*` routes to Browser UI. Existing IM service/router remain the lower/external IM contract, but Web Management no longer forwards `/api/im/*` to Browser-facing callers.
 
@@ -14,11 +14,11 @@
 
 Web Management represents one stable external user inside one shared runtime.
 
-- First Web Management startup registers one external participant.
+- First Web Management startup creates one external connection.
 - Page refresh does not register.
 - Page reopen does not register.
 - Web service restart does not register.
-- Browser JavaScript never stores or receives the long-lived participant token.
+- Browser JavaScript never stores or receives the long-lived connection key.
 - Browser JavaScript never calls `/api/im/*`.
 - Web Management does not expose `/api/im/*` as a Browser-facing compatibility path.
 - Message history is read from IM conversation facts, not stored in Web-interface.
@@ -28,8 +28,8 @@ Web Management represents one stable external user inside one shared runtime.
 
 - Create: `tools/launcher/web_im_identity.py`
   - Owns the Web Management IM credential record under `runtime_files.LOCAL_ROOT / "web-management" / "im-session.json"`.
-  - Validates existing token with `message_service.authenticate_im_token`.
-  - Registers exactly once when no valid identity exists.
+  - Validates an existing connection key with `message_service.authenticate_external_connection_key`.
+  - Creates exactly one external connection when no valid identity exists.
   - Uses `im-session.lock` to serialize startup in one runtime.
 
 - Modify: `tools/launcher/web_management.py`
@@ -65,9 +65,9 @@ Web Management represents one stable external user inside one shared runtime.
 ### Task 1: Red Tests For No-Compat Web Surface
 
 - [ ] Update Web Management tests so `service.handle_api("POST", "/api/im/external-participants", ...)` raises `HttpError` 404.
-- [ ] Add tests that `/api/web/im/session` returns Web session metadata without `participant_token`.
+- [ ] Add tests that `/api/web/im/session` returns Web session metadata without `connection_key`.
 - [ ] Add tests that constructing two `WebManagementService` instances in the same runtime reuses one identity record.
-- [ ] Add tests that invalid identity token is replaced once and then reused.
+- [ ] Add tests that an invalid identity connection key is replaced once and then reused.
 
 ### Task 2: Red Tests For WebUI Contract
 
@@ -80,8 +80,8 @@ Web Management represents one stable external user inside one shared runtime.
 - [ ] Add `tools/launcher/web_im_identity.py`.
 - [ ] Persist identity JSON under `runtime_files.LOCAL_ROOT / "web-management"`.
 - [ ] Acquire a local lock around read/validate/register/write.
-- [ ] Use `message_service.authenticate_im_token` to validate persisted credentials.
-- [ ] Use `message_service.register_external_participant(client_kind="web-management", display_name="BuddySwitch Web")` only when no valid credential exists.
+- [ ] Use `message_service.authenticate_external_connection_key` to validate persisted credentials.
+- [ ] Use `message_service.create_external_connection(display_name="BuddySwitch Web")` only when no valid credential exists.
 - [ ] Never store message history in the identity record.
 
 ### Task 4: Replace Web Management IM Routes
@@ -89,7 +89,7 @@ Web Management represents one stable external user inside one shared runtime.
 - [ ] Add `/api/web/im/session`.
 - [ ] Add `/api/web/im/messages` for Browser sends; derive sender from server-owned identity.
 - [ ] Add `/api/web/im/conversations/direct` for selected actor history.
-- [ ] Add actor-scoped `/api/web/im/events`; require `role_id` and `actor_id`, return only that actor direct conversation's events plus visible message payloads, and keep the Web participant cursor moving across skipped unrelated events.
+- [ ] Add actor-scoped `/api/web/im/events`; require `role_id` and `actor_id`, return only that actor direct conversation's events plus visible message payloads, and keep the external connection cursor server-owned.
 - [ ] Remove `/api/im/*` forwarding from `WebManagementService.handle_api`.
 
 ### Task 5: Replace Browser IM Calls

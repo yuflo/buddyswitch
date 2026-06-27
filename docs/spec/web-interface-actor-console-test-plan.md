@@ -177,12 +177,13 @@ Coverage:
   - `/api/actors/`
   - `/console`
   - `/api/tracks`
-  - `/api/im/*`
+  - `/api/web/im/*`
   - `/api/instances/*` only for control-plane actions.
 - JavaScript excludes:
   - `/api/actors/{id}/tasks`
   - `/api/actors/{id}/tracks`
   - `/api/tracks/{id}/comments`
+  - `/api/im/*`
   - `env.tool`
   - `env.repos`
   - `env.tools.track._impl`

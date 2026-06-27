@@ -136,7 +136,6 @@
       openTuiMessage: '',
       openTuiCommand: '',
       imSessionReady: false,
-      imEventCursor: '',
       imConversation: [],
       imSeenMessageIds: {},
       imPolling: false,
@@ -186,12 +185,10 @@
     return '/api/tracks/' + encodeURIComponent(trackId);
   }
 
-  function buildImEventsUrl(roleId, actorId, cursor, waitMs) {
-    const normalizedCursor = typeof cursor === 'string' && cursor ? cursor : '';
+  function buildImEventsUrl(roleId, actorId, waitMs) {
     const normalizedWait = Number.isFinite(waitMs) && waitMs >= 0 ? Math.floor(waitMs) : 0;
     return '/api/web/im/events?role_id=' + encodeURIComponent(roleId || '')
       + '&actor_id=' + encodeURIComponent(actorId || '')
-      + '&cursor=' + encodeURIComponent(normalizedCursor)
       + '&wait_ms=' + encodeURIComponent(String(normalizedWait));
   }
 
@@ -375,9 +372,6 @@
   }
 
   function applyImEventsPayload(state, payload) {
-    if (payload && typeof payload.next_cursor === 'string' && payload.next_cursor) {
-      state.imEventCursor = payload.next_cursor;
-    }
     const messages = payload && Array.isArray(payload.messages) ? payload.messages : [];
     messages.forEach(function (message) {
       recordImProjectedMessage(state, message);
@@ -885,9 +879,8 @@
       startImPolling(state, elements);
       return;
     }
-    const payload = await fetchJson('/api/web/im/session');
+    await fetchJson('/api/web/im/session');
     state.imSessionReady = true;
-    state.imEventCursor = payload.event_cursor || state.imEventCursor;
     startImPolling(state, elements);
   }
 
@@ -929,7 +922,7 @@
     }
     const actorAddress = target.actor_address;
     const payload = await fetchJson(
-      buildImEventsUrl(actorAddress.role_id, actorAddress.actor_id, state.imEventCursor, 15000)
+      buildImEventsUrl(actorAddress.role_id, actorAddress.actor_id, 15000)
     );
     if (state.selectedActorId !== actorAddress.actor_id) {
       return;

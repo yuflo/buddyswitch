@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import fcntl
 import json
 import sys
 from pathlib import Path
@@ -158,8 +160,39 @@ def _format_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _parse_utc(value: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise BrowserLifecycleError("timestamp must be a non-empty string")
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise BrowserLifecycleError(f"invalid timestamp: {value}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def page_idle_state_file(instance_root: Path) -> Path:
     return Path(instance_root) / "runtime" / "browser" / "page_idle.json"
+
+
+def page_idle_state_lock_file(instance_root: Path) -> Path:
+    return Path(instance_root) / "runtime" / "browser" / "page_idle.lock"
+
+
+@contextmanager
+def _page_idle_state_lock(instance_root: Path) -> Any:
+    path = page_idle_state_lock_file(instance_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _read_page_idle_state(instance_root: Path) -> dict[str, Any]:
@@ -264,18 +297,19 @@ def mark_current_page(
 ) -> dict[str, Any]:
     normalized_target_id = _normalize_target_id(target_id)
     timestamp = _format_utc(now or _utc_now())
-    state = _read_page_idle_state(instance_root)
-    _apply_target_metadata(
-        state,
-        target_id=normalized_target_id,
-        timestamp=timestamp,
-        target_url=target_url,
-        page_id=page_id,
-    )
-    state["current_target_id"] = normalized_target_id
-    state["current_page_updated_at"] = timestamp
-    _write_page_idle_state(instance_root, state)
-    return dict(state)
+    with _page_idle_state_lock(Path(instance_root)):
+        state = _read_page_idle_state(instance_root)
+        _apply_target_metadata(
+            state,
+            target_id=normalized_target_id,
+            timestamp=timestamp,
+            target_url=target_url,
+            page_id=page_id,
+        )
+        state["current_target_id"] = normalized_target_id
+        state["current_page_updated_at"] = timestamp
+        _write_page_idle_state(instance_root, state)
+        return dict(state)
 
 
 def current_target_id(instance_root: Path) -> str | None:
@@ -284,6 +318,39 @@ def current_target_id(instance_root: Path) -> str | None:
     if isinstance(target_id, str) and target_id.strip():
         return target_id.strip()
     return None
+
+
+def target_idle_expiry_after_due_at(
+    *,
+    instance_root: Path,
+    target_id: str,
+    due_at: str | None,
+    idle_seconds: int = BROWSER_PAGE_IDLE_SECONDS,
+) -> bool:
+    normalized_target_id = _normalize_target_id(target_id)
+    if isinstance(idle_seconds, bool) or not isinstance(idle_seconds, int) or idle_seconds <= 0:
+        raise BrowserLifecycleError("idle_seconds must be a positive integer")
+    if not isinstance(due_at, str) or not due_at.strip():
+        return False
+    try:
+        due_at_dt = _parse_utc(due_at)
+    except BrowserLifecycleError:
+        return False
+    state = _read_page_idle_state(Path(instance_root))
+    targets = state.get("targets")
+    if not isinstance(targets, dict):
+        return False
+    target_state = targets.get(normalized_target_id)
+    if not isinstance(target_state, dict):
+        return False
+    last_used_at = target_state.get("last_used_at")
+    if not isinstance(last_used_at, str) or not last_used_at.strip():
+        return False
+    try:
+        last_used_dt = _parse_utc(last_used_at)
+    except BrowserLifecycleError:
+        return False
+    return last_used_dt + timedelta(seconds=idle_seconds) > due_at_dt
 
 
 def target_id_for_page_id(instance_root: Path, page_id: object) -> str | None:
@@ -324,15 +391,16 @@ def refresh_page_idle(
         source_context={"owner": "browser"},
         schedule_key=f"browser.page.idle:{normalized_target_id}",
     )
-    state = _read_page_idle_state(Path(instance_root))
-    _apply_target_metadata(
-        state,
-        target_id=normalized_target_id,
-        timestamp=_format_utc(timestamp_value),
-        target_url=target_url,
-        page_id=page_id,
-    )
-    _write_page_idle_state(Path(instance_root), state)
+    with _page_idle_state_lock(Path(instance_root)):
+        state = _read_page_idle_state(Path(instance_root))
+        _apply_target_metadata(
+            state,
+            target_id=normalized_target_id,
+            timestamp=_format_utc(timestamp_value),
+            target_url=target_url,
+            page_id=page_id,
+        )
+        _write_page_idle_state(Path(instance_root), state)
     return {
         "idle_refreshed": True,
         "idle_seconds": idle_seconds,
@@ -370,21 +438,22 @@ def refresh_current_page_idle(
 
 def forget_page_idle_target(*, instance_root: Path, target_id: str) -> dict[str, Any]:
     normalized_target_id = _normalize_target_id(target_id)
-    state = _read_page_idle_state(Path(instance_root))
-    targets = state.setdefault("targets", {})
-    if not isinstance(targets, dict):
-        targets = {}
-        state["targets"] = targets
-    targets.pop(normalized_target_id, None)
-    page_map = state.setdefault("page_id_to_target_id", {})
-    if not isinstance(page_map, dict):
-        page_map = {}
-        state["page_id_to_target_id"] = page_map
-    stale_page_ids = [page_id for page_id, mapped_target in page_map.items() if mapped_target == normalized_target_id]
-    for page_id in stale_page_ids:
-        page_map.pop(page_id, None)
-    if state.get("current_target_id") == normalized_target_id:
-        state.pop("current_target_id", None)
-        state.pop("current_page_updated_at", None)
-    _write_page_idle_state(Path(instance_root), state)
-    return dict(state)
+    with _page_idle_state_lock(Path(instance_root)):
+        state = _read_page_idle_state(Path(instance_root))
+        targets = state.setdefault("targets", {})
+        if not isinstance(targets, dict):
+            targets = {}
+            state["targets"] = targets
+        targets.pop(normalized_target_id, None)
+        page_map = state.setdefault("page_id_to_target_id", {})
+        if not isinstance(page_map, dict):
+            page_map = {}
+            state["page_id_to_target_id"] = page_map
+        stale_page_ids = [page_id for page_id, mapped_target in page_map.items() if mapped_target == normalized_target_id]
+        for page_id in stale_page_ids:
+            page_map.pop(page_id, None)
+        if state.get("current_target_id") == normalized_target_id:
+            state.pop("current_target_id", None)
+            state.pop("current_page_updated_at", None)
+        _write_page_idle_state(Path(instance_root), state)
+        return dict(state)

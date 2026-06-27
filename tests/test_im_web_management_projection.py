@@ -23,6 +23,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         service = web_management.WebManagementService(repo_root=ROOT)
 
         for method, path in (
+            ("POST", "/api/im/connections"),
             ("POST", "/api/im/external-participants"),
             ("POST", "/api/im/messages"),
             ("GET", "/api/im/events?cursor=imev-000000000000&wait_ms=0"),

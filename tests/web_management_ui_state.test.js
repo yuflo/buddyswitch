@@ -409,10 +409,10 @@ test('mutation busy state disables open tui', () => {
   );
 });
 
-test('im event URL targets selected actor with cursor and bounded wait', () => {
+test('im event URL targets selected actor with bounded wait only', () => {
   assert.equal(
-    app.buildImEventsUrl('market', 'act-market demo', 'imev-abc 123', 15000),
-    '/api/web/im/events?role_id=market&actor_id=act-market%20demo&cursor=imev-abc%20123&wait_ms=15000'
+    app.buildImEventsUrl('market', 'act-market demo', 15000),
+    '/api/web/im/events?role_id=market&actor_id=act-market%20demo&wait_ms=15000'
   );
 });
 
@@ -515,12 +515,10 @@ test('direct conversation payload replaces local render cache with persisted his
   assert.deepEqual(Object.keys(state.imSeenMessageIds).sort(), ['msg-reply-1', 'msg-sent-1']);
 });
 
-test('web im event payload appends projected messages and advances cursor', () => {
+test('web im event payload appends projected messages without browser cursor state', () => {
   const state = app.createState();
-  state.imEventCursor = 'imev-before';
 
   app.applyImEventsPayload(state, {
-    next_cursor: 'imev-after',
     messages: [
       {
         id: 'msg-reply-1',
@@ -531,7 +529,7 @@ test('web im event payload appends projected messages and advances cursor', () =
     ],
   });
 
-  assert.equal(state.imEventCursor, 'imev-after');
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'imEventCursor'), false);
   assert.deepEqual(state.imConversation.map((entry) => [entry.id, entry.direction, entry.content]), [
     ['msg-reply-1', 'reply', 'pong'],
   ]);

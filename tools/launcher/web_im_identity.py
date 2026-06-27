@@ -42,10 +42,13 @@ class WebImIdentityProvider:
         runtime_files.require_central_im_write_root()
         with self._lock():
             record = self._read_existing()
-            if record is not None and self._is_valid(record):
+            authenticated = self._authenticate_record(record) if record is not None else None
+            if record is not None and authenticated is not None:
                 updated = dict(record)
+                updated["participant"] = authenticated["participant"]
                 updated["updated_at"] = runtime_files.now_iso()
                 self._write(updated)
+                updated["connection"] = authenticated["connection"]
                 return updated
             return self._register_new()
 
@@ -59,43 +62,49 @@ class WebImIdentityProvider:
             return None
         return payload
 
-    def _is_valid(self, record: dict[str, Any]) -> bool:
-        token = record.get("participant_token")
+    def _authenticate_record(self, record: dict[str, Any]) -> dict[str, Any] | None:
+        connection_key = record.get("connection_key")
         participant = record.get("participant")
-        if not isinstance(token, str) or not token.strip() or not isinstance(participant, dict):
-            return False
-        auth = message_service.authenticate_im_token(token)
+        if not isinstance(connection_key, str) or not connection_key.strip() or not isinstance(participant, dict):
+            return None
+        auth = message_service.authenticate_external_connection_key(connection_key)
         if auth.get("ok") is not True:
-            return False
+            return None
         authenticated = auth.get("participant")
-        if not isinstance(authenticated, dict):
-            return False
-        return _external_id(participant) == _external_id(authenticated)
+        connection = auth.get("connection")
+        if not isinstance(authenticated, dict) or not isinstance(connection, dict):
+            return None
+        if _external_id(participant) != _external_id(authenticated):
+            return None
+        return {"participant": authenticated, "connection": connection}
 
     def _register_new(self) -> dict[str, Any]:
-        result = message_service.register_external_participant(
-            client_kind=CLIENT_KIND,
-            display_name=DISPLAY_NAME,
-        )
+        result = message_service.create_external_connection(display_name=DISPLAY_NAME)
         if result.get("ok") is not True:
             message = result.get("error", {}).get("message") if isinstance(result.get("error"), dict) else None
-            raise WebImIdentityError(str(message or "Unable to register Web Management IM participant."))
+            raise WebImIdentityError(str(message or "Unable to create Web Management IM connection."))
         now = runtime_files.now_iso()
-        participant = result.get("participant")
-        token = result.get("participant_token")
-        if not isinstance(participant, dict) or not isinstance(token, str) or not token:
-            raise WebImIdentityError("Web Management IM registration returned an invalid identity.")
+        connection_key = result.get("connection_key")
+        if not isinstance(connection_key, str) or not connection_key:
+            raise WebImIdentityError("Web Management IM connection creation returned an invalid key.")
+        authenticated = message_service.authenticate_external_connection_key(connection_key)
+        if authenticated.get("ok") is not True:
+            raise WebImIdentityError("Web Management IM connection could not be authenticated.")
+        participant = authenticated.get("participant")
+        connection = authenticated.get("connection")
+        if not isinstance(participant, dict) or not isinstance(connection, dict):
+            raise WebImIdentityError("Web Management IM authentication returned an invalid identity.")
         record = {
             "schema_version": SCHEMA_VERSION,
             "client_kind": CLIENT_KIND,
             "display_name": DISPLAY_NAME,
             "participant": participant,
-            "participant_token": token,
-            "event_cursor": result.get("event_cursor") or "imev-000000000000",
+            "connection_key": connection_key,
             "created_at": now,
             "updated_at": now,
         }
         self._write(record)
+        record["connection"] = connection
         return record
 
     def _write(self, record: dict[str, Any]) -> None:

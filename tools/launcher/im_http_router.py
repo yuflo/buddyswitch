@@ -44,19 +44,23 @@ class ImHttpRouter:
         route = parsed.path
         query = parse_qs(parsed.query)
         normalized_method = method.upper()
-        if normalized_method == "POST" and route == "/api/im/external-participants":
-            payload = _json_body(body)
-            return 200, message_service.register_external_participant(
-                client_kind=str(payload.get("client_kind") or ""),
-                display_name=str(payload.get("display_name") or ""),
-            )
+        if normalized_method == "POST" and route == "/api/im/connections":
+            try:
+                payload = _json_body(body)
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": str(exc)}}
+            result = message_service.create_external_connection(display_name=str(payload.get("display_name") or ""))
+            return (200 if result.get("ok") is True else 400), result
         if not route.startswith("/api/im/"):
+            return _not_found()
+        if not _is_authenticated_im_route(normalized_method, route):
             return _not_found()
 
         auth = self._authenticate(headers)
         if auth.get("ok") is not True:
             return 401, auth
         participant = auth["participant"]
+        connection = auth["connection"]
 
         if normalized_method == "GET" and route == "/api/im/actors":
             role_id = _first_query_value(query, "role_id")
@@ -82,8 +86,8 @@ class ImHttpRouter:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": str(exc)}}
             if "from" in payload:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "from is derived from authentication"}}
-            result = message_service.send_im_message(
-                sender_participant=participant,
+            result = message_service.send_external_connection_message(
+                connection=connection,
                 to=target,
                 content=str(payload.get("content") or ""),
                 reply_to=payload.get("reply_to") if payload.get("reply_to") is not None else None,
@@ -92,9 +96,10 @@ class ImHttpRouter:
             return (200 if result.get("ok") is True else 400), result
 
         if normalized_method == "GET" and route == "/api/im/events":
-            result = message_service.read_im_events(
-                participant=participant,
-                cursor=_first_query_value(query, "cursor") or "",
+            if "cursor" in query:
+                return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "cursor is internal to the connection"}}
+            result = message_service.read_external_connection_events(
+                connection=connection,
                 limit=_int_query_value(query, "limit", 50),
                 wait_ms=_int_query_value(query, "wait_ms", 0),
             )
@@ -142,8 +147,8 @@ class ImHttpRouter:
             auth_value = headers.get("Authorization") or headers.get("authorization") or ""
         prefix = "Bearer "
         if not auth_value.startswith(prefix):
-            return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "Authorization: Bearer token is required"}}
-        return message_service.authenticate_im_token(auth_value[len(prefix) :])
+            return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "Authorization: Bearer connection_key is required"}}
+        return message_service.authenticate_external_connection_key(auth_value[len(prefix) :])
 
 
 def _json_body(body: bytes) -> dict[str, Any]:
@@ -178,6 +183,22 @@ def _int_query_value(query: dict[str, list[str]], name: str, default: int) -> in
     except ValueError:
         return default
     return value if value >= 0 else default
+
+
+def _is_authenticated_im_route(method: str, route: str) -> bool:
+    if method == "GET" and route in {"/api/im/actors", "/api/im/events", "/api/im/conversations/direct"}:
+        return True
+    if method == "POST" and route == "/api/im/messages":
+        return True
+    message_prefix = "/api/im/messages/"
+    if not route.startswith(message_prefix):
+        return False
+    suffix = route[len(message_prefix) :]
+    if method == "GET" and suffix.endswith("/replies"):
+        return True
+    if method == "PATCH" and suffix.endswith("/disposition"):
+        return True
+    return method == "GET" and "/" not in suffix
 
 
 def _not_found() -> JsonResponse:

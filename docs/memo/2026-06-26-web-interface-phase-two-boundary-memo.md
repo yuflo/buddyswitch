@@ -14,7 +14,7 @@ needed to avoid a real boundary violation or duplicated domain semantics.
 
 ## Current Code Facts Checked
 
-Current Browser calls are still instance/control oriented:
+Current Browser calls are actor/control oriented:
 
 - `tools/launcher/assets/web-management/app.js`
   - calls `/api/health`;
@@ -23,8 +23,8 @@ Current Browser calls are still instance/control oriented:
   - calls `/api/instances/{actor_id}/status`;
   - calls instance actions such as `interrupt`, `stop`, `clear`, `resume`,
     `open-tui`, and delete;
-  - calls `/api/im/external-participants`, `/api/im/messages`, and
-    `/api/im/events`.
+  - calls `/api/actors`, `/api/actors/{actor_id}/console`, `/api/tracks`,
+    `/api/tracks/{track_id}`, and `/api/web/im/*`.
 
 Current Web HTTP routes are in `tools/launcher/web_management.py`:
 
@@ -33,11 +33,15 @@ Current Web HTTP routes are in `tools/launcher/web_management.py`:
 - `/api/instances`
 - `/api/instances/{actor_id}/status`
 - `/api/instances/{actor_id}/input|side|side/close|interrupt|resume|stop|clear|open-tui`
-- `/api/im/*`
+- `/api/actors`
+- `/api/actors/{actor_id}/console`
+- `/api/tracks`
+- `/api/tracks/{track_id}`
+- `/api/web/im/*`
 
 Current IM HTTP routes are in `tools/launcher/im_http_router.py`:
 
-- `POST /api/im/external-participants`
+- `POST /api/im/connections`
 - `GET /api/im/actors`
 - `POST /api/im/messages`
 - `GET /api/im/events`
@@ -100,9 +104,9 @@ Existing APIs to reuse:
 
 | Capability | API / Boundary | Layer | Decision |
 | --- | --- | --- | --- |
-| Actor direct conversation | `GET /api/im/conversations/direct` | Web-interface API | Reuse |
-| Web sends message to actor | `POST /api/im/messages` | Web-interface API | Reuse |
-| Message disposition | `PATCH /api/im/messages/{id}/disposition` | Web-interface API | Reuse |
+| Actor direct conversation | `GET /api/web/im/conversations/direct` | Web-interface API | Reuse through Web facade |
+| Web sends message to actor | `POST /api/web/im/messages` | Web-interface API | Reuse through Web facade |
+| Message polling | `GET /api/web/im/events` | Web-interface API | Reuse through Web facade |
 | Instance lifecycle/status | `/api/instances/*` | Web-interface API -> host control | Reuse as control plane |
 | Actor task state | `task_management.current_view(...)` | Domain / service | Reuse |
 | Message semantics | `env.services.messages` | Domain / service | Reuse |

@@ -186,7 +186,7 @@ Implementation notes:
   - non-archived Track list;
   - selected Track detail;
   - materials, proofs, updates, and comment threads within the detail panel.
-- Preserve existing IM send/poll behavior through `/api/im/*`.
+- Preserve IM send/poll behavior through Web Management's first-party `/api/web/im/*` routes.
 - Preserve existing instance lifecycle actions through `/api/instances/*`.
 - Add loading, empty, and error states without decorative UI copy.
 - Keep the UI dense, calm, scan-oriented, and responsive.
