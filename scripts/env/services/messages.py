@@ -172,78 +172,65 @@ def _actor_address_from_any(context: MessageSendContext, value: Any) -> Any:
     return context.rules.message.ActorAddress.from_payload(value)
 
 
-def register_external_participant(*, client_kind: str, display_name: str) -> dict[str, Any]:
+def create_external_connection(*, display_name: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    normalized_client_kind = client_kind.strip() if isinstance(client_kind, str) else ""
     normalized_display_name = display_name.strip() if isinstance(display_name, str) else ""
-    if not normalized_client_kind:
-        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "client_kind must be a non-empty string"}}
     if not normalized_display_name:
         return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "display_name must be a non-empty string"}}
 
     external_id = f"ext-{uuid.uuid4().hex[:12]}"
+    now = message_repo.runtime_files.now_iso()
     participant = {
         "kind": "external",
         "external_id": external_id,
-        "client_kind": normalized_client_kind,
         "display_name": normalized_display_name,
-        "created_at": message_repo.runtime_files.now_iso(),
-        "last_seen_at": message_repo.runtime_files.now_iso(),
+        "created_at": now,
+        "last_seen_at": now,
     }
-    participant_token = f"impt-{secrets.token_hex(24)}"
-    token_hash = "sha256:" + hashlib.sha256(participant_token.encode("utf-8")).hexdigest()
+    connection_key = f"imck-{secrets.token_hex(24)}"
+    connection_key_hash = _im_connection_key_hash(connection_key)
     message_repo.save_im_participant(participant)
-    message_repo.save_im_session(
+    message_repo.save_im_connection(
         {
-            "token_hash": token_hash,
+            "connection_key_hash": connection_key_hash,
             "participant": {"kind": "external", "external_id": external_id},
-            "created_at": participant["created_at"],
-            "last_used_at": participant["created_at"],
-        }
-    )
-    message_repo.save_im_cursor(
-        {
-            "participant": {"kind": "external", "external_id": external_id},
+            "display_name": normalized_display_name,
             "last_event_id": message_repo.INITIAL_IM_EVENT_CURSOR,
-            "updated_at": participant["created_at"],
+            "created_at": now,
+            "last_used_at": now,
         }
     )
     return {
         "ok": True,
-        "participant": {
-            "kind": "external",
-            "external_id": external_id,
-            "client_kind": normalized_client_kind,
-            "display_name": normalized_display_name,
-        },
-        "participant_token": participant_token,
-        "event_cursor": message_repo.INITIAL_IM_EVENT_CURSOR,
+        "connection_key": connection_key,
     }
 
 
-def _im_token_hash(participant_token: str) -> str:
-    return "sha256:" + hashlib.sha256(participant_token.encode("utf-8")).hexdigest()
+def _im_connection_key_hash(connection_key: str) -> str:
+    return "sha256:" + hashlib.sha256(connection_key.encode("utf-8")).hexdigest()
 
 
-def authenticate_im_token(participant_token: str) -> dict[str, Any]:
+def authenticate_external_connection_key(connection_key: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    if not isinstance(participant_token, str) or not participant_token.strip():
-        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "participant token is required"}}
-    session = message_repo.get_im_session_by_token_hash(_im_token_hash(participant_token.strip()))
-    if session is None:
-        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "participant token is invalid"}}
-    participant = session.get("participant")
+    if not isinstance(connection_key, str) or not connection_key.strip():
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection_key is required"}}
+    connection = message_repo.get_im_connection_by_key_hash(_im_connection_key_hash(connection_key.strip()))
+    if connection is None:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection_key is invalid"}}
+    participant = connection.get("participant")
     if not isinstance(participant, dict):
-        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "participant session is invalid"}}
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection participant is invalid"}}
     try:
         participant_ref = message_repo.im_participant_ref(participant)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
-    session["last_used_at"] = message_repo.runtime_files.now_iso()
-    message_repo.save_im_session(session)
-    return {"ok": True, "participant": participant_ref}
+    updated = dict(connection)
+    updated["participant"] = participant_ref
+    updated["last_used_at"] = message_repo.runtime_files.now_iso()
+    saved = message_repo.save_im_connection(updated)
+    return {"ok": True, "participant": participant_ref, "connection": saved}
 
 
 def _new_im_id(prefix: str) -> str:
@@ -418,13 +405,6 @@ def send_im_message(
                 "sequence": sequence,
             }
         )
-    message_repo.save_im_cursor(
-        {
-            "participant": sender,
-            "last_event_id": event_id,
-            "updated_at": now,
-        }
-    )
     original_reply_state = None
     if reply_to_id is not None:
         original_reply_state = _mark_reply_source_replied(
@@ -473,6 +453,81 @@ def send_im_message(
             original_reply_state.get("disposition") if isinstance(original_reply_state, dict) else None
         )
     return response
+
+
+def _connection_participant_ref(connection: dict[str, Any]) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    participant = connection.get("participant")
+    if not isinstance(participant, dict):
+        raise ValueError("connection.participant must be an object")
+    return message_repo.im_participant_ref(participant)
+
+
+def _save_connection_last_event(connection: dict[str, Any], event_id: str) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    updated = dict(connection)
+    updated["last_event_id"] = str(event_id)
+    updated["last_used_at"] = message_repo.runtime_files.now_iso()
+    saved = message_repo.save_im_connection(updated)
+    connection.clear()
+    connection.update(saved)
+    return saved
+
+
+def send_external_connection_message(
+    *,
+    connection: dict[str, Any],
+    to: dict[str, Any],
+    content: str,
+    reply_to: str | None = None,
+    wake_actor: Any | None = None,
+) -> dict[str, Any]:
+    try:
+        sender = _connection_participant_ref(connection)
+    except ValueError as exc:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
+    result = send_im_message(
+        sender_participant=sender,
+        to=to,
+        content=content,
+        reply_to=reply_to,
+        wake_actor=wake_actor,
+    )
+    if result.get("ok") is True:
+        _save_connection_last_event(connection, str(result["event_id"]))
+    external_response = dict(result)
+    external_response.pop("next_cursor", None)
+    return external_response
+
+
+def read_external_connection_events(
+    *,
+    connection: dict[str, Any],
+    limit: int = 50,
+    wait_ms: int = 0,
+) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    try:
+        participant = _connection_participant_ref(connection)
+    except ValueError as exc:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
+    last_event_id = connection.get("last_event_id")
+    cursor = last_event_id if isinstance(last_event_id, str) and last_event_id.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
+    result = read_im_events(
+        participant=participant,
+        cursor=cursor,
+        limit=limit,
+        wait_ms=wait_ms,
+    )
+    if result.get("ok") is not True:
+        return result
+    events = result.get("events") if isinstance(result.get("events"), list) else []
+    if events:
+        _save_connection_last_event(connection, str(events[-1]["event_id"]))
+    return {"ok": True, "events": events}
 
 
 def read_im_events(

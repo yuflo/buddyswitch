@@ -11,6 +11,31 @@
     return Boolean(options && options.selectedRole && !options.isCreating);
   }
 
+  const IM_CONNECTION_KEY_STORAGE_KEY = 'buddyswitch.imConnectionKey';
+
+  function readStoredImConnectionKey() {
+    if (typeof localStorage === 'undefined') {
+      return '';
+    }
+    try {
+      const value = localStorage.getItem(IM_CONNECTION_KEY_STORAGE_KEY);
+      return typeof value === 'string' ? value : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function writeStoredImConnectionKey(value) {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+    try {
+      localStorage.setItem(IM_CONNECTION_KEY_STORAGE_KEY, value);
+    } catch (_error) {
+      return;
+    }
+  }
+
   function computeInstanceActionState(instance, options) {
     const draftText = options && typeof options.draftText === 'string' ? options.draftText.trim() : '';
     const isMutating = Boolean(options && options.isMutating);
@@ -99,8 +124,7 @@
       mutationKey: '',
       openTuiMessage: '',
       openTuiCommand: '',
-      imParticipantToken: '',
-      imEventCursor: '',
+      imConnectionKey: readStoredImConnectionKey(),
       imConversation: [],
       imSeenMessageIds: {},
       imPolling: false,
@@ -140,10 +164,9 @@
       .replace(/'/g, '&#039;');
   }
 
-  function buildImEventsUrl(cursor, waitMs) {
-    const normalizedCursor = typeof cursor === 'string' && cursor ? cursor : '';
+  function buildImEventsUrl(waitMs) {
     const normalizedWait = Number.isFinite(waitMs) && waitMs >= 0 ? Math.floor(waitMs) : 0;
-    return '/api/im/events?cursor=' + encodeURIComponent(normalizedCursor) + '&wait_ms=' + encodeURIComponent(String(normalizedWait));
+    return '/api/im/events?wait_ms=' + encodeURIComponent(String(normalizedWait));
   }
 
   function participantLabel(participant) {
@@ -466,31 +489,30 @@
     }
   }
 
-  async function ensureImParticipant(state, elements) {
-    if (state.imParticipantToken) {
+  async function ensureImConnection(state, elements) {
+    if (state.imConnectionKey) {
       startImPolling(state, elements);
       return;
     }
-    const payload = await fetchJson('/api/im/external-participants', {
+    const payload = await fetchJson('/api/im/connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        client_kind: 'web-management',
         display_name: 'BuddySwitch Web',
       }),
     });
-    state.imParticipantToken = payload.participant_token;
-    state.imEventCursor = payload.event_cursor;
+    state.imConnectionKey = payload.connection_key;
+    writeStoredImConnectionKey(state.imConnectionKey);
     startImPolling(state, elements);
   }
 
   async function sendImDraft(state, elements) {
-    await ensureImParticipant(state, elements);
+    await ensureImConnection(state, elements);
     const content = state.draftText;
     const payload = await fetchJson('/api/im/messages', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer ' + state.imParticipantToken,
+        'Authorization': 'Bearer ' + state.imConnectionKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -510,15 +532,14 @@
   }
 
   async function pollImEventsOnce(state, elements) {
-    if (!state.imParticipantToken) {
+    if (!state.imConnectionKey) {
       return;
     }
-    const payload = await fetchJson(buildImEventsUrl(state.imEventCursor, 15000), {
+    const payload = await fetchJson(buildImEventsUrl(15000), {
       headers: {
-        'Authorization': 'Bearer ' + state.imParticipantToken,
+        'Authorization': 'Bearer ' + state.imConnectionKey,
       },
     });
-    state.imEventCursor = payload.next_cursor || state.imEventCursor;
     const events = Array.isArray(payload.events) ? payload.events : [];
     for (const event of events) {
       if (!event || event.type !== 'message.created' || typeof event.message_id !== 'string') {
@@ -526,7 +547,7 @@
       }
       const messagePayload = await fetchJson('/api/im/messages/' + encodeURIComponent(event.message_id), {
         headers: {
-          'Authorization': 'Bearer ' + state.imParticipantToken,
+          'Authorization': 'Bearer ' + state.imConnectionKey,
         },
       });
       recordImFetchedMessage(state, messagePayload.message);
@@ -535,7 +556,7 @@
   }
 
   function startImPolling(state, elements) {
-    if (!elements || !state.imParticipantToken || state.imPolling || state.imPollTimer) {
+    if (!elements || !state.imConnectionKey || state.imPolling || state.imPollTimer) {
       return;
     }
     state.imPollTimer = setTimeout(function () {
@@ -546,7 +567,7 @@
         render(state, elements);
       }).finally(function () {
         state.imPolling = false;
-        if (state.imParticipantToken) {
+        if (state.imConnectionKey) {
           startImPolling(state, elements);
         }
       });
