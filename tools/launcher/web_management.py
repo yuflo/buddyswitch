@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 HELPER_DIR = Path(__file__).resolve().parent
 SCRIPTS = HELPER_DIR.parents[1] / "scripts"
@@ -24,8 +24,10 @@ for candidate in (HELPER_DIR, SCRIPTS):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import im_http_router
+import web_im_identity
+from env.domain import task_management, track_read
 from env.repos import runtime_files
+from env.services import messages as message_service
 from env.tool_runtime import daemon_client
 
 
@@ -247,17 +249,14 @@ class WebManagementService:
         repo_root: Path,
         command_runner: Callable[[list[str], float], CommandResult] | Callable[..., CommandResult] | None = None,
         terminal_opener: Callable[[str], None] | None = None,
-        im_router: im_http_router.ImHttpRouter | None = None,
+        web_im_identity_provider: web_im_identity.WebImIdentityProvider | None = None,
         platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._runner = command_runner or LauncherCommandRunner(repo_root).run
         self._terminal_opener = terminal_opener or open_macos_terminal_app
-        self._im_router = im_router or im_http_router.ImHttpRouter(
-            actor_lister=self._list_im_actor_rows,
-            wake_actor=self._wake_im_actor,
-        )
+        self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider()
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
 
@@ -268,6 +267,9 @@ class WebManagementService:
         body: bytes,
         headers: Mapping[str, str] | None = None,
     ) -> tuple[int, dict[str, Any]]:
+        parsed = urlsplit(path)
+        route = parsed.path
+        query = parse_qs(parsed.query)
         if method == "GET" and path == "/api/health":
             return 200, {"ok": True}
         if method == "GET" and path == "/api/roles":
@@ -276,8 +278,28 @@ class WebManagementService:
             return 200, {"ok": True, "instances": self._list_instances()}
         if method == "POST" and path == "/api/instances":
             return 200, self._create_instance(body)
-        if path.startswith("/api/im/"):
-            return self._im_router.handle(method, path, body, headers or {})
+        if method == "GET" and route == "/api/actors":
+            return 200, {"ok": True, "actors": self._list_actor_rows()}
+        actor_console_id = self._parse_actor_console_path(route)
+        if method == "GET" and actor_console_id is not None:
+            try:
+                validate_actor_id(actor_console_id)
+            except ValueError as exc:
+                raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
+            return 200, {"ok": True, "console": self._actor_console(actor_console_id)}
+        if method == "GET" and route == "/api/tracks":
+            return 200, {"ok": True, "tracks": track_read.list_track_summaries()}
+        track_id = self._parse_track_detail_path(route)
+        if method == "GET" and track_id is not None:
+            try:
+                detail = track_read.get_track_detail(track_id)
+            except ValueError as exc:
+                raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
+            if detail is None:
+                raise HttpError(status=404, code="NOT_FOUND", message=f"track not found: {track_id}")
+            return 200, {"ok": True, "track": detail}
+        if route.startswith("/api/web/im/"):
+            return self._handle_web_im(method, route, query, body)
 
         instance_action = self._parse_instance_action_path(path)
         if instance_action is None:
@@ -336,6 +358,139 @@ class WebManagementService:
                 return None
             return actor_id, "delete"
         return None
+
+    def _parse_actor_console_path(self, path: str) -> str | None:
+        prefix = "/api/actors/"
+        suffix = "/console"
+        if path.startswith(prefix) and path.endswith(suffix):
+            return path[len(prefix) : -len(suffix)]
+        return None
+
+    def _parse_track_detail_path(self, path: str) -> str | None:
+        prefix = "/api/tracks/"
+        if path.startswith(prefix):
+            track_id = path[len(prefix) :]
+            if "/" not in track_id:
+                return track_id
+        return None
+
+    def ensure_web_im_identity(self) -> dict[str, Any]:
+        try:
+            return self._web_im_identity.ensure()
+        except web_im_identity.WebImIdentityError as exc:
+            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message=str(exc)) from exc
+        except ValueError as exc:
+            raise HttpError(status=409, code="IM_IDENTITY_BLOCKED", message=str(exc)) from exc
+
+    def _handle_web_im(
+        self,
+        method: str,
+        route: str,
+        query: dict[str, list[str]],
+        body: bytes,
+    ) -> tuple[int, dict[str, Any]]:
+        normalized_method = method.upper()
+        if normalized_method == "GET" and route == "/api/web/im/session":
+            record = self.ensure_web_im_identity()
+            return 200, {
+                "ok": True,
+                "participant": dict(record["participant"]),
+                "client_kind": web_im_identity.CLIENT_KIND,
+                "display_name": web_im_identity.DISPLAY_NAME,
+            }
+        if normalized_method == "POST" and route == "/api/web/im/messages":
+            return self._web_im_send_message(body)
+        if normalized_method == "GET" and route == "/api/web/im/events":
+            return 200, self._web_im_events(query)
+        if normalized_method == "GET" and route == "/api/web/im/conversations/direct":
+            return self._web_im_direct_conversation(query)
+        raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
+
+    def _web_im_participant(self) -> dict[str, Any]:
+        record = self.ensure_web_im_identity()
+        participant = record.get("participant")
+        if not isinstance(participant, dict):
+            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity participant is invalid.")
+        return participant
+
+    def _web_im_connection(self) -> dict[str, Any]:
+        record = self.ensure_web_im_identity()
+        connection = record.get("connection")
+        if not isinstance(connection, dict):
+            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity connection is invalid.")
+        return connection
+
+    def _web_im_send_message(self, body: bytes) -> tuple[int, dict[str, Any]]:
+        payload = self._parse_json_body(body)
+        target = payload.get("to")
+        if not isinstance(target, dict):
+            raise HttpError(status=400, code="INVALID_REQUEST", message="to must be an object.")
+        result = message_service.send_external_connection_message(
+            connection=self._web_im_connection(),
+            to=target,
+            content=str(payload.get("content") or ""),
+            reply_to=payload.get("reply_to") if payload.get("reply_to") is not None else None,
+            wake_actor=self._wake_im_actor,
+        )
+        return (200 if result.get("ok") is True else 400), result
+
+    def _web_im_events(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        if "cursor" in query:
+            raise HttpError(status=400, code="INVALID_REQUEST", message="cursor is internal to the Web IM session.")
+        connection = self._web_im_connection()
+        participant = connection.get("participant")
+        if not isinstance(participant, dict):
+            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity participant is invalid.")
+        actor_address = self._web_im_actor_address_from_query(query)
+        result = message_service.read_external_connection_events(
+            connection=connection,
+            limit=_int_query_value(query, "limit", 50),
+            wait_ms=_int_query_value(query, "wait_ms", 0),
+        )
+        messages: list[dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
+        for event in result.get("events") if isinstance(result.get("events"), list) else []:
+            if not isinstance(event, dict):
+                continue
+            if not _im_event_targets_actor(event, actor_address):
+                continue
+            message_id = event.get("message_id")
+            if not isinstance(message_id, str) or not message_id:
+                continue
+            fetched = message_service.get_im_message(participant=participant, message_id=message_id)
+            if fetched.get("ok") is True and isinstance(fetched.get("message"), dict):
+                events.append(event)
+                messages.append(fetched["message"])
+        payload = dict(result)
+        payload["events"] = events
+        payload["messages"] = messages
+        return payload
+
+    def _web_im_direct_conversation(self, query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
+        actor_address = self._web_im_actor_address_from_query(query)
+        result = message_service.get_im_direct_conversation(
+            participant=self._web_im_participant(),
+            target={"kind": "actor", "actor_address": actor_address},
+            limit=_int_query_value(query, "limit", 20),
+        )
+        if result.get("ok") is True:
+            return 200, result
+        error = result.get("error") if isinstance(result.get("error"), dict) else {}
+        if error.get("code") == "E_IM_NOT_FOUND":
+            return 200, {"ok": True, "conversation": None, "messages": [], "count": 0}
+        return 400, result
+
+    def _web_im_actor_address_from_query(self, query: dict[str, list[str]]) -> dict[str, str]:
+        role_id = _first_query_value(query, "role_id") or ""
+        actor_id = _first_query_value(query, "actor_id") or ""
+        if not role_id.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message="role_id is required.")
+        try:
+            runtime_files.require_id(role_id, "role_id")
+            validate_actor_id(actor_id)
+        except ValueError as exc:
+            raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
+        return {"role_id": role_id, "actor_id": actor_id}
 
     def _create_instance(self, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
@@ -699,25 +854,74 @@ class WebManagementService:
             )
         return rows
 
-    def _list_im_actor_rows(self, role_id: str | None) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        for instance in self._list_instances():
-            if instance.get("status") != "active":
-                continue
-            role = instance.get("role")
-            actor_id = instance.get("actor_id")
-            if not isinstance(role, str) or not isinstance(actor_id, str):
-                continue
-            if role_id is not None and role != role_id:
-                continue
-            rows.append(
-                {
+    def _runtime_row(self, instance: Mapping[str, Any]) -> dict[str, Any]:
+        thread = instance.get("thread")
+        thread_status = thread.get("status") if isinstance(thread, Mapping) else None
+        app_server_health = instance.get("app_server_health")
+        if not isinstance(app_server_health, str):
+            app_server = instance.get("app_server")
+            if isinstance(app_server, Mapping) and isinstance(app_server.get("healthy"), bool):
+                app_server_health = "healthy" if app_server.get("healthy") else "unhealthy"
+            else:
+                app_server_health = ""
+        return {
+            "status": instance.get("status"),
+            "app_server_health": app_server_health,
+            "thread_id": instance.get("thread_id"),
+            "thread_status": thread_status or "",
+            "browser_port": instance.get("browser_port"),
+            "updated_at": instance.get("updated_at"),
+            "workspace_dir": instance.get("workspace_dir"),
+        }
+
+    def _actor_row_from_instance(self, instance: Mapping[str, Any]) -> dict[str, Any]:
+        row = {
+            "actor_id": instance.get("actor_id"),
+            "role": instance.get("role"),
+            "status": instance.get("status"),
+            "app_server_health": instance.get("app_server_health"),
+            "thread_id": instance.get("thread_id"),
+            "browser_port": instance.get("browser_port"),
+            "updated_at": instance.get("updated_at"),
+            "workspace_dir": instance.get("workspace_dir"),
+        }
+        row["runtime"] = self._runtime_row(instance)
+        return row
+
+    def _list_actor_rows(self) -> list[dict[str, Any]]:
+        return [self._actor_row_from_instance(instance) for instance in self._list_instances()]
+
+    def _actor_console(self, actor_id: str) -> dict[str, Any]:
+        instance = self._get_instance_status(actor_id)
+        role = instance.get("role")
+        if not isinstance(role, str) or not role:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status payload for {actor_id}.")
+        active_actor = {"actor_id": actor_id, "role_id": role}
+        instance_payload = dict(instance)
+        workspace_dir = instance_payload.get("workspace_dir")
+        if "instance_root" not in instance_payload and isinstance(workspace_dir, str) and workspace_dir.strip():
+            instance_payload["instance_root"] = str(Path(workspace_dir).expanduser().resolve(strict=False).parent)
+        task = task_management.current_view(
+            active_role=role,
+            active_actor=active_actor,
+            instance_json=None,
+            instance_payload=instance_payload,
+        )
+        return {
+            "actor": {"actor_id": actor_id, "role": role},
+            "runtime": self._runtime_row(instance),
+            "task": task,
+            "tracks": {
+                "items": track_read.list_track_summaries(owner_actor=active_actor),
+                "source": "web-track-summary",
+            },
+            "im": {
+                "target": {
+                    "kind": "actor",
                     "actor_address": {"role_id": role, "actor_id": actor_id},
-                    "status": "online",
-                    "last_seen_at": instance.get("updated_at"),
                 }
-            )
-        return rows
+            },
+        }
 
     def _wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return daemon_client.wake_im_actor(payload)
@@ -784,6 +988,40 @@ def _header_value(headers: Mapping[str, str] | None, name: str) -> str | None:
         if key.lower() == lower_name:
             return str(candidate)
     return None
+
+
+def _first_query_value(query: dict[str, list[str]], name: str) -> str | None:
+    values = query.get(name)
+    if not values:
+        return None
+    return values[0]
+
+
+def _int_query_value(query: dict[str, list[str]], name: str, default: int) -> int:
+    raw = _first_query_value(query, name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+def _im_event_targets_actor(event: dict[str, Any], actor_address: dict[str, str]) -> bool:
+    if _im_participant_is_actor(event.get("from"), actor_address):
+        return True
+    recipients = event.get("to")
+    if not isinstance(recipients, list):
+        return False
+    return any(_im_participant_is_actor(row, actor_address) for row in recipients)
+
+
+def _im_participant_is_actor(value: Any, actor_address: dict[str, str]) -> bool:
+    if not isinstance(value, dict) or value.get("kind") != "actor":
+        return False
+    participant_address = value.get("actor_address")
+    return isinstance(participant_address, dict) and participant_address == actor_address
 
 
 def _hostname_from_host_header(value: str | None) -> str | None:
@@ -856,6 +1094,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     bind_web_runtime_state()
     service = WebManagementService(repo_root=REPO_ROOT)
+    try:
+        service.ensure_web_im_identity()
+    except HttpError as exc:
+        print(exc.message, file=sys.stderr, flush=True)
+        return 1
     server = create_server(args.host, args.port, service)
     print(f"BuddySwitch web management listening on http://{args.host}:{server.server_port}", flush=True)
     try:
