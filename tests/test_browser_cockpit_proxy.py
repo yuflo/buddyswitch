@@ -435,6 +435,39 @@ for raw_line in sys.stdin:
             self.assertEqual(page_idle["current_target_id"], "target-new-page")
             self.assertFalse(thread.is_alive())
 
+    def test_new_page_error_response_still_registers_created_target(self) -> None:
+        before = _page_targets(1)
+        after = before + [{"id": "target-new-page", "type": "page", "url": "https://example.com/new"}]
+        browser_url = self._start_cdp_list_server({"requests": [], "list_payloads": [before, before, after]})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new", "forceError": True})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(len(forwarded), 1)
+            response = responses[0]
+            self.assertTrue(response["result"].get("isError"), msg=response)
+            self.assertIn("failed new_page", json.dumps(response, ensure_ascii=True))
+            self.assertIn("Browser page idle refreshed: 300s.", json.dumps(response, ensure_ascii=True))
+
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["type"], "browser.page.expired")
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-new-page")
+            self.assertEqual(schedule["payload"], {"target_id": "target-new-page"})
+
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["current_target_id"], "target-new-page")
+            self.assertFalse(thread.is_alive())
+
     def test_new_page_without_instance_root_is_blocked_before_forwarding(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
@@ -471,6 +504,33 @@ for raw_line in sys.stdin:
         assert isinstance(rpc_requests, list)
         self.assertEqual([request.get("method") for request in rpc_requests], ["Target.closeTarget"])
         self.assertEqual(rpc_requests[0].get("params"), {"targetId": "target-new-page"})
+
+    def test_new_page_ambiguous_created_targets_returns_lifecycle_error(self) -> None:
+        before = _page_targets(1)
+        after = before + [
+            {"id": "target-new-a", "type": "page", "url": "https://example.com/new"},
+            {"id": "target-new-b", "type": "page", "url": "https://example.com/new"},
+        ]
+        browser_url = self._start_cdp_list_server({"requests": [], "list_payloads": [before, before, after]})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(len(forwarded), 1)
+            response = responses[0]
+            self.assertTrue(response["result"].get("isError"), msg=response)
+            self.assertIn("not uniquely resolved", response["result"]["content"][0]["text"])
+            self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
+            self.assertFalse(thread.is_alive())
 
     def test_new_page_reuse_registration_failure_returns_error_without_forwarding(self) -> None:
         target_url = "https://example.com/new"
