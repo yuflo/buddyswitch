@@ -13,8 +13,9 @@ INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
+IMESSAGE_BRIDGE_HELPER="${REPO_ROOT}/tools/launcher/imessage_bridge.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" || ! -f "${IMESSAGE_BRIDGE_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -50,6 +51,7 @@ Usage:
   buddyswitch-codex instance list [--role <role>] [--json]
   buddyswitch-codex instance delete <actor-id> [--yes] [--json]
   buddyswitch-codex web [--host 127.0.0.1] [--port 8765]
+  buddyswitch-codex imessage bridge --server <url> --target-identity-id <actor_identity_id> --allow-sender <sender>
 
   buddyswitch-codex data cleanup --role <role> [--yes] [--json]
   buddyswitch-codex data cleanup --all-data [--yes] [--json]
@@ -64,6 +66,7 @@ Usage:
 Commands:
   instance Manage BuddySwitch product-mode instances.
   web      Run the local BuddySwitch web management server.
+  imessage Run local channel adapters for Messages.app/iMessage.
   data     Manage BuddySwitch data cleanup commands.
   env      Manage BuddySwitch environment status and reset commands.
   help     Show this help message.
@@ -1931,6 +1934,11 @@ web_main() {
   return "${status}"
 }
 
+imessage_main() {
+  export BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state"
+  python3 "${IMESSAGE_BRIDGE_HELPER}" "$@"
+}
+
 main() {
   local command="${1:-}"
   case "${command}" in
@@ -1972,6 +1980,10 @@ main() {
     web)
       shift || true
       web_main "$@"
+      ;;
+    imessage)
+      shift || true
+      imessage_main "$@"
       ;;
     data)
       shift || true

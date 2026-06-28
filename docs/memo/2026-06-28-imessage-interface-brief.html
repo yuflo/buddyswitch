@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BuddySwitch iMessage Interface Brief</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #5b6870;
+      --line: #d8dee3;
+      --soft: #f5f7f8;
+      --accent: #0c6b58;
+      --warn: #8a4f00;
+      --risk: #8f2f2f;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+      line-height: 1.55;
+    }
+    .page {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 40px 28px 56px;
+    }
+    .page-header {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 20px;
+      margin-bottom: 28px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 32px 0 12px;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 20px 0 8px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 8px 0;
+    }
+    .meta,
+    .muted {
+      color: var(--muted);
+    }
+    .verdict {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin: 18px 0 8px;
+    }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: var(--soft);
+    }
+    .box strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    .flow {
+      margin: 14px 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 4px;
+      font-size: 14px;
+    }
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--soft);
+    }
+    ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+    li {
+      margin: 5px 0;
+    }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      margin-right: 4px;
+    }
+    .accent {
+      color: var(--accent);
+      font-weight: 650;
+    }
+    .warn {
+      color: var(--warn);
+      font-weight: 650;
+    }
+    .risk {
+      color: var(--risk);
+      font-weight: 650;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #eef2f3;
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    a {
+      color: #0b5cad;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .footer {
+      margin-top: 36px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 760px) {
+      .page {
+        padding: 28px 18px 44px;
+      }
+      .verdict {
+        grid-template-columns: 1fr;
+      }
+      table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="page-header">
+    <p class="meta">BuddySwitch memo · 2026-06-28</p>
+    <h1>iPhone ↔ Mac iMessage 接入 BuddySwitch：可行性与方案简报</h1>
+    <p class="muted">目标：快速理解整体思路、方案取舍、关键集成点、风险和应对策略。</p>
+  </div>
+
+  <div class="section">
+    <h2>一句话结论</h2>
+    <p>
+      这件事<span class="accent">可行</span>，但不是 iPhone 直接连接 BuddySwitch；可行路径是：
+      iPhone 的 iMessage 同步到一台已登录 Messages.app 的 Mac，Mac 上运行一个本地 bridge，
+      通过 <code>imsg</code> 读取/监听/发送，再映射进 BuddySwitch 现有 Central IM。
+    </p>
+    <div class="verdict">
+      <div class="box">
+        <strong>推荐路径</strong>
+        Mac 本地 <code>imsg</code> bridge MVP。
+      </div>
+      <div class="box">
+        <strong>不建议先做</strong>
+        群聊、附件、tapback、已读、typing indicators。
+      </div>
+      <div class="box">
+        <strong>核心原则</strong>
+        iMessage 只是外部 IM 适配器，不进入 BuddySwitch 核心消息模型。
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>技术心智模型</h2>
+    <div class="flow">iPhone iMessage
+  -> Mac Messages.app
+  -> imsg rpc / watch
+  -> buddyswitch-imessage-bridge
+  -> BuddySwitch /api/im/messages
+  -> actor wake + message tool
+  -> BuddySwitch /api/im/events
+  -> imsg send
+  -> iPhone iMessage</div>
+    <p>
+      OpenClaw 的实践也指向同一类路径：通过 <code>imsg rpc</code> 作为本地 JSON-RPC 子进程，
+      读取和监听 Messages，并通过 Messages.app 自动化发送。关键约束是 Mac 必须能运行 Messages.app，
+      且启动 <code>imsg</code> 的进程具备对应 macOS 权限。
+    </p>
+  </div>
+
+  <div class="section">
+    <h2>方案取舍</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>方案</th>
+          <th>做法</th>
+          <th>优点</th>
+          <th>代价 / 风险</th>
+          <th>判断</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>A. Mac 本地 imsg bridge</strong></td>
+          <td>bridge 与 Messages.app 跑在同一台 Mac，直接调用 <code>imsg rpc</code> 和 BuddySwitch IM API。</td>
+          <td>路径最短；不引入外部服务；最容易做可验证 MVP。</td>
+          <td>依赖 macOS 权限、Messages.app 登录状态、<code>imsg</code> 稳定性。</td>
+          <td><span class="accent">推荐</span></td>
+        </tr>
+        <tr>
+          <td><strong>B. 远程 Mac / SSH bridge</strong></td>
+          <td>BuddySwitch 可在别的机器，bridge 通过 SSH 到 Mac 执行 <code>imsg</code>。</td>
+          <td>部署更灵活；保留 Mac 作为 iMessage 网关。</td>
+          <td>多一层 SSH 凭据、网络、日志和故障面。</td>
+          <td>第二阶段再做</td>
+        </tr>
+        <tr>
+          <td><strong>C. 第三方 iMessage relay</strong></td>
+          <td>使用外部中继或商业接口，BuddySwitch 对接 relay API。</td>
+          <td>可能避开本地 Mac 权限问题。</td>
+          <td>隐私、成本、供应商锁定、可靠性和合规风险更大。</td>
+          <td>不作为首选</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>推荐设计：本地 bridge MVP</h2>
+    <h3>职责边界</h3>
+    <ul>
+      <li><span class="tag">Bridge</span> 只负责 iMessage 与 BuddySwitch Central IM 之间的协议转换、去重、状态保存和健康检查。</li>
+      <li><span class="tag">BuddySwitch</span> 继续拥有消息模型、actor wake、权限和回复语义。</li>
+      <li><span class="tag">Actor</span> 继续使用现有 <code>message.get</code>、<code>message.send(reply_to=...)</code>、<code>message.mark</code>。</li>
+    </ul>
+
+    <h3>MVP 功能</h3>
+    <ul>
+      <li>只支持一对一文本消息。</li>
+      <li>配置 allowlist：允许的 phone/email/chat_id 与目标 <code>target_identity_id</code>。</li>
+      <li>每个 iMessage chat 绑定一个 BuddySwitch external IM connection。</li>
+      <li>入站 iMessage 调用 <code>POST /api/im/messages</code>。</li>
+      <li>出站 actor 回复通过 <code>GET /api/im/events</code> 拉取，再用 <code>imsg send</code> 发回原 chat。</li>
+      <li>本地保存 <code>chat_id</code>、<code>connection_key</code>、目标 actor、last row/guid、发送状态。</li>
+    </ul>
+
+    <h3>不进入第一版</h3>
+    <ul>
+      <li>群聊 routing 和 mention 规则。</li>
+      <li>图片、语音、文件附件。</li>
+      <li>tapback、已读、撤回、编辑、typing indicators。</li>
+      <li>跨机器远程 Mac 自动部署。</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>BuddySwitch 当前结合点</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>能力</th>
+          <th>现有入口</th>
+          <th>bridge 如何复用</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>创建外部 IM 身份</td>
+          <td><code>POST /api/im/connections</code></td>
+          <td>为每个 iMessage chat 创建或复用 external connection。</td>
+        </tr>
+        <tr>
+          <td>外部用户发给 actor</td>
+          <td><code>POST /api/im/messages</code></td>
+          <td>iMessage 入站消息转换成 BuddySwitch Central IM 消息。</td>
+        </tr>
+        <tr>
+          <td>actor 被唤醒处理</td>
+          <td><code>im.message.created</code> wake</td>
+          <td>沿用现有 actor wake，不做 iMessage 专属 runtime。</td>
+        </tr>
+        <tr>
+          <td>actor 回复外部用户</td>
+          <td><code>message.send(reply_to=...)</code></td>
+          <td>actor 不需要知道 iMessage，只回复 Central IM 消息。</td>
+        </tr>
+        <tr>
+          <td>外部侧读取回复</td>
+          <td><code>GET /api/im/events</code></td>
+          <td>bridge 拉取 actor 回复并转发到 iMessage。</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="muted">
+      已验证的内部链路：external HTTP sender -> actor wake -> actor reply_to 回复 -> external event 可见一次。
+    </p>
+  </div>
+
+  <div class="section">
+    <h2>关键风险与应对</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>风险</th>
+          <th>影响</th>
+          <th>应对策略</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="risk">macOS 权限</span></td>
+          <td><code>imsg</code> 无法读取 Messages 数据库或无法驱动 Messages.app。</td>
+          <td>启动前做 <code>imsg chats</code>、<code>imsg rpc --help</code>、发送 dry-run/探测；错误信息明确指向 Full Disk Access 与 Automation。</td>
+        </tr>
+        <tr>
+          <td><span class="risk">Messages / Apple Push 状态</span></td>
+          <td>手机消息没有同步到 Mac，bridge 没有入站事件。</td>
+          <td>健康检查区分 BuddySwitch 正常、<code>imsg</code> 正常、chat.db 没更新三类问题；提供人工修复步骤。</td>
+        </tr>
+        <tr>
+          <td><span class="risk">重复消息 / 回环</span></td>
+          <td>同一条 iMessage 被重复送入 BuddySwitch，或 bot 自己回复又被当作用户消息。</td>
+          <td>保存 rowid/guid cursor；忽略 <code>is_from_me</code>；BuddySwitch event cursor 只由 bridge 内部推进。</td>
+        </tr>
+        <tr>
+          <td><span class="risk">错误目标 actor</span></td>
+          <td>某个 iMessage chat 被投递给错误角色或实例。</td>
+          <td>显式 allowlist + chat 到 <code>target_identity_id</code> 静态绑定；不做 open DM。</td>
+        </tr>
+        <tr>
+          <td><span class="risk">隐私和权限面</span></td>
+          <td>运行 bridge 的进程可以访问 Messages 数据。</td>
+          <td>本地运行、最小配置、密钥文件 0600、日志默认不记录正文、只允许 allowlist chat。</td>
+        </tr>
+        <tr>
+          <td><span class="warn">功能期望外溢</span></td>
+          <td>群聊/附件/富交互会拉大复杂度。</td>
+          <td>MVP 明确只做一对一文本；真实使用稳定后再扩展。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>验证策略</h2>
+    <ul>
+      <li>先跑 BuddySwitch 现有 Central IM 测试，确认内部链路不坏。</li>
+      <li>bridge 单元测试：<code>imsg</code> message JSON -> BuddySwitch payload 映射、去重、忽略 self-message。</li>
+      <li>bridge 集成测试：mock <code>imsg rpc</code> + fake BuddySwitch IM API，覆盖入站和回复转发。</li>
+      <li>真实 Mac 手工 smoke：从 iPhone 发一条 allowlist 消息，确认 actor 收到并回复回同一 iMessage chat。</li>
+      <li>健康检查测试：缺少 <code>imsg</code>、缺少权限、actor 离线、BuddySwitch API 不可用时给出可操作错误。</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>当前状态</h2>
+    <ul>
+      <li><span class="accent">可行性：</span>外部实践和 BuddySwitch 内部接口都支持这个方向。</li>
+      <li><span class="accent">代码结合：</span>不需要改 Central IM 核心模型，bridge 可作为外部 IM 适配器接入。</li>
+      <li><span class="warn">本机限制：</span>当前本机未安装 <code>imsg</code>，所以还不能做真实 iMessage 收发验证。</li>
+      <li><span class="accent">建议下一步：</span>写正式实现计划，先做本地 bridge MVP 的最短闭环。</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>参考资料</h2>
+    <ul>
+      <li><a href="https://docs.openclaw.ai/channels/imessage">OpenClaw iMessage channel docs</a></li>
+      <li><a href="https://docs.openclaw.ai/reference/rpc">OpenClaw RPC adapters</a></li>
+      <li><a href="https://github.com/openclaw/imsg">openclaw/imsg GitHub repository</a></li>
+      <li><a href="https://support.apple.com/guide/mac-help/change-privacy-security-settings-on-mac-mchl211c911f/mac">Apple: Change Privacy &amp; Security settings on Mac</a></li>
+      <li><a href="https://support.apple.com/guide/mac-help/allow-apps-to-control-other-apps-on-mac-mchl07817563/mac">Apple: Allow apps to control other apps on Mac</a></li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    <p>
+      本备忘录是产品/技术取舍简报，不是最终实现计划。实现时仍需补充配置格式、进程生命周期、
+      mock imsg 合约测试、真实 Mac smoke 流程和操作手册。
+    </p>
+  </div>
+</div>
+</body>
+</html>

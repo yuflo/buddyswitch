@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from env.repos import runtime_files
-from env.services import messages as message_service
+from env.services import external_im_session
 
 
 SCHEMA_VERSION = 1
@@ -23,8 +23,14 @@ class WebImIdentityError(RuntimeError):
 
 
 class WebImIdentityProvider:
-    def __init__(self, *, identity_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        identity_dir: Path | None = None,
+        im_session: external_im_session.ExternalImSession | None = None,
+    ) -> None:
         self._identity_dir = identity_dir
+        self._im_session = im_session or external_im_session.ExternalImSession()
 
     @property
     def identity_dir(self) -> Path:
@@ -68,7 +74,7 @@ class WebImIdentityProvider:
         identity = record.get("identity")
         if not isinstance(connection_key, str) or not connection_key.strip() or not isinstance(identity, dict):
             return None
-        auth = message_service.authenticate_external_connection_key(connection_key)
+        auth = self._im_session.authenticate(connection_key)
         if auth.get("ok") is not True:
             return None
         authenticated = auth.get("identity")
@@ -80,7 +86,7 @@ class WebImIdentityProvider:
         return {"identity": authenticated, "connection": connection}
 
     def _register_new(self) -> dict[str, Any]:
-        result = message_service.create_external_connection(display_name=DISPLAY_NAME)
+        result = self._im_session.create_connection(display_name=DISPLAY_NAME)
         if result.get("ok") is not True:
             message = result.get("error", {}).get("message") if isinstance(result.get("error"), dict) else None
             raise WebImIdentityError(str(message or "Unable to create Web Management IM connection."))
@@ -88,7 +94,7 @@ class WebImIdentityProvider:
         connection_key = result.get("connection_key")
         if not isinstance(connection_key, str) or not connection_key:
             raise WebImIdentityError("Web Management IM connection creation returned an invalid key.")
-        authenticated = message_service.authenticate_external_connection_key(connection_key)
+        authenticated = self._im_session.authenticate(connection_key)
         if authenticated.get("ok") is not True:
             raise WebImIdentityError("Web Management IM connection could not be authenticated.")
         identity = authenticated.get("identity")
