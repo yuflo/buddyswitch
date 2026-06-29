@@ -1435,7 +1435,7 @@ exec "$real_git" "$@"
         self.assertTrue(LAUNCHER.exists(), "expected root launcher to exist")
         self._assert_unknown_top_level_command(["debug", "prompt-input", "Draft the onboarding PRD"], "debug")
 
-    def test_imessage_bridge_command_dispatches_to_bridge_parser(self) -> None:
+    def test_imessage_command_is_not_public(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             env = os.environ.copy()
             env["HOME"] = source_home
@@ -1443,7 +1443,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_SHARED_ROOT"] = str(Path(temp_root) / "shared")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "imessage", "bridge"],
+                [str(LAUNCHER), "imessage"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1452,48 +1452,7 @@ exec "$real_git" "$@"
             )
 
         self.assertEqual(completed.returncode, 2, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
-        self.assertNotIn("Unknown top-level command: imessage", completed.stderr)
-        self.assertIn("the following arguments are required", completed.stderr)
-        self.assertIn("--server", completed.stderr)
-        self.assertIn("--target-identity-id", completed.stderr)
-
-    def test_imessage_bridge_command_binds_shared_state_root(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            temp_root_path = Path(temp_root)
-            shared_root = temp_root_path / "shared"
-            fake_bin = temp_root_path / "bin"
-            fake_bin.mkdir()
-            capture_path = temp_root_path / "capture.txt"
-            self._write_exec(
-                fake_bin / "python3",
-                """#!/usr/bin/env bash
-{
-  printf '%s\\n' "${BUDDYSWITCH_STATE_ROOT:-}"
-  printf '%s\\n' "$1"
-} > "${BUDDYSWITCH_TEST_CAPTURE}"
-exit 0
-""",
-            )
-            env = os.environ.copy()
-            env["HOME"] = source_home
-            env.pop("CODEX_HOME", None)
-            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
-            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
-
-            completed = subprocess.run(
-                [str(LAUNCHER), "imessage", "bridge", "--help"],
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            captured = capture_path.read_text(encoding="utf-8").splitlines()
-
-        self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
-        self.assertEqual(captured[0], str(shared_root / "state"))
-        self.assertTrue(captured[1].endswith("tools/launcher/imessage_bridge.py"))
+        self.assertIn("Unknown top-level command: imessage", completed.stderr)
 
     def test_start_execution_worktree_uses_runtime_workspace_agents_header(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -8018,7 +7977,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertIn("buddyswitch-codex env status", help_result.stdout)
             self.assertIn("buddyswitch-codex env reset [--yes]", help_result.stdout)
             self.assertIn("buddyswitch-codex help", help_result.stdout)
+            self.assertIn("buddyswitch-codex web", help_result.stdout)
             self.assertIn("  instance", help_result.stdout)
+            self.assertIn("  web", help_result.stdout)
             self.assertIn("  data", help_result.stdout)
             self.assertIn("  env", help_result.stdout)
             self.assertIn("  help", help_result.stdout)
@@ -8029,6 +7990,10 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertNotIn("buddyswitch-codex reset", help_result.stdout)
             self.assertNotIn("buddyswitch-codex browser", help_result.stdout)
             self.assertNotIn("buddyswitch-codex workspace", help_result.stdout)
+            self.assertNotIn("imessage " + "bridge", help_result.stdout)
+            self.assertNotIn("target" + "-identity-id", help_result.stdout)
+            self.assertNotIn("allow" + "-sender", help_result.stdout)
+            self.assertNotIn("  imessage", help_result.stdout)
 
     def test_legacy_public_commands_fail_closed_with_hints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

@@ -1,440 +1,382 @@
-# iMessage Rebuild Development Plan
+# iMessage Channel Product Logic Rebuild Development Plan
 
 Date: 2026-06-28
 
 ## Goal
 
-Rebuild BuddySwitch IM forward so there is one `External IM Session` application
-semantic boundary, two HTTP projections of it, and one local iMessage Channel
-Adapter that consumes only `/api/im/*`.
+Execute the source memo at `docs/memo/2026-06-28-imessage-channel-product-logic-rebuild.md` through staged, verified replacement of the old iMessage bridge path.
 
 ## Architecture
 
 Target dependency direction:
 
 ```text
-iMessage bridge -> /api/im/* -> External IM Session -> Central IM Core -> repo
-Browser UI -> /api/web/im/* -> External IM Session -> Central IM Core -> repo
-Actor runtime message tool -> Central IM Core -> repo
+Messages.app / imsg
+  -> tools/launcher/imessage_channel.py
+  -> /api/im/*
+  -> ExternalImSession
+  -> Central IM Core
+  -> actor runtime
 ```
 
-`/api/im/*` and `/api/web/im/*` stay as separate consumer surfaces. They must
-not stay as separate business implementations.
+`./buddyswitch-codex web` owns process lifecycle. The iMessage module owns sender-scoped channel state and iMessage control-message behavior. Web, `/api/im/*`, `ExternalImSession`, and Central IM must not learn iMessage control semantics.
 
-## Stage 0: Fact Baseline And Entry Freeze
+## Current Code Facts
 
-### Stage Goal
+- `buddyswitch-codex` still exposes the retired standalone iMessage command and help text.
+- The retired bridge module still uses fixed actor targeting, sender allow-listing, schema version 1, and the retired bridge state directory.
+- The retired bridge tests still cover the fixed-target allowlist bridge.
+- `tools/launcher/web_management.py` exposes `/api/im/*` but does not start or stop an iMessage worker.
+- `ExternalImSession.list_actors` and `ExternalImSession.send_message` both use the injected actor lister, so the channel can filter current actor rows without importing Central IM internals.
+- Existing `docs/spec` iMessage documents describe the old bridge MVP and must be replaced as live planning surfaces.
 
-Lock the current facts before implementation and prove the Stage 1 problem is
-real.
+## Phase 0: Plan Reset And Current-State Gate
 
-### Current Problem
+### Phase Objective
 
-The memo and feasibility brief are planning inputs, but implementation must use
-current code and command output. The brief's old local `imsg` note is stale.
+Replace stale `docs/spec` planning surfaces with this source-memo-driven plan and prove the old bridge surface is still live.
 
-### Planned Files
+### Source Memo Requirements Covered
 
-- Create: `docs/spec/imessage-rebuild-context-audit.md`
-- Create: `docs/spec/imessage-rebuild-development-plan.md`
-- Create: `docs/spec/imessage-rebuild-test-plan.md`
-- Create/update: `docs/spec/imessage-rebuild-stage-acceptance.md`
+- Complete development plan before implementation.
+- Complete test plan before implementation.
+- No phase completion claim without verification.
+- Live docs must not continue to teach the old bridge path.
 
-### New Files
+### Files Expected To Change
 
-Documentation files only.
+- Modify: `docs/spec/imessage-rebuild-development-plan.md`
+- Modify: `docs/spec/imessage-rebuild-test-plan.md`
+- Modify: `docs/spec/imessage-rebuild-context-audit.md`
+- Modify: `docs/spec/imessage-rebuild-stage-acceptance.md`
+- Delete or replace: the retired standalone iMessage smoke runbook in `docs/spec`.
 
-### Deleted Or Replaced Old Paths
+### Boundaries That Must Not Be Crossed
 
-None.
+- No production code changes in Phase 0.
+- Do not rewrite the source memo.
+- Do not preserve old bridge runbooks as current execution guidance.
 
-### Forbidden Compatibility Paths
+### Implementation Steps
 
-- Do not start iMessage adapter implementation in Stage 0.
-- Do not change business code in Stage 0.
-- Do not treat stale memo text as stronger than current command evidence.
+1. Read source memo, `AGENTS.md`, and `docs/bitter/*`.
+2. Inspect current iMessage code, launcher help, Web lifecycle, and tests.
+3. Replace stale development and test plans with source-memo-aligned phase plans.
+4. Replace the context audit and acceptance record with current evidence.
+5. Remove the old bridge smoke runbook from live `docs/spec` guidance.
 
-### Executable Tasks
+### Deletion / Replacement Points
 
-1. Read the memo, the feasibility brief, AGENTS guidance, and the four relevant
-   `docs/bitter` principle notes.
-2. Search current IM code and tests for `/api/im/*`, `/api/web/im/*`, direct
-   message service calls, actor wake paths, and browser IM calls.
-3. Run focused baseline verification.
-4. Run the scoped direct-call residue scan and record its current failing hits.
-5. Record Stage 0 acceptance in
-   `docs/spec/imessage-rebuild-stage-acceptance.md`.
+- Replace old bridge MVP plan content in `docs/spec`.
+- Remove the old smoke runbook that starts the retired standalone command.
 
-### Stage Acceptance
+### Verification Commands
 
-- Current `imsg` capability surface is recorded.
-- Current IM/Web test baseline is recorded.
-- Current live surfaces are named.
-- The Stage 1 residue problem is proven by current hits.
-- No business code has changed.
+```bash
+git status --short
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
+```
 
-### Regression Risk
+### Residue Scan Commands
 
-Low. Documentation-only stage. Risk is inaccurate audit, mitigated by command
-output and exact file paths.
+Phase 0 expects current live hits outside historical/source memo context:
 
-## Stage 1: Rebuild External IM Session
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
+```
 
-### Stage Goal
+### Phase Done Criteria
 
-Create the only External IM application semantic layer and make both HTTP route
-families delegate to it.
+- `docs/spec` contains this updated plan, an updated test plan, a current context audit, and Phase 0 acceptance evidence.
+- Old bridge smoke runbook is removed or replaced.
+- Current old-surface residue is recorded as the Phase 1/2 target.
+- No production code has changed.
 
-### Current Problem
+## Phase 1: iMessage Channel State And Controller
 
-`tools/launcher/im_http_router.py`, `tools/launcher/web_management.py`, and
-`tools/launcher/web_im_identity.py` call Central IM external-session service
-methods directly. That is the dual-track semantic split.
+### Phase Objective
 
-### Planned Files
+Replace fixed-target bridge semantics with sender-scoped iMessage channel product logic behind test-first controller and state-store coverage.
 
-- Create: `scripts/env/services/external_im_session.py`
-- Create: `tests/test_external_im_session.py`
-- Modify: `tools/launcher/im_http_router.py`
-- Modify: `tools/launcher/web_management.py`
-- Modify: `tools/launcher/web_im_identity.py`
-- Modify: `tests/test_im_http_router.py`
-- Modify: `tests/test_web_management.py`
-- Modify: `tests/test_im_web_management_projection.py`
-- Modify: `tests/test_im_external_reply_loop.py` only if constructor wiring
-  changes require it.
-- Update: `docs/spec/imessage-rebuild-stage-acceptance.md`
+### Source Memo Requirements Covered
 
-### New Files
+- State path is `runtime_files.LOCAL_ROOT / "imessage-channel" / "state.json"`.
+- Schema version is 2 with per-sender `contacts`.
+- First message from a sender creates a distinct `/api/im/connections` connection.
+- Same sender reuses its connection.
+- Different senders do not share connection key, active actor, pending choices, dedupe, outbound event ids, or routes.
+- `/actors` lists online actors as `[n] role_id actor_id` and stores the sender's pending choice snapshot.
+- Numeric selection only uses the pending snapshot and only updates sender-local active actor.
+- Ordinary messages require an active actor and otherwise only send the minimal `/actors` prompt.
+- Ordinary messages send original content to `/api/im/messages` using the sender's active actor.
+- Actor replies are sent back through the stored iMessage route and wrapped by the channel.
+- The iMessage module does not import Central IM repo/service internals.
 
-`scripts/env/services/external_im_session.py` owns:
+### Code Facts Discovered
 
-- `ExternalImSession.create_connection(display_name)`
-- `ExternalImSession.authenticate(connection_key)`
-- `ExternalImSession.list_actors(role_id)`
-- `ExternalImSession.send_message(connection, target_identity_id, content, reply_to)`
-- `ExternalImSession.read_events(connection, limit, wait_ms)`
-- `ExternalImSession.get_direct_conversation(connection, identity_id, limit)`
-- `ExternalImSession.get_message(connection, message_id)`
-- `ExternalImSession.list_replies(connection, message_id)`
-- `ExternalImSession.update_disposition(connection, message_id, disposition, reason)`
+- Existing `BuddySwitchImApi` is usable as the `/api/im/*` client but must drop bridge-specific naming.
+- Existing `CommandImsgClient` already encapsulates `imsg status/watch/send` and can be carried forward.
+- Existing bridge state shape is global and must not be migrated or dual-read.
 
-### Deleted Or Replaced Old Paths
+### Files Expected To Change
 
-Replace these direct calls in projection files:
+- Create: `tools/launcher/imessage_channel.py`
+- Create: `tests/test_imessage_channel.py`
+- Delete or stop importing the retired bridge module.
+- Delete or replace the retired bridge tests.
 
-- `message_service.create_external_connection`
-- `message_service.authenticate_external_connection_key`
-- `message_service.send_external_connection_message`
-- `message_service.read_external_connection_events`
-- `message_service.get_im_direct_conversation`
-- `message_service.get_im_message`
-- `message_service.list_im_replies`
-- `message_service.update_im_disposition`
+### Boundaries That Must Not Be Crossed
 
-No route family is deleted in this stage.
+- No `/actors` or numeric-selection parsing in Web, HTTP router, `ExternalImSession`, or Central IM.
+- No Central IM imports from the iMessage channel module.
+- No old schema dual-read or migration path.
+- No generic channel framework.
 
-### Forbidden Compatibility Paths
+### Implementation Steps
 
-- No compatibility wrapper that lets HTTP/Web choose between old direct calls
-  and new session calls.
-- No duplicate actor target resolver in both route files.
-- No browser exposure of `connection_key`.
-- No change to `/api/im/*` or `/api/web/im/*` public response contracts beyond
-  implementation routing.
+1. Write failing tests for schema path/version and sender-isolated connection creation/reuse.
+2. Write failing tests for `/actors` formatting, online filtering, and pending snapshot storage.
+3. Write failing tests for numeric selection with and without pending choices.
+4. Write failing tests for ordinary message delivery to active actor and no-active prompt.
+5. Write failing tests for reply route lookup, reply prefix wrapping, and per-contact outbound dedupe.
+6. Write failing source-boundary tests that reject Central IM imports and old bridge state names.
+7. Implement `ImessageChannelStateStore`, `BuddySwitchImApi`, `CommandImsgClient`, and `ImessageChannelController` in one concrete module.
+8. Implement worker shell only as needed for controller-level tests; lifecycle belongs to Phase 2.
+9. Delete the old bridge test file after replacement tests cover the new behavior.
 
-### Executable Tasks
+### Deletion / Replacement Points
 
-1. Re-read this Stage 1 plan and the Stage 1 section of
-   `docs/spec/imessage-rebuild-test-plan.md`.
-2. Add a residue/contract test that fails while projection files call Central IM
-   external-session methods directly.
-3. Add `scripts/env/services/external_im_session.py` with the concrete methods
-   listed above.
-4. Move actor identity resolution into `ExternalImSession`.
-5. Change `ImHttpRouter` to parse HTTP, authenticate header, call
-   `ExternalImSession`, and map status codes.
-6. Change `WebManagementService` to keep browser-specific session/query/body/DTO
-   work and call `ExternalImSession` for IM semantics.
-7. Change `WebImIdentityProvider` to use `ExternalImSession` for
-   create/authenticate while still owning only server-side persistence.
-8. Run the focused tests and residue scan.
-9. Record exact commands, results, changed files, and remaining risk in
-   `docs/spec/imessage-rebuild-stage-acceptance.md`.
+- Replace the retired bridge configuration, bridge runner, state store, and global bridge state with channel-specific classes.
+- Delete fixed actor targeting, sender allow-list state, and schema version 1 from iMessage channel code and tests.
 
-### Stage Acceptance
+### Verification Commands
 
-- Only `ExternalImSession` calls Central IM external-session methods from the
-  HTTP/Web path.
-- `/api/im/*` contract tests still pass.
-- `/api/web/im/*` contract tests still pass.
-- Web UI JS contract tests still pass.
-- Scoped residue scan returns no hits in HTTP/Web projection files.
+```bash
+python -m pytest tests/test_imessage_channel.py -q
+python -m py_compile tools/launcher/imessage_channel.py
+```
 
-### Regression Risk
+### Residue Scan Commands
 
-Medium. Contract shape must stay stable while moving implementation. The main
-risk is advancing the external event cursor before Web DTO filtering finishes;
-keep existing behavior tests green and add session tests around event reads.
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_source_does_not_import_central_im_internals -q
+```
 
-## Stage 2: Projection Contract Tightening
+### Phase Done Criteria
 
-### Stage Goal
+- New channel tests pass after observed RED failures.
+- Old bridge source/test files are deleted or no longer live.
+- Channel state is sender-scoped and schema version 2.
+- Scoped residue scans pass for channel code and tests.
 
-Prevent the two route families from growing product semantics again.
+## Phase 2: Web-Owned Worker Lifecycle And Public Entry Removal
 
-### Current Problem
+### Phase Objective
 
-Existing tests prove behavior but not enough of the projection boundary. A
-future edit could reintroduce direct Central IM calls while keeping route
-behavior green.
+Make `./buddyswitch-codex web` the only user startup path and have Web start/stop the iMessage worker lifecycle without owning channel semantics.
 
-### Planned Files
+### Source Memo Requirements Covered
 
-- Create or extend: `tests/test_external_im_projection_contract.py`
-- Modify: `tests/test_im_http_router.py`
-- Modify: `tests/test_web_management.py`
-- Modify: `tests/test_im_web_management_projection.py`
-- Update: `docs/spec/imessage-rebuild-stage-acceptance.md`
+- Root launcher no longer exposes the retired standalone iMessage command.
+- User starts only `./buddyswitch-codex web`.
+- Web starts/stops the iMessage channel worker lifecycle.
+- Web passes lifecycle dependencies only.
+- Worker failure due to local `imsg` availability or permissions must not crash the Web service.
+- Web shutdown stops the worker and `imsg watch`.
 
-### New Files
+### Code Facts Discovered
 
-Optional new focused test file:
+- `web_main` already ensures and idles the central daemon.
+- `tools/launcher/web_management.py` currently creates the HTTP server directly and has no worker lifecycle hook.
+- Launcher help currently advertises the old command.
 
-- `tests/test_external_im_projection_contract.py`
+### Files Expected To Change
 
-### Deleted Or Replaced Old Paths
-
-None beyond removing any old projection tests that teach direct service
-ownership.
-
-### Forbidden Compatibility Paths
-
-- No resurrection of `/api/messages/send`.
-- No resurrection of `/api/im/external-participants`.
-- Browser JS must not call `/api/im/*`.
-- Route tests must not assert that Web/HTTP files call `message_service`
-  directly.
-
-### Executable Tasks
-
-1. Add projection contract tests using a fake session where practical.
-2. Add a scoped source scan test for direct Central IM external-session calls in
-   HTTP/Web projection files.
-3. Keep Web-specific tests limited to browser session ownership, actor scope
-   requirement, and DTO shaping.
-4. Run focused Python and Node verification.
-5. Record acceptance.
-
-### Stage Acceptance
-
-- Integration API tests distinguish auth/body/query/status mapping from session
-  semantics.
-- Web BFF tests distinguish browser session/DTO behavior from session
-  semantics.
-- Residue scan is part of the automated suite.
-- Naming for Integration External IM HTTP API, Web Console IM BFF, and External
-  IM Session is consistent in tests.
-
-### Regression Risk
-
-Low to medium. Main risk is over-mocking the session and weakening behavior
-coverage. Keep existing end-to-end route tests alongside projection tests.
-
-## Stage 3: iMessage Channel Adapter MVP
-
-### Stage Goal
-
-Add a local iMessage bridge that is only a headless consumer of `/api/im/*`.
-
-### Current Problem
-
-No `imessage bridge` command exists. Central IM and Web code must not gain
-iMessage-specific state.
-
-### Planned Files
-
-- Create: `tools/launcher/imessage_bridge.py`
 - Modify: `buddyswitch-codex`
-- Create: `tests/test_imessage_bridge.py`
+- Modify: `tools/launcher/web_management.py`
 - Modify: `tests/test_buddyswitch_launcher.py`
-- Update: `docs/spec/imessage-rebuild-stage-acceptance.md`
+- Modify: `tests/test_web_management.py`
+- Modify: `tests/test_imessage_channel.py`
 
-### New Files
+### Boundaries That Must Not Be Crossed
 
-`tools/launcher/imessage_bridge.py` owns:
+- Web must not parse `/actors`, numeric choices, sender keys, active actors, pending choices, or outbound text wrapping.
+- Root launcher must not keep old command aliases or deprecated params.
+- Web service must remain available if iMessage worker startup reports a local environment problem.
 
-- CLI parsing for `bridge`;
-- `imsg status` health check;
-- connection creation or restore through `/api/im/connections`;
-- target validation through `/api/im/actors`;
-- inbound `imsg watch` processing;
-- `is_from_me` filtering;
-- allowlist filtering;
-- rowid/guid dedupe;
-- outbound `/api/im/events` polling;
-- message fetch through `/api/im/messages/{id}`;
-- send back through `imsg send`;
-- local adapter state under `runtime_files.LOCAL_ROOT / "imessage-bridge"`.
+### Implementation Steps
 
-### Deleted Or Replaced Old Paths
+1. Write failing launcher tests showing help omits the retired standalone iMessage command and that its top-level dispatch is unknown.
+2. Write failing Web lifecycle tests with a fake worker factory proving `start()` on Web startup and `stop()` on shutdown.
+3. Write failing lifecycle test proving worker startup failure is captured without preventing `/api/health`.
+4. Add explicit Web server lifecycle helpers that start the worker after server construction and stop it in `finally`.
+5. Wire `ImessageChannelWorker` with base URL, state path, logger, and stop signal only.
+6. Remove the retired standalone iMessage helper and dispatch from the root launcher.
 
-None expected. This stage adds the first adapter path.
+### Deletion / Replacement Points
 
-### Forbidden Compatibility Paths
+- Delete root launcher `imessage` top-level dispatch.
+- Delete old bridge help line and helper constant.
+- Replace old launcher tests that expected bridge dispatch.
 
-- iMessage adapter must not import `env.services.messages`.
-- iMessage adapter must not import `env.repos.messages`.
-- Central IM Core must not contain Apple ID, chat id, rowid, guid, sender
-  allowlist, or `imsg` process lifecycle fields.
-- No generic channel plugin framework.
-- No Web UI dependency.
+### Verification Commands
 
-### Executable Tasks
+```bash
+python -m pytest tests/test_buddyswitch_launcher.py tests/test_web_management.py tests/test_imessage_channel.py -q
+python -m py_compile tools/launcher/web_management.py tools/launcher/imessage_channel.py
+```
 
-1. Add failing bridge tests for fail-fast actor validation, allowlist rejection,
-   `is_from_me` filtering, rowid/guid dedupe, and outbound event exactly-once.
-2. Add `buddyswitch-codex imessage bridge` command dispatch.
-3. Implement a small HTTP client for `/api/im/*` using the standard library.
-4. Implement local JSON state load/save with 0600 permissions.
-5. Implement inbound mapping and dedupe.
-6. Implement outbound polling and send-once tracking.
-7. Add source scans proving adapter isolation from Central IM internals.
-8. Run focused tests and record acceptance.
+### Residue Scan Commands
 
-### Stage Acceptance
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
+```
 
-- Bridge tests cover all MVP adapter rules named in the memo.
-- Source scan proves no Central IM service/repo imports in adapter code.
-- Central IM source scan proves no iMessage-specific fields in core.
-- `./buddyswitch-codex imessage bridge --server ... --target-identity-id ... --allow-sender ...`
-  is the documented command shape.
+### Phase Done Criteria
 
-### Regression Risk
+- Launcher no longer exposes or dispatches the old command.
+- Web lifecycle tests prove start/stop behavior and failure isolation.
+- Web source contains no channel product semantics.
+- Residue scan passes except explicitly historical/source memo context.
 
-Medium to high. The adapter crosses local process, HTTP, and filesystem state.
-Keep implementation concrete and adapter-local; defer real Messages.app effects
-to Stage 4 smoke.
+## Phase 3: Cross-Layer Contract And Actor List Alignment
 
-## Stage 4: End-To-End Smoke
+### Phase Objective
 
-### Stage Goal
+Prove the channel uses `/api/im/*` end to end with per-sender connections and an actor list that matches the existing reachability path.
 
-Prove the MVP user-visible iMessage loop or record the exact external blocker.
+### Source Memo Requirements Covered
 
-### Current Problem
+- `/actors` uses `/api/im/actors` and does not create Central IM messages.
+- Numeric selection does not call `/api/im/messages` or wake an actor.
+- Ordinary messages post through `/api/im/messages`.
+- Event polling is per contact/connection.
+- Actor id for reply prefix comes from message/event metadata, not from reply content.
+- Actor list source cannot diverge from wake reachability.
 
-Module tests cannot prove a real iPhone-to-Mac-to-BuddySwitch-to-iPhone loop.
+### Code Facts Discovered
 
-### Planned Files
+- `ExternalImSession.list_actors` and `_actor_participant_for_identity` use the same actor lister injection.
+- `ImHttpRouter` continues to own `/api/im/*` HTTP request mapping and session authentication.
 
-- Create: `docs/spec/imessage-bridge-smoke-runbook.md`
-- Update: `docs/spec/imessage-rebuild-stage-acceptance.md`
-- Modify tests only if the automated acceptance slice needs a stable command
-  wrapper.
+### Files Expected To Change
 
-### New Files
+- Modify: `tests/test_imessage_channel.py`
+- Modify if needed: `scripts/env/services/external_im_session.py`
+- Modify if needed: `tests/test_external_im_session.py`
+- Modify if needed: `tests/test_im_http_router.py`
 
-`docs/spec/imessage-bridge-smoke-runbook.md` records:
+### Boundaries That Must Not Be Crossed
 
-- prerequisites;
-- commands;
-- allowlisted sender used;
-- target actor identity used;
-- observed bridge logs;
-- observed iPhone result;
-- failure classification if blocked.
+- Do not add iMessage control routes to `/api/im/*`.
+- Do not move active actor state into Central IM.
+- Do not add actor-list special cases in Web for iMessage.
 
-### Deleted Or Replaced Old Paths
+### Implementation Steps
 
-None.
+1. Add integration-style fake HTTP/API tests for `/actors -> numeric selection -> ordinary message -> prefixed reply`.
+2. Add tests proving two senders get isolated connection keys and event polling.
+3. Add a test proving displayed actor rows are filtered from the same actor list shape used by message delivery.
+4. Adjust `ExternalImSession` only if current actor list/wake reachability evidence is inconsistent.
 
-### Forbidden Compatibility Paths
+### Deletion / Replacement Points
 
-- Do not call a mocked bridge smoke "real smoke".
-- Do not mark Stage 4 complete if Apple/Messages permissions block the run
-  without recording the blocker and separating it from BuddySwitch adapter
-  behavior.
+- Remove any leftover bridge-level target validation tests.
+- Remove tests that assert allowlist rejection or fixed target delivery.
 
-### Executable Tasks
+### Verification Commands
 
-1. Keep or run the automated external reply-loop acceptance test.
-2. Start `./buddyswitch-codex web --port 8765`.
-3. Start `./buddyswitch-codex imessage bridge ...`.
-4. Send one text from the allowlisted iPhone identity.
-5. Confirm the actor receives and replies.
-6. Confirm the reply lands in the same iMessage chat.
-7. Record command output and observations.
+```bash
+python -m pytest tests/test_imessage_channel.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py -q
+```
 
-### Stage Acceptance
+### Residue Scan Commands
 
-- Automated external reply-loop acceptance still passes.
-- Real smoke is recorded, or a precise external environment blocker is recorded.
-- The smoke validates one-to-one text, one allowlisted sender, one target actor,
-  and same-chat reply.
+```bash
+rg -n "/actors|pending_actor_choices|active_actor_id|\\[Message From" tools/launcher/web_management.py tools/launcher/im_http_router.py scripts/env/services scripts/env/repos
+rg -n "\\b(iMessage|imessage|imsg|chat_id|chat_identifier|chat_guid|rowid|guid|sender handle|pending_actor_choices|active_actor_id)\\b" scripts/env/services/messages.py scripts/env/repos/messages.py scripts/env/tool_runtime/im_client.py scripts/env/tools/message/_impl.py tools/launcher/im_wake_handler.py
+```
 
-### Regression Risk
+### Phase Done Criteria
 
-High because macOS permissions and Apple account state are outside the repo.
-Bridge startup must produce actionable errors.
+- Cross-layer fake path proves the memo's main channel loop without real Messages.app dependency.
+- Boundary scans show channel-specific semantics are only in the iMessage module.
+- Existing External IM HTTP and reply-loop tests still pass.
 
-## Stage 5: Residue Cleanup And Documentation Closeout
+## Phase 4: Live Docs, Smoke Runbook, And Final Acceptance
 
-### Stage Goal
+### Phase Objective
 
-Make live surfaces teach the final architecture and not the old dual-track
-semantics.
+Make every live execution surface teach the new Web-started channel path and record final automated plus manual smoke evidence or a precise external blocker.
 
-### Current Problem
+Phase 4 also owns one live-smoke reliability supplement discovered during testing: `imsg send` can return command-level success while the Messages.app database records a failed outbound message. Final acceptance must not treat command submission as proof that an iMessage reply reached the user.
 
-Current architecture docs still say Web IM delegates to the message service.
-Tests and docs may also retain old route or direct-core wording after
-implementation.
+### Source Memo Requirements Covered
 
-### Planned Files
+- Live docs only describe `./buddyswitch-codex web` for iMessage startup.
+- Smoke runbook uses `/actors -> numeric selection -> ordinary message -> prefixed reply`.
+- Old bridge command appears only in historical/superseded source material, not current execution guidance.
+- Final acceptance proves the source memo target end to end.
+- Outbound iMessage smoke evidence distinguishes command submission from the underlying Messages.app send state.
 
-- Modify: `docs/arch/web-interface-call-architecture.md`
-- Modify: `tests/test_im_web_management_projection.py`
-- Modify: any live tests that still teach old names.
-- Update: `docs/spec/imessage-rebuild-stage-acceptance.md`
+### Files Expected To Change
 
-### New Files
+- Replace the retired standalone iMessage smoke runbook with channel smoke guidance or delete it if the final acceptance record fully covers smoke instructions.
+- Modify: `docs/spec/imessage-rebuild-stage-acceptance.md`
+- Modify: any live docs found by residue scan.
+- Modify: `tools/launcher/imessage_channel.py`
+- Modify: `tests/test_imessage_channel.py`
 
-Only add a short principle doc if a durable rule emerges that is not already
-covered by `docs/bitter`.
+### Boundaries That Must Not Be Crossed
 
-### Deleted Or Replaced Old Paths
+- Do not edit historical memos only to satisfy scans.
+- Do not call fake tests a manual iMessage smoke.
+- Do not mark final complete without requirement-by-requirement evidence.
+- Do not move iMessage send-state interpretation into Web, `/api/im/*`, `ExternalImSession`, or Central IM.
+- Do not require `is_delivered == 1` as the only success signal; delivery can lag after local send. The first gate is command success plus a route-scoped Messages.app row with no error and `is_sent == 1`.
 
-- Remove old helper names or docs that describe `/api/im/*` and
-  `/api/web/im/*` as separate product implementations.
-- Remove any live-surface instruction suggesting iMessage should call Central IM
-  Core directly.
+### Code Facts Discovered During Phase 4
 
-### Forbidden Compatibility Paths
+- A direct `imsg send --json` to `yuflo2024@126.com` returned `{"status":"sent"}`.
+- The matching `chat.db.message` row later showed `error=22`, `is_sent=0`, `is_delivered=0`, and `is_finished=1`.
+- Successful nearby outbound rows showed `error=0`, `is_sent=1`, and `is_delivered=1`.
+- Current `CommandImsgClient.send()` only checks the `imsg send` subprocess return code, so `poll_outbound_once()` can mark an outbound event as sent even when Messages.app recorded a failed send.
+- `imsg history --json` does not expose the status fields needed for this distinction; the local Messages.app SQLite database does.
+- A successful outbound can be temporarily visible as `error=0,is_sent=0,is_delivered=0,is_finished=1` before Messages.app updates the same row to `is_sent=1,is_delivered=1`. This transient no-error unsent state must keep polling; only `error!=0` is an immediate bottom-level failure.
 
-- Do not edit historical memos just to make scans pass.
-- Do not add broad repo-wide scans over common terms.
-- Do not preserve old wording in live architecture docs.
+### Implementation Steps
 
-### Executable Tasks
+1. Update smoke runbook to use `./buddyswitch-codex web` and the channel control flow.
+2. Add a failing regression test proving command-level `imsg send` success with a failed Messages.app row raises `ChannelError`.
+3. Add a failing controller regression test proving outbound events are not added to `sent_outbound_event_ids` when `imsg.send()` raises.
+4. Add a failing regression test proving a no-error transient unsent row is polled until it becomes sent.
+5. Implement the minimal route-scoped Messages.app status confirmation inside `CommandImsgClient`.
+6. Keep product processing unchanged: failed send status should surface as `ChannelError`, and existing controller flow must avoid outbound dedupe when send fails.
+7. Run focused, broader, and residue verification.
+8. Run manual smoke if local iMessage conditions permit; otherwise record exact external blocker.
+9. Write phase/final acceptance mapping each source memo requirement to evidence.
 
-1. Update `docs/arch/web-interface-call-architecture.md` to name
-   `External IM Session` as the shared semantic layer.
-2. Run scoped scans over the memo-named live surfaces.
-3. Remove or justify every hit.
-4. Run full relevant verification.
-5. Record final acceptance and remaining risk.
+### Verification Commands
 
-### Stage Acceptance
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelTests::test_poll_outbound_does_not_mark_event_sent_when_imessage_send_fails tests/test_imessage_channel.py::CommandImsgClientSendStatusTests -q
+python -m pytest tests/test_imessage_channel.py tests/test_buddyswitch_launcher.py tests/test_web_management.py tests/test_external_im_projection_contract.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
+node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
+python -m py_compile tools/launcher/imessage_channel.py tools/launcher/web_management.py tools/launcher/im_http_router.py scripts/env/services/external_im_session.py
+```
 
-- No live surface teaches `/api/im/*` and `/api/web/im/*` as separate IM
-  product implementations.
-- No live surface suggests iMessage directly imports Central IM Core.
-- No live surface suggests an iMessage-specific Central IM branch.
-- Startup docs match actual commands.
+### Residue Scan Commands
 
-### Regression Risk
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_semantics_stay_out_of_web_http_and_core -q
+```
 
-Low to medium. Main risk is over-editing docs outside live surfaces. Keep scans
-scoped.
+### Phase Done Criteria
 
+- All planned automated verification passes.
+- Residue scans pass or remaining source memo/historical hits are explicitly classified.
+- Command-level send success with bottom-level Messages.app failure is detected before an outbound event is deduped as sent.
+- Manual smoke succeeds or a precise external blocker is recorded.
+- Final acceptance record proves every source memo requirement.

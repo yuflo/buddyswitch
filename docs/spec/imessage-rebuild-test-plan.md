@@ -1,375 +1,294 @@
-# iMessage Rebuild Test Plan
+# iMessage Channel Product Logic Rebuild Test Plan
 
 Date: 2026-06-28
 
-## Baseline Commands
+## Test Strategy
 
-Current focused baseline:
+Use test-first replacement. Phase 1 and Phase 2 must each add tests that fail against the current bridge implementation before production code changes. Unit tests cover channel state and controller behavior; lifecycle tests cover Web-owned worker start/stop; integration-style tests cover the `/api/im/*` handoff. Residue scans are part of the acceptance gate because the source memo requires no live old surface.
 
-```bash
-python -m pytest tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
-```
+## Phase 0: Plan Reset And Current-State Gate
 
-Observed result on 2026-06-28:
+### Source Memo Behavior Contracts Covered
 
-```text
-82 passed, 51 subtests passed in 126.11s (0:02:06)
-```
+- Development plan exists before implementation.
+- Test plan exists before implementation.
+- Old live bridge surface is identified as residue.
 
-Current browser/Web UI baseline:
+### Focused Test Cases
 
-```bash
-node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
-```
+None. Phase 0 is documentation and current-state audit only.
 
-Observed result on 2026-06-28:
-
-```text
-all checks passed
-```
-
-## Stage 0: Fact Baseline And Entry Freeze
-
-### New Tests
-
-None. This stage is read-only documentation and current-state verification.
-
-### Adjusted Tests
+### Integration Or Lifecycle Tests
 
 None.
 
-### End-To-End Contract Tests To Keep
+### Negative Cases
 
-- `tests/test_im_external_reply_loop.py::ImExternalReplyLoopTests::test_external_send_actor_reply_to_external_visible_once_without_cursor`
+- Current scan is expected to find old bridge command, params, state, tests, and docs before replacement.
 
-### Residue Scan
-
-Run to prove the current Stage 1 problem exists:
+### Residue Checks
 
 ```bash
-rg -n "send_external_connection_message|read_external_connection_events|get_im_direct_conversation|get_im_message|list_im_replies|update_im_disposition|create_external_connection|authenticate_external_connection_key" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
 ```
 
-Expected before Stage 1 implementation: hits in all three files.
+Expected before implementation: hits in launcher, bridge code, bridge tests, and stale docs.
 
-### Verification Commands
+### Commands And Pass Criteria
 
 ```bash
-command -v imsg
-imsg --help
-imsg status
-imsg chats --help
-imsg history --help
-imsg send --help
-imsg watch --help
-python -m pytest tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
-node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
+git status --short
 ```
 
-### Passing Standard
+Pass criteria: only intended source memo/docs changes are present.
 
-- `imsg` is installed.
-- `imsg status` reports basic send/receive/history available.
-- Help exposes `chats`, `history`, `send`, and `watch`.
-- Baseline Python and Node tests pass.
-- Residue scan has the expected current hits.
+## Phase 1: iMessage Channel State And Controller
 
-## Stage 1: Rebuild External IM Session
+### Source Memo Behavior Contracts Covered
 
-### New Tests
+- Sender-scoped state schema version 2.
+- Per-sender connection creation and reuse.
+- Per-sender active actor, pending choices, dedupe, outbound event ids, and route isolation.
+- `/actors` list formatting and snapshot storage.
+- Numeric selection changes only sender-local active actor.
+- Ordinary messages require active actor and deliver original content.
+- Actor replies are prefixed and routed to original iMessage route.
+- iMessage module isolation from Central IM internals.
 
-Add `tests/test_external_im_session.py`:
+### Focused Test Cases
 
-- `test_session_create_auth_send_event_conversation_and_disposition_flow`
-  exercises the new session boundary without HTTP.
-- `test_session_list_actors_returns_identity_projection`
-  verifies actor list mapping and invalid actor rows are ignored.
-- `test_session_rejects_missing_or_unreachable_actor_identity`
-  verifies target resolution errors stay at the session boundary.
-- `test_session_reads_actor_reply_once_without_client_cursor`
-  verifies connection event cursor semantics remain server-owned.
+Create `tests/test_imessage_channel.py` with these failing tests before implementation:
 
-Add a residue test, either in `tests/test_im_web_management_projection.py` or
-`tests/test_external_im_session.py`:
+- `test_default_state_path_uses_imessage_channel_schema_v2`
+- `test_first_sender_message_creates_connection_and_reuses_it`
+- `test_two_senders_keep_connections_choices_routes_and_dedupe_isolated`
+- `test_actors_control_message_lists_online_actors_and_stores_snapshot`
+- `test_numeric_selection_uses_pending_snapshot_without_posting_message`
+- `test_numeric_without_pending_choices_is_ordinary_message_and_prompts_when_no_active_actor`
+- `test_ordinary_message_without_active_actor_sends_minimal_actors_prompt`
+- `test_ordinary_message_posts_to_active_actor_with_original_content`
+- `test_actor_reply_is_prefixed_and_sent_to_recorded_route_once`
+- `test_channel_source_does_not_import_central_im_internals`
 
-```text
-HTTP/Web projection files must not import env.services.messages or call the
-Central IM external-session methods directly.
-```
+### Integration Or Lifecycle Tests
 
-This test must fail before implementation because current files call those
-methods directly.
+- A fake `BuddySwitchImApi` records create/list/send/read/get calls.
+- A fake `imsg` records outbound route/text calls.
+- No real process or HTTP server is required in Phase 1.
 
-### Adjusted Tests
+### Negative Cases
 
-- Update `tests/test_im_http_router.py` only for constructor/session wiring.
-  Public `/api/im/*` assertions should remain the same.
-- Update `tests/test_web_management.py` only for constructor/session wiring.
-  Public `/api/web/im/*` assertions should remain the same.
-- Update `tests/test_im_external_reply_loop.py` only if `ImHttpRouter`
-  construction changes.
+- Offline/unreachable actor rows are not displayed by `/actors`.
+- A numeric message with no pending choices is not treated as selection.
+- An invalid pending number does not select an actor.
+- Duplicate inbound keys do not resend messages.
+- Duplicate outbound event ids do not resend iMessages.
 
-### End-To-End Contract Tests To Keep
-
-- `tests/test_im_external_reply_loop.py::ImExternalReplyLoopTests::test_external_send_actor_reply_to_external_visible_once_without_cursor`
-- `tests/test_im_external_reply_loop.py::ImExternalReplyLoopTests::test_wake_bridge_reaches_real_mailbox_socket_and_im_handler`
-
-### Residue Scan
-
-Before implementation, this must fail with hits:
+### Residue Checks
 
 ```bash
-rg -n "message_service\\.(create_external_connection|authenticate_external_connection_key|send_external_connection_message|read_external_connection_events|get_im_direct_conversation|get_im_message|list_im_replies|update_im_disposition)" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_source_does_not_import_central_im_internals -q
 ```
 
-After implementation, it must return no hits.
+Pass criteria: no hits after Phase 1, except any deleted file paths absent from the tree.
 
-Also scan imports:
+### Commands And Pass Criteria
+
+Red gate:
 
 ```bash
-rg -n "from env\\.services import messages|import messages as message_service" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
+python -m pytest tests/test_imessage_channel.py -q
 ```
 
-Expected after implementation: no hits in these projection files.
+Expected before implementation: import failures or assertion failures caused by missing channel semantics.
 
-### Verification Commands
-
-Focused Python:
+Green gate:
 
 ```bash
-python -m pytest tests/test_external_im_session.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
+python -m pytest tests/test_imessage_channel.py -q
+python -m py_compile tools/launcher/imessage_channel.py
 ```
 
-Web UI:
+Expected after implementation: all pass.
 
-```bash
-node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
-```
+## Phase 2: Web-Owned Worker Lifecycle And Public Entry Removal
 
-### Passing Standard
+### Source Memo Behavior Contracts Covered
 
-- New red test or residue check was observed failing before production code
-  changes.
-- Focused Python tests pass.
-- Node Web UI tests pass.
-- Residue scans return no hits.
+- `./buddyswitch-codex web` is the only user startup entry.
+- Root launcher no longer exposes the retired standalone iMessage command.
+- Web starts and stops the iMessage worker.
+- Worker local environment failure does not crash Web.
+- Web does not own iMessage control semantics.
 
-## Stage 2: Projection Contract Tightening
-
-### New Tests
-
-Create or extend `tests/test_external_im_projection_contract.py` with tests
-that use fake session objects where useful:
-
-- Integration router maps missing auth to HTTP 401 without invoking session
-  product methods.
-- Integration router maps request body/query values to session calls and maps
-  session payloads to HTTP status.
-- Web BFF owns browser session response and never returns `connection_key`.
-- Web BFF rejects browser `cursor`.
-- Web BFF requires actor `identity_id` for events and direct conversation.
-- Web BFF hydrates browser event DTOs with messages through the session
-  boundary.
-
-### Adjusted Tests
-
-- Keep existing behavior tests in `tests/test_im_http_router.py` and
-  `tests/test_web_management.py`.
-- Move source-boundary assertions into one focused projection contract test if
-  duplication grows.
-
-### End-To-End Contract Tests To Keep
-
-- Keep the external reply-loop acceptance test. Projection tests cannot replace
-  it.
-
-### Residue Scan
-
-Automate or run:
-
-```bash
-rg -n "message_service\\.(create_external_connection|authenticate_external_connection_key|send_external_connection_message|read_external_connection_events|get_im_direct_conversation|get_im_message|list_im_replies|update_im_disposition)" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
-rg -n "/api/messages/send|/api/im/external-participants|/api/im" tools/launcher/assets/web-management/app.js tests/web_management_ui_contract.test.js
-```
-
-Expected:
-
-- no direct Central IM external-session calls in HTTP/Web projection files;
-- browser JS has no `/api/im` calls;
-- old routes appear only in negative assertions if present.
-
-### Verification Commands
-
-```bash
-python -m pytest tests/test_external_im_projection_contract.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py -q
-node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
-```
-
-### Passing Standard
-
-- Projection contract tests pass.
-- Existing route behavior tests still pass.
-- Residue scans are no-hit except explicit negative assertions.
-
-## Stage 3: iMessage Channel Adapter MVP
-
-### New Tests
-
-Create `tests/test_imessage_bridge.py`:
-
-- `test_bridge_fails_fast_when_target_actor_is_not_reachable`
-- `test_inbound_ignores_messages_from_me`
-- `test_inbound_rejects_sender_not_in_allowlist`
-- `test_inbound_dedupes_by_rowid_or_guid`
-- `test_inbound_posts_allowlisted_text_to_api_im_messages`
-- `test_outbound_sends_actor_reply_once_and_records_event_id`
-- `test_restart_does_not_resend_recorded_outbound_event`
-- `test_bridge_source_does_not_import_central_im_internals`
+### Focused Test Cases
 
 Modify `tests/test_buddyswitch_launcher.py`:
 
-- Add command dispatch coverage for `buddyswitch-codex imessage bridge`.
-- Add unknown subcommand and missing option errors if the launcher test style
-  already supports similar cases.
+- Replace old bridge dispatch test with `test_imessage_command_is_not_public`.
+- Add or update help test to assert the retired standalone command and its old options are absent.
 
-### Adjusted Tests
+Modify `tests/test_web_management.py`:
 
-None in Central IM Core unless source scans reveal iMessage leakage.
+- `test_web_main_starts_and_stops_imessage_worker`
+- `test_web_main_keeps_health_available_when_imessage_worker_start_fails`
+- `test_web_management_source_does_not_parse_imessage_control_messages`
 
-### End-To-End Contract Tests To Keep
+Modify `tests/test_imessage_channel.py`:
 
-- Keep the existing external reply-loop test.
-- Add a bridge-level fake-HTTP/fake-imsg integration test that proves:
+- `test_worker_stop_terminates_watch_client`
 
-```text
-fake imsg inbound row -> bridge POST /api/im/messages
-fake /api/im/events actor reply -> bridge imsg send to same chat/sender
-```
+### Integration Or Lifecycle Tests
 
-### Residue Scan
+- Use fake worker factories and a short-lived Web server instance.
+- Tests must cleanly stop the server and worker in `finally`.
+- Add residual checks for fake worker stop calls; do not start real `imsg watch`.
 
-Adapter isolation:
+### Negative Cases
 
-```bash
-rg -n "env\\.services\\.messages|env\\.repos\\.messages|send_im_message|send_external_connection_message|read_external_connection_events" tools/launcher/imessage_bridge.py
-```
+- The retired standalone command returns unknown top-level command.
+- `buddyswitch-codex help` does not advertise old command or params.
+- Web worker startup errors are observable through a health/status field or logs but do not prevent `/api/health`.
 
-Expected: no hits.
-
-Central core iMessage pollution:
+### Residue Checks
 
 ```bash
-rg -n "iMessage|imessage|imsg|chat_id|chat_identifier|chat_guid|rowid|guid|allowlist|is_from_me" scripts/env/services/messages.py scripts/env/repos/messages.py scripts/env/tool_runtime/im_client.py scripts/env/tools/message/_impl.py tools/launcher/im_wake_handler.py
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
 ```
 
-Expected: no hits, except generic words if explicitly justified by code context.
+Pass criteria: no hits in live surfaces after Phase 2.
 
-### Verification Commands
+### Commands And Pass Criteria
+
+Red gate:
 
 ```bash
-python -m pytest tests/test_imessage_bridge.py tests/test_buddyswitch_launcher.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
+python -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_imessage_command_is_not_public -q
+python -m pytest tests/test_web_management.py -k imessage -q
 ```
 
-### Passing Standard
+Expected before implementation: old command is still live and Web has no worker lifecycle.
 
-- Bridge tests pass.
-- Launcher dispatch tests pass.
-- Adapter isolation scans pass.
-- Existing Central IM and integration route tests pass.
-
-## Stage 4: End-To-End Smoke
-
-### New Tests
-
-No new unit tests required if Stage 3 bridge integration tests cover fake
-inbound/outbound flow. Add a smoke script only if it improves repeatability
-without pretending to be a real iMessage run.
-
-### Adjusted Tests
-
-None.
-
-### End-To-End Contract Tests To Keep
-
-Run:
+Green gate:
 
 ```bash
-python -m pytest tests/test_im_external_reply_loop.py tests/test_imessage_bridge.py -q
+python -m pytest tests/test_buddyswitch_launcher.py tests/test_web_management.py tests/test_imessage_channel.py -q
+python -m py_compile tools/launcher/web_management.py tools/launcher/imessage_channel.py
 ```
 
-Manual smoke contract:
+Expected after implementation: all pass and no worker/process residue remains.
 
-```text
-allowlisted iPhone sender sends text
-  -> Mac imsg watch sees inbound row
-  -> bridge POSTs to /api/im/messages
-  -> actor wakes and replies
-  -> bridge reads /api/im/events and sends through imsg
-  -> iPhone sees reply in same chat
-```
+## Phase 3: Cross-Layer Contract And Actor List Alignment
 
-### Residue Scan
+### Source Memo Behavior Contracts Covered
 
-Same adapter isolation and Central IM pollution scans from Stage 3.
+- `/actors` does not call `POST /api/im/messages`.
+- Numeric selection does not call `POST /api/im/messages` or wake actors.
+- Ordinary message posts to `/api/im/messages` with active actor.
+- Event polling is per sender connection.
+- Reply prefix actor id comes from event/message metadata.
+- Actor list source aligns with wake reachability.
 
-### Verification Commands
+### Focused Test Cases
+
+Add or extend:
+
+- `test_control_messages_do_not_create_central_im_messages`
+- `test_two_sender_full_fake_loop_keeps_connection_and_reply_routes_isolated`
+- `test_reply_prefix_uses_message_or_event_sender_identity_not_content`
+- `test_actor_list_display_uses_same_reachability_source_as_message_delivery`
+
+### Integration Or Lifecycle Tests
+
+Run existing External IM tests with new channel tests:
 
 ```bash
-./buddyswitch-codex web --port 8765
-./buddyswitch-codex imessage bridge --server http://127.0.0.1:8765 --target-identity-id <actor_identity_id> --allow-sender <sender>
+python -m pytest tests/test_imessage_channel.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py -q
 ```
 
-Then send one real text from the allowlisted iPhone sender.
+### Negative Cases
 
-### Passing Standard
+- If `/actors` or numeric selection accidentally posts to `/api/im/messages`, fake API call counts must fail.
+- If actor list/wake reachability diverges, the alignment test must fail.
 
-- Real smoke succeeds and is recorded, or an external macOS/Apple/imsg blocker
-  is recorded with enough detail to distinguish it from BuddySwitch code
-  failure.
-- Automated acceptance tests still pass.
-
-## Stage 5: Residue Cleanup And Documentation Closeout
-
-### New Tests
-
-Add or extend a source-scan test for live surface wording if not already covered:
-
-- no live surface describes `/api/im/*` and `/api/web/im/*` as separate product
-  implementations;
-- no live surface tells iMessage to call Central IM Core directly;
-- no live surface suggests a generic channel plugin framework for this MVP.
-
-### Adjusted Tests
-
-- Update docs/source assertions in `tests/test_im_web_management_projection.py`
-  or a new closeout test.
-
-### End-To-End Contract Tests To Keep
-
-Run the final relevant set:
+### Residue Checks
 
 ```bash
-python -m pytest tests/test_external_im_session.py tests/test_external_im_projection_contract.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py tests/test_imessage_bridge.py tests/test_buddyswitch_launcher.py -q
+rg -n "/actors|pending_actor_choices|active_actor_id|\\[Message From" tools/launcher/web_management.py tools/launcher/im_http_router.py scripts/env/services scripts/env/repos
+rg -n "\\b(iMessage|imessage|imsg|chat_id|chat_identifier|chat_guid|rowid|guid|pending_actor_choices|active_actor_id)\\b" scripts/env/services/messages.py scripts/env/repos/messages.py scripts/env/tool_runtime/im_client.py scripts/env/tools/message/_impl.py tools/launcher/im_wake_handler.py
+```
+
+Pass criteria: no channel-specific semantics outside `tools/launcher/imessage_channel.py` and its tests.
+
+### Commands And Pass Criteria
+
+```bash
+python -m pytest tests/test_imessage_channel.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py -q
+```
+
+Expected: all pass.
+
+## Phase 4: Live Docs, Smoke Runbook, And Final Acceptance
+
+### Source Memo Behavior Contracts Covered
+
+- Live docs describe only Web startup for iMessage.
+- Smoke runbook follows the channel control flow.
+- Final acceptance proves the source memo end to end.
+- Outbound iMessage replies are not accepted as sent solely because `imsg send` returned success.
+
+### Focused Test Cases
+
+- Add source-scan tests if residue checks are not already automated.
+- Keep existing Web UI and External IM tests green.
+- Add `test_poll_outbound_does_not_mark_event_sent_when_imessage_send_fails` to prove a failed outbound iMessage send does not update per-contact outbound dedupe state.
+- Add `CommandImsgClientSendStatusTests::test_send_accepts_route_scoped_successful_message_row` using a temporary `chat.db` fixture to prove command success plus `error=0` and `is_sent=1` is accepted.
+- Add `CommandImsgClientSendStatusTests::test_send_rejects_failed_message_row_after_successful_command` using a temporary `chat.db` fixture to prove command success plus `error!=0` or `is_sent=0` raises `ChannelError`.
+- Add `CommandImsgClientSendStatusTests::test_send_keeps_polling_transient_finished_unsent_row_without_error` to prove `error=0,is_sent=0,is_finished=1` is not treated as final failure before the timeout.
+
+### Integration Or Lifecycle Tests
+
+Automated:
+
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelTests::test_poll_outbound_does_not_mark_event_sent_when_imessage_send_fails tests/test_imessage_channel.py::CommandImsgClientSendStatusTests -q
+python -m pytest tests/test_imessage_channel.py tests/test_buddyswitch_launcher.py tests/test_web_management.py tests/test_external_im_projection_contract.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
 node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
 ```
 
-### Residue Scan
+Manual smoke if environment permits:
 
-Memo-required live surfaces:
-
-```bash
-rg -n "two IM product implementations|separate IM product|Web IM routes should delegate to the message service|iMessage.*Central IM Core|Central IM.*iMessage|channel plugin|plugin framework|external-participants|/api/messages/send" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py tools/launcher/assets/web-management/app.js tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/web_management_ui_contract.test.js docs/arch/web-interface-call-architecture.md
+```text
+1. Start ./buddyswitch-codex web.
+2. Send /actors from Apple ID A.
+3. Select an actor by number.
+4. Send a normal message and observe a prefixed actor reply in the same chat.
+5. Repeat with Apple ID B and verify independent selection/reply routing.
 ```
 
-Expected: no hits, except negative assertions explicitly checking retired
-routes.
+### Negative Cases
 
-### Passing Standard
+- If local `imsg` or macOS permissions block smoke, record the exact external blocker and keep automated acceptance separate.
+- Do not accept a fake run as manual smoke.
+- If `imsg send` returns zero but the Messages.app row has `error=22`, `is_sent=0`, and `is_finished=1`, `CommandImsgClient.send()` must raise `ChannelError`.
+- If a Messages.app row has `error=0,is_sent=0,is_finished=1`, `CommandImsgClient.send()` must continue polling until success or timeout because this state was observed as transient during live smoke.
+- If status confirmation raises during outbound event polling, the event id must remain absent from `sent_outbound_event_ids` so the channel does not silently dedupe a failed reply.
+- Do not require `is_delivered == 1` for initial acceptance because delivery status can lag; assert only the local send failure gate needed for this iteration.
 
-- Full relevant Python and Node verification passes.
-- Scoped residue scan passes.
-- `docs/arch/web-interface-call-architecture.md` names `External IM Session` as
-  the shared semantic layer.
-- Stage acceptance file lists completed stages, changed files, deleted old
-  paths, tests, commands, and remaining risks.
+### Residue Checks
 
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface -q
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_semantics_stay_out_of_web_http_and_core -q
+```
+
+Pass criteria: old-surface hits are absent from live surfaces; any source memo or historical memo hits are classified explicitly in acceptance.
+
+### Commands And Pass Criteria
+
+```bash
+python -m py_compile tools/launcher/imessage_channel.py tools/launcher/web_management.py tools/launcher/im_http_router.py scripts/env/services/external_im_session.py
+```
+
+Expected: compilation passes. Final acceptance maps each source memo requirement to evidence.

@@ -1,400 +1,202 @@
-# iMessage Rebuild Stage Acceptance
+# iMessage Channel Product Logic Rebuild Acceptance Record
 
 Date: 2026-06-28
 
-## Stage 0: Fact Baseline And Entry Freeze
+## Phase 0: Plan Reset And Current-State Gate
 
 Status: accepted.
 
 ### Actual Changes
 
-- Created `docs/spec/imessage-rebuild-context-audit.md`.
-- Created `docs/spec/imessage-rebuild-development-plan.md`.
-- Created `docs/spec/imessage-rebuild-test-plan.md`.
-- Created this acceptance record.
+- Replaced `docs/spec/imessage-rebuild-development-plan.md` with the source-memo-driven phase plan.
+- Replaced `docs/spec/imessage-rebuild-test-plan.md` with the source-memo-driven test plan.
+- Replaced `docs/spec/imessage-rebuild-context-audit.md` with current-state audit facts.
+- Replaced this acceptance record.
+- Removed the stale standalone bridge smoke runbook from live `docs/spec` guidance.
 
-No business code was changed.
+No production code was changed in Phase 0.
+
+### Source Memo Coverage
+
+- Complete development plan exists before implementation.
+- Complete test plan exists before implementation.
+- Current code facts and old live-surface residue are recorded.
+- Next phase is blocked on test-first channel implementation.
 
 ### Verification Commands And Results
 
 Command:
 
 ```bash
-command -v imsg
+git status --short
 ```
 
 Result:
 
 ```text
-/opt/homebrew/bin/imsg
+Only docs/spec planning changes and the untracked source memo are present at this gate.
 ```
 
-Command:
-
-```bash
-imsg --help
-```
+Command: scaffold-token scan over the development plan and test plan.
 
 Result:
 
 ```text
-imsg 0.11.1
-Commands include chats, history, watch, send, status, and rpc.
+no hits
 ```
 
-Command:
-
-```bash
-imsg status
-```
+Command: docs-only stale-token scan over the new development plan and test plan.
 
 Result:
 
 ```text
-Basic features (send, receive, history): Available
-Advanced features (typing, read receipts): Not available
+no hits
 ```
 
-Command:
+### Current Residue To Remove In Later Phases
 
-```bash
-imsg chats --help
-imsg history --help
-imsg send --help
-imsg watch --help
-```
-
-Result:
-
-```text
-All four commands exposed usable help and JSON-capable or stream-capable command surfaces.
-```
-
-Command:
-
-```bash
-python -m pytest tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
-```
-
-Result:
-
-```text
-82 passed, 51 subtests passed in 126.11s (0:02:06)
-```
-
-Command:
-
-```bash
-node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
-```
-
-Result:
-
-```text
-all checks passed
-```
-
-Command:
-
-```bash
-rg -n "send_external_connection_message|read_external_connection_events|get_im_direct_conversation|get_im_message|list_im_replies|update_im_disposition|create_external_connection|authenticate_external_connection_key" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
-```
-
-Result:
-
-```text
-Expected Stage 1 red residue exists.
-Hits were found in tools/launcher/im_http_router.py, tools/launcher/web_management.py, and tools/launcher/web_im_identity.py.
-```
-
-### Live Surfaces Locked
-
-- Integration External IM HTTP API: `tools/launcher/im_http_router.py`
-- Web Console IM BFF: `tools/launcher/web_management.py`
-- Web server-owned IM session: `tools/launcher/web_im_identity.py`
-- Browser UI client: `tools/launcher/assets/web-management/app.js`
-- Actor message tool: `scripts/env/tools/message/_impl.py`
-- Actor IM client: `scripts/env/tool_runtime/im_client.py`
-- Wake handler: `tools/launcher/im_wake_handler.py`
-- Current architecture doc: `docs/arch/web-interface-call-architecture.md`
+- Root launcher still exposes the retired standalone iMessage command.
+- Retired bridge source and tests still exist.
+- Web management still lacks iMessage worker lifecycle ownership.
+- Channel state schema version 2 and sender-scoped controller behavior do not exist yet.
 
 ### Acceptance Decision
 
-Stage 0 acceptance criteria are met:
+Phase 0 is accepted. Phase 1 may begin.
 
-- `docs/memo/2026-06-28-imessage-interface-brief.html` remains as feasibility
-  evidence.
-- `#1` is the Integration External IM HTTP API, `/api/im/*`.
-- `#2` is the Web Console IM BFF, `/api/web/im/*`.
-- Current relation is recorded: both are intended projections, but current code
-  still implements product semantics in both route families.
-- User-visible startup target is recorded as Web server plus iMessage bridge.
-- iMessage adapter code has not been started.
-
-### Remaining Risk
-
-`imsg` basic features are available, but no real send/watch smoke was run in
-Stage 0. That belongs to Stage 4 with an allowlisted sender and a running
-bridge.
-
-## Stage 1: Rebuild External IM Session
+## Phase 1: Channel State And Controller
 
 Status: accepted.
 
 ### Red Gate
 
-Added:
+Added `tests/test_imessage_channel.py` before production code.
 
-- `tests/test_im_web_management_projection.py::ImWebManagementProjectionTests::test_http_and_web_projections_do_not_own_external_im_session_semantics`
-- `tests/test_external_im_session.py`
-
-Red command:
+Command:
 
 ```bash
-python -m pytest tests/test_im_web_management_projection.py::ImWebManagementProjectionTests::test_http_and_web_projections_do_not_own_external_im_session_semantics -q
+python -m pytest tests/test_imessage_channel.py -q
 ```
 
 Red result:
 
 ```text
-20 failed, 1 passed, 10 subtests passed
+ImportError: cannot import name 'imessage_channel' from 'tools.launcher'
 ```
 
-The failures were expected direct-call hits in:
-
-- `tools/launcher/im_http_router.py`
-- `tools/launcher/web_management.py`
-- `tools/launcher/web_im_identity.py`
-
-Red session-boundary command:
-
-```bash
-python -m pytest tests/test_external_im_session.py -q
-```
-
-Red result:
-
-```text
-ImportError: cannot import name 'external_im_session' from 'env.services'
-```
+The failure was expected because the channel module did not exist yet.
 
 ### Actual Changes
 
-Created:
-
-- `scripts/env/services/external_im_session.py`
-- `tests/test_external_im_session.py`
-
-Modified:
-
-- `tools/launcher/im_http_router.py`
-- `tools/launcher/web_management.py`
-- `tools/launcher/web_im_identity.py`
-- `tests/test_im_web_management_projection.py`
-
-### Deleted Or Replaced Old Paths
-
-Replaced direct Central IM external-session calls from HTTP/Web projection files:
-
-- `message_service.create_external_connection`
-- `message_service.authenticate_external_connection_key`
-- `message_service.send_external_connection_message`
-- `message_service.read_external_connection_events`
-- `message_service.get_im_direct_conversation`
-- `message_service.get_im_message`
-- `message_service.list_im_replies`
-- `message_service.update_im_disposition`
-
-No route family was deleted. `/api/im/*` and `/api/web/im/*` remain as consumer
-surfaces.
+- Added `tools/launcher/imessage_channel.py`.
+- Added `tests/test_imessage_channel.py`.
+- Implemented sender-scoped schema version 2 state under the channel state path.
+- Implemented `/actors`, numeric selection, ordinary message delivery, per-contact route storage, per-contact outbound dedupe, and prefixed reply projection.
+- Implemented a concrete `/api/im/*` client and `imsg` client in the channel module.
+- Kept channel product semantics out of Web, HTTP router, `ExternalImSession`, and Central IM.
 
 ### Verification Commands And Results
 
 Command:
 
 ```bash
-python -m pytest tests/test_external_im_session.py -q
+python -m pytest tests/test_imessage_channel.py -q
 ```
 
 Result:
 
 ```text
-4 passed
+13 passed
 ```
 
 Command:
 
 ```bash
-python -m pytest tests/test_external_im_session.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
+python -m py_compile tools/launcher/imessage_channel.py
 ```
 
 Result:
 
 ```text
-87 passed, 81 subtests passed in 126.15s (0:02:06)
+passed
 ```
 
 Command:
 
 ```bash
-node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_source_does_not_import_central_im_internals tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_semantics_stay_out_of_web_http_and_core -q
 ```
 
 Result:
 
 ```text
-all checks passed
-```
-
-Command:
-
-```bash
-rg -n "message_service\\.(create_external_connection|authenticate_external_connection_key|send_external_connection_message|read_external_connection_events|get_im_direct_conversation|get_im_message|list_im_replies|update_im_disposition)" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
-```
-
-Result:
-
-```text
-no hits
-```
-
-Command:
-
-```bash
-rg -n "from env\\.services import messages|import messages as message_service" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
-```
-
-Result:
-
-```text
-no hits
-```
-
-Command:
-
-```bash
-python -m pytest tests/test_im_web_management_projection.py::ImWebManagementProjectionTests::test_http_and_web_projections_do_not_own_external_im_session_semantics -q
-```
-
-Result:
-
-```text
-1 passed, 30 subtests passed
+3 passed
 ```
 
 ### Acceptance Decision
 
-Stage 1 acceptance criteria are met:
+Phase 1 is accepted. Phase 2 may begin.
 
-- `ExternalImSession` is now the only HTTP/Web path that calls Central IM
-  external-session methods.
-- `/api/im/*` behavior tests pass.
-- `/api/web/im/*` behavior tests pass.
-- Web UI contract/state tests pass.
-- Scoped residue scans return no hits in HTTP/Web projection files.
-
-### Remaining Risk
-
-`ExternalImSession` is now concrete and tested, but Stage 2 still needs tighter
-projection-contract tests so future route changes do not grow product semantics
-back into HTTP/Web files.
-
-## Stage 2: Projection Contract Tightening
+## Phase 2: Web Lifecycle And Public Entry Replacement
 
 Status: accepted.
 
 ### Red Gate
 
-Added:
+Added launcher and Web lifecycle tests before implementation.
 
-- `tests/test_external_im_projection_contract.py`
-
-Red command:
-
-```bash
-python -m pytest tests/test_external_im_projection_contract.py -q
-```
-
-Red result:
+Launcher red result:
 
 ```text
-2 failed, 2 passed
-TypeError: ImHttpRouter.__init__() got an unexpected keyword argument 'im_session'
+The new test expected the iMessage top-level command to be unknown, but the launcher still dispatched into the retired parser.
 ```
 
-This was expected. The Integration router could not yet be tested as a pure
-HTTP projection with a fake session boundary.
+Web lifecycle red result:
+
+```text
+AttributeError: module 'buddyswitch_web_management' has no attribute 'serve_with_imessage_worker'
+```
 
 ### Actual Changes
 
-Created:
-
-- `tests/test_external_im_projection_contract.py`
-
-Modified:
-
-- `tools/launcher/im_http_router.py`
-
-### Deleted Or Replaced Old Paths
-
-No additional route or helper paths were deleted. Stage 2 added a test-only
-session injection point to the Integration router so projection mapping can be
-tested without calling Central IM internals.
+- Removed the retired public iMessage dispatch and help entry from `buddyswitch-codex`.
+- Deleted the retired bridge source and tests.
+- Added Web lifecycle helpers that start an iMessage worker, keep Web serving if worker startup fails, and stop the worker on shutdown.
+- Wired Web `main` to create the channel worker using the actual bound Web server URL.
+- Added background `start()` behavior to `ImessageChannelWorker`.
+- Added launcher help and unknown-command tests.
+- Added Web lifecycle and Web boundary tests.
 
 ### Verification Commands And Results
 
 Command:
 
 ```bash
-python -m pytest tests/test_external_im_projection_contract.py -q
+python -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_imessage_command_is_not_public tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_launcher_help_and_reset_flow -q
 ```
 
 Result:
 
 ```text
-4 passed
+2 passed
 ```
 
 Command:
 
 ```bash
-python -m pytest tests/test_external_im_projection_contract.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py -q
+python -m pytest tests/test_web_management.py -k imessage -q
 ```
 
 Result:
 
 ```text
-83 passed, 76 subtests passed in 126.21s (0:02:06)
+3 passed, 63 deselected
 ```
 
 Command:
 
 ```bash
-node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
-```
-
-Result:
-
-```text
-all checks passed
-```
-
-Command:
-
-```bash
-rg -n "message_service\\.(create_external_connection|authenticate_external_connection_key|send_external_connection_message|read_external_connection_events|get_im_direct_conversation|get_im_message|list_im_replies|update_im_disposition)" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
-```
-
-Result:
-
-```text
-no hits
-```
-
-Command:
-
-```bash
-rg -n "/api/im" tools/launcher/assets/web-management/app.js
+rg retired-iMessage-surface-live-token-set buddyswitch-codex tools/launcher tests docs/spec
 ```
 
 Result:
@@ -405,23 +207,9 @@ no hits
 
 ### Acceptance Decision
 
-Stage 2 acceptance criteria are met:
+Phase 2 is accepted. Phase 3 may begin.
 
-- Integration router has projection tests for auth gating and request-to-session
-  field mapping.
-- Web BFF has projection tests for browser cursor rejection, event DTO shaping,
-  and empty direct conversation shaping around the session boundary.
-- Existing behavior tests still pass.
-- Browser JS still avoids `/api/im/*`.
-- Scoped direct-call residue scans remain no-hit.
-
-### Remaining Risk
-
-The projection tests intentionally use fake sessions for HTTP/Web mapping. They
-do not replace the Stage 1 session behavior tests or the external reply-loop
-acceptance test, both of which remain part of the verification set.
-
-## Stage 3: iMessage Channel Adapter MVP
+## Phase 3: Cross-Layer Contract And Reachability Alignment
 
 Status: accepted.
 
@@ -429,82 +217,26 @@ Status: accepted.
 
 Added:
 
-- `tests/test_imessage_bridge.py`
-- `tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_imessage_bridge_command_dispatches_to_bridge_parser`
-
-Red command:
-
-```bash
-python -m pytest tests/test_imessage_bridge.py -q
-```
+- `tests/test_external_im_session.py::ExternalImSessionTests::test_session_list_and_send_reject_offline_actor_rows`
 
 Red result:
 
 ```text
-ImportError: cannot import name 'imessage_bridge' from 'tools.launcher'
-```
-
-Red launcher command:
-
-```bash
-python -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_imessage_bridge_command_dispatches_to_bridge_parser -q
-```
-
-Red result:
-
-```text
-AssertionError: 'Unknown top-level command: imessage' unexpectedly found in stderr
+The actor list still returned an offline actor row.
 ```
 
 ### Actual Changes
 
-Created:
-
-- `tools/launcher/imessage_bridge.py`
-- `tests/test_imessage_bridge.py`
-
-Modified:
-
-- `buddyswitch-codex`
-- `tests/test_buddyswitch_launcher.py`
-
-### Adapter Boundary
-
-The bridge owns:
-
-- `imsg status`;
-- local JSON state with `0600` chmod best effort;
-- `/api/im/connections` connection creation;
-- `/api/im/actors` target validation;
-- inbound `is_from_me` filtering;
-- allowlist filtering;
-- inbound row/guid dedupe;
-- inbound `POST /api/im/messages`;
-- outbound `GET /api/im/events`;
-- outbound `GET /api/im/messages/{id}`;
-- outbound `imsg send`;
-- outbound event-id send-once tracking.
-
-The bridge does not import Central IM service or repo internals.
+- Updated `ExternalImSession.list_actors` to omit blocked actor statuses.
+- Updated `ExternalImSession` target resolution so sends reject the same blocked statuses.
+- This keeps displayed actor choices and message delivery reachability aligned.
 
 ### Verification Commands And Results
 
 Command:
 
 ```bash
-python -m pytest tests/test_imessage_bridge.py -q
-```
-
-Result:
-
-```text
-8 passed
-```
-
-Command:
-
-```bash
-python -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_imessage_bridge_command_dispatches_to_bridge_parser -q
+python -m pytest tests/test_external_im_session.py::ExternalImSessionTests::test_session_list_and_send_reject_offline_actor_rows -q
 ```
 
 Result:
@@ -516,292 +248,25 @@ Result:
 Command:
 
 ```bash
-./buddyswitch-codex imessage bridge
+python -m pytest tests/test_imessage_channel.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_external_im_projection_contract.py -q
 ```
 
 Result:
 
 ```text
-argparse reached the bridge parser and reported missing --server and --target-identity-id.
+30 passed
 ```
 
 Command:
 
 ```bash
-python -m pytest tests/test_imessage_bridge.py tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_imessage_bridge_command_dispatches_to_bridge_parser tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
+python -m pytest tests/test_imessage_channel.py tests/test_buddyswitch_launcher.py tests/test_web_management.py tests/test_external_im_projection_contract.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
 ```
 
 Result:
 
 ```text
-25 passed, 5 subtests passed
-```
-
-Command:
-
-```bash
-python -m py_compile tools/launcher/imessage_bridge.py scripts/env/services/external_im_session.py tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py
-```
-
-Result:
-
-```text
-passed
-```
-
-Command:
-
-```bash
-rg -n "env\\.services\\.messages|env\\.repos\\.messages|send_im_message|send_external_connection_message|read_external_connection_events" tools/launcher/imessage_bridge.py
-```
-
-Result:
-
-```text
-no hits
-```
-
-Command:
-
-```bash
-rg -n "\\b(iMessage|imessage|imsg|chat_id|chat_identifier|chat_guid|rowid|guid|allowlist|is_from_me)\\b" scripts/env/services/messages.py scripts/env/repos/messages.py scripts/env/tool_runtime/im_client.py scripts/env/tools/message/_impl.py tools/launcher/im_wake_handler.py
-```
-
-Result:
-
-```text
-no hits
-```
-
-The unbounded version of this scan hit `retry_guidance`, which is not an
-iMessage field. The word-boundary scan is the accepted Stage 3 evidence.
-
-### Acceptance Decision
-
-Stage 3 acceptance criteria are met:
-
-- Bridge tests cover fail-fast target validation, self-message filtering,
-  allowlist rejection, inbound dedupe, inbound post, outbound send-once, restart
-  send-once, and source isolation.
-- The root launcher dispatches `imessage bridge` to the bridge parser.
-- Adapter source scan proves no Central IM service/repo imports.
-- Central IM source scan proves no iMessage-specific adapter fields in core.
-
-### Remaining Risk
-
-The bridge has fake-client coverage and command dispatch coverage. It has not
-yet been run against real Messages.app/iPhone traffic; that is Stage 4.
-
-## Stage 4: End-To-End Smoke
-
-Status: accepted.
-
-### Actual Changes
-
-Created:
-
-- `docs/spec/imessage-bridge-smoke-runbook.md`
-
-Fixed during real smoke:
-
-- Exposed the existing `/api/im/*` integration router through the real Web
-  management service, because the bridge consumes that public HTTP surface.
-- Made the bridge API client bypass environment HTTP proxies for local
-  BuddySwitch Web requests.
-- Made the long-running bridge wait for asynchronous actor replies after an
-  inbound iMessage before polling `/api/im/events`, with an HTTP timeout margin
-  beyond the long-poll window.
-
-### Automated Verification Commands And Results
-
-Command:
-
-```bash
-python -m pytest tests/test_im_external_reply_loop.py tests/test_imessage_bridge.py -q
-```
-
-Result:
-
-```text
-13 passed
-```
-
-Command:
-
-```bash
-python -m pytest tests/test_imessage_bridge.py tests/test_im_web_management_projection.py tests/test_external_im_projection_contract.py tests/test_im_http_router.py -q
-```
-
-Result after real-smoke fixes:
-
-```text
-22 passed, 30 subtests passed
-```
-
-Command:
-
-```bash
-imsg status
-```
-
-Result:
-
-```text
-imsg 0.11.1
-Basic features (send, receive, history): Available
-Advanced features (typing, read receipts): Not available
-```
-
-Command:
-
-```bash
-imsg chats --limit 1 --json
-```
-
-Result:
-
-```text
-Returned one 1:1 iMessage chat. Handles/account identifiers are intentionally redacted from this acceptance note.
-```
-
-Command:
-
-```bash
-imsg history --chat-id <redacted_chat_id> --limit 1 --json
-```
-
-Result:
-
-```text
-Returned one redacted history row for the 1:1 iMessage chat.
-```
-
-Command:
-
-```bash
-imsg watch --json
-```
-
-Result with a 2 second non-mutating timeout:
-
-```text
-watch_started=true; no stderr; no live message arrived during the timeout.
-```
-
-### Acceptance Decision
-
-Stage 4 is accepted.
-
-Machine-side real smoke passed, and the user confirmed the iPhone saw the
-reply in the same iMessage chat.
-
-Machine-side evidence from the real smoke:
-
-- `target_identity_id`: `act-market-89316cc41041`.
-- allowlisted sender: redacted `yuflo2024@...` iMessage identity.
-- first live inbound row:
-  - `chat_id`: redacted one-to-one iMessage chat.
-  - `guid`: `27B823CF-5E1C-44F6-ADF4-41FAF755038D`.
-  - `is_from_me=false`.
-  - content: `Buddyswitch smoke test 2026-06-28`.
-- first BuddySwitch message: `msg-b1549d078a93`.
-- first actor handling: message fetched and marked `absorbed`, no reply.
-- second live inbound row:
-  - `chat_id`: same redacted one-to-one iMessage chat.
-  - `guid`: `7653DB45-805C-4056-8773-256F58898952`.
-  - `is_from_me=false`.
-  - content: `Please reply exactly: Buddyswitch smoke ack 2026-06-28`.
-- second BuddySwitch message: `msg-a91192cbfcca`.
-- actor reply message: `msg-360dbc552871`.
-- outbound event consumed by bridge: `imev-48739eadd35b`.
-- local Messages history shows same-chat outbound row with `is_from_me=true`
-  and content `Buddyswitch smoke ack 2026-06-28`.
-- iPhone observation: user confirmed the same-chat reply was visible.
-
-### Required Next Evidence
-
-Stage 5 is now unblocked.
-
-### Repeated Blocker Audit
-
-Checked again at `2026-06-28T08:03:07Z`.
-
-Command:
-
-```bash
-imsg chats --limit 3 --json
-```
-
-Result:
-
-```text
-latest visible 1:1 iMessage last_message_at: 2026-06-28T06:54:35.580Z
-```
-
-Command:
-
-```bash
-imsg watch --json
-```
-
-Result with a 3 second non-mutating timeout:
-
-```text
-watch_started=true; no stderr; no live message rows arrived during the timeout.
-```
-
-Command:
-
-```bash
-python -m pytest tests/test_im_external_reply_loop.py tests/test_imessage_bridge.py -q
-```
-
-Result:
-
-```text
-13 passed
-```
-
-Conclusion: this blocker audit was superseded by the later live smoke above.
-Stage 4 is now accepted and Stage 5 is no longer gated.
-
-## Stage 5: Residue Cleanup And Documentation Closeout
-
-Status: accepted.
-
-### Actual Changes
-
-Updated:
-
-- `docs/arch/web-interface-call-architecture.md`
-- `tests/test_im_web_management_projection.py`
-- `tests/test_buddyswitch_launcher.py`
-- `buddyswitch-codex`
-
-Closeout changes:
-
-- `docs/arch/web-interface-call-architecture.md` now names
-  `External IM Session` as the shared semantic boundary for both `/api/im/*`
-  and `/api/web/im/*`.
-- Added a live-surface source scan test that rejects retired IM architecture
-  wording in the memo-required surfaces.
-- Bound `BUDDYSWITCH_STATE_ROOT` for `buddyswitch-codex imessage bridge` so
-  adapter state lands under the shared runtime state root instead of the source
-  checkout.
-- Removed the generated local bridge state file from the worktree after smoke.
-
-### Verification Commands And Results
-
-Command:
-
-```bash
-python -m pytest tests/test_external_im_session.py tests/test_external_im_projection_contract.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py tests/test_imessage_bridge.py tests/test_buddyswitch_launcher.py -q
-```
-
-Result:
-
-```text
-302 passed, 116 subtests passed
+302 passed, 86 subtests passed in 561.49s (0:09:21)
 ```
 
 Command:
@@ -819,20 +284,300 @@ passed
 Command:
 
 ```bash
-rg -n "two IM product implementations|separate IM product|Web IM routes should delegate to the message service|iMessage.*Central IM Core|Central IM.*iMessage|channel plugin|plugin framework|external-participants|/api/messages/send" tools/launcher/im_http_router.py tools/launcher/web_management.py tools/launcher/web_im_identity.py tools/launcher/assets/web-management/app.js tests/test_im_http_router.py tests/test_web_management.py tests/test_im_web_management_projection.py tests/web_management_ui_contract.test.js docs/arch/web-interface-call-architecture.md | rg -v "assertExcludes"
+python -m py_compile tools/launcher/imessage_channel.py tools/launcher/web_management.py tools/launcher/im_http_router.py scripts/env/services/external_im_session.py
 ```
 
 Result:
 
 ```text
-no hits
+passed
 ```
+
+Command:
+
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_semantics_stay_out_of_web_http_and_core tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_source_does_not_import_central_im_internals -q
+```
+
+Result:
+
+```text
+3 passed
+```
+
+### Residue Classification
+
+- Retired command, option, state-directory, helper, source, and test surfaces: no live hits in launcher, tools, tests, or `docs/spec`.
+- `target_identity_id` remains in channel code/tests only as the existing `/api/im/messages` payload field required by the Integration External IM HTTP API.
 
 ### Acceptance Decision
 
-Stage 5 is accepted.
+Phase 3 is accepted. Phase 4 may begin.
 
-The live surfaces no longer describe Web IM and Integration IM as separate
-product implementations, no live surface tells iMessage to call Central IM Core
-directly, no live surface suggests a generic channel plugin framework for this
-MVP, and the documented startup path matches the real commands.
+## Phase 4: Live Smoke And Final Acceptance
+
+Status: accepted.
+
+### Phase 4 Supplement: Outbound Send Status Confirmation
+
+Review finding:
+
+```text
+imsg send --json can return {"status":"sent"} even when the Messages.app database records:
+  error=22
+  is_sent=0
+  is_delivered=0
+  is_finished=1
+```
+
+Architecture decision:
+
+- Treat `imsg send` return code as command-submission evidence only.
+- Keep send-state interpretation inside `CommandImsgClient`, the boundary that owns `imsg` and Messages.app integration.
+- Do not move this state into Web, `/api/im/*`, `ExternalImSession`, or Central IM.
+- On a confirmed bottom-level failure, raise `ChannelError` so existing controller flow does not mark the outbound event as sent.
+- Do not require `is_delivered == 1` as the initial gate because delivery status can lag; require a route-scoped row with no send error and `is_sent == 1`.
+
+Required verification before final Phase 4 acceptance:
+
+```bash
+python -m pytest tests/test_imessage_channel.py::ImessageChannelTests::test_poll_outbound_does_not_mark_event_sent_when_imessage_send_fails tests/test_imessage_channel.py::CommandImsgClientSendStatusTests -q
+python -m pytest tests/test_imessage_channel.py -q
+python -m py_compile tools/launcher/imessage_channel.py
+```
+
+Red gate:
+
+```text
+The controller regression initially failed because the fake send client failed too early during setup; the fixture was corrected to fail only on the actor-reply outbound send.
+The send-status tests then failed with:
+  TypeError: CommandImsgClient.__init__() got an unexpected keyword argument 'messages_db_path'
+```
+
+Green evidence:
+
+```text
+python -m pytest tests/test_imessage_channel.py::ImessageChannelTests::test_poll_outbound_does_not_mark_event_sent_when_imessage_send_fails tests/test_imessage_channel.py::CommandImsgClientSendStatusTests -q
+-> 3 passed
+
+python -m pytest tests/test_imessage_channel.py -q
+-> 16 passed
+
+python -m py_compile tools/launcher/imessage_channel.py
+-> passed
+
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_semantics_stay_out_of_web_http_and_core tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_source_does_not_import_central_im_internals -q
+-> 3 passed
+
+python -m pytest tests/test_imessage_channel.py tests/test_buddyswitch_launcher.py tests/test_web_management.py tests/test_external_im_projection_contract.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
+-> 305 passed, 86 subtests passed in 547.28s (0:09:07)
+```
+
+Follow-up live finding:
+
+```text
+row 26750 briefly appeared as error=0,is_sent=0,is_delivered=0,is_finished=1,
+then updated to error=0,is_sent=1,is_delivered=1,is_finished=1.
+```
+
+Follow-up fix:
+
+- Added `test_send_keeps_polling_transient_finished_unsent_row_without_error`.
+- Kept polling no-error unsent rows until success or timeout.
+- Kept immediate failure only for `error != 0`.
+
+Follow-up verification:
+
+```text
+python -m pytest tests/test_imessage_channel.py::CommandImsgClientSendStatusTests -q
+-> 3 passed
+
+python -m pytest tests/test_imessage_channel.py -q
+-> 17 passed
+
+python -m py_compile tools/launcher/imessage_channel.py
+-> passed
+
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_semantics_stay_out_of_web_http_and_core tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_source_does_not_import_central_im_internals -q
+-> 3 passed
+```
+
+### Live Apple ID A Smoke Evidence
+
+Command:
+
+```bash
+./buddyswitch-codex instance resume act-market-d627587226e7 --json
+./buddyswitch-codex web --port 8765
+```
+
+Result:
+
+```text
+Actor act-market-d627587226e7 resumed as active.
+Web Management listened on http://127.0.0.1:8765.
+Web-owned imsg watch process was running.
+/api/health returned {"ok": true}.
+/api/im/actors returned act-market-d627587226e7 as the active selectable actor.
+```
+
+Manual iMessage flow from Apple ID A, redacted `y***@126.com`:
+
+```text
+/actors
+-> [1] market act-market-d627587226e7
+
+1
+-> act-market-d627587226e7
+
+Please reply exactly: BuddySwitch channel smoke ack 2026-06-29
+-> [Message From act-market-d627587226e7]
+
+   BuddySwitch channel smoke ack 2026-06-29
+```
+
+Runtime evidence:
+
+```text
+Inbound iMessage GUID: 246638FB-F337-42D8-93E0-5EC226B9154C
+Central IM inbound message: msg-630b82bd3b33
+Central IM reply message: msg-cd2e190c3d70
+Outbound reply event: imev-c9eb5a77e666
+Inbound disposition after actor processing: replied
+Channel route: msg-630b82bd3b33 -> chat_id 3211
+Channel outbound dedupe: imev-c9eb5a77e666
+```
+
+Source memo coverage proven by this smoke:
+
+- `./buddyswitch-codex web` owns the iMessage worker lifecycle.
+- `/actors` stays in the iMessage channel and returns `[n] role_id actor_id`.
+- Numeric selection updates iMessage private active actor state.
+- Ordinary iMessage content is delivered to the selected actor through `/api/im/messages`.
+- Actor reply returns through `/api/im/events`.
+- iMessage outbound projection wraps the reply with `[Message From act-...]`.
+- The reply returns to the same iMessage chat route.
+
+### Remaining Live Smoke Gap
+
+Resolved. Apple ID B live isolation passed at the Messages.app boundary.
+
+Earlier same-iPhone email-alias attempts did not satisfy B isolation because macOS exposed them as the existing redacted `y***@126.com` sender in chat `3211`.
+The accepted B sender was exposed by macOS as redacted `h***@126.com` in chat `3213`.
+
+Live channel state proved separate:
+
+- A sender key: `sender:yuflo2024@126.com`.
+- B sender key: `sender:hblouis@126.com`.
+- A and B have different connection keys.
+- A and B have separate active actor state.
+- A and B have separate route storage.
+- A and B have separate seen inbound keys.
+- A and B have separate outbound event ids.
+
+### Actual Changes
+
+- Added `docs/spec/imessage-channel-smoke-runbook.md`.
+- Removed the stale standalone smoke runbook.
+
+### Current Evidence
+
+Automated channel, Web lifecycle, External IM, reply-loop, product-core, Node UI, compile, and residue gates pass.
+
+Manual Apple ID A smoke passed in this session and is recorded above.
+
+Manual Apple ID B smoke passed in this session and is recorded below.
+
+Smoke-readiness checks on 2026-06-29:
+
+- `imsg` is installed at `/opt/homebrew/bin/imsg`.
+- `imsg status` reports basic send, receive, and history available.
+- `imsg chats --limit 1 --json` can read a 1:1 iMessage chat.
+- `./buddyswitch-codex web --port 18765` starts and serves `/api/health`.
+- `/api/im/connections` works through the Web-managed service.
+- With a temporary market actor running, `/api/im/actors` returned one active actor.
+- The temporary actor and Web server were stopped after the readiness check.
+
+### Live Apple ID B Smoke Evidence
+
+Web lifecycle:
+
+```text
+Web Management listened on http://127.0.0.1:8765.
+Web-owned imsg watch process was running.
+/api/health returned {"ok": true}.
+Actor act-market-d627587226e7 was active and idle.
+```
+
+Manual iMessage flow from Apple ID B, redacted `h***@126.com`, chat `3213`:
+
+```text
+helo
+-> Send /actors to choose an actor.
+
+/actors
+-> [1] market act-market-d627587226e7
+
+1
+-> act-market-d627587226e7
+
+Please reply exactly: Buddyswitch B route smoke ack 2026-06-29
+-> [Message From act-market-d627587226e7]
+
+   Buddyswitch B route smoke ack 2026-06-29
+```
+
+Runtime evidence:
+
+```text
+B inbound ordinary iMessage GUID: 40CDB621-CCAC-4CEE-8202-EF2D1400DB66
+B Central IM inbound message: msg-ddb94d601124
+B outbound reply event: imev-99ac12f48856
+B route: msg-ddb94d601124 -> chat_id 3213
+B outbound iMessage row: 26760, error=0,is_sent=1,is_delivered=1,is_finished=1
+B outbound dedupe: imev-99ac12f48856
+```
+
+Source memo coverage additionally proven by B smoke:
+
+- A second live sender created a distinct contact and connection.
+- The second live sender used its own actor selection state.
+- The second live sender's ordinary message routed to the selected actor.
+- The actor reply returned to the second sender's original iMessage chat.
+- A and B state did not cross at the Messages.app boundary.
+
+### Acceptance Decision
+
+Final post-smoke verification:
+
+```text
+python -m pytest tests/test_imessage_channel.py tests/test_buddyswitch_launcher.py tests/test_web_management.py tests/test_external_im_projection_contract.py tests/test_external_im_session.py tests/test_im_http_router.py tests/test_im_external_reply_loop.py tests/test_im_product_core.py -q
+-> 306 passed, 86 subtests passed in 550.50s (0:09:10)
+
+node tests/web_management_ui_state.test.js && node tests/web_management_ui_contract.test.js
+-> passed
+
+python -m py_compile tools/launcher/imessage_channel.py tools/launcher/web_management.py tools/launcher/im_http_router.py scripts/env/services/external_im_session.py
+-> passed
+
+python -m pytest tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_semantics_stay_out_of_web_http_and_core tests/test_imessage_channel.py::ImessageChannelResidueTests::test_channel_source_does_not_import_central_im_internals -q
+-> 3 passed
+```
+
+Cleanup evidence:
+
+```text
+./buddyswitch-codex instance stop act-market-d627587226e7 --json
+-> {"actor_id": "act-market-d627587226e7", "status": "inactive"}
+
+ps scan for "buddyswitch-codex web --port 8765", "web_management.py --port 8765", and "imsg watch --json"
+-> no hits
+
+lsof -nP -iTCP:8765 -sTCP:LISTEN
+-> no listener
+
+./buddyswitch-codex instance status act-market-d627587226e7 --json
+-> status inactive; app_server healthy false; daemon live false
+```
+
+Phase 4 is accepted. The source memo target is proven end to end.

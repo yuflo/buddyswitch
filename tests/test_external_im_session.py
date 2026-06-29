@@ -174,6 +174,24 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(unreachable["error"]["code"], "E_IM_PAYLOAD")
         self.assertIn("not a reachable actor identity", unreachable["error"]["message"])
 
+    def test_session_list_and_send_reject_offline_actor_rows(self) -> None:
+        offline_actor = self._actor_address(role="market", label="offline")
+        session = self._session([{"actor_address": offline_actor, "status": "offline"}])
+        _key, connection, _participant = self._connection(session)
+
+        actors = session.list_actors(role_id=None)
+        sent = session.send_message(
+            connection=connection,
+            target_identity_id=offline_actor["actor_id"],
+            content="ping",
+            reply_to=None,
+        )
+
+        self.assertEqual(actors["actors"], [])
+        self.assertFalse(sent.get("ok"), msg=sent)
+        self.assertEqual(sent["error"]["code"], "E_IM_PAYLOAD")
+        self.assertIn("not a reachable actor identity", sent["error"]["message"])
+
     def test_session_reads_actor_reply_once_without_client_cursor(self) -> None:
         actor_address = self._actor_address()
         session = self._session([{"actor_address": actor_address, "status": "online"}])

@@ -26,6 +26,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import web_im_identity
 import im_http_router
+import imessage_channel
 from env.domain import task_management, track_read
 from env.repos import runtime_files
 from env.services import external_im_session
@@ -241,6 +242,31 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
             self.wfile.write(body)
 
     return WebManagementServer((host, port), Handler)
+
+
+def create_imessage_channel_worker(server_url: str) -> imessage_channel.ImessageChannelWorker:
+    config = imessage_channel.ChannelConfig(server=server_url)
+    controller = imessage_channel.ImessageChannelController(config=config)
+    return imessage_channel.ImessageChannelWorker(controller)
+
+
+def serve_with_imessage_worker(server: Any, worker: Any) -> None:
+    worker_started = False
+    try:
+        try:
+            worker.start()
+            worker_started = True
+        except Exception as exc:
+            sys.stderr.write(f"iMessage channel worker disabled: {exc}\n")
+            sys.stderr.flush()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    finally:
+        if worker_started:
+            worker.stop()
+        server.server_close()
 
 
 class WebManagementService:
@@ -1111,12 +1137,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     server = create_server(args.host, args.port, service)
     print(f"BuddySwitch web management listening on http://{args.host}:{server.server_port}", flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    worker = create_imessage_channel_worker(f"http://{args.host}:{server.server_port}")
+    serve_with_imessage_worker(server, worker)
     return 0
 
 

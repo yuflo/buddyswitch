@@ -240,6 +240,89 @@ class WebManagementUnitTests(unittest.TestCase):
         self.assertLess(run_index, stop_index)
         self.assertIn('return "${status}"', block)
 
+    def test_serve_with_imessage_worker_starts_stops_and_closes_server(self) -> None:
+        class StopServer(Exception):
+            pass
+
+        class FakeServer:
+            def __init__(self) -> None:
+                self.served = False
+                self.closed = False
+
+            def serve_forever(self) -> None:
+                self.served = True
+                raise StopServer()
+
+            def server_close(self) -> None:
+                self.closed = True
+
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.started = 0
+                self.stopped = 0
+
+            def start(self) -> None:
+                self.started += 1
+
+            def stop(self) -> None:
+                self.stopped += 1
+
+        server = FakeServer()
+        worker = FakeWorker()
+
+        with self.assertRaises(StopServer):
+            WEB_MANAGEMENT.serve_with_imessage_worker(server, worker)
+
+        self.assertTrue(server.served)
+        self.assertTrue(server.closed)
+        self.assertEqual(worker.started, 1)
+        self.assertEqual(worker.stopped, 1)
+
+    def test_serve_with_imessage_worker_keeps_server_available_when_worker_start_fails(self) -> None:
+        class StopServer(Exception):
+            pass
+
+        class FakeServer:
+            def __init__(self) -> None:
+                self.served = False
+                self.closed = False
+
+            def serve_forever(self) -> None:
+                self.served = True
+                raise StopServer()
+
+            def server_close(self) -> None:
+                self.closed = True
+
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.stopped = 0
+
+            def start(self) -> None:
+                raise RuntimeError("imsg unavailable")
+
+            def stop(self) -> None:
+                self.stopped += 1
+
+        server = FakeServer()
+        worker = FakeWorker()
+
+        with mock.patch("sys.stderr") as stderr, self.assertRaises(StopServer):
+            WEB_MANAGEMENT.serve_with_imessage_worker(server, worker)
+
+        self.assertTrue(server.served)
+        self.assertTrue(server.closed)
+        self.assertEqual(worker.stopped, 0)
+        stderr.write.assert_any_call("iMessage channel worker disabled: imsg unavailable\n")
+
+    def test_web_management_source_does_not_parse_imessage_control_messages(self) -> None:
+        source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
+
+        self.assertNotRegex(source, r"""["']/actors["']""")
+        self.assertNotIn("pending_actor_choices", source)
+        self.assertNotIn("active_actor_id", source)
+        self.assertNotIn("[Message From", source)
+
     def test_web_runtime_binds_shared_state_for_server_owned_web_im_identity(self) -> None:
         from env.repos import runtime_files
 

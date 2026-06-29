@@ -12,6 +12,7 @@ from env.tool_runtime.actor_profile import ActorAddress
 
 ActorLister = Callable[[str | None], list[dict[str, Any]]]
 WakeActor = Callable[[dict[str, Any]], dict[str, Any]]
+BLOCKED_ACTOR_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
 
 
 def _payload_error(message: str) -> dict[str, Any]:
@@ -61,6 +62,8 @@ class ExternalImSession:
             except ValueError:
                 continue
             status = row.get("status") if isinstance(row.get("status"), str) else "online"
+            if status in BLOCKED_ACTOR_STATUSES:
+                continue
             actors.append(
                 {
                     "identity": {"id": normalized_address["actor_id"], "type": "actor"},
@@ -164,7 +167,9 @@ class ExternalImSession:
                 normalized_address = ActorAddress.from_payload(actor_address).to_payload()
             except ValueError:
                 continue
+            status = row.get("status") if isinstance(row.get("status"), str) else "online"
+            if status in BLOCKED_ACTOR_STATUSES:
+                continue
             if normalized_address["actor_id"] == identity_id:
                 return {"ok": True, "participant": {"kind": "actor", "actor_address": normalized_address}}
         return _payload_error(f"{field} is not a reachable actor identity: {identity_id}")
-
