@@ -383,6 +383,27 @@ def unique_page_target_for_url(browser_url: str, target_url: str) -> str | None:
     return str(matches[0])
 
 
+def _new_page_target_ids(before_targets: list[Any], after_targets: list[Any]) -> list[str]:
+    before_ids: set[str] = set()
+    for target in before_targets:
+        if not isinstance(target, dict) or target.get("type") != "page":
+            continue
+        for key in ("id", "targetId"):
+            target_id = target.get(key)
+            if isinstance(target_id, str) and target_id.strip():
+                before_ids.add(target_id.strip())
+
+    new_ids: list[str] = []
+    for target in after_targets:
+        if not isinstance(target, dict) or target.get("type") != "page":
+            continue
+        for key in ("id", "targetId"):
+            target_id = target.get(key)
+            if isinstance(target_id, str) and target_id.strip() and target_id.strip() not in before_ids:
+                new_ids.append(target_id.strip())
+    return new_ids
+
+
 def _tool_response_succeeded(message: dict[str, Any]) -> bool:
     result = message.get("result")
     return isinstance(result, dict) and result.get("isError") is not True
@@ -399,12 +420,12 @@ def patch_tool_response_page_use_metadata(
     page_hint = metadata.get("page_hint")
     if isinstance(page_hint, str) and page_hint:
         patched = patch_tool_response_hint(patched, page_hint)
-    if not _tool_response_succeeded(message):
+    kind = metadata.get("kind")
+    if kind != "new_page" and not _tool_response_succeeded(message):
         return patched
     root = _instance_root_path(instance_root)
     if root is None:
         return patched
-    kind = metadata.get("kind")
     if kind == "select_page":
         page_id = metadata.get("page_id")
         target_id: str | None = None
@@ -468,13 +489,23 @@ def patch_tool_response_page_use_metadata(
     before_targets = metadata.get("before_targets")
     target_url = metadata.get("target_url")
     if not isinstance(before_targets, list) or not isinstance(target_url, str) or not target_url:
-        return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
+        return patched
     target_id: str | None = None
     try:
         after_targets = browser_lifecycle.read_page_targets(browser_url)
         target_id = browser_lifecycle.new_page_target_id(before_targets, after_targets)
         if target_id is None:
-            return patch_tool_response_hint(patched, "Browser page idle not refreshed.")
+            if not _new_page_target_ids(before_targets, after_targets):
+                return patched
+            return tool_error_response(
+                message,
+                _lifecycle_error_text(
+                    "new_page",
+                    browser_lifecycle.BrowserLifecycleError(
+                        "created browser target was not uniquely resolved after upstream response"
+                    ),
+                ),
+            )
         hint = _refresh_current_idle_hint(
             root=root,
             target_id=target_id,
