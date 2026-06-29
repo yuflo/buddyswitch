@@ -160,7 +160,8 @@ def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     )
     instruction = task_sys.parent_handoff_instruction(str(result.get("task_id") or ""))
     parent_runtime = _execute_parent_instruction(context, instruction)
-    task = task_sys.get_task(str(result.get("task_id") or ""))
+    started = task_sys.record_parent_handoff_started(str(result.get("task_id") or ""))
+    task = started.get("task") if isinstance(started.get("task"), dict) else task_sys.get_task(str(result.get("task_id") or ""))
     handoff_result = dict(result, task=task)
     return _success(
         "need_parent",

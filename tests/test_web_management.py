@@ -372,16 +372,6 @@ class WebManagementUnitTests(unittest.TestCase):
                 "LIFECYCLE_BLOCKED",
             ),
             (
-                WEB_MANAGEMENT.CommandResult(
-                    returncode=1,
-                    stdout="",
-                    stderr="Instance input blocked: active turn is not healthy",
-                    timed_out=False,
-                ),
-                409,
-                "LIFECYCLE_BLOCKED",
-            ),
-            (
                 WEB_MANAGEMENT.CommandResult(returncode=1, stdout="", stderr="internal error", timed_out=True),
                 504,
                 "COMMAND_TIMEOUT",
@@ -1038,104 +1028,18 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(status, 502)
         self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
 
-    def test_input_route_rejects_empty_text(self) -> None:
+    def test_input_route_returns_404_without_launcher_call(self) -> None:
         runner, base_url = self._start_server()
+        removed_route = "/".join(("", "api", "instances", "act-pm-demo", "input"))
         status, payload = self._request_json(
             base_url,
             method="POST",
-            path="/api/instances/act-pm-demo/input",
-            payload={"text": "   "},
+            path=removed_route,
+            payload={"text": "Advance the brief"},
         )
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["error"]["code"], "NOT_FOUND")
         self.assertEqual(runner.calls, [])
-
-    def test_input_route_delegates_and_reports_task_sys_task(self) -> None:
-        for command_payload in (
-            {
-                "actor_id": "act-pm-demo",
-                "role_id": "pm",
-                "thread_id": "thread-demo",
-                "action": "task_created",
-                "task_id": "task-user-input-web",
-                "instruction_type": "start_side",
-            },
-            {
-                "actor_id": "act-pm-demo",
-                "role_id": "pm",
-                "thread_id": "thread-demo",
-                "action": "task_created",
-                "task_id": "task-user-input-web-2",
-                "instruction_type": "start_side",
-            },
-        ):
-            with self.subTest(command_payload=command_payload):
-                runner = FakeRunner()
-                runner.add(
-                    [
-                        "instance",
-                        "input",
-                        "act-pm-demo",
-                        "--text",
-                        "Advance the brief",
-                        "--json",
-                    ],
-                    WEB_MANAGEMENT.CommandResult(
-                        returncode=0,
-                        stdout=json.dumps(command_payload, ensure_ascii=True),
-                        stderr="",
-                        timed_out=False,
-                    ),
-                )
-                runner.add(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    WEB_MANAGEMENT.CommandResult(
-                        returncode=0,
-                        stdout=json.dumps(
-                            {
-                                "actor_id": "act-pm-demo",
-                                "role": "pm",
-                                "status": "active",
-                                "workspace_dir": "/tmp/shared/instances/act-pm-demo/workspace",
-                                "browser_port": 9222,
-                                "updated_at": "2026-05-24T10:00:00Z",
-                                "thread_id": "thread-demo",
-                                "app_server": {"healthy": True},
-                                "thread": {"status": "idle", "raw": {}},
-                            },
-                            ensure_ascii=True,
-                        ),
-                        stderr="",
-                        timed_out=False,
-                    ),
-                )
-                _, base_url = self._start_server(runner)
-                status, payload = self._request_json(
-                    base_url,
-                    method="POST",
-                    path="/api/instances/act-pm-demo/input",
-                    payload={"text": "Advance the brief"},
-                )
-                self.assertEqual(status, 200)
-                self.assertEqual(payload["action"], "task_created")
-                self.assertEqual(payload["task_id"], command_payload["task_id"])
-                self.assertEqual(payload["instruction_type"], "start_side")
-                self.assertNotIn("turn_id", payload)
-                self.assertNotIn("expected_turn_id", payload)
-                self.assertEqual(
-                    runner.calls,
-                    [
-                        [
-                            "instance",
-                            "input",
-                            "act-pm-demo",
-                            "--text",
-                            "Advance the brief",
-                            "--json",
-                        ],
-                        ["instance", "status", "act-pm-demo", "--json"],
-                    ],
-                )
 
     def test_web_management_does_not_write_message_rows_or_construct_signals(self) -> None:
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
@@ -1148,6 +1052,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             "message." + "available",
             "signal_id",
             "daemon_client.deliver_signal",
+            "Instance " + "input blocked:",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
@@ -1886,73 +1791,6 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
         self.assertEqual(runner.calls, [])
-
-    def test_user_input_does_not_use_internal_bootstrap_marker(self) -> None:
-        runner = OrderedRunner(
-            [
-                CommandStep(
-                    [
-                        "instance",
-                        "input",
-                        "act-pm-demo",
-                        "--text",
-                        "User task",
-                        "--json",
-                    ],
-                    command_json(
-                        {
-                            "actor_id": "act-pm-demo",
-                            "role_id": "pm",
-                            "thread_id": "thread-1",
-                            "action": "task_created",
-                            "task_id": "task-user-input-web",
-                            "instruction_type": "start_side",
-                        }
-                    ),
-                ),
-                CommandStep(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    command_json(active_status("act-pm-demo", "thread-1", "active")),
-                ),
-            ]
-        )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
-
-        status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/input", b'{"text":"User task"}')
-
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["task_id"], "task-user-input-web")
-        self.assertNotIn("turn_id", payload)
-        self.assertNotIn("Initialize this " "BuddySwitch thread", json.dumps(runner.calls))
-        self.assertNotIn("[BuddySwitch internal bootstrap marker]", json.dumps(runner.calls))
-
-    def test_input_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
-        runner = FakeRunner()
-        runner.add(
-            [
-                "instance",
-                "input",
-                "act-pm-demo",
-                "--text",
-                "Advance the brief",
-                "--json",
-            ],
-            WEB_MANAGEMENT.CommandResult(
-                returncode=0,
-                stdout="{bad json",
-                stderr="",
-                timed_out=False,
-            ),
-        )
-        _, base_url = self._start_server(runner)
-        status, payload = self._request_json(
-            base_url,
-            method="POST",
-            path="/api/instances/act-pm-demo/input",
-            payload={"text": "Advance the brief"},
-        )
-        self.assertEqual(status, 502)
-        self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
 
     def test_interrupt_route_delegates_and_parses_turn_id(self) -> None:
         runner = FakeRunner()

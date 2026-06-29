@@ -166,10 +166,22 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("task-user-input-abcdef123456", text)
         self.assertIn("task_sys.close", text)
         self.assertIn("task_sys.need_parent", text)
-        self.assertNotIn("[IM MESSAGE TRIAGE]", text)
-        self.assertNotIn("[TRACK COMMENT TRIAGE]", text)
+        self.assertIn("Core policy: decide by required resources.", text)
+        self.assertIn("Allowed side resources:", text)
+        self.assertIn("Forbidden side resources:", text)
+        self.assertIn("message.send(reply_to=source_message_id", text)
+        self.assertIn("message.mark(message_id=source_message_id, disposition=absorbed)", text)
+        self.assertIn("Do not call task_sys.need_parent merely because a user-facing reply is needed.", text)
+        self.assertIn("Track shared state, including comments", text)
+        self.assertIn("browser session, web search, webpage reading, evidence gathering, or research loops", text)
+        self.assertIn("source files, git, config, dependencies, tests, builds, app runtime, or workspace state", text)
+        self.assertIn("artifacts, evidence, durable deliverables", text)
+        self.assertIn("checkpoint state or task_sys.checkpoint_update", text)
+        self.assertIn("Finish this frame with exactly one Task Sys side result", text)
+        self.assertNotIn("[IM MESSAGE " + "TRIAGE]", text)
+        self.assertNotIn("[TRACK COMMENT " + "TRIAGE]", text)
         self.assertNotIn("submit parent", text.lower())
-        self.assertNotIn("side_interrupt", text)
+        self.assertNotIn("side_" + "interrupt", text)
 
     def test_execute_start_side_instruction_uses_physical_side_start(self) -> None:
         context = self._context()
@@ -239,7 +251,7 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("Task Sys source:", text)
         self.assertIn("Parent handoff params:", text)
         self.assertIn("Draft the brief in parent.", text)
-        self.assertNotIn("[MESSAGE NEEDS PARENT]", text)
+        self.assertNotIn("[MESSAGE NEEDS " + "PARENT]", text)
         self.assertNotIn("[TRACK COMMENT", text)
 
     def test_render_checkpoint_frame_is_task_sys_scoped_without_legacy_prompt(self) -> None:
@@ -328,6 +340,61 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "submit_turn"])
         self.assertEqual(calls[0]["thread_id"], "thr-main")
         self.assertIn("task_sys.parent_frame", calls[1]["text"])
+
+    def test_execute_interrupt_submit_parent_idle_parent_submits_without_interrupted_turn(self) -> None:
+        context = self._context()
+        calls: list[dict[str, Any]] = []
+        original_submit = self.module.launcher_submit_turn.submit_turn
+        original_interrupt = self.module.app_server.interrupt_turn
+
+        def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
+            calls.append({"helper": "interrupt_turn", "socket_path": socket_path, "thread_id": thread_id})
+            raise self.module.app_server.AppServerUnavailableError("thread thr-main has no active in-progress turn")
+
+        def fake_submit_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"helper": "submit_turn", **kwargs})
+            return {"turn_id": "turn-parent-idle"}
+
+        self.addCleanup(setattr, self.module.launcher_submit_turn, "submit_turn", original_submit)
+        self.addCleanup(setattr, self.module.app_server, "interrupt_turn", original_interrupt)
+        self.module.launcher_submit_turn.submit_turn = fake_submit_turn
+        self.module.app_server.interrupt_turn = fake_interrupt_turn
+
+        result = self.module.execute_instruction(context, self._parent_instruction(interrupt=True))
+
+        self.assertEqual(result["action"], "interrupt_submit_parent")
+        self.assertEqual(result["turn_id"], "turn-parent-idle")
+        self.assertNotIn("interrupted_turn_id", result)
+        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "submit_turn"])
+        self.assertIn("task_sys.parent_frame", calls[1]["text"])
+
+    def test_execute_interrupt_submit_parent_no_active_turn_race_submits_without_interrupted_turn(self) -> None:
+        context = self._context()
+        calls: list[dict[str, Any]] = []
+        original_submit = self.module.launcher_submit_turn.submit_turn
+        original_interrupt = self.module.app_server.interrupt_turn
+
+        def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
+            calls.append({"helper": "interrupt_turn", "socket_path": socket_path, "thread_id": thread_id})
+            raise self.module.app_server.AppServerUnavailableError(
+                "thread thr-main is active but no in-progress turn was found"
+            )
+
+        def fake_submit_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"helper": "submit_turn", **kwargs})
+            return {"turn_id": "turn-parent-race"}
+
+        self.addCleanup(setattr, self.module.launcher_submit_turn, "submit_turn", original_submit)
+        self.addCleanup(setattr, self.module.app_server, "interrupt_turn", original_interrupt)
+        self.module.launcher_submit_turn.submit_turn = fake_submit_turn
+        self.module.app_server.interrupt_turn = fake_interrupt_turn
+
+        result = self.module.execute_instruction(context, self._parent_instruction(interrupt=True))
+
+        self.assertEqual(result["action"], "interrupt_submit_parent")
+        self.assertEqual(result["turn_id"], "turn-parent-race")
+        self.assertNotIn("interrupted_turn_id", result)
+        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "submit_turn"])
 
 
 if __name__ == "__main__":

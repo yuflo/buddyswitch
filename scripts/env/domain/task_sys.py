@@ -323,6 +323,20 @@ def parent_handoff_instruction(task_id: str) -> dict[str, Any]:
         raise ValueError("task must be in needs_parent status before parent handoff")
     params = _require_mapping(record.get("parent_handoff_params"), "task.parent_handoff_params")
     instruction_type = "interrupt_submit_parent" if params.get("interrupt") is True else "submit_parent"
+    return runtime_instruction(
+        instruction_type,
+        task_id=normalized_task_id,
+        actor_target=_normalize_actor_target(record.get("actor_target")),
+        frame=_parent_frame(record),
+    )
+
+
+def record_parent_handoff_started(task_id: str) -> dict[str, Any]:
+    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    record = _load_task(normalized_task_id)
+    if record.get("status") != "needs_parent":
+        raise ValueError("task must be in needs_parent status before parent processing starts")
+    _require_mapping(record.get("parent_handoff_params"), "task.parent_handoff_params")
     now = runtime_files.now_iso()
     record.update(
         {
@@ -332,12 +346,7 @@ def parent_handoff_instruction(task_id: str) -> dict[str, Any]:
         }
     )
     persisted = _persist_task(record)
-    return runtime_instruction(
-        instruction_type,
-        task_id=normalized_task_id,
-        actor_target=_normalize_actor_target(persisted.get("actor_target")),
-        frame=_parent_frame(persisted),
-    )
+    return {"ok": True, "task_id": normalized_task_id, "task": persisted}
 
 
 def record_checkpoint_update(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:

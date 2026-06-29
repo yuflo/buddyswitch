@@ -153,8 +153,6 @@ def map_command_failure(command_label: str, result: CommandResult) -> HttpError:
         return HttpError(status=400, code="INVALID_REQUEST", message=message)
     if result.returncode == 3:
         return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=message)
-    if result.returncode == 1 and result.stderr.startswith("Instance input blocked:"):
-        return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=message)
     return HttpError(status=502, code="COMMAND_FAILED", message=message)
 
 
@@ -355,8 +353,6 @@ class WebManagementService:
             return 200, {"ok": True, "instance": self._get_instance_status(actor_id)}
         if method == "POST" and action == "clear":
             return 200, self._clear(actor_id)
-        if method == "POST" and action == "input":
-            return 200, self._send_input(actor_id, body)
         if method == "POST" and action == "side":
             return 200, self._side(actor_id, body)
         if method == "POST" and action == "side-close":
@@ -379,8 +375,6 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/status")], "status"
         if path.startswith(status_prefix) and path.endswith("/clear"):
             return path[len(status_prefix) : -len("/clear")], "clear"
-        if path.startswith(status_prefix) and path.endswith("/input"):
-            return path[len(status_prefix) : -len("/input")], "input"
         if path.startswith(status_prefix) and path.endswith("/side/close"):
             return path[len(status_prefix) : -len("/side/close")], "side-close"
         if path.startswith(status_prefix) and path.endswith("/side"):
@@ -543,30 +537,6 @@ class WebManagementService:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for role {role}.")
         return {"ok": True, "actor_id": actor_id, "instance": self._get_instance_status(actor_id)}
 
-    def _send_input(self, actor_id: str, body: bytes) -> dict[str, Any]:
-        payload = self._parse_json_body(body)
-        text = payload.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._send_input_under_lock(actor_id, text),
-        )
-
-    def _send_input_under_lock(self, actor_id: str, text: str) -> dict[str, Any]:
-        parsed = self._run_input_command(actor_id, text, timeout_seconds=60)
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
-        action = parsed.get("action")
-        task_id = parsed.get("task_id")
-        instruction_type = parsed.get("instruction_type")
-        if isinstance(action, str):
-            payload["action"] = action
-        if isinstance(task_id, str):
-            payload["task_id"] = task_id
-        if isinstance(instruction_type, str):
-            payload["instruction_type"] = instruction_type
-        return payload
-
     def _clear(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
             f"instance:{actor_id}",
@@ -587,16 +557,6 @@ class WebManagementService:
         if isinstance(thread_id, str):
             payload["thread_id"] = thread_id
         return payload
-
-    def _run_input_command(self, actor_id: str, text: str, *, timeout_seconds: float) -> dict[str, Any]:
-        result = self._run_command(
-            ["instance", "input", actor_id, "--text", text, "--json"],
-            timeout_seconds=timeout_seconds,
-        )
-        return load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance input for {actor_id}.",
-        )
 
     def _run_side_command(
         self,

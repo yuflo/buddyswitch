@@ -41,6 +41,12 @@ class _TaskSysToolContext(dict):
         raise AssertionError("task_sys.need_parent must not submit raw parent prompts")
 
 
+class _FailingTaskSysToolContext(_TaskSysToolContext):
+    def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
+        self.instructions.append(instruction)
+        raise RuntimeError("parent runtime failed before submit")
+
+
 class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _envelope(self) -> dict[str, Any]:
         return {
@@ -162,6 +168,33 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         record = self._task_record(task_id)
         self.assertEqual(record["status"], "parent_processing")
         self.assertEqual(record["active_processor"], "parent")
+
+    def test_task_sys_need_parent_tool_leaves_task_parent_ready_when_parent_runtime_fails(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        impl = importlib.import_module("env.tools.task_sys._impl")
+        context = _FailingTaskSysToolContext()
+
+        with self.assertRaisesRegex(RuntimeError, "parent runtime failed before submit"):
+            impl.invoke(
+                action="need_parent",
+                args={
+                    "task_id": task_id,
+                    "params": {
+                        "parent_frame_context": {"next": "Draft in parent."},
+                        "relation": "Side needs parent work.",
+                        "interrupt": True,
+                    },
+                },
+                context=context,
+            )
+
+        self.assertEqual(len(context.instructions), 1)
+        instruction = context.instructions[0]
+        self.assertEqual(instruction["type"], "interrupt_submit_parent")
+        record = self._task_record(task_id)
+        self.assertEqual(record["status"], "needs_parent")
+        self.assertIsNone(record["active_processor"])
 
 
 if __name__ == "__main__":

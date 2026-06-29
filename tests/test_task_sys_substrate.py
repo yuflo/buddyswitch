@@ -145,7 +145,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 frame=frame,
             )
 
-    def test_parent_instruction_from_need_parent_task_uses_handoff_interrupt_param(self) -> None:
+    def test_parent_instruction_from_need_parent_task_stays_parent_ready_until_runtime_start(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
         task_sys.record_side_result(
@@ -183,6 +183,29 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "ordering": {"priority": "normal"},
             },
         )
+        persisted = json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
+        self.assertEqual(persisted["status"], "needs_parent")
+        self.assertIsNone(persisted["active_processor"])
+
+    def test_record_parent_handoff_started_marks_parent_processing(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_sys.record_side_result(
+            task_id,
+            {
+                "outcome": "need_parent",
+                "params": {
+                    "parent_frame_context": {"next": "Draft the brief in parent."},
+                    "relation": "User input requires main-thread work.",
+                    "interrupt": True,
+                },
+            },
+        )
+
+        result = task_sys.record_parent_handoff_started(task_id)
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(result["task_id"], task_id)
         persisted = json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
         self.assertEqual(persisted["status"], "parent_processing")
         self.assertEqual(persisted["active_processor"], "parent")

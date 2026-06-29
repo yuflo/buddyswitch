@@ -98,14 +98,137 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
     return "\n\n".join(
         (
             "task_sys.side_frame",
+            "You are processing exactly one Task Sys side frame.",
+            (
+                "The inherited parent thread history is reference context only. The active task is only the task "
+                "described in this frame. Do not continue inherited parent-thread work, plans, tool calls, approvals, "
+                "edits, or requests."
+            ),
             f"Task id: {task_id}",
             "Task Sys source:",
             _json_block(_require_mapping(payload.get("source"), "frame.source")),
             "Task Sys context:",
             _json_block(_require_mapping(payload.get("context"), "frame.context")),
+            "Core policy: decide by required resources.",
+            (
+                "A side thread may handle the task only when completion requires this task_sys.side_frame, exact "
+                "source objects referenced by this frame, bounded read-only inspection, current-source IM "
+                "disposition/reply, and one Task Sys side result."
+            ),
+            (
+                "If the task requires parent attention, workspace resources, browser/web/research resources, shared "
+                "product-state writes, durable deliverables, new outbound communication, or multi-step execution, do "
+                "not perform it in side. Call task_sys.need_parent."
+            ),
+            "Allowed side resources:",
+            "\n".join(
+                (
+                    "1. Frame and exact source reads",
+                    "- Read this task frame.",
+                    "- Read exact source refs from this frame.",
+                    "- Use message.get / message.conversation only as needed for the current source.",
+                    "- Use track/artifact/context read-only tools only for bounded inspection.",
+                    (
+                        "- Use local read-only inspection only; do not run tests, builds, app servers, installers, "
+                        "formatters, or commands that write files/cache/state."
+                    ),
+                    "- Use search.status only for capability/status inspection.",
+                )
+            ),
+            "\n".join(
+                (
+                    "2. Current-source IM closure",
+                    "For an IM source message, side may only:",
+                    "- reply to the exact source message with message.send(reply_to=source_message_id, content=...),",
+                    (
+                        "- or mark the exact source message absorbed with "
+                        "message.mark(message_id=source_message_id, disposition=absorbed)."
+                    ),
+                    (
+                        "Do not start a new IM conversation. Do not send to target_identity_id from side unless the "
+                        "frame explicitly defines that as the exact source-bound closure, which normal IM inbound "
+                        "frames do not."
+                    ),
+                )
+            ),
+            "\n".join(
+                (
+                    "3. Task Sys side result",
+                    "Finish this frame with exactly one Task Sys side result:",
+                    "- task_sys.close(task_id=..., summary=...) when the task is fully handled without parent work.",
+                    (
+                        "- task_sys.need_parent(task_id=..., params={parent_frame_context, relation, interrupt, "
+                        "ordering}) when parent work is required."
+                    ),
+                )
+            ),
+            "Forbidden side resources:",
+            "\n".join(
+                (
+                    "Do not use or mutate:",
+                    "- parent turns, parent submit, parent interrupt, or parent steering directly,",
+                    "- source files, git, config, dependencies, tests, builds, app runtime, or workspace state,",
+                    "- browser session, web search, webpage reading, evidence gathering, or research loops,",
+                    "- Track shared state, including comments, status, requirements, materials, proof, resolve, archive,",
+                    "- artifacts, evidence, durable deliverables,",
+                    "- checkpoint state or task_sys.checkpoint_update,",
+                    "- raw runtime files or buddyswitch/objects direct writes,",
+                    "- permission changes, sandbox broadening, or external credentials,",
+                    "- any outbound communication that is not an exact reply/closure for the current source.",
+                )
+            ),
+            "Decision procedure:",
+            "\n".join(
+                (
+                    "1. Identify the resources required to complete the user-visible task.",
+                    "2. If all required resources are allowed side resources, complete the task in side.",
+                    "3. If any required resource is forbidden or belongs to parent, call task_sys.need_parent.",
+                    (
+                        "4. Do not call task_sys.need_parent merely because a user-facing reply is needed. If the "
+                        "reply is a short exact IM reply to the current source message, handle it in side."
+                    ),
+                    (
+                        "5. Do call task_sys.need_parent for research, implementation, planning, verification, "
+                        "shared product-state writes, Track replies, artifact/evidence output, browser/web use, or "
+                        "parent-thread continuity."
+                    ),
+                )
+            ),
+            "IM closure order:",
+            "\n".join(
+                (
+                    "- If replying: first call message.send(reply_to=source_message_id, content=...).",
+                    "- If absorbing: first call message.mark(message_id=source_message_id, disposition=absorbed).",
+                    "- Only after that source-bound action succeeds, call task_sys.close.",
+                    (
+                        "- If the source-bound action fails, do not close the task. Retry if clearly safe, otherwise "
+                        "call task_sys.need_parent with failure context."
+                    ),
+                    (
+                        "- If the source-bound action succeeded but task_sys.close fails, retry task_sys.close; do "
+                        "not send a duplicate reply."
+                    ),
+                )
+            ),
+            "Parent handoff rules:",
+            "\n".join(
+                (
+                    "Use task_sys.need_parent when the task needs resources outside side's boundary.",
+                    "The parent_frame_context must be minimal and concrete:",
+                    "- what the source asked for,",
+                    "- what side inspected,",
+                    "- why parent resources are required,",
+                    "- any exact source ids needed by parent,",
+                    "- any failure details if side could not safely close.",
+                    (
+                        "Set interrupt=true only when delaying parent work would be harmful, stale, or explicitly "
+                        "superseded. Otherwise omit interrupt or set it false."
+                    ),
+                )
+            ),
             "Allowed result actions:",
-            "- task_sys.close(task_id=..., summary=...) when no parent work is needed.",
-            "- task_sys.need_parent(task_id=..., params={parent_frame_context, relation, interrupt, ordering}) when parent work is needed.",
+            "- task_sys.close(task_id=..., summary=...)",
+            "- task_sys.need_parent(task_id=..., params={parent_frame_context, relation, interrupt, ordering})",
             "Do not use any other side outcome. Treat interrupt only as a task_sys.need_parent params field.",
         )
     )
@@ -252,17 +375,27 @@ def _turn_id_from_submit_result(result: Mapping[str, Any]) -> str:
     raise ValueError("submit parent instruction did not return a turn id")
 
 
+def _is_no_active_turn_interrupt_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "has no active in-progress turn" in message or "active but no in-progress turn was found" in message
+
+
 def _execute_submit_parent(context: Any, instruction: Mapping[str, Any], *, interrupt: bool) -> dict[str, Any]:
     task_id = _require_text(instruction.get("task_id"), "instruction.task_id")
     frame_text = render_submit_parent_frame(_require_mapping(instruction.get("frame"), "instruction.frame"))
     interrupted_turn_id: str | None = None
     if interrupt:
-        interrupted = app_server.interrupt_turn(_socket_path(context), _main_thread_id(context))
-        value = interrupted.get("turn_id") if isinstance(interrupted, Mapping) else None
-        if isinstance(value, str) and value.strip():
-            interrupted_turn_id = value.strip()
+        try:
+            interrupted = app_server.interrupt_turn(_socket_path(context), _main_thread_id(context))
+        except app_server.AppServerUnavailableError as exc:
+            if not _is_no_active_turn_interrupt_error(exc):
+                raise
         else:
-            raise ValueError("interrupt submit parent instruction did not return an interrupted turn id")
+            value = interrupted.get("turn_id") if isinstance(interrupted, Mapping) else None
+            if isinstance(value, str) and value.strip():
+                interrupted_turn_id = value.strip()
+            else:
+                raise ValueError("interrupt submit parent instruction did not return an interrupted turn id")
     result = launcher_submit_turn.submit_turn(
         socket_path=_socket_path(context),
         thread_id=_main_thread_id(context),
