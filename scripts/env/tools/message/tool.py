@@ -159,7 +159,7 @@ def _build_definition() -> ToolDefinition:
                     'You are starting a new actor-directed conversation and do not have a target identity id (use message.contacts).',
                     'You need Track discussion; use track.add_comment instead of Central IM.',
                     'Use message.mark(absorbed) when no reply is needed.',
-                    'Use message.mark(needs_parent) when side triage needs parent handling.',
+                    'Use task_sys.need_parent when a task_sys.side_frame needs parent handling.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -237,7 +237,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='mark',
                 title='message.mark',
-                description='Set only non-reply processing dispositions for one exact inbound message: absorbed or needs_parent.',
+                description='Set only non-reply absorbed disposition for one exact inbound message.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -249,12 +249,12 @@ def _build_definition() -> ToolDefinition:
                         },
                         'disposition': {
                             'type': 'string',
-                            'description': 'Allowed values are absorbed and needs_parent. Use message.send(reply_to=...) for replied.',
-                            'enum': ['absorbed', 'needs_parent'],
+                            'description': 'Allowed value is absorbed. Use message.send(reply_to=...) for replied and task_sys.need_parent for parent handoff.',
+                            'enum': ['absorbed'],
                         },
                         'reason': {
                             'type': 'string',
-                            'description': 'Required and non-empty for needs_parent; ignored or omitted for absorbed.',
+                            'description': 'Ignored or omitted for absorbed.',
                         },
                     },
                 },
@@ -269,8 +269,8 @@ def _build_definition() -> ToolDefinition:
                 visibility='active actor exact processable inbound message disposition',
                 durability='durable',
                 result_content_level='updated message disposition metadata',
-                success_effect='absorbed saves the message as processed without a reply; needs_parent submits the parent prompt first, then saves the message as needs_parent.',
-                failure_state_guarantee='Validation failures do not mutate state; needs_parent prompt-submit failure leaves the message in its previous disposition; needs_parent save failure after prompt submit leaves the message in its previous disposition but the parent prompt was already submitted.',
+                success_effect='absorbed saves the message as processed without a reply.',
+                failure_state_guarantee='Validation failures do not mutate message state.',
                 reads=(
                     'one active actor processable inbound message',
                 ),
@@ -287,7 +287,6 @@ def _build_definition() -> ToolDefinition:
                 preconditions=(
                     'message_id references a message addressed to the active actor',
                     'message disposition transition is valid',
-                    'needs_parent includes a non-empty reason',
                 ),
                 returns=(
                     'message_id',
@@ -295,10 +294,11 @@ def _build_definition() -> ToolDefinition:
                     'message',
                 ),
                 use_when=(
-                    'You processed an exact inbound message and need to mark disposition absorbed, or side triage needs_parent with a reason.',
+                    'You processed an exact inbound message and need to mark disposition absorbed.',
                 ),
                 do_not_use_when=(
                     'You need to reply; use message.send with reply_to so the message is marked replied after delivery.',
+                    'You need parent handling from a task_sys.side_frame; use task_sys.need_parent.',
                     'Do not use message.mark as a generic disposition editor.',
                 ),
                 risk_hints={

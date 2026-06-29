@@ -1,33 +1,27 @@
 ---
 name: task-management
-description: Use when current user input may continue, capture, select, switch, progress, checkout, or review a persistent BuddySwitch task.
+description: Use when processing Task Sys side frames, parent-thread decisions, or checkpoint frames through BuddySwitch env tools.
 ---
 
 # task-management
 
 ## Principles
-- Task state is active actor private state stored in the instance-local taskbox.
+- Task state is owned by Task Sys, not by actor-private files.
 - Primary route: use native BuddySwitch env MCP tools through `env.tool`.
-- Task tools expose Task Operations: `current`, `capture`, `select`, `switch_request`, `switch_confirm`, `progress`, `checkout`, and `review`.
-- Exact payload schemas, effects, rejection meanings, and recovery guidance come from native tool schemas and `context.get.tool_catalog['task']`.
+- Use `task_sys.close` when a `task_sys.side_frame` is handled without parent work.
+- Use `task_sys.need_parent` when a `task_sys.side_frame` needs parent-thread work; `interrupt` is only a parameter.
+- Use `task_sys.checkpoint_update` when a `task_sys.checkpoint` frame asks for the actor's checkpoint outcome.
+- Exact payload schemas, effects, rejection meanings, and recovery guidance come from native tool schemas and `context.get.tool_catalog['task_sys']`.
 - Diagnostic fallback: `python3 scripts/turn_runtime.py status`.
-- Broker method remains `env.tool`; do not edit taskbox files or runtime state files directly.
-- Runtime response fields and TaskViewModel are authoritative for current anchor, shelf, pending switch, evidence, checkout cue, warnings, and next legal operations.
+- Broker method remains `env.tool`; do not edit runtime task objects or private runtime files directly.
 
-## Judge The Input
-- If the user input naturally continues the current task, keep working without task mutation.
-- Read task `current` when current anchor, shelf, pending switch, recent evidence, or available actions matter.
-- Use task `capture` when a new work demand should be saved for later and must not replace active work.
-- Use task `select` when captured shelf work or blocked work should become current and no active current anchor exists.
-- Use task `switch_request` when the actor should leave active current work for another captured, blocked, or new target task.
-- Use task `switch_confirm` only when TaskViewModel shows a pending switch and the user answers that pending switch.
-- Use task `progress` to append evidence, refs, or progress summary to the active current task.
-- Use task `checkout` to end a work block as `continue`, `finish`, or `block`.
-- Use task `review` to inspect captured, blocked, pending, or stale task cues.
+## Judge The Frame
+- If the frame kind is `task_sys.side_frame`, finish with exactly one Task Sys side result: `close` or `need_parent`.
+- If the frame kind is `task_sys.parent_frame`, process the parent task context in the frame before using other product tools.
+- If the frame kind is `task_sys.checkpoint`, choose a legal `checkpoint_update` outcome from the frame; do not rely on a recommendation.
+- Use `context.get` only when exact schemas or runtime source descriptions are needed.
 
 ## Runtime Boundary
-- Task refs are private context links; task operations do not publish or mutate track, artifact, message, comment, browser, or actor private file contents.
-- Capture stores work on the shelf; it does not auto-select.
-- Switching is two-step: request first, then confirm accept or reject.
-- Finish requires evidence. Block requires a reason.
-- Rejections leave taskbox and sibling runtime state unchanged unless the response explicitly says otherwise.
+- Task Sys frames carry source refs and task context; do not reconstruct raw inbound prompts.
+- Product tools such as track, artifact, message, and search remain the source of truth for their own product data.
+- Rejections leave Task Sys and sibling runtime state unchanged unless the response explicitly says otherwise.

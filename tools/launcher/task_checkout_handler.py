@@ -16,8 +16,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
-import submit_turn as launcher_submit_turn  # noqa: E402
-from env.domain import task_management, task_tui  # noqa: E402
+import task_sys_ingress  # noqa: E402
+import task_sys_runtime  # noqa: E402
 
 
 def _string_field(payload: dict[str, Any], *names: str) -> str:
@@ -49,29 +49,31 @@ def completed_turn_for_checkout(trigger: Any, state: Any) -> dict[str, str] | No
     return {"thread_id": thread_id, "turn_id": turn_id, "status": status}
 
 
-def send_checkout_prompt(
+def record_completed_turn(
     context: Any,
     state: Any,
     runtime: Any,
     previous_turn: dict[str, str],
 ) -> daemon_core.HandlerResult:
-    origin_turn_id = previous_turn["turn_id"]
+    del runtime
     try:
-        view = task_management.current_view(
-            active_role=context.role,
-            active_actor={"actor_id": context.actor_id, "role_id": context.role},
-            instance_json=context.instance_json,
-            instance_payload=context.instance_payload,
+        result = task_sys_ingress.ingest_turn_completed(
+            actor_id=context.actor_id,
+            role_id=context.role,
+            thread_id=previous_turn["thread_id"],
+            turn_id=previous_turn["turn_id"],
+            status=previous_turn["status"],
         )
-        prompt = task_tui.render_stop_task_tui(view, previous_turn)
-        runtime.submit_parent_prompt(
-            prompt,
-            handler_name="task_checkout",
-            origin_id=origin_turn_id,
-            interrupt_policy="none",
-        )
+        runtime_result = task_sys_runtime.execute_instruction(context, result["instruction"])
+        turn_id = runtime_result.get("turn_id") if isinstance(runtime_result, dict) else None
+        if isinstance(turn_id, str) and turn_id:
+            state.record_daemon_origin_turn(
+                turn_id,
+                handler_name="task_checkout",
+                origin_turn_id=previous_turn["turn_id"],
+            )
         return daemon_core.HandlerResult.handled()
-    except launcher_submit_turn.SubmitTurnError as exc:
+    except Exception as exc:
         return daemon_core.HandlerResult.failed(str(exc))
 
 
@@ -91,4 +93,4 @@ class TaskCheckoutHandler:
         previous_turn = completed_turn_for_checkout(trigger, state)
         if previous_turn is None:
             return daemon_core.HandlerResult.ignored()
-        return send_checkout_prompt(context, state, runtime, previous_turn)
+        return record_completed_turn(context, state, runtime, previous_turn)

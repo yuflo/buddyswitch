@@ -180,7 +180,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         module = _load_module(DAEMON_CORE_PATH, block_task_imports=True)
         self.assertIsNotNone(module)
 
-    def test_task_checkout_handler_is_the_only_daemon_side_task_import(self) -> None:
+    def test_daemon_side_handlers_do_not_import_taskbox_domain_modules(self) -> None:
         daemon_core_imports = _imported_modules(DAEMON_CORE_PATH)
         instance_daemon_imports = _imported_modules(INSTANCE_DAEMON_PATH)
         task_checkout_imports = _imported_modules(TASK_CHECKOUT_HANDLER_PATH)
@@ -193,14 +193,16 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             TASK_DOMAIN_IMPORTS.intersection(instance_daemon_imports),
             "instance_daemon.py must not import task domain modules directly",
         )
-        self.assertTrue(
+        self.assertFalse(
             TASK_DOMAIN_IMPORTS.intersection(task_checkout_imports),
-            "task_checkout_handler.py must own daemon-side task domain imports",
+            "task_checkout_handler.py must not import taskbox domain modules",
         )
-        daemon_core_source = DAEMON_CORE_PATH.read_text(encoding="utf-8")
-        self.assertNotIn("task_tui", daemon_core_source)
-        self.assertNotIn("task_management", daemon_core_source)
-        self.assertNotIn("stop_tui", daemon_core_source)
+        for path in (DAEMON_CORE_PATH, INSTANCE_DAEMON_PATH, TASK_CHECKOUT_HANDLER_PATH):
+            source = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.name):
+                self.assertNotIn("task_tui", source)
+                self.assertNotIn("task_management", source)
+                self.assertNotIn("stop_tui", source)
 
     def test_daemon_core_does_not_import_message_handler_or_message_domain(self) -> None:
         daemon_core_imports = _imported_modules(DAEMON_CORE_PATH)

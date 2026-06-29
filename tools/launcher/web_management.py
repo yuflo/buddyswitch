@@ -27,7 +27,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import web_im_identity
 import im_http_router
 import imessage_channel
-from env.domain import task_management, track_read
+from env.domain import task_sys, track_read
 from env.repos import runtime_files
 from env.tool_runtime import daemon_client
 import external_im_session
@@ -557,14 +557,14 @@ class WebManagementService:
         parsed = self._run_input_command(actor_id, text, timeout_seconds=60)
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         action = parsed.get("action")
-        turn_id = parsed.get("turn_id")
-        expected_turn_id = parsed.get("expected_turn_id")
+        task_id = parsed.get("task_id")
+        instruction_type = parsed.get("instruction_type")
         if isinstance(action, str):
             payload["action"] = action
-        if isinstance(turn_id, str):
-            payload["turn_id"] = turn_id
-        if isinstance(expected_turn_id, str):
-            payload["expected_turn_id"] = expected_turn_id
+        if isinstance(task_id, str):
+            payload["task_id"] = task_id
+        if isinstance(instruction_type, str):
+            payload["instruction_type"] = instruction_type
         return payload
 
     def _clear(self, actor_id: str) -> dict[str, Any]:
@@ -948,16 +948,24 @@ class WebManagementService:
         workspace_dir = instance_payload.get("workspace_dir")
         if "instance_root" not in instance_payload and isinstance(workspace_dir, str) and workspace_dir.strip():
             instance_payload["instance_root"] = str(Path(workspace_dir).expanduser().resolve(strict=False).parent)
-        task = task_management.current_view(
-            active_role=role,
-            active_actor=active_actor,
-            instance_json=None,
-            instance_payload=instance_payload,
-        )
+        del instance_payload
+        task_sys_tasks = task_sys.active_tasks_for_actor(active_actor)
         return {
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
-            "task": task,
+            "task_sys": {
+                "active_count": len(task_sys_tasks),
+                "active_tasks": [
+                    {
+                        "task_id": row.get("id"),
+                        "source_type": row.get("source_type"),
+                        "status": row.get("status"),
+                        "active_processor": row.get("active_processor"),
+                        "updated_at": row.get("updated_at"),
+                    }
+                    for row in task_sys_tasks[:10]
+                ],
+            },
             "tracks": {
                 "items": track_read.list_track_summaries(owner_actor=active_actor),
                 "source": "web-track-summary",

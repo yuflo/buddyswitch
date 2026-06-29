@@ -39,7 +39,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         "source_refs",
         "actor_private_workspace",
     }
-    _SHIPPED_TOOLS = {"task", "track", "artifact", "context", "evidence", "message", "search"}
+    _SHIPPED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "message", "search"}
 
     def _legacy_store_import_violations(self, roots: list[Path]) -> list[str]:
         violations: list[str] = []
@@ -211,7 +211,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch_dev_task_capture(self, args: dict[str, object]) -> dict[str, object]:
+    def _dispatch_dev_retired_task_tool(self, args: dict[str, object]) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-boundary")
         envelope = runtime_broker.dispatch_runtime_request(
             request={
@@ -336,10 +336,10 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_env_tool_rejects_payload_paths_instead_of_bypassing_project_or_raw_state_boundaries(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-boundary")
         project_probe = self._runtime_path("projects/app/env-tool-bypass.txt")
-        raw_state_path = f"instances/{actor_id}/taskbox/dev/tasks/env-tool-bypass.json"
+        raw_state_path = f"instances/{actor_id}/retired-task/env-tool-bypass.json"
         raw_probe = self._runtime_path(raw_state_path)
 
-        response = self._dispatch_dev_task_capture(
+        response = self._dispatch_dev_retired_task_tool(
             {
                 "reason": "Boundary test.",
                 "evidence": "Payload includes forbidden path fields.",
@@ -353,7 +353,8 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("permission_boundary"), "request-payload")
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL")
+        self.assertEqual(response.get("permission_boundary"), "env.tool")
         self.assertFalse(project_probe.exists())
         self.assertFalse(raw_probe.exists())
 
@@ -444,7 +445,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         allowed_paths = {
             "scripts/env/repos/artifacts.py",
             "scripts/env/repos/tracks.py",
-            "scripts/env/domain/task_management.py",
             "scripts/env/domain/tasks.py",
         }
         scanned_roots = [ROOT / "scripts/env/domain"]

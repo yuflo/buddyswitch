@@ -18,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import turn_runtime  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 
 
@@ -93,59 +94,30 @@ class RuntimeWorkspaceTestMixin:
     def _instance_root(self, actor_id: str) -> Path:
         return self.runtime_root / "instances" / actor_id
 
-    def _taskbox_root(self, *, actor_id: str, role: str) -> Path:
-        return self._instance_root(actor_id) / "taskbox" / role
-
-    def _ensure_taskbox(self, *, actor_id: str, role: str) -> Path:
-        root = self._taskbox_root(actor_id=actor_id, role=role)
-        (root / "tasks").mkdir(parents=True, exist_ok=True)
-        history_file = root / "history.md"
-        if not history_file.exists():
-            history_file.write_text("", encoding="utf-8")
-        return root
-
-    def _write_taskbox_task(
+    def _write_task_sys_task(
         self,
         *,
         actor_id: str,
         role: str,
-        task_id: str,
+        task_slug: str,
         title: str,
         summary: str = "",
-        status: str = "active",
-        priority: str = "normal",
         track_id: str | None = None,
-        refs: list[dict[str, object]] | None = None,
-        created_at: str = "2026-05-23T12:00:00+08:00",
-        updated_at: str = "2026-05-23T12:00:00+08:00",
-        closed_at: str | None = None,
-    ) -> Path:
-        if closed_at is None and status in {"done", "archived"}:
-            closed_at = updated_at
-        root = self._ensure_taskbox(actor_id=actor_id, role=role)
-        task_path = root / "tasks" / f"{task_id}.json"
-        task_path.write_text(
-            json.dumps(
-                {
-                    "id": task_id,
-                    "owner_actor": {"actor_id": actor_id, "role_id": role},
-                    "title": title,
-                    "summary": summary,
-                    "status": status,
-                    "priority": priority,
-                    "track_id": track_id,
-                    "refs": refs or [],
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "closed_at": closed_at,
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
+    ) -> str:
+        source_ref: dict[str, object] = {"slug": runtime_files.slugify(task_slug), "title": title}
+        if summary:
+            source_ref["summary"] = summary
+        if track_id is not None:
+            source_ref["track_id"] = track_id
+        result = task_sys.ingest(
+            {
+                "source": {"type": "test.fixture", "ref": source_ref},
+                "actor_target": {"actor_id": actor_id, "role_id": role},
+                "context": {"fixture": "task sys test task"},
+                "initial_processor": "checkpoint",
+            }
         )
-        return task_path
+        return str(result["task_id"])
 
     def _seed_active_task_for_instance(
         self,
@@ -155,39 +127,13 @@ class RuntimeWorkspaceTestMixin:
         actor_id: str,
         task_slug: str = "active-task",
     ) -> str:
-        payload = json.loads(instance_json.read_text(encoding="utf-8")) if instance_json.exists() else {}
-        raw_instance_root = payload.get("instance_root") if isinstance(payload, dict) else None
-        instance_root = Path(raw_instance_root) if isinstance(raw_instance_root, str) and raw_instance_root.strip() else instance_json.parent
-        taskbox = instance_root / "taskbox" / role
-        tasks_dir = taskbox / "tasks"
-        tasks_dir.mkdir(parents=True, exist_ok=True)
-        task_id = f"task-0001-{runtime_files.slugify(task_slug)}"
-        (tasks_dir / f"{task_id}.json").write_text(
-            json.dumps(
-                {
-                    "id": task_id,
-                    "owner_actor": {"actor_id": actor_id, "role_id": role},
-                    "title": "Active task",
-                    "summary": "Active task seeded for env-tool test fixture.",
-                    "body": "Active task seeded for env-tool test fixture.",
-                    "status": "active",
-                    "priority": "normal",
-                    "origin": {"type": "manual"},
-                    "track_id": None,
-                    "refs": [],
-                    "progress_summary": "Active task seeded for env-tool test fixture.",
-                    "created_at": "2026-06-07T10:00:00+08:00",
-                    "updated_at": "2026-06-07T10:00:00+08:00",
-                    "closed_at": None,
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
+        actor_target = {"actor_id": actor_id, "role_id": role}
+        result = task_sys.ingest(
+            {
+                "source": {"type": "test.fixture", "ref": {"slug": runtime_files.slugify(task_slug)}},
+                "actor_target": actor_target,
+                "context": {"fixture": "active task"},
+                "initial_processor": "checkpoint",
+            }
         )
-        (taskbox / "history.md").write_text(
-            f"- 2026-06-07T10:00:00+08:00 task.selected {task_id} reason=\"seed active task fixture\"\n",
-            encoding="utf-8",
-        )
-        return task_id
+        return str(result["task_id"])

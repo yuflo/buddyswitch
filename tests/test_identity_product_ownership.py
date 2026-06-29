@@ -13,7 +13,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.repos import artifacts as artifact_repo  # noqa: E402
-from env.repos import tasks as task_repo  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -60,22 +60,18 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase
     def test_task_new_writes_persist_owner_identity_id(self) -> None:
         actor = self._actor(role="pm", actor_id="act-pm-task-owner")
 
-        task = task_repo.create_task(
-            task_id="task-identity-owner",
-            title="Identity-owned task",
-            active_role=actor["role_id"],
-            active_actor=actor,
-            instance_json=None,
-            instance_payload=self._task_instance_payload(actor),
-            track_id=None,
-            status="active",
-            priority="normal",
-            summary="Identity task.",
-            refs=[],
-            body="Identity task body.",
+        result = task_sys.ingest(
+            {
+                "source": {"type": "test.fixture", "ref": {"title": "Identity-owned task"}},
+                "actor_target": {"actor_id": actor["actor_id"], "role_id": actor["role_id"]},
+                "context": self._task_instance_payload(actor),
+                "initial_processor": "side",
+            }
         )
+        task = result["task"]
 
-        self.assertEqual(task["owner_identity_id"], actor["actor_id"])
+        self.assertEqual(task["actor_target"]["actor_id"], actor["actor_id"])
+        self.assertEqual(task["actor_target"]["role_id"], actor["role_id"])
         self.assertNotIn("owner_actor", task)
 
     def test_artifact_new_writes_persist_creator_and_author_identity_ids(self) -> None:

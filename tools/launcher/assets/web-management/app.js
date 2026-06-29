@@ -465,18 +465,16 @@
   }
 
   function renderTaskSummaryHtml(state) {
-    const task = state.actorConsole && state.actorConsole.task ? state.actorConsole.task : null;
-    if (!task) {
-      return renderEmpty('No task state loaded.');
+    const taskSys = state.actorConsole && state.actorConsole.task_sys ? state.actorConsole.task_sys : null;
+    if (!taskSys) {
+      return renderEmpty('No Task Sys state loaded.');
     }
-    const anchor = task.current_anchor;
-    const warnings = Array.isArray(task.warnings) ? task.warnings : [];
-    const shelf = Array.isArray(task.shelf) ? task.shelf : [];
+    const activeTasks = Array.isArray(taskSys.active_tasks) ? taskSys.active_tasks : [];
+    const active = activeTasks[0] || null;
     return [
-      '<div class="summary-line"><span>State</span>' + badge(task.task_state || 'none') + '</div>',
-      anchor ? '<div class="summary-callout"><strong>' + escapeHtml(anchor.title || anchor.id) + '</strong><span class="mono-value">' + escapeHtml(anchor.id || '') + '</span></div>' : '',
-      '<div class="summary-line"><span>Captured</span><strong>' + escapeHtml(String(shelf.length)) + '</strong></div>',
-      '<div class="summary-line"><span>Warnings</span><strong>' + escapeHtml(String(warnings.length)) + '</strong></div>',
+      '<div class="summary-line"><span>Active</span><strong>' + escapeHtml(String(taskSys.active_count || 0)) + '</strong></div>',
+      active ? '<div class="summary-callout"><strong>' + escapeHtml(active.source_type || active.status || 'Task Sys') + '</strong><span class="mono-value">' + escapeHtml(active.task_id || '') + '</span></div>' : '',
+      '<div class="summary-line"><span>Processor</span>' + badge(active && active.active_processor ? active.active_processor : 'none') + '</div>',
     ].join('');
   }
 

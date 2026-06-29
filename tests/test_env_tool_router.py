@@ -20,12 +20,12 @@ from env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message"}
+EXPECTED_TOOLS = {"track", "artifact", "context", "evidence", "search", "message", "task_sys"}
 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     _CHEAP_ACTION_CASES = (
-        ("task", "current", {}, "dev"),
+        ("task_sys", "close", {"task_id": "missing-task"}, "dev"),
         ("track", "list", {}, "dev"),
         ("artifact", "get", {"artifact_id": "missing-artifact"}, "dev"),
         ("context", "list_sources", {}, "dev"),
@@ -133,10 +133,12 @@ class BlockMessageImpl(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockMessageImpl())
 
 import env_manifest
+from env.repos import runtime_files
 from env.tool_runtime.registry import dispatch_env_tool_request
 
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
+runtime_files.set_runtime_root_override(Path({str(self.runtime_root)!r}))
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
     payload=json.loads({payload_json!r}),
@@ -184,10 +186,12 @@ class BlockSelectedImpl(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockSelectedImpl())
 
 import env_manifest
+from env.repos import runtime_files
 from env.tool_runtime.registry import dispatch_env_tool_request
 
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
+runtime_files.set_runtime_root_override(Path({str(self.runtime_root)!r}))
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
     payload=json.loads({payload_json!r}),
@@ -212,6 +216,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
     def test_registry_surface_matches_expected_tools(self) -> None:
         tools = set(tool_registry.supported_tools())
         self.assertEqual(tools, EXPECTED_TOOLS)
+        self.assertNotIn("task", tools)
         self.assertNotIn("handoff", tools)
 
     def test_handoff_tool_is_unsupported(self) -> None:
@@ -238,14 +243,14 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         instance_json = self._instance_json(actor_id="act-dev-isolation", role="dev")
         completed = self._run_router_subprocess_with_blocked_message_impl(
             instance_json=instance_json,
-            payload={"tool": "task", "action": "current", "args": {}},
+            payload={"tool": "context", "action": "list_sources", "args": {}},
             role="dev",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         response = json.loads(completed.stdout)
         self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("tool"), "task")
-        self.assertEqual(response.get("action"), "task.current")
+        self.assertEqual(response.get("tool"), "context")
+        self.assertEqual(response.get("action"), "context.list_sources")
         self.assertIs(response.get("state_changed"), False)
 
     def test_selected_private_impl_import_failure_returns_structured_feedback(self) -> None:
@@ -338,10 +343,12 @@ root = Path({str(ROOT)!r})
 sys.path.insert(0, str(root / "scripts"))
 
 import env_manifest
+from env.repos import runtime_files
 from env.tool_runtime.registry import dispatch_env_tool_request
 
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
+runtime_files.set_runtime_root_override(Path({str(self.runtime_root)!r}))
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
     payload=json.loads({payload_json!r}),

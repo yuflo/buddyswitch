@@ -15,6 +15,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
+import task_sys_ingress  # noqa: E402
+import task_sys_runtime  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
@@ -34,43 +36,6 @@ def _payload_id(trigger: Any, field: str) -> str:
     if not isinstance(payload, dict):
         raise ValueError("IM wake payload must be an object")
     return runtime_files.require_id(payload.get(field), field)
-
-
-def _parent_prompt(message_id: str, conversation_id: str, event_id: str) -> str:
-    return "\n\n".join(
-        (
-            "[IM MESSAGE CREATED]",
-            f"Message id: {message_id}",
-            f"Conversation id: {conversation_id}",
-            f"Event id: {event_id}",
-            "Required action:\nProcess this exact IM message. Do not assume a reply is required.",
-            "Steps:\n"
-            f'1. Call message__get with message_id="{message_id}".\n'
-            "2. If prior context is needed, call message__conversation for the sender from the message.\n"
-            f'3. If a reply is needed, call message__send(content=..., reply_to="{message_id}").\n'
-            "4. If no reply is needed, call message__mark with disposition=\"absorbed\".",
-            'Finish:\nFinish after the message is marked "absorbed" or "replied".',
-        )
-    )
-
-
-def _side_prompt(message_id: str, conversation_id: str, event_id: str) -> str:
-    return "\n\n".join(
-        (
-            "[IM MESSAGE TRIAGE]",
-            f"Message id: {message_id}",
-            f"Conversation id: {conversation_id}",
-            f"Event id: {event_id}",
-            "Required action:\nTriage this exact IM message without interrupting the parent unless parent involvement is necessary.",
-            "Steps:\n"
-            f'1. Call message__get with message_id="{message_id}".\n'
-            "2. If prior context is needed, call message__conversation for the sender from the message.\n"
-            f'3. Use message__send(content=..., reply_to="{message_id}") when a reply is enough.\n'
-            "4. Use message__mark with disposition=\"needs_parent\" only when parent work is required.\n"
-            "5. Otherwise use message__mark with disposition=\"absorbed\".",
-            "Finish:\nFinish after exactly one disposition path succeeds.",
-        )
-    )
 
 
 class ImMessageCreatedHandler:
@@ -97,25 +62,16 @@ class ImMessageCreatedHandler:
             message_id = _payload_id(trigger, "message_id")
             conversation_id = _payload_id(trigger, "conversation_id")
             event_id = _payload_id(trigger, "event_id")
-            activity = runtime.parent_activity()
-            status = activity.get("status") if isinstance(activity, dict) else None
-            if status == "idle":
-                runtime.submit_parent_prompt(
-                    _parent_prompt(message_id, conversation_id, event_id),
-                    handler_name=self.name,
-                    origin_id=message_id,
-                    interrupt_policy="none",
-                )
-                return daemon_core.HandlerResult.handled()
-            if status == "running":
-                runtime.submit_side_triage_prompt(
-                    _side_prompt(message_id, conversation_id, event_id),
-                    handler_name=self.name,
-                    origin_id=message_id,
-                )
-                return daemon_core.HandlerResult.handled()
-            error = activity.get("error") if isinstance(activity, dict) else None
-            return daemon_core.HandlerResult.failed(str(error or "parent thread activity is unavailable"))
+            del runtime
+            result = task_sys_ingress.ingest_im_message(
+                actor_id=target_actor.actor_id,
+                role_id=target_actor.role_id,
+                message_id=message_id,
+                conversation_id=conversation_id,
+                event_id=event_id,
+            )
+            task_sys_runtime.execute_instruction(context, result["instruction"])
+            return daemon_core.HandlerResult.handled()
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))
 

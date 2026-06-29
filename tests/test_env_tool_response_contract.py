@@ -22,6 +22,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.repos import messages as message_repo  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
@@ -224,37 +225,14 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         return path
 
     def _seed_active_task(self, *, instance_json: Path, role: str, actor_id: str) -> None:
-        taskbox = instance_json.parent / "taskbox" / role
-        tasks_dir = taskbox / "tasks"
-        tasks_dir.mkdir(parents=True, exist_ok=True)
         task_id = f"task-0001-{role}-response-contract"
-        (tasks_dir / f"{task_id}.json").write_text(
-            json.dumps(
-                {
-                    "id": task_id,
-                    "owner_actor": {"actor_id": actor_id, "role_id": role},
-                    "title": "Response contract active task",
-                    "summary": "Active task for handler-level response contract tests.",
-                    "body": "Active task for handler-level response contract tests.",
-                    "status": "active",
-                    "priority": "normal",
-                    "origin": {"type": "manual"},
-                    "track_id": None,
-                    "refs": [],
-                    "progress_summary": "Active task for handler-level response contract tests.",
-                    "created_at": "2026-06-07T10:00:00+08:00",
-                    "updated_at": "2026-06-07T10:00:00+08:00",
-                    "closed_at": None,
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        (taskbox / "history.md").write_text(
-            f"- 2026-06-07T10:00:00+08:00 task.selected {task_id} reason=\"seed response contract active task\"\n",
-            encoding="utf-8",
+        task_sys.ingest(
+            {
+                "source": {"type": "test.response_contract", "ref": {"id": task_id}},
+                "actor_target": {"actor_id": actor_id, "role_id": role},
+                "context": {"fixture": "response contract"},
+                "initial_processor": "checkpoint",
+            }
         )
 
     def _dispatch(
@@ -776,7 +754,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("proof_relation_added", changes)
         self.assertNotIn("update_added", changes)
 
-    def test_message_mark_needs_parent_prompt_failure_follows_rejection_contract(self) -> None:
+    def test_message_mark_needs_parent_rejects_without_parent_submit(self) -> None:
         dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
         pm_actor_id = self._runtime_actor_id(role="pm", label="act-pm-parent-submit-contract")
         instance_json = self._instance_json(role="dev", actor_id="act-dev-parent-submit-contract")
@@ -792,9 +770,9 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         with patch.object(
             runtime_context.DaemonAccess,
-            "request_parent_message_handling",
+            "execute_task_sys_instruction",
             autospec=True,
-            side_effect=RuntimeError("parent submit unavailable"),
+            side_effect=AssertionError("message.mark must not execute parent handoff"),
         ):
             response = self._dispatch(
                 instance_json=instance_json,
@@ -810,10 +788,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             )
 
         self._assert_rejection_contract(response)
-        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PARENT_REQUIRED_SUBMIT_FAILED")
-        self.assertIs(response.get("parent_prompt_submitted"), False, msg=response)
-        self.assertEqual(response.get("original_previous_disposition"), "unseen")
-        self.assertEqual(response.get("original_final_disposition"), "unseen")
+        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+        self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
         self.assertIn("message.get", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
         state = message_repo.get_im_message_state(message_id, target_participant)
         self.assertIsInstance(state, dict, msg=response)

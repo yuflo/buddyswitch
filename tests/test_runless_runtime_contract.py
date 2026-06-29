@@ -123,10 +123,10 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return response
 
     def _seed_pm_task(self, task_id: str) -> None:
-        self._write_taskbox_task(
+        self._write_task_sys_task(
             actor_id="act-pm-runless",
             role="pm",
-            task_id=task_id,
+            task_slug=task_id,
             title="Runless Task",
             summary="runless contract seed",
         )

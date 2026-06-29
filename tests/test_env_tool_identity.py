@@ -61,25 +61,16 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=self.manifest_path,
         )
 
-    def test_task_capture_rejects_payload_owner_fields(self) -> None:
+    def test_old_task_tool_is_not_identity_surface(self) -> None:
         payload = self._dispatch(
             active_role="pm",
             tool="task",
             action="capture",
-            args={
-                "reason": "Identity boundary test.",
-                "evidence": "Payload tries to override owner.",
-                "task": {
-                    "title": "Identity",
-                    "body": "runless",
-                    "role": "design",
-                    "active_role": "design",
-                },
-            },
+            args={},
         )
         self.assertFalse(payload["ok"], msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
-        self.assertEqual(payload.get("permission_boundary"), "request-payload")
+        self.assertEqual((payload.get("error") or {}).get("code"), "E_ENV_TOOL")
+        self.assertEqual(payload.get("permission_boundary"), "env.tool")
         self.assertIs(payload.get("state_changed"), False)
 
     def test_role_auth_uses_runtime_actor_not_payload_identity_hints(self) -> None:

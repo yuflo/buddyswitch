@@ -24,7 +24,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
     "evidence": {"approve_downgrade", "issue_browser"},
     "message": {"contacts", "conversation", "get", "list", "mark", "send"},
     "search": {"open_browser", "request", "status"},
-    "task": {"current", "capture", "select", "switch_request", "switch_confirm", "progress", "checkout", "review"},
+    "task_sys": {"close", "need_parent", "checkpoint_update"},
     "track": {
         "add_comment",
         "add_material",
@@ -526,16 +526,16 @@ base = {
     "manifest": manifest,
     "manifest_path": root / "buddyswitch" / "manifest.toml",
 }
-task = dispatch_env_tool_request(payload={"tool": "task", "action": "current", "args": {}}, **base)
+context = dispatch_env_tool_request(payload={"tool": "context", "action": "list_sources", "args": {}}, **base)
 message = dispatch_env_tool_request(payload={"tool": "message", "action": "list", "args": {}}, **base)
-print(json.dumps({"task": task, "message": message}, sort_keys=True))
+print(json.dumps({"context": context, "message": message}, sort_keys=True))
 """
         completed = self._run_python(script)
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         payload = json.loads(completed.stdout)
-        task = payload["task"]
+        context = payload["context"]
         message = payload["message"]
-        self.assertTrue(task.get("ok"), msg=task)
+        self.assertTrue(context.get("ok"), msg=context)
         self.assertFalse(message.get("ok"), msg=message)
         self.assertEqual((message.get("error") or {}).get("code"), "E_ENV_TOOL_DISPATCH")
         self.assertIs(message.get("state_changed"), False)

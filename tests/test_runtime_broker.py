@@ -156,21 +156,16 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(summarized["ok"], msg=summarized)
         self.assertEqual(summarized["action"], "context.summarize")
 
-        created = self._dispatch(
+        listed_sources = self._dispatch(
             method="env.tool",
             params={
-                "tool": "task",
-                "action": "capture",
-                "args": {
-                    "reason": "Broker test.",
-                    "evidence": "Broker test starts a task.",
-                    "task": {"title": "Broker Task", "summary": "seed", "body": "Broker Task"},
-                },
+                "tool": "context",
+                "action": "list_sources",
+                "args": {},
             },
             instance_json=instance_json,
         )
-        self.assertTrue(created["ok"], msg=created)
-        self.assertEqual((created.get("task") or {}).get("title"), "Broker Task")
+        self.assertTrue(listed_sources["ok"], msg=listed_sources)
 
         after_instance = json.loads(instance_json.read_text(encoding="utf-8"))
         self.assertEqual(after_instance, before_instance)
@@ -300,20 +295,16 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 instance_json=instance_json,
             )
             self.assertTrue(summarized["ok"], msg=summarized)
-            created = self._dispatch(
+            listed_sources = self._dispatch(
                 method="env.tool",
                 params={
-                    "tool": "task",
-                    "action": "capture",
-                    "args": {
-                        "reason": "Broker lock test.",
-                        "evidence": "Broker lock test starts a task.",
-                        "task": {"title": "Broker Lock Task", "body": "Broker Lock Task"},
-                    },
+                    "tool": "context",
+                    "action": "list_sources",
+                    "args": {},
                 },
                 instance_json=instance_json,
             )
-            self.assertTrue(created["ok"], msg=created)
+            self.assertTrue(listed_sources["ok"], msg=listed_sources)
 
         expected_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
         self.assertEqual([session["actor_id"] for session in lock_sessions], [expected_actor_id, expected_actor_id])
@@ -443,7 +434,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         supported = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "current", "args": {}},
+            params={"tool": "context", "action": "summarize", "args": {}},
             instance_json=instance_json,
             actor_id="act-dev-example",
             role="dev",
@@ -467,13 +458,13 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             role="dev",
         )
         self.assertFalse(task_gated["ok"], msg=task_gated)
-        self.assertEqual(task_gated["error"]["code"], "E_ACTIVE_TASK_REQUIRED")
-        self.assertEqual(task_gated.get("permission_boundary"), "task.active_anchor")
+        self.assertEqual(task_gated["error"]["code"], "E_TASK_SYS_ACTIVE_TASK_REQUIRED")
+        self.assertEqual(task_gated.get("permission_boundary"), "task_sys.active_task")
         self.assertEqual(task_gated.get("active_role"), "dev")
 
         wrong_instance = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "current", "args": {}},
+            params={"tool": "context", "action": "summarize", "args": {}},
             instance_json=instance_json,
             actor_id="act-other",
             role="dev",
@@ -483,7 +474,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         wrong_role = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "current", "args": {}, "actor_id": active_actor_id},
+            params={"tool": "context", "action": "summarize", "args": {}, "actor_id": active_actor_id},
             instance_json=instance_json,
             role="pm",
         )
@@ -493,7 +484,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         inactive_instance_json = self._instance_json(actor_id="act-dev-inactive", role="dev", status="inactive")
         inactive = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "current", "args": {}},
+            params={"tool": "context", "action": "summarize", "args": {}},
             instance_json=inactive_instance_json,
             actor_id="act-dev-inactive",
             role="dev",
@@ -778,7 +769,6 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
 
     def test_lock_mode_for_read_only_env_tool_is_read(self) -> None:
         for params in (
-            {"tool": "task", "action": "current", "args": {}},
             {"tool": "context", "action": "summarize", "args": {}},
             {"tool": "track", "action": "open", "args": {}},
             {"tool": "artifact", "action": "get", "args": {}},
@@ -788,7 +778,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
 
     def test_lock_mode_for_mutating_env_tool_is_write(self) -> None:
         for params in (
-            {"tool": "task", "action": "capture", "args": {}},
+            {"tool": "task_sys", "action": "close", "args": {}},
             {"tool": "track", "action": "update_status", "args": {}},
             {"tool": "track", "action": "add_material", "args": {}},
             {"tool": "track", "action": "add_update", "args": {}},
@@ -800,7 +790,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
                 self.assertEqual(self.coordinator.lock_mode_for_request("env.tool", params), self.coordinator.LockMode.WRITE)
 
     def test_unknown_env_tool_action_defaults_to_write(self) -> None:
-        params = {"tool": "task", "action": "merge", "args": {}}
+        params = {"tool": "task_sys", "action": "merge", "args": {}}
         self.assertEqual(self.coordinator.lock_mode_for_request("env.tool", params), self.coordinator.LockMode.WRITE)
 
     def test_ping_and_status_do_not_acquire_runtime_lock(self) -> None:
@@ -936,7 +926,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
             clear=False,
         ):
             with self.assertRaises(client.RuntimeBrokerError) as raised:
-                client.request_runtime_broker("env.tool", {"tool": "task", "action": "current", "args": {}})
+                client.request_runtime_broker("env.tool", {"tool": "context", "action": "summarize", "args": {}})
         thread.join(timeout=2.0)
         self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PERMISSION")
         self.assertEqual(raised.exception.details.get("permission_boundary"), "active-role")
@@ -981,7 +971,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         ):
             result = client.request_runtime_broker(
                 "env.tool",
-                {"tool": "task", "action": "current", "args": {}},
+                {"tool": "context", "action": "summarize", "args": {}},
             )
         thread.join(timeout=2.0)
         self.assertEqual(result, {"ok": True})
@@ -1060,7 +1050,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         ) as request_once, ensure_patch:
             result = client.request_runtime_broker(
                 "env.tool",
-                {"tool": "task", "action": "current", "args": {}},
+                {"tool": "context", "action": "summarize", "args": {}},
             )
         self.assertEqual(result, {"ok": True, "items": []})
         self.assertEqual(request_once.call_count, 2)
@@ -1120,7 +1110,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
             with self.assertRaises(client.RuntimeBrokerError):
                 client.request_runtime_broker(
                     "env.tool",
-                    {"tool": "task", "action": "capture", "args": {"task": {"title": "Broker Task", "body": "Broker Task"}}},
+                    {"tool": "task_sys", "action": "close", "args": {"task_id": "task-missing"}},
                 )
         self.assertEqual(request_once.call_count, 1)
 
@@ -1307,7 +1297,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     manifest_path=manifest_path,
                 )
 
-    def test_live_broker_needs_parent_uses_repo_root_with_workspace_manifest(self) -> None:
+    def test_live_broker_message_needs_parent_rejects_without_parent_submit(self) -> None:
         protocol = _require_module("runtime_kernel.protocol")
         with tempfile.TemporaryDirectory() as temp:
             workspace_dir = Path(temp) / "workspace"
@@ -1416,53 +1406,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             launcher_dir = fake_source_root / "tools" / "launcher"
             launcher_dir.mkdir(parents=True, exist_ok=True)
             (launcher_dir / "daemon_core.py").write_text(
-                "\n".join(
-                    (
-                        "from pathlib import Path",
-                        "import json",
-                        "",
-                        "class _DaemonContext:",
-                        "    def __init__(self, instance_json):",
-                        "        payload = json.loads(Path(instance_json).read_text(encoding='utf-8'))",
-                        "        self.instance_root = Path(payload['instance_root'])",
-                        "        self.actor_id = payload['actor_id']",
-                        "        self.main_thread_id = payload.get('main_thread_id') or 'thread-main-live'",
-                        "",
-                        "def load_daemon_context(instance_json):",
-                        "    return _DaemonContext(instance_json)",
-                        "",
-                        "class DaemonState:",
-                        "    @staticmethod",
-                        "    def load(*, instance_root, actor_id, main_thread_id):",
-                        "        return {",
-                        "            'instance_root': str(instance_root),",
-                        "            'actor_id': actor_id,",
-                        "            'main_thread_id': main_thread_id,",
-                        "        }",
-                        "",
-                        "class DaemonRuntime:",
-                        "    def __init__(self, *, context, state):",
-                        "        self.context = context",
-                        "        self.state = state",
-                        "",
-                        "    def submit_parent_prompt(self, prompt, *, handler_name, origin_id, interrupt_policy):",
-                        "        payload = {",
-                        "            'prompt': prompt,",
-                        "            'handler_name': handler_name,",
-                        "            'origin_id': origin_id,",
-                        "            'interrupt_policy': interrupt_policy,",
-                        "            'state': self.state,",
-                        "        }",
-                        "        runtime_dir = Path(self.context.instance_root) / 'runtime'",
-                        "        runtime_dir.mkdir(parents=True, exist_ok=True)",
-                        "        (runtime_dir / 'parent-request.json').write_text(",
-                        "            json.dumps(payload, ensure_ascii=True, indent=2) + '\\n',",
-                        "            encoding='utf-8',",
-                        "        )",
-                        "        return payload",
-                    )
-                )
-                + "\n",
+                "raise AssertionError('old daemon_core parent submit path must not be imported')\n",
                 encoding="utf-8",
             )
 
@@ -1500,25 +1444,14 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     protocol.write_message(sock, request)
                     response = protocol.read_message(sock)
 
-                self.assertTrue(response.get("ok"), msg=response)
-                result = response.get("result")
-                self.assertIsInstance(result, dict, msg=response)
-                assert isinstance(result, dict)
-                self.assertTrue(result.get("ok"), msg=response)
-                response_parent_request = result.get("parent_request")
-                self.assertIsInstance(response_parent_request, dict, msg=response)
-                assert isinstance(response_parent_request, dict)
-                self.assertEqual(response_parent_request["handler_name"], "message_mark")
-                self.assertEqual(response_parent_request["origin_id"], message_id)
-                self.assertEqual(response_parent_request["interrupt_policy"], "ensure_stopped")
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+                self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
                 stored = json.loads(state_path.read_text(encoding="utf-8"))
-                self.assertEqual(stored["disposition"], "needs_parent")
-                self.assertEqual(stored["reason"], "This changes the active parent-thread objective.")
+                self.assertEqual(stored["disposition"], "unseen")
+                self.assertIsNone(stored["reason"])
                 parent_request_path = workspace_dir / "runtime" / "parent-request.json"
-                parent_request = json.loads(parent_request_path.read_text(encoding="utf-8"))
-                self.assertEqual(parent_request["handler_name"], "message_mark")
-                self.assertEqual(parent_request["origin_id"], message_id)
-                self.assertEqual(parent_request["interrupt_policy"], "ensure_stopped")
+                self.assertFalse(parent_request_path.exists(), msg=parent_request_path)
             finally:
                 self._run_broker_cli(
                     workspace_dir=workspace_dir,

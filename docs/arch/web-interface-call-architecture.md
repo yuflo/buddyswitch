@@ -14,7 +14,7 @@ and persistence keep their own boundaries.
 1. Browser UI
    - Owns user interaction state and rendering.
    - Calls only Web-interface HTTP APIs.
-   - Must not know runtime broker methods, daemon sockets, taskbox paths, JSON
+   - Must not know runtime broker methods, daemon sockets, Task Sys storage paths, JSON
      file paths, or repository modules.
 
 2. Web-interface API
@@ -35,19 +35,20 @@ and persistence keep their own boundaries.
 4. Actor runtime product API
    - Owns active actor capabilities and permission checks.
    - Runtime broker and native env MCP expose actor-bound actions such as
-     `task.current`, `track.open`, `context.summarize`, and `message.send`.
+     `task_sys.checkpoint_update`, `track.open`, `context.summarize`, and
+     `message.send`.
    - This layer is not the default Web query path because it is actor-bound and
      active-instance-gated.
 
 5. Domain / service layer
    - Owns product semantics.
-   - Examples: task view semantics, track read semantics, message service,
+   - Examples: Task Sys frame semantics, track read semantics, message service,
      actor identity normalization.
    - Provides reusable behavior to Web-interface APIs and actor runtime tools.
 
 6. Repo / persistence layer
    - Owns storage reads and writes.
-   - Examples: instance-local taskbox files, shared track JSON, track comments,
+   - Examples: Task Sys records, shared track JSON, track comments,
      IM message files.
    - Must not be used as a Browser-facing or UI-shaped API.
 
@@ -137,10 +138,10 @@ Actor:
 
 Task:
 
-- Task state belongs to the task domain.
-- Web reads actor task state through a domain read model with resolved actor
-  context.
-- Web should not call `env.tool task.current` for general console reads.
+- Actor-driving task state belongs to Task Sys.
+- Web reads actor task state through Task Sys summary projections with resolved
+  actor context.
+- Web should not call actor env tools for general console reads.
 
 Track:
 

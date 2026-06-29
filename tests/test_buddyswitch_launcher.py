@@ -894,6 +894,8 @@ exec "$real_git" "$@"
         env = os.environ.copy()
         env["HOME"] = str(source_home_path)
         env.pop("CODEX_HOME", None)
+        env.pop("BUDDYSWITCH_SHARED_ROOT", None)
+        env.pop("BUDDYSWITCH_STATE_ROOT", None)
         env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
         env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
         env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(temp_root_path / "browser-ready.flag")
@@ -966,6 +968,24 @@ exec "$real_git" "$@"
             time.sleep(0.05)
         return [row for row in self._read_rpc_rows(path) if row.get("rpc_method") == method] if path.exists() else []
 
+    def _task_sys_records(self, shared_root: Path) -> list[dict[str, object]]:
+        tasks_dir = shared_root / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks"
+        if not tasks_dir.exists():
+            return []
+        return [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(tasks_dir.glob("*.json"))
+        ]
+
+    def _wait_for_task_sys_records(self, shared_root: Path, *, count: int = 1, timeout: float = 5.0) -> list[dict[str, object]]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            records = self._task_sys_records(shared_root)
+            if len(records) >= count:
+                return records
+            time.sleep(0.05)
+        return self._task_sys_records(shared_root)
+
     def _set_instance_side_threads(
         self,
         instance_root: Path,
@@ -1009,40 +1029,27 @@ exec "$real_git" "$@"
         state_file.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         return payload
 
-    def _seed_instance_taskbox_current(
-        self,
-        *,
-        instance_root: Path,
-        role: str,
-        task_id: str = "task-0001-launcher-context",
-        title: str = "Launcher context task",
-        summary: str = "Render task context before user input.",
-    ) -> None:
-        taskbox_root = instance_root / "taskbox" / role
-        tasks_dir = taskbox_root / "tasks"
-        tasks_dir.mkdir(parents=True, exist_ok=True)
-        task_payload = {
-            "id": task_id,
-            "owner_actor": {"actor_id": instance_root.name, "role_id": role},
-            "title": title,
-            "summary": summary,
-            "body": "Detailed launcher task body.",
-            "status": "active",
-            "priority": "normal",
-            "track_id": None,
-            "refs": [],
-            "created_at": "2026-05-27T10:00:00+08:00",
-            "updated_at": "2026-05-27T10:00:00+08:00",
-            "closed_at": None,
-        }
-        (tasks_dir / f"{task_id}.json").write_text(json.dumps(task_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-        (taskbox_root / "history.md").write_text(
-            f"- 2026-05-27T10:00:00+08:00 task.create {task_id} title={json.dumps(title, ensure_ascii=True, separators=(',', ':'))} status=\"active\"\n",
-            encoding="utf-8",
-        )
-
     def _assert_raw_input(self, text: str, *, raw_text: str) -> None:
         self.assertEqual(text, raw_text)
+
+    def _assert_task_sys_input_task(self, shared_root: Path, payload: dict[str, object], *, text: str) -> dict[str, object]:
+        task_id = payload.get("task_id")
+        self.assertIsInstance(task_id, str, msg=payload)
+        assert isinstance(task_id, str)
+        task_path = shared_root / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks" / f"{task_id}.json"
+        self.assertTrue(task_path.exists(), msg=task_path)
+        record = json.loads(task_path.read_text(encoding="utf-8"))
+        self.assertEqual(record["id"], task_id)
+        self.assertEqual(record["source_type"], "user.input")
+        self.assertEqual(record["source_ref"]["surface"], "cli")
+        self.assertIsInstance(record["source_ref"]["id"], str)
+        self.assertEqual(record["inbound_context"]["text"], text)
+        self.assertEqual(record["inbound_context"]["surface"], "cli")
+        self.assertEqual(record["actor_target"]["actor_id"], payload["actor_id"])
+        self.assertEqual(record["actor_target"]["role_id"], payload["role_id"])
+        self.assertEqual(record["status"], "side_processing")
+        self.assertEqual(record["active_processor"], "side")
+        return record
 
     def _runtime_sparse_list(self, workspace_dir: Path) -> list[str]:
         return subprocess.check_output(
@@ -1599,7 +1606,7 @@ exec "$real_git" "$@"
         self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
         self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
 
-    def test_instance_start_creates_private_taskbox_for_active_role(self) -> None:
+    def test_instance_start_does_not_create_private_taskbox_for_active_role(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -1627,7 +1634,7 @@ exec "$real_git" "$@"
             self._write_fake_curl(fake_bin / "curl")
             self._write_fake_chrome(fake_bin / "fake-chrome")
 
-            capture_path = temp_root_path / "capture-taskbox.json"
+            capture_path = temp_root_path / "capture-task-sys.json"
             ready_file = temp_root_path / "browser-ready.flag"
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
@@ -1654,11 +1661,7 @@ exec "$real_git" "$@"
             workspace_dir = instance_root / "workspace"
             runtime_root = shared_root / "state"
 
-            taskbox_root = instance_root / "taskbox" / "dev"
-            self.assertTrue((taskbox_root / "tasks").is_dir())
-            self.assertTrue((taskbox_root / "history.md").is_file())
-            self.assertEqual((taskbox_root / "history.md").read_text(encoding="utf-8"), "")
-
+            self.assertFalse((instance_root / "taskbox").exists())
             self.assertFalse((workspace_dir / "taskbox").exists())
             self.assertFalse((runtime_root / "buddyswitch" / "objects" / "tasks").exists())
 
@@ -2219,8 +2222,8 @@ exec "$real_git" "$@"
                 "scripts/env/services/private.py",
                 "scripts/env/services/evidence.py",
                 "scripts/env/repos/track_comments.py",
-                "scripts/env/tools/task/tool.py",
-                "scripts/env/tools/task/_impl.py",
+                "scripts/env/tools/task_sys/tool.py",
+                "scripts/env/tools/task_sys/_impl.py",
                 "scripts/env/tools/track/tool.py",
                 "scripts/env/tools/track/_impl.py",
                 "scripts/env/tools/artifact/tool.py",
@@ -2598,7 +2601,7 @@ exec "$real_git" "$@"
             self.assertTrue(main_thread["rollout_materialized"])
             self.assertEqual(main_thread["injected_items"][0]["role"], "assistant")
 
-    def test_fake_codex_turn_start_still_materializes_thread(self) -> None:
+    def test_instance_input_records_task_without_materializing_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
@@ -2624,7 +2627,9 @@ exec "$real_git" "$@"
 
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
-            self.assertTrue(state_payload["threads"][thread_id]["rollout_materialized"])
+            self.assertFalse(state_payload["threads"][thread_id]["rollout_materialized"])
+            payload = json.loads(input_result.stdout)
+            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="materialize")
 
     def test_start_bootstraps_main_thread_rollout_before_daemon_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2977,13 +2982,14 @@ exec "$real_git" "$@"
                 Path(payload["instance_json"]).parent,
             )
 
-    def test_input_starts_turn_when_thread_idle_defaults_to_raw(self) -> None:
+    def test_input_creates_task_sys_task_when_thread_idle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
                 [
                     str(LAUNCHER),
@@ -3007,25 +3013,33 @@ exec "$real_git" "$@"
             ]
             rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
             methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("thread/read", methods)
+            self.assertIn("thread/fork", methods)
+            self.assertIn("thread/inject_items", methods)
             self.assertIn("turn/start", methods)
             self.assertNotIn("turn/steer", methods)
             turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            input_item = turn_start["params"]["input"][0]
-            self.assertEqual(input_item["type"], "text")
-            self._assert_raw_input(input_item["text"], raw_text="Draft brief")
-            self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
-            self.assertNotIn("sandboxPolicy", turn_start["params"])
-            self.assertIn("turn-test", input_result.stdout)
+            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            prompt = turn_start["params"]["input"][0]["text"]
+            self.assertIn("task_sys.side_frame", prompt)
+            self.assertIn("task_sys.close", prompt)
+            self.assertIn("task_sys.need_parent", prompt)
+            self.assertIn("Task created:", input_result.stdout)
+            task_id = input_result.stdout.strip().removeprefix("Task created: ").strip()
+            payload = {
+                "actor_id": ctx["actor_id"],
+                "role_id": ctx["instance_payload"]["role"],
+                "task_id": task_id,
+            }
+            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Draft brief")
 
-    def test_input_json_starts_turn_when_thread_idle_without_changing_sent_text(self) -> None:
+    def test_input_json_creates_task_sys_task_when_thread_idle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
                 [
                     str(LAUNCHER),
@@ -3045,16 +3059,27 @@ exec "$real_git" "$@"
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
             payload = json.loads(input_result.stdout)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
+            self.assertEqual(payload["role_id"], ctx["instance_payload"]["role"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(payload["action"], "start")
-            self.assertTrue(payload["turn_id"])
+            self.assertEqual(payload["action"], "task_created")
+            self.assertEqual(payload["instruction_type"], "start_side")
+            self.assertTrue(payload["task_id"])
+            self.assertEqual(payload["runtime"]["action"], "start_side")
+            self.assertTrue(payload["runtime"]["side_thread_id"])
             self.assertNotIn("Started turn:", input_result.stdout)
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [row["rpc_method"] for row in rpc_rows]
+            self.assertIn("thread/fork", methods)
+            self.assertIn("thread/inject_items", methods)
+            self.assertIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
             turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self._assert_raw_input(turn_start["params"]["input"][0]["text"], raw_text="Draft brief")
+            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
+            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Draft brief")
 
-    def test_input_steers_in_progress_turn_defaults_to_raw(self) -> None:
+    def test_input_creates_task_sys_task_when_thread_active(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -3103,15 +3128,21 @@ exec "$real_git" "$@"
             ]
             rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
             methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("thread/read", methods)
-            self.assertIn("thread/turns/list", methods)
-            self.assertIn("turn/steer", methods)
-            self.assertNotIn("turn/start", methods)
-            steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
-            self.assertEqual(steer["params"]["expectedTurnId"], "turn-123")
-            input_item = steer["params"]["input"][0]
-            self.assertEqual(input_item["type"], "text")
-            self._assert_raw_input(input_item["text"], raw_text="Steer current turn")
+            self.assertIn("thread/fork", methods)
+            self.assertIn("thread/inject_items", methods)
+            self.assertIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
+            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
+            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
+            self.assertIn("Task created:", input_result.stdout)
+            task_id = input_result.stdout.strip().removeprefix("Task created: ").strip()
+            payload = {
+                "actor_id": ctx["actor_id"],
+                "role_id": ctx["instance_payload"]["role"],
+                "task_id": task_id,
+            }
+            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Steer current turn")
 
     def test_input_rejects_unknown_option_without_rpc_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3142,7 +3173,7 @@ exec "$real_git" "$@"
             self.assertIn("Unknown instance input option: --bogus-input-option", input_result.stderr)
             self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
 
-    def test_input_json_includes_expected_turn_id_when_steering(self) -> None:
+    def test_input_json_creates_task_sys_task_when_thread_active(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -3187,11 +3218,24 @@ exec "$real_git" "$@"
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
             payload = json.loads(input_result.stdout)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
+            self.assertEqual(payload["role_id"], ctx["instance_payload"]["role"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(payload["action"], "steer")
-            self.assertEqual(payload["turn_id"], "turn-123")
-            self.assertEqual(payload["expected_turn_id"], "turn-123")
+            self.assertEqual(payload["action"], "task_created")
+            self.assertEqual(payload["instruction_type"], "start_side")
+            self.assertTrue(payload["task_id"])
+            self.assertEqual(payload["runtime"]["action"], "start_side")
+            self.assertTrue(payload["runtime"]["side_thread_id"])
             self.assertNotIn("Steered turn:", input_result.stdout)
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [row["rpc_method"] for row in rpc_rows]
+            self.assertIn("thread/fork", methods)
+            self.assertIn("thread/inject_items", methods)
+            self.assertIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
+            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
+            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
+            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Steer current turn")
 
     def test_side_creates_child_injects_boundary_and_sends_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -4239,7 +4283,7 @@ exec "$real_git" "$@"
             resume_rpc = next(row for row in calls if row.get("rpc_method") == "thread/resume")
             self.assertEqual(resume_rpc["params"]["threadId"], "thread-cleared")
 
-    def test_input_reports_non_steerable_active_turn(self) -> None:
+    def test_input_records_task_without_steering_non_steerable_active_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -4286,8 +4330,8 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertNotEqual(input_result.returncode, 0)
-            self.assertIn("interrupt", input_result.stderr.lower())
+            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            self.assertIn("Task created:", input_result.stdout)
             calls = [
                 json.loads(line)
                 for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
@@ -4295,8 +4339,18 @@ exec "$real_git" "$@"
             ]
             rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
             methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("turn/steer", methods)
-            self.assertNotIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
+            self.assertIn("turn/start", methods)
+            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
+            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
+            task_id = input_result.stdout.strip().removeprefix("Task created: ").strip()
+            payload = {
+                "actor_id": ctx["actor_id"],
+                "role_id": ctx["instance_payload"]["role"],
+                "task_id": task_id,
+            }
+            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Steer current turn")
 
     def test_input_rejects_inactive_or_unhealthy_instance(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -5232,7 +5286,7 @@ exec "$real_git" "$@"
             ]
             self.assertEqual(sequence[:4], ["initialize", "initialized", "thread/resume", "turn/completed"])
 
-    def test_fake_codex_real_completed_event_triggers_one_stop_task_tui_prompt(self) -> None:
+    def test_fake_codex_real_completed_event_records_task_sys_completion(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -5265,21 +5319,27 @@ exec "$real_git" "$@"
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-            turn_start_rows = self._wait_for_rpc_rows(Path(str(ctx["calls_path"])), "turn/start")
-            time.sleep(0.5)
-            turn_start_rows = [row for row in self._read_rpc_rows(Path(str(ctx["calls_path"]))) if row.get("rpc_method") == "turn/start"]
-
-            self.assertEqual(len(turn_start_rows), 1)
-            params = turn_start_rows[0]["params"]
-            self.assertEqual(params["threadId"], "thr-main")
-            prompt = params["input"][0]["text"]
-            self.assertTrue(prompt.startswith("[TASK CHECKPOINT]"), msg=prompt)
+            records = self._wait_for_task_sys_records(Path(str(ctx["shared_root"])))
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["source_type"], "app_server.turn_completed")
+            self.assertEqual(records[0]["source_ref"], {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"})
+            self.assertEqual(records[0]["status"], "checkpoint")
+            self.assertEqual(records[0]["active_processor"], "checkpoint")
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            rpc_methods = [row.get("rpc_method") for row in rpc_rows]
+            self.assertIn("turn/start", rpc_methods)
+            self.assertNotIn("turn/steer", rpc_methods)
+            turn_start = next(row for row in rpc_rows if row.get("rpc_method") == "turn/start")
+            checkpoint_text = turn_start["params"]["input"][0]["text"]
+            self.assertIn("task_sys.checkpoint", checkpoint_text)
+            self.assertIn("checkpoint_update", checkpoint_text)
+            self.assertNotIn("[TASK CHECKPOINT]", checkpoint_text)
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(daemon_state["daemon_origin_turn_ids"], ["turn-daemon-1"])
             self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "task_checkout")
             self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "turn-user-1")
             self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_origin_turn_id"], "turn-user-1")
-            self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_runtime_turn_id"], "turn-daemon-1")
+            self.assertIsNone(daemon_state["handlers"]["task_checkout"]["last_runtime_turn_id"])
             self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_result"], "handled")
             self.assertNotIn("last_" + "action" + "_turn_id", daemon_state["handlers"]["task_checkout"])
             self.assertNotIn("last_checkout_turn_id", daemon_state["handlers"]["task_checkout"])
@@ -5317,10 +5377,12 @@ exec "$real_git" "$@"
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-            turn_start_rows = self._wait_for_rpc_rows(Path(str(ctx["calls_path"])), "turn/start")
-            time.sleep(0.5)
-            turn_start_rows = [row for row in self._read_rpc_rows(Path(str(ctx["calls_path"]))) if row.get("rpc_method") == "turn/start"]
-            self.assertEqual(len(turn_start_rows), 1)
+            records = self._wait_for_task_sys_records(Path(str(ctx["shared_root"])))
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["source_type"], "app_server.turn_completed")
+            self.assertEqual(records[0]["source_ref"]["turn_id"], "turn-user-1")
+            rpc_methods = [row.get("rpc_method") for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
+            self.assertEqual(rpc_methods.count("turn/start"), 1)
 
     def test_daemon_ignores_other_thread_real_completion_in_fake_codex(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -5370,8 +5432,14 @@ exec "$real_git" "$@"
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-            turn_start_rows = self._wait_for_rpc_rows(Path(str(ctx["calls_path"])), "turn/start")
-            self.assertEqual(len(turn_start_rows), 1)
+            records = self._wait_for_task_sys_records(Path(str(ctx["shared_root"])))
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["source_ref"], {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"})
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            rpc_methods = [row.get("rpc_method") for row in rpc_rows]
+            self.assertIn("turn/start", rpc_methods)
+            turn_start = next(row for row in rpc_rows if row.get("rpc_method") == "turn/start")
+            self.assertIn("task_sys.checkpoint", turn_start["params"]["input"][0]["text"])
 
     def test_list_includes_app_server_health_and_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

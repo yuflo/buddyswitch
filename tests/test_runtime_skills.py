@@ -34,7 +34,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         "--target-id",
     )
     SHARED_TOOL_SKILLS = {
-        "task": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
+        "task_sys": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
         "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
         "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
         "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
@@ -766,7 +766,7 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
         skill_paths = {
-            "task": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
+            "task_sys": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
             "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
             "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",

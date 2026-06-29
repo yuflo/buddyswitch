@@ -46,7 +46,7 @@ class TurnRuntimeRunlessTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["runtime_mode"], "runless")
         tools = payload["env_tools"]
-        self.assertIn("task", tools)
+        self.assertIn("task_sys", tools)
         self.assertIn("context", tools)
         self.assertNotIn("memory", tools)
         self.assertNotIn("actor_private", tools)

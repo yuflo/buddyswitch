@@ -54,7 +54,7 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         self.assertIn("message__list", by_name)
         self.assertIn("message__mark", by_name)
         self.assertIn("message__send", by_name)
-        self.assertIn("task__current", by_name)
+        self.assertIn("task_sys__checkpoint_update", by_name)
         self.assertNotIn("task__get", by_name)
         self.assertEqual(by_name["message__get"]["inputSchema"]["type"], "object")
         self.assertEqual(by_name["message__list"]["inputSchema"]["type"], "object")

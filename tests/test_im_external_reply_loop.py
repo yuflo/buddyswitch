@@ -79,16 +79,34 @@ class _WakeHandlerDispatcher:
         self.runtime = _Runtime()
         self.handler = im_wake_handler.ImMessageCreatedHandler()
         self.triggers: list[Any] = []
+        self.task_sys_instructions: list[dict[str, Any]] = []
 
     def __call__(self, trigger: Any) -> dict[str, Any]:
         self.triggers.append(trigger)
-        result = self.handler.handle(self.context, None, self.runtime, trigger)
+        original_execute = im_wake_handler.task_sys_runtime.execute_instruction
+
+        def fake_execute(context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
+            actor_address = getattr(context, "actor_address")
+            self.assert_actor_target(actor_address, instruction)
+            self.task_sys_instructions.append(instruction)
+            return {"action": instruction["type"], "task_id": instruction["task_id"]}
+
+        try:
+            im_wake_handler.task_sys_runtime.execute_instruction = fake_execute
+            result = self.handler.handle(self.context, None, self.runtime, trigger)
+        finally:
+            im_wake_handler.task_sys_runtime.execute_instruction = original_execute
         return {
             "accepted": True,
             "handled_count": 1 if result.status == "handled" else 0,
             "matched_count": 1,
             "handling_status": result.status,
         }
+
+    @staticmethod
+    def assert_actor_target(actor_address: ActorAddress, instruction: dict[str, Any]) -> None:
+        if instruction.get("actor_target") != actor_address.to_payload():
+            raise AssertionError(f"wrong task sys target: {instruction.get('actor_target')!r}")
 
 
 class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -270,8 +288,18 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(trigger.correlation_id, "imwake-socket")
         self.assertEqual(trigger.payload, {"message_id": "msg-socket", "conversation_id": "conv-socket", "event_id": "imev-socket"})
         self.assertEqual(trigger.source_context, {"source": "central_im"})
-        self.assertEqual(len(dispatcher.runtime.parent_prompts), 1)
-        self.assertIn('message__get with message_id="msg-socket"', dispatcher.runtime.parent_prompts[0]["prompt"])
+        self.assertEqual(dispatcher.runtime.parent_prompts, [])
+        self.assertEqual(len(dispatcher.task_sys_instructions), 1)
+        instruction = dispatcher.task_sys_instructions[0]
+        self.assertEqual(instruction["type"], "start_side")
+        self.assertEqual(instruction["actor_target"], target)
+        frame = instruction["frame"]
+        self.assertEqual(frame["kind"], "task_sys.side_frame")
+        self.assertEqual(frame["source"]["type"], "im.message.created")
+        self.assertEqual(
+            frame["source"]["ref"],
+            {"message_id": "msg-socket", "conversation_id": "conv-socket", "event_id": "imev-socket"},
+        )
 
     def test_wake_bridge_reports_offline_target_without_mailbox_request(self) -> None:
         mailbox_calls: list[dict[str, Any]] = []

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from env.services import messages as message_service
@@ -92,132 +91,15 @@ class ActorImClient:
 
     def mark(self, args: dict[str, Any]) -> dict[str, Any]:
         if args.get("disposition") == "needs_parent":
-            return self._mark_needs_parent(args)
+            return self._reject_message_payload(
+                message="needs_parent message disposition was replaced by task_sys.need_parent from a task_sys.side_frame",
+                correctable_fields=["disposition"],
+            )
         return message_service.update_im_disposition(
             participant=self._actor,
             message_id=str(args.get("message_id") or ""),
             disposition=str(args.get("disposition") or ""),
             reason=args.get("reason") if isinstance(args.get("reason"), str) else None,
-        )
-
-    def _mark_needs_parent(self, args: dict[str, Any]) -> dict[str, Any]:
-        from env.repos import messages as message_repo
-
-        message_id = str(args.get("message_id") or "")
-        reason = args.get("reason") if isinstance(args.get("reason"), str) else None
-        if not reason or not reason.strip():
-            return self._reject_message_payload(
-                message="reason is required when disposition is needs_parent",
-                correctable_fields=["reason"],
-            )
-        message_response = message_service.get_im_message(participant=self._actor, message_id=message_id)
-        if message_response.get("ok") is not True:
-            return message_response
-        message = message_response["message"]
-        current_state = message_repo.get_im_message_state(message_id, self._actor)
-        if current_state is None:
-            return {"ok": False, "error": {"code": "E_IM_SCOPE", "message": "participant has no state for this message"}}
-        original_previous_disposition = str(current_state.get("disposition") or "unseen")
-        prompt = self._render_parent_required_prompt(message=message, reason=reason.strip())
-        try:
-            parent_request = self._request_parent_message_handling(message_id=message_id, prompt=prompt)
-        except Exception as exc:
-            final_state = message_repo.get_im_message_state(message_id, self._actor) or current_state
-            original_final_disposition = str(final_state.get("disposition") or original_previous_disposition)
-            return tool_results.rejection(
-                tool="message",
-                action="message.mark",
-                active_actor=self._active_actor_payload(),
-                active_role=self._active_role(),
-                code="E_MESSAGE_PARENT_REQUIRED_SUBMIT_FAILED",
-                message=str(exc),
-                permission_boundary="message.needs_parent_runtime",
-                human_summary="Parent-required message handoff failed.",
-                why_blocked="The parent prompt could not be submitted, so the message was not marked needs_parent.",
-                impact="No message disposition changed; the original message remains in its previous disposition.",
-                state_changed=False,
-                durability="none",
-                retryable=True,
-                retry_guidance="Retry message.mark(needs_parent) after parent runtime availability is restored.",
-                allowed_next_actions=[
-                    "Use message.get to inspect the original processable message.",
-                ],
-                extra={
-                    "message_id": message_id,
-                    "original_message_id": message_id,
-                    "original_previous_disposition": original_previous_disposition,
-                    "original_final_disposition": original_final_disposition,
-                    "parent_prompt_submitted": False,
-                    "message": message,
-                },
-            )
-
-        update_response = message_service.update_im_disposition(
-            participant=self._actor,
-            message_id=message_id,
-            disposition="needs_parent",
-            reason=reason.strip(),
-        )
-        if update_response.get("ok") is not True:
-            final_state = message_repo.get_im_message_state(message_id, self._actor) or current_state
-            original_final_disposition = str(final_state.get("disposition") or original_previous_disposition)
-            return tool_results.rejection(
-                tool="message",
-                action="message.mark",
-                active_actor=self._active_actor_payload(),
-                active_role=self._active_role(),
-                code="E_MESSAGE_NEEDS_PARENT_DISPOSITION_SAVE_FAILED",
-                message=str((update_response.get("error") or {}).get("message") or "needs_parent disposition save failed"),
-                permission_boundary="message.needs_parent_disposition",
-                human_summary="Parent prompt was submitted, but the message disposition could not be saved.",
-                why_blocked="The parent prompt was submitted, but the needs_parent disposition save failed.",
-                impact="Parent handling was requested; the original message remains in its previous disposition.",
-                state_changed=True,
-                durability="durable",
-                retryable=True,
-                retry_guidance="Inspect message state before repeating the parent handoff; the parent prompt was already submitted.",
-                allowed_next_actions=[
-                    "Use message.get to inspect the original processable message if it is still available.",
-                    "Inspect parent runtime state before repeating message.mark(needs_parent).",
-                ],
-                extra={
-                    "message_id": message_id,
-                    "original_message_id": message_id,
-                    "original_previous_disposition": original_previous_disposition,
-                    "original_final_disposition": original_final_disposition,
-                    "parent_prompt_submitted": True,
-                    "parent_request": parent_request,
-                    "message": message,
-                },
-            )
-
-        return tool_results.success(
-            tool="message",
-            action="message.mark",
-            active_actor=self._active_actor_payload(),
-            active_role=self._active_role(),
-            effect_summary=f"Marked message '{message_id}' as needs_parent.",
-            state_changed=True,
-            durability="durable",
-            updated_ids=[message_id],
-            state_changes=[
-                {
-                    "object_type": "message",
-                    "change": "marked_needs_parent",
-                    "message_id": message_id,
-                }
-            ],
-            allowed_next_actions=[
-                "Finish after this disposition path succeeds.",
-            ],
-            extra={
-                "message_id": message_id,
-                "disposition": "needs_parent",
-                "participant": self._actor,
-                "parent_request": parent_request,
-                "parent_prompt_submitted": True,
-                "original_previous_disposition": original_previous_disposition,
-            },
         )
 
     def _wake_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -264,28 +146,6 @@ class ActorImClient:
             if actor_address["actor_id"] == identity_id:
                 return {"kind": "actor", "actor_address": actor_address}
         return None
-
-    def _request_parent_message_handling(self, *, message_id: str, prompt: str) -> dict[str, Any]:
-        request_parent = getattr(self._context.daemon, "request_parent_message_handling", None)
-        if not callable(request_parent):
-            raise RuntimeError("parent message handling is unavailable")
-        return request_parent(message_id=message_id, prompt=prompt)
-
-    def _render_parent_required_prompt(self, *, message: dict[str, Any], reason: str) -> str:
-        from_participant = message.get("from") if isinstance(message.get("from"), dict) else {}
-        to_participants = message.get("to") if isinstance(message.get("to"), list) else []
-        return "\n\n".join(
-            (
-                "[MESSAGE NEEDS PARENT]",
-                f"Message id: {message.get('id')}",
-                f"From: {json.dumps(from_participant, ensure_ascii=True, sort_keys=True)}",
-                f"To: {json.dumps(to_participants, ensure_ascii=True, sort_keys=True)}",
-                f"Reason from side triage:\n{reason}",
-                "A side thread reviewed this IM message and determined that parent processing is required.",
-                "Required action:\nProcess this exact message. Do not assume a reply is required.",
-                "Use only message tools to inspect, reply to, or mark this message.",
-            )
-        )
 
     def _reject_message_payload(self, *, message: str, correctable_fields: list[str]) -> dict[str, Any]:
         return tool_results.rejection(

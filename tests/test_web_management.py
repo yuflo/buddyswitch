@@ -1050,29 +1050,24 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
         self.assertEqual(runner.calls, [])
 
-    def test_input_route_delegates_and_reports_started_vs_steered_turn(self) -> None:
-        for command_payload, expected_action, expected_turn_id in (
-            (
-                {
-                    "actor_id": "act-pm-demo",
-                    "thread_id": "thread-demo",
-                    "action": "start",
-                    "turn_id": "turn-demo",
-                },
-                "start",
-                None,
-            ),
-            (
-                {
-                    "actor_id": "act-pm-demo",
-                    "thread_id": "thread-demo",
-                    "action": "steer",
-                    "turn_id": "turn-steer",
-                    "expected_turn_id": "turn-steer",
-                },
-                "steer",
-                "turn-steer",
-            ),
+    def test_input_route_delegates_and_reports_task_sys_task(self) -> None:
+        for command_payload in (
+            {
+                "actor_id": "act-pm-demo",
+                "role_id": "pm",
+                "thread_id": "thread-demo",
+                "action": "task_created",
+                "task_id": "task-user-input-web",
+                "instruction_type": "start_side",
+            },
+            {
+                "actor_id": "act-pm-demo",
+                "role_id": "pm",
+                "thread_id": "thread-demo",
+                "action": "task_created",
+                "task_id": "task-user-input-web-2",
+                "instruction_type": "start_side",
+            },
         ):
             with self.subTest(command_payload=command_payload):
                 runner = FakeRunner()
@@ -1122,11 +1117,11 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                     payload={"text": "Advance the brief"},
                 )
                 self.assertEqual(status, 200)
-                self.assertEqual(payload["action"], expected_action)
-                if expected_turn_id is None:
-                    self.assertNotIn("expected_turn_id", payload)
-                else:
-                    self.assertEqual(payload["expected_turn_id"], expected_turn_id)
+                self.assertEqual(payload["action"], "task_created")
+                self.assertEqual(payload["task_id"], command_payload["task_id"])
+                self.assertEqual(payload["instruction_type"], "start_side")
+                self.assertNotIn("turn_id", payload)
+                self.assertNotIn("expected_turn_id", payload)
                 self.assertEqual(
                     runner.calls,
                     [
@@ -1649,39 +1644,35 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             {"actor_id": target_identity_id, "role_id": "market"},
         )
 
-    def test_actor_console_api_composes_runtime_task_track_and_im_projection(self) -> None:
-        from env.domain import task_management
+    def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
+        from env.domain import task_sys
 
         self._seed_track_pages()
         runner = FakeRunner()
         runner.add(["instance", "status", "act-pm-demo", "--json"], command_json(self._instance_status_payload()))
         service = self._service(runner)
-        task_view = {
-            "owner_actor": {"actor_id": "act-pm-demo", "role_id": "pm"},
-            "current_anchor": None,
-            "task_state": "none",
-            "shelf": [],
-            "warnings": [],
-        }
+        task_result = task_sys.ingest(
+            {
+                "source": {"type": "test.console", "ref": {"id": "console"}},
+                "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
+                "context": {"fixture": "web console"},
+                "initial_processor": "checkpoint",
+            }
+        )
 
-        with mock.patch.object(task_management, "current_view", return_value=task_view) as current_view:
-            status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
+        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
 
         self.assertEqual(status, 200)
         console = payload["console"]
         self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
         self.assertEqual(console["runtime"]["thread_status"], "idle")
-        self.assertEqual(console["task"], task_view)
+        self.assertEqual(console["task_sys"]["active_count"], 1)
+        self.assertEqual(console["task_sys"]["active_tasks"][0]["task_id"], task_result["task_id"])
         self.assertEqual(console["im"]["target"]["identity"], {"id": "act-pm-demo", "type": "actor"})
         self.assertEqual(console["im"]["target"]["identity_id"], "act-pm-demo")
         self.assertEqual(console["im"]["target"]["role_id"], "pm")
         self.assertNotIn("actor_address", console["im"]["target"])
         self.assertEqual([row["id"] for row in console["tracks"]["items"]], ["track-alpha"])
-        current_view.assert_called_once()
-        call_kwargs = current_view.call_args.kwargs
-        self.assertEqual(call_kwargs["active_role"], "pm")
-        self.assertEqual(call_kwargs["active_actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
-        self.assertEqual(call_kwargs["instance_payload"]["actor_id"], "act-pm-demo")
 
     def test_actor_console_api_rejects_invalid_actor_ids(self) -> None:
         service = self._service()
@@ -1911,9 +1902,11 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
                     command_json(
                         {
                             "actor_id": "act-pm-demo",
+                            "role_id": "pm",
                             "thread_id": "thread-1",
-                            "action": "start",
-                            "turn_id": "turn-user",
+                            "action": "task_created",
+                            "task_id": "task-user-input-web",
+                            "instruction_type": "start_side",
                         }
                     ),
                 ),
@@ -1928,7 +1921,8 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/input", b'{"text":"User task"}')
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["turn_id"], "turn-user")
+        self.assertEqual(payload["task_id"], "task-user-input-web")
+        self.assertNotIn("turn_id", payload)
         self.assertNotIn("Initialize this " "BuddySwitch thread", json.dumps(runner.calls))
         self.assertNotIn("[BuddySwitch internal bootstrap marker]", json.dumps(runner.calls))
 

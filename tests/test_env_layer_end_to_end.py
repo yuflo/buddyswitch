@@ -131,12 +131,12 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         ]
 
     def _instance_task_snapshot(self) -> dict[str, str]:
-        instances_root = self.runtime_root / "instances"
-        if not instances_root.exists():
+        tasks_root = self.runtime_root / "buddyswitch" / "objects" / "task-sys" / "tasks"
+        if not tasks_root.exists():
             return {}
         return {
-            path.relative_to(instances_root).as_posix(): path.read_text(encoding="utf-8")
-            for path in sorted(instances_root.glob("*/taskbox/**/*.json"))
+            path.relative_to(tasks_root).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted(tasks_root.glob("*.json"))
         }
 
     def test_pm_design_dev_test_track_artifact_publication_flow(self) -> None:

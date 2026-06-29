@@ -279,16 +279,13 @@ def _candidate_track_row(*, track: dict[str, Any], active_actor: dict[str, Any])
 
 
 def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
-    refs = task.get("refs")
+    source_ref = task.get("source_ref")
     return {
         "task_id": task.get("id"),
-        "title": task.get("title"),
-        "summary": task.get("summary"),
+        "source_type": task.get("source_type"),
+        "source_ref": source_ref if isinstance(source_ref, dict) else {},
         "status": task.get("status"),
-        "priority": task.get("priority"),
-        "track_id": task.get("track_id"),
-        "closed_at": task.get("closed_at"),
-        "ref_count": len(refs) if isinstance(refs, list) else 0,
+        "active_processor": task.get("active_processor"),
         "updated_at": task.get("updated_at"),
     }
 
@@ -300,7 +297,7 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
     runtime_policy_preview = context.runtime_policy_preview(operation_semantics)
     return {
         "runtime_policy_preview": runtime_policy_preview,
-        "task_visibility": str(operation_semantics["task.current"]["visibility"]),
+        "task_visibility": "Task Sys frames and task_sys tool actions",
         "artifact_publication_path": " ".join(
             [
                 str(artifact_create["success_effect"]),
@@ -330,16 +327,15 @@ def _visible_tasks(
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
-    tasks = context.repos.task.list_tasks(
-        active_role=active_role,
-        instance_json=context["instance_json"],
-        instance_payload=context["instance_payload"],
+    tasks = context.rules.task_sys.list_tasks(
+        actor_target={"actor_id": context["actor_id"], "role_id": active_role},
     )
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
     rows: list[dict[str, Any]] = []
     for task in tasks:
-        track_id = task.get("track_id")
+        source_ref = task.get("source_ref") if isinstance(task.get("source_ref"), dict) else {}
+        track_id = source_ref.get("track_id") if isinstance(source_ref, dict) else None
         if isinstance(track_id, str) and track_id and track_id not in visible_track_ids:
             continue
         rows.append(task)
@@ -669,9 +665,9 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "track.open / track.list via runtime env tools",
         },
         "tasks": {
-            "description": "Active actor private task hints and checklists.",
-            "scope": "active actor private task state",
-            "source_of_truth": "task.current / task.capture / task.select / task.switch_request / task.switch_confirm / task.progress / task.checkout / task.review via runtime env tools",
+            "description": "Task Sys frames, side results, parent handoff, and checkpoint updates.",
+            "scope": "Task Sys task state",
+            "source_of_truth": "task_sys.close / task_sys.need_parent / task_sys.checkpoint_update via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",

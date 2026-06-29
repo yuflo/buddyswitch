@@ -15,6 +15,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import env_legacy_store as env_store  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -36,39 +37,25 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             "browser_port": 9555,
         }
         (self.instance_root / "workspace").mkdir(parents=True, exist_ok=True)
-        taskbox_root = self.instance_root / "taskbox" / "market"
-        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
-        (taskbox_root / "history.md").write_text("", encoding="utf-8")
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _seed_taskbox_task(self, *, role: str, task_id: str, title: str, track_id: str | None = None) -> None:
-        path = self.instance_root / "taskbox" / role / "tasks" / f"{task_id}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
+    def _seed_task_sys_task(self, *, role: str, track_id: str | None = None) -> str:
         actor_id = self.actor_id if role == self.instance_payload.get("role") else self._runtime_actor_id(
             role=role,
             label=f"act-{role}-decision-surface",
         )
-        path.write_text(
-            json.dumps(
-                {
-                    "id": task_id,
-                    "owner_actor": {"actor_id": actor_id, "role_id": role},
-                    "title": title,
-                    "summary": "",
-                    "status": "active",
-                    "priority": "normal",
-                    "track_id": track_id,
-                    "refs": [],
-                    "created_at": "2026-05-23T12:00:00+08:00",
-                    "updated_at": "2026-05-23T12:00:00+08:00",
-                    "closed_at": None,
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
+        source_ref: dict[str, object] = {"fixture": "decision-surface"}
+        if track_id is not None:
+            source_ref["track_id"] = track_id
+        result = task_sys.ingest(
+            {
+                "source": {"type": "test.decision_surface", "ref": source_ref},
+                "actor_target": {"actor_id": actor_id, "role_id": role},
+                "context": {"fixture": "decision surface"},
+                "initial_processor": "checkpoint",
+            }
         )
+        return str(result["task_id"])
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role=role, label="act-market-decision-surface")
@@ -96,7 +83,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             outcome="Ship market decision with clear positioning.",
             now={"next": "Scan market", "blocker": None},
         )
-        self._seed_taskbox_task(role="market", task_id="task-market-decision", title="Scan market", track_id=str(track["id"]))
+        decision_task_id = self._seed_task_sys_task(role="market", track_id=str(track["id"]))
         response = self._dispatch(role="market", tool="context", action="summarize", args={})
         self.assertTrue(response["ok"], msg=response)
         self.assertEqual(response["decision_surface"]["binding_state"]["state"], "runless")
@@ -107,12 +94,12 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         removed_candidate_section = "candidate_" + "requests"
         self.assertNotIn(removed_candidate_section, response)
         self.assertIn("candidate_tasks", response)
-        self.assertTrue(any(row.get("task_id") == "task-market-decision" for row in response["candidate_tasks"]))
+        self.assertTrue(any(row.get("task_id") == decision_task_id for row in response["candidate_tasks"]))
         self.assertNotIn("requests", response.get("current_context_summary") or {})
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
-        self.assertTrue({"task", "track", "artifact", "context", "evidence", "search", "message"}.issubset(set(affordances)))
+        self.assertTrue({"task_sys", "track", "artifact", "context", "evidence", "search", "message"}.issubset(set(affordances)))
         self.assertNotIn("request", affordances)
         self.assertNotIn("private", affordances)
         self.assertNotIn("handoff", affordances)
@@ -412,7 +399,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
         artifact = affordances.get("artifact")
-        task = affordances.get("task")
+        task = affordances.get("task_sys")
         track = affordances.get("track")
         context_tool = affordances.get("context")
         evidence = affordances.get("evidence")
