@@ -29,8 +29,8 @@ import im_http_router
 import imessage_channel
 from env.domain import task_management, track_read
 from env.repos import runtime_files
-from env.services import external_im_session
 from env.tool_runtime import daemon_client
+import external_im_session
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

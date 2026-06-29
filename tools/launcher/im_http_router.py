@@ -17,7 +17,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from env.services import external_im_session  # noqa: E402
+import external_im_session  # noqa: E402
 
 
 JsonResponse = tuple[int, dict[str, Any]]

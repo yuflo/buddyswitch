@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from env.repos import runtime_files
-from env.services import external_im_session
+import external_im_session
 
 
 SCHEMA_VERSION = 1

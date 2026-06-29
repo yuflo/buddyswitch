@@ -16,10 +16,10 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
-from env.services import external_im_session  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
+from tools.launcher import external_im_session  # noqa: E402
 
 
 class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

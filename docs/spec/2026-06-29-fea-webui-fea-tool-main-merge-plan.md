@@ -37,7 +37,7 @@
 
 - The branches have no overlapping changed source files.
 - `fea-webui` and `fea-tool` are semantically related through launcher/runtime quality gates but do not share behavior paths.
-- The only integration fix discovered before merge is in `scripts/env/services/external_im_session.py`: its runtime type alias must avoid Python-version-sensitive union syntax because launcher subprocesses can resolve a different `python3` than the parent test process.
+- The only integration fix discovered before merge is in `tools/launcher/external_im_session.py`: its runtime type alias must avoid Python-version-sensitive union syntax because launcher subprocesses can resolve a different `python3` than the parent test process.
 - `fea-webui` also contains trailing whitespace in a memo file, so the final tree must pass `git diff --check`.
 - `fea-webui` carries historical planning/memo files that still describe the retired iMessage bridge direction. Those should not enter `main` as live guidance. Preserve current product progress in code, tests, and the current smoke runbook; delete stale planning artifacts instead of marking them compatible.
 
@@ -59,7 +59,7 @@ Expected: only this plan file is staged before the planning commit.
 ### Task 2: Merge `fea-webui`
 
 - [ ] Run `git merge --no-ff --no-commit fea-webui`.
-- [ ] Fix `scripts/env/services/external_im_session.py` so runtime type aliases do not evaluate `str | None`.
+- [ ] Fix `tools/launcher/external_im_session.py` so runtime type aliases do not evaluate `str | None`.
 - [ ] Remove stale iMessage bridge planning/memo files that are no longer current execution guidance.
 - [ ] Remove trailing whitespace introduced by the branch.
 - [ ] Keep the current iMessage channel code, External IM session changes, Web lifecycle changes, tests, and current smoke runbook.
@@ -69,8 +69,8 @@ Expected: only this plan file is staged before the planning commit.
 Focused verification:
 
 ```bash
-python3 -m py_compile scripts/env/services/external_im_session.py tools/launcher/imessage_channel.py tools/launcher/web_management.py tools/launcher/im_http_router.py
-python3 -m pytest -q tests/test_imessage_channel.py tests/test_external_im_session.py tests/test_external_im_projection_contract.py tests/test_im_web_management_projection.py tests/test_web_management.py
+python3 -m py_compile tools/launcher/external_im_session.py tools/launcher/imessage_channel.py tools/launcher/web_management.py tools/launcher/im_http_router.py
+python3 -m pytest -q tests/test_imessage_channel.py tests/test_external_im_session.py tests/test_im_web_management_projection.py tests/test_web_management.py
 git diff --check
 ```
 
