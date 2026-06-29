@@ -110,7 +110,7 @@ git status --short --branch
 Residue scan:
 
 ```bash
-rg -n "target-identity-id|allow-sender|allowed_senders|target_identity_id|imessage-bridge" buddyswitch-codex tools/launcher scripts/env/services tests docs/spec
+python3 -m pytest -q tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface
 ```
 
 Expected: no live runtime or test hits for retired iMessage public surfaces; any remaining doc hit must be in a current acceptance/runbook context, not current execution guidance for the retired path.

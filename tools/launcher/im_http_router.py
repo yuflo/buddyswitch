@@ -17,8 +17,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from env.services import messages as message_service  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
+from env.services import external_im_session  # noqa: E402
 
 
 JsonResponse = tuple[int, dict[str, Any]]
@@ -30,9 +29,12 @@ class ImHttpRouter:
         *,
         actor_lister: Callable[[str | None], list[dict[str, Any]]],
         wake_actor: Callable[[dict[str, Any]], dict[str, Any]],
+        im_session: Any | None = None,
     ) -> None:
-        self._actor_lister = actor_lister
-        self._wake_actor = wake_actor
+        self._session = im_session or external_im_session.ExternalImSession(
+            actor_lister=actor_lister,
+            wake_actor=wake_actor,
+        )
 
     def handle(
         self,
@@ -50,7 +52,7 @@ class ImHttpRouter:
                 payload = _json_body(body)
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": str(exc)}}
-            result = message_service.create_external_connection(display_name=str(payload.get("display_name") or ""))
+            result = self._session.create_connection(display_name=str(payload.get("display_name") or ""))
             return (200 if result.get("ok") is True else 400), result
         if not route.startswith("/api/im/"):
             return _not_found()
@@ -60,30 +62,10 @@ class ImHttpRouter:
         auth = self._authenticate(headers)
         if auth.get("ok") is not True:
             return 401, auth
-        participant = auth["participant"]
         connection = auth["connection"]
 
         if normalized_method == "GET" and route == "/api/im/actors":
-            role_id = _first_query_value(query, "role_id")
-            actors = []
-            for row in self._actor_lister(role_id):
-                actor_address = row.get("actor_address") if isinstance(row, dict) else None
-                if not isinstance(actor_address, dict):
-                    continue
-                try:
-                    normalized_address = ActorAddress.from_payload(actor_address).to_payload()
-                except ValueError:
-                    continue
-                status = row.get("status") if isinstance(row.get("status"), str) else "online"
-                actors.append(
-                    {
-                        "identity": {"id": normalized_address["actor_id"], "type": "actor"},
-                        "identity_id": normalized_address["actor_id"],
-                        "role_id": normalized_address["role_id"],
-                        "reachability_status": status,
-                    }
-                )
-            return 200, {"ok": True, "actors": actors, "count": len(actors)}
+            return 200, self._session.list_actors(role_id=_first_query_value(query, "role_id"))
 
         if normalized_method == "POST" and route == "/api/im/messages":
             try:
@@ -92,22 +74,18 @@ class ImHttpRouter:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": str(exc)}}
             if "from" in payload:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "from is derived from authentication"}}
-            target_response = self._actor_participant_for_identity(payload.get("target_identity_id"), field="target_identity_id")
-            if target_response.get("ok") is not True:
-                return 400, target_response
-            result = message_service.send_external_connection_message(
+            result = self._session.send_message(
                 connection=connection,
-                to=target_response["participant"],
+                target_identity_id=payload.get("target_identity_id"),
                 content=str(payload.get("content") or ""),
                 reply_to=payload.get("reply_to") if payload.get("reply_to") is not None else None,
-                wake_actor=self._wake_actor,
             )
             return (200 if result.get("ok") is True else 400), result
 
         if normalized_method == "GET" and route == "/api/im/events":
             if "cursor" in query:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "cursor is internal to the connection"}}
-            result = message_service.read_external_connection_events(
+            result = self._session.read_events(
                 connection=connection,
                 limit=_int_query_value(query, "limit", 50),
                 wait_ms=_int_query_value(query, "wait_ms", 0),
@@ -115,35 +93,32 @@ class ImHttpRouter:
             return 200, result
 
         if normalized_method == "GET" and route == "/api/im/conversations/direct":
-            target_response = self._actor_participant_for_identity(_first_query_value(query, "identity_id"), field="identity_id")
-            if target_response.get("ok") is not True:
-                return 400, target_response
-            result = message_service.get_im_direct_conversation(
-                participant=participant,
-                target=target_response["participant"],
+            result = self._session.get_direct_conversation(
+                connection=connection,
+                identity_id=_first_query_value(query, "identity_id"),
                 limit=_int_query_value(query, "limit", 20),
             )
-            return (200 if result.get("ok") is True else 404), result
+            return _status_for_direct_conversation(result), result
 
         message_prefix = "/api/im/messages/"
         if route.startswith(message_prefix):
             suffix = route[len(message_prefix) :]
             if normalized_method == "GET" and suffix.endswith("/replies"):
                 message_id = suffix[: -len("/replies")]
-                result = message_service.list_im_replies(participant=participant, message_id=message_id)
+                result = self._session.list_replies(connection=connection, message_id=message_id)
                 return (200 if result.get("ok") is True else 404), result
             if normalized_method == "PATCH" and suffix.endswith("/disposition"):
                 message_id = suffix[: -len("/disposition")]
                 payload = _json_body(body)
-                result = message_service.update_im_disposition(
-                    participant=participant,
+                result = self._session.update_disposition(
+                    connection=connection,
                     message_id=message_id,
                     disposition=str(payload.get("disposition") or ""),
                     reason=payload.get("reason") if payload.get("reason") is not None else None,
                 )
                 return (200 if result.get("ok") is True else 400), result
             if normalized_method == "GET" and "/" not in suffix:
-                result = message_service.get_im_message(participant=participant, message_id=suffix)
+                result = self._session.get_message(connection=connection, message_id=suffix)
                 return (200 if result.get("ok") is True else 404), result
 
         return _not_found()
@@ -155,29 +130,7 @@ class ImHttpRouter:
         prefix = "Bearer "
         if not auth_value.startswith(prefix):
             return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "Authorization: Bearer connection_key is required"}}
-        return message_service.authenticate_external_connection_key(auth_value[len(prefix) :])
-
-    def _actor_participant_for_identity(self, value: Any, *, field: str) -> dict[str, Any]:
-        identity_id = value.strip() if isinstance(value, str) and value.strip() else ""
-        if not identity_id:
-            return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": f"{field} is required"}}
-        for row in self._actor_lister(None):
-            actor_address = row.get("actor_address") if isinstance(row, dict) else None
-            if not isinstance(actor_address, dict):
-                continue
-            try:
-                normalized_address = ActorAddress.from_payload(actor_address).to_payload()
-            except ValueError:
-                continue
-            if normalized_address["actor_id"] == identity_id:
-                return {"ok": True, "participant": {"kind": "actor", "actor_address": normalized_address}}
-        return {
-            "ok": False,
-            "error": {
-                "code": "E_IM_PAYLOAD",
-                "message": f"{field} is not a reachable actor identity: {identity_id}",
-            },
-        }
+        return self._session.authenticate(auth_value[len(prefix) :])
 
 
 def _json_body(body: bytes) -> dict[str, Any]:
@@ -205,6 +158,15 @@ def _int_query_value(query: dict[str, list[str]], name: str, default: int) -> in
     except ValueError:
         return default
     return value if value >= 0 else default
+
+
+def _status_for_direct_conversation(result: dict[str, Any]) -> int:
+    if result.get("ok") is True:
+        return 200
+    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    if error.get("code") == "E_IM_NOT_FOUND":
+        return 404
+    return 400
 
 
 def _is_authenticated_im_route(method: str, route: str) -> bool:

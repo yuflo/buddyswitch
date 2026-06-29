@@ -25,9 +25,11 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import web_im_identity
+import im_http_router
+import imessage_channel
 from env.domain import task_management, track_read
 from env.repos import runtime_files
-from env.services import messages as message_service
+from env.services import external_im_session
 from env.tool_runtime import daemon_client
 
 
@@ -242,6 +244,31 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
     return WebManagementServer((host, port), Handler)
 
 
+def create_imessage_channel_worker(server_url: str) -> imessage_channel.ImessageChannelWorker:
+    config = imessage_channel.ChannelConfig(server=server_url)
+    controller = imessage_channel.ImessageChannelController(config=config)
+    return imessage_channel.ImessageChannelWorker(controller)
+
+
+def serve_with_imessage_worker(server: Any, worker: Any) -> None:
+    worker_started = False
+    try:
+        try:
+            worker.start()
+            worker_started = True
+        except Exception as exc:
+            sys.stderr.write(f"iMessage channel worker disabled: {exc}\n")
+            sys.stderr.flush()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    finally:
+        if worker_started:
+            worker.stop()
+        server.server_close()
+
+
 class WebManagementService:
     def __init__(
         self,
@@ -250,15 +277,27 @@ class WebManagementService:
         command_runner: Callable[[list[str], float], CommandResult] | Callable[..., CommandResult] | None = None,
         terminal_opener: Callable[[str], None] | None = None,
         web_im_identity_provider: web_im_identity.WebImIdentityProvider | None = None,
+        im_session: external_im_session.ExternalImSession | None = None,
         platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._runner = command_runner or LauncherCommandRunner(repo_root).run
         self._terminal_opener = terminal_opener or open_macos_terminal_app
-        self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider()
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
+        self._im_session = im_session or external_im_session.ExternalImSession(
+            actor_lister=self._external_im_actor_rows,
+            wake_actor=self._wake_im_actor,
+        )
+        self._im_router = im_http_router.ImHttpRouter(
+            actor_lister=self._external_im_actor_rows,
+            wake_actor=self._wake_im_actor,
+            im_session=self._im_session,
+        )
+        self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider(
+            im_session=self._im_session
+        )
 
     def handle_api(
         self,
@@ -300,6 +339,8 @@ class WebManagementService:
             return 200, {"ok": True, "track": detail}
         if route.startswith("/api/web/im/"):
             return self._handle_web_im(method, route, query, body)
+        if route.startswith("/api/im/"):
+            return self._im_router.handle(method, path, body, headers)
 
         instance_action = self._parse_instance_action_path(path)
         if instance_action is None:
@@ -406,13 +447,6 @@ class WebManagementService:
             return self._web_im_direct_conversation(query)
         raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
 
-    def _web_im_participant(self) -> dict[str, Any]:
-        record = self.ensure_web_im_identity()
-        identity = record.get("identity")
-        if not isinstance(identity, dict) or identity.get("type") != "external" or not isinstance(identity.get("id"), str):
-            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity is invalid.")
-        return {"kind": "external", "external_id": identity["id"]}
-
     def _web_im_connection(self) -> dict[str, Any]:
         record = self.ensure_web_im_identity()
         connection = record.get("connection")
@@ -422,13 +456,11 @@ class WebManagementService:
 
     def _web_im_send_message(self, body: bytes) -> tuple[int, dict[str, Any]]:
         payload = self._parse_json_body(body)
-        target = self._actor_participant_from_identity_id(payload.get("target_identity_id"), field="target_identity_id")
-        result = message_service.send_external_connection_message(
+        result = self._im_session.send_message(
             connection=self._web_im_connection(),
-            to=target,
+            target_identity_id=payload.get("target_identity_id"),
             content=str(payload.get("content") or ""),
             reply_to=payload.get("reply_to") if payload.get("reply_to") is not None else None,
-            wake_actor=self._wake_im_actor,
         )
         return (200 if result.get("ok") is True else 400), result
 
@@ -436,9 +468,8 @@ class WebManagementService:
         if "cursor" in query:
             raise HttpError(status=400, code="INVALID_REQUEST", message="cursor is internal to the Web IM session.")
         connection = self._web_im_connection()
-        participant = self._web_im_participant()
         target_identity_id = self._actor_identity_id_from_query(query)
-        result = message_service.read_external_connection_events(
+        result = self._im_session.read_events(
             connection=connection,
             limit=_int_query_value(query, "limit", 50),
             wait_ms=_int_query_value(query, "wait_ms", 0),
@@ -453,7 +484,7 @@ class WebManagementService:
             message_id = event.get("message_id")
             if not isinstance(message_id, str) or not message_id:
                 continue
-            fetched = message_service.get_im_message(participant=participant, message_id=message_id)
+            fetched = self._im_session.get_message(connection=connection, message_id=message_id)
             if fetched.get("ok") is True and isinstance(fetched.get("message"), dict):
                 events.append(event)
                 messages.append(fetched["message"])
@@ -463,10 +494,9 @@ class WebManagementService:
         return payload
 
     def _web_im_direct_conversation(self, query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
-        target = self._actor_participant_from_identity_id(_first_query_value(query, "identity_id"), field="identity_id")
-        result = message_service.get_im_direct_conversation(
-            participant=self._web_im_participant(),
-            target=target,
+        result = self._im_session.get_direct_conversation(
+            connection=self._web_im_connection(),
+            identity_id=self._actor_identity_id_from_query(query),
             limit=_int_query_value(query, "limit", 20),
         )
         if result.get("ok") is True:
@@ -479,11 +509,6 @@ class WebManagementService:
     def _actor_identity_id_from_query(self, query: dict[str, list[str]]) -> str:
         return self._actor_identity_id(_first_query_value(query, "identity_id"), field="identity_id")
 
-    def _actor_participant_from_identity_id(self, value: Any, *, field: str) -> dict[str, Any]:
-        identity_id = self._actor_identity_id(value, field=field)
-        actor_address = self._actor_route_from_identity_id(identity_id, field=field)
-        return {"kind": "actor", "actor_address": actor_address}
-
     def _actor_identity_id(self, value: Any, *, field: str) -> str:
         if not isinstance(value, str) or not value.strip():
             raise HttpError(status=400, code="INVALID_REQUEST", message=f"{field} is required.")
@@ -493,20 +518,6 @@ class WebManagementService:
         except ValueError as exc:
             raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
         return identity_id
-
-    def _actor_route_from_identity_id(self, identity_id: str, *, field: str) -> dict[str, str]:
-        for row in self._list_actor_rows():
-            if row.get("actor_id") != identity_id:
-                continue
-            role_id = row.get("role")
-            try:
-                return {
-                    "actor_id": validate_actor_id(identity_id),
-                    "role_id": runtime_files.require_id(role_id, "role_id"),
-                }
-            except ValueError as exc:
-                raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
-        raise HttpError(status=400, code="INVALID_REQUEST", message=f"{field} is not a reachable actor identity: {identity_id}")
 
     def _create_instance(self, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
@@ -907,6 +918,26 @@ class WebManagementService:
     def _list_actor_rows(self) -> list[dict[str, Any]]:
         return [self._actor_row_from_instance(instance) for instance in self._list_instances()]
 
+    def _external_im_actor_rows(self, role_id: str | None) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for row in self._list_actor_rows():
+            if role_id is not None and row.get("role") != role_id:
+                continue
+            try:
+                actor_address = {
+                    "actor_id": validate_actor_id(row.get("actor_id")),
+                    "role_id": runtime_files.require_id(row.get("role"), "role_id"),
+                }
+            except ValueError:
+                continue
+            rows.append(
+                {
+                    "actor_address": actor_address,
+                    "status": row.get("status") if isinstance(row.get("status"), str) else "online",
+                }
+            )
+        return rows
+
     def _actor_console(self, actor_id: str) -> dict[str, Any]:
         instance = self._get_instance_status(actor_id)
         role = instance.get("role")
@@ -1106,12 +1137,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     server = create_server(args.host, args.port, service)
     print(f"BuddySwitch web management listening on http://{args.host}:{server.server_port}", flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    worker = create_imessage_channel_worker(f"http://{args.host}:{server.server_port}")
+    serve_with_imessage_worker(server, worker)
     return 0
 
 
