@@ -45,8 +45,8 @@
 
 ### Task 1: Record The Plan
 
-- [ ] Add this merge and test plan under `docs/spec`.
-- [ ] Commit the plan before code merge if the worktree is otherwise clean.
+- [x] Add this merge and test plan under `docs/spec`.
+- [x] Commit the plan before code merge if the worktree is otherwise clean.
 
 Verification:
 
@@ -58,13 +58,13 @@ Expected: only this plan file is staged before the planning commit.
 
 ### Task 2: Merge `fea-webui`
 
-- [ ] Run `git merge --no-ff --no-commit fea-webui`.
-- [ ] Fix `tools/launcher/external_im_session.py` so runtime type aliases do not evaluate `str | None`.
-- [ ] Remove stale iMessage bridge planning/memo files that are no longer current execution guidance.
-- [ ] Remove trailing whitespace introduced by the branch.
-- [ ] Keep the current iMessage channel code, External IM session changes, Web lifecycle changes, tests, and current smoke runbook.
-- [ ] Run focused iMessage/Web verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-webui`.
+- [x] Fix `tools/launcher/external_im_session.py` so runtime type aliases do not evaluate `str | None`.
+- [x] Remove stale iMessage bridge planning/memo files that are no longer current execution guidance.
+- [x] Remove trailing whitespace introduced by the branch.
+- [x] Keep the current iMessage channel code, External IM session changes, Web lifecycle changes, tests, and current smoke runbook.
+- [x] Run focused iMessage/Web verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -78,11 +78,11 @@ Expected: compile passes, focused tests pass, whitespace check has no output.
 
 ### Task 3: Merge `fea-tool`
 
-- [ ] Run `git merge --no-ff --no-commit fea-tool`.
-- [ ] Keep the deterministic post-response `new_page` lifecycle reconciliation path.
-- [ ] Ensure the browser lifecycle spec is current or remove stale implementation checklist wording.
-- [ ] Run focused browser verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-tool`.
+- [x] Keep the deterministic post-response `new_page` lifecycle reconciliation path.
+- [x] Ensure the browser lifecycle spec is current or remove stale implementation checklist wording.
+- [x] Run focused browser verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -95,9 +95,9 @@ Expected: browser cockpit proxy tests pass and whitespace check has no output.
 
 ### Task 4: Final Integration Verification
 
-- [ ] Run broad Python verification from `main`.
-- [ ] Run scoped residue scans for retired iMessage public surfaces and stale dual-path wording in live runtime/test/spec surfaces.
-- [ ] Inspect final git status and recent history.
+- [x] Run broad Python verification from `main`.
+- [x] Run scoped residue scans for retired iMessage public surfaces and stale dual-path wording in live runtime/test/spec surfaces.
+- [x] Inspect final git status and recent history.
 
 Broad verification:
 
@@ -125,3 +125,25 @@ Expected: no live runtime or test hits for retired iMessage public surfaces; any
 - Focused iMessage/Web and browser tests pass.
 - Broad Python verification passes, or any blocker is recorded with exact failing command and root cause.
 - Final report includes changed commits, verification evidence, and remaining risk.
+
+## Final Merge Verification 2026-06-29
+
+```text
+git merge-base --is-ancestor fea-webui main
+exit 0
+
+git merge-base --is-ancestor fea-tool main
+exit 0
+
+python3 -m pytest -q
+1087 passed, 1757 subtests passed in 599.78s
+
+python3 -m pytest -q tests/test_imessage_channel.py::ImessageChannelResidueTests::test_no_retired_imessage_surface tests/test_env_layer_boundaries.py::EnvLayerBoundaryTests::test_legacy_env_services_tool_entrypoints_are_removed tests/test_repo_consistency.py::RepoConsistencyTests::test_stable_guidance_does_not_point_to_internal_tool_contract_surfaces
+3 passed in 0.16s
+
+git diff --check
+no output
+
+git status --short --branch
+## main...origin/main [ahead 7]
+```
