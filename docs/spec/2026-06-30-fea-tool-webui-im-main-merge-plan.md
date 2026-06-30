@@ -104,7 +104,15 @@ Focused verification:
 ```bash
 bash -n buddyswitch-codex tools/launcher/browser_cockpit.sh tools/launcher/env.sh
 python3 -m py_compile scripts/env/cdp_browser_lifecycle.py scripts/env/tools/search/_impl.py tools/launcher/browser_page_expired_handler.py tools/launcher/browser_release_handler.py tools/launcher/browser_inbound.py tools/launcher/chrome_devtools_cockpit_proxy.py
-python3 -m unittest tests.test_browser_cockpit_launcher tests.test_browser_cockpit_proxy tests.test_browser_page_expired_handler tests.test_cdp_browser_session tests.test_search_env_tool tests.test_env_tool_response_contract tests.test_buddyswitch_launcher tests.test_instance_daemon_entrypoint tests.test_browser_lazy_release_integration
+python3 -m unittest tests.test_browser_cockpit_launcher
+python3 -m unittest tests.test_browser_cockpit_proxy
+python3 -m unittest tests.test_browser_page_expired_handler
+python3 -m unittest tests.test_cdp_browser_session
+python3 -m unittest tests.test_search_env_tool
+python3 -m unittest tests.test_env_tool_response_contract
+python3 -m unittest tests.test_buddyswitch_launcher
+python3 -m unittest tests.test_instance_daemon_entrypoint
+python3 -m unittest tests.test_browser_lazy_release_integration
 git diff --check
 ```
 
@@ -179,7 +187,15 @@ node --check tools/launcher/assets/web-management/app.js
 python3 -m py_compile scripts/env/cdp_browser_lifecycle.py scripts/env/tools/search/_impl.py scripts/env/tools/message/tool.py tools/launcher/browser_page_expired_handler.py tools/launcher/browser_release_handler.py tools/launcher/browser_inbound.py tools/launcher/chrome_devtools_cockpit_proxy.py
 node tests/web_management_ui_state.test.js
 node tests/web_management_ui_contract.test.js
-python3 -m unittest tests.test_browser_cockpit_launcher tests.test_browser_cockpit_proxy tests.test_browser_page_expired_handler tests.test_cdp_browser_session tests.test_search_env_tool tests.test_env_tool_response_contract tests.test_buddyswitch_launcher tests.test_instance_daemon_entrypoint tests.test_browser_lazy_release_integration
+python3 -m unittest tests.test_browser_cockpit_launcher
+python3 -m unittest tests.test_browser_cockpit_proxy
+python3 -m unittest tests.test_browser_page_expired_handler
+python3 -m unittest tests.test_cdp_browser_session
+python3 -m unittest tests.test_search_env_tool
+python3 -m unittest tests.test_env_tool_response_contract
+python3 -m unittest tests.test_buddyswitch_launcher
+python3 -m unittest tests.test_instance_daemon_entrypoint
+python3 -m unittest tests.test_browser_lazy_release_integration
 python3 -m pytest -q tests/test_env_tool_schema_contract.py tests/test_env_tool_semantic_contract.py tests/test_runtime_skills.py tests/test_repo_consistency.py
 git diff --check
 git status --short --branch
