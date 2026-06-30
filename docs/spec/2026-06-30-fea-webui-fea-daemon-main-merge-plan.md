@@ -120,11 +120,11 @@ Expected: compile and shell syntax pass, focused daemon/runtime tests pass, whit
 
 ### Task 4: Final Integration Verification
 
-- [ ] Prove both feature branches are ancestors of `main`.
-- [ ] Run broad Python verification from `main`.
-- [ ] Run Node UI contract verification.
-- [ ] Run residue scans for retired taskbox/task tool paths, retired iMessage worker-ordering residue, sensitive log metadata exposure, and accidental daemon-to-iMessage branch leakage.
-- [ ] Inspect final git status and recent history.
+- [x] Prove both feature branches are ancestors of `main`.
+- [x] Run broad Python verification from `main`.
+- [x] Run Node UI contract verification.
+- [x] Run residue scans for retired taskbox/task tool paths, retired iMessage worker-ordering residue, sensitive log metadata exposure, and accidental daemon-to-iMessage branch leakage.
+- [x] Inspect final git status and recent history.
 
 Broad verification:
 
@@ -165,3 +165,95 @@ Expected:
 - Explicit `task_sys.close`, parent-frame completion requirements, daemon Task Sys status projection, runtime breadcrumb logs, and compact status log metadata are preserved.
 - No generic event bus, tracing platform, feature flag, or dual compatibility mode is introduced.
 - Focused and broad verification pass, or any blocker is recorded with exact failing command and root cause before further changes.
+
+## Final Merge Verification 2026-06-30
+
+Merge commits:
+
+```text
+b0817bb docs: plan fea webui daemon merge
+3b2b687 Merge branch 'fea-webui'
+367e456 Merge branch 'fea-daemon'
+83fd567 test: classify merge implementation specs
+```
+
+Branch ancestry:
+
+```text
+git merge-base --is-ancestor fea-webui main
+exit 0
+
+git merge-base --is-ancestor fea-daemon main
+exit 0
+```
+
+Focused `fea-webui` verification:
+
+```text
+python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/services/messages.py tools/launcher/task_sys_ingress.py tools/launcher/task_sys_runtime.py tools/launcher/external_im_session.py tools/launcher/im_http_router.py tools/launcher/imessage_channel.py tools/launcher/web_management.py
+passed
+
+python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_task_sys_checkpoint.py tests/test_external_im_session.py tests/test_im_product_core.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_external_reply_loop.py tests/test_external_im_projection_contract.py tests/test_imessage_channel.py
+144 passed, 60 subtests passed in 113.01s
+
+node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
+2 test files passed
+
+git diff --check
+no output
+```
+
+Focused `fea-daemon` verification:
+
+```text
+python3 -m py_compile tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py tools/launcher/task_sys_runtime.py
+passed
+
+bash -n buddyswitch-codex
+passed
+
+bash -n tools/launcher/runtime_broker.sh
+passed
+
+python3 -m pytest -q tests/test_daemon_service_contract.py tests/test_runless_runtime_contract.py tests/test_buddyswitch_launcher.py tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_env_tool_schema_contract.py tests/test_env_tool_semantic_contract.py tests/test_task_management_skill_architecture.py
+303 passed, 498 subtests passed in 644.84s
+
+git diff --check
+no output
+```
+
+Final integration verification:
+
+```text
+python3 -m pytest -q
+1128 passed, 1605 subtests passed in 804.08s
+
+node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
+2 test files passed
+
+python3 -m pytest -q tests/test_imessage_channel.py::ImessageChannelResidueTests::test_live_surfaces_do_not_teach_serial_reply_wait_semantics
+1 passed
+
+python3 -m pytest -q tests/test_repo_consistency.py::RepoConsistencyTests::test_docs_spec_drift_filter_rejects_unmarked_live_guidance tests/test_repo_consistency.py::RepoConsistencyTests::test_stable_guidance_does_not_point_to_internal_tool_contract_surfaces
+2 passed
+
+rg -n "task\\.current|task\\.capture|task\\.checkout|task__current|task__checkout|TaskViewModel|E_ACTIVE_TASK_REQUIRED|task\\.active_anchor|taskbox|task_management" scripts tools buddyswitch docs/arch -S
+no output
+
+rg -n "raw_message|message_content|artifact_body|full_prompt|credentials|tool_payload|event bus|trace id|sampling" tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py -S
+no output
+
+git diff --check
+no output
+```
+
+Residue interpretation:
+
+- The broad sensitive-term scan across tests and specs reports historical records, current non-goal text, and negative assertions. The implementation-only scan over status/logging code has no hits.
+- Final iMessage/Web file hits from `git diff --name-only 25b44e7..HEAD` are exactly the intentional `fea-webui` files: `tests/test_external_im_session.py`, `tests/test_im_http_router.py`, `tests/test_imessage_channel.py`, `tests/test_web_management.py`, `tools/launcher/external_im_session.py`, `tools/launcher/im_http_router.py`, `tools/launcher/imessage_channel.py`, and `tools/launcher/web_management.py`.
+- The first broad run exposed that the repo-consistency docs/spec context filter did not classify the new implementation-record directories or merge-plan docs. Commit `83fd567` fixed the filter narrowly and added assertions that unmarked stable guidance remains rejected.
+
+Remaining risk:
+
+- Live macOS/iMessage delivery was not manually smoke-tested in this merge pass. Automated worker and projection tests cover the merged delayed-control and ack behavior.
+- Runtime service tests exercise fake launcher/service paths; external daemon behavior still depends on host process state outside the unit test environment.
