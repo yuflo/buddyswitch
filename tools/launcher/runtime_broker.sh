@@ -134,6 +134,72 @@ buddyswitch_runtime_broker_is_active() {
   _buddyswitch_runtime_broker_lifecycle_json "status" "${socket_path}" "${pid_file}" "${marker_path}" "${log_file}" >/dev/null
 }
 
+buddyswitch_runtime_broker_status_json() {
+  local socket_path pid_file marker_path log_file output
+  socket_path="$(_buddyswitch_runtime_broker_effective_socket)"
+  pid_file="$(buddyswitch_runtime_broker_pid_file)"
+  marker_path="$(buddyswitch_runtime_broker_socket_marker_file)"
+  log_file="$(buddyswitch_runtime_broker_log_file)"
+  if output="$(_buddyswitch_runtime_broker_lifecycle_json "status" "${socket_path}" "${pid_file}" "${marker_path}" "${log_file}" 2>/dev/null)"; then
+    printf '%s\n' "${output}"
+    return 0
+  fi
+  if [[ -n "${output:-}" ]]; then
+    printf '%s\n' "${output}"
+    return 0
+  fi
+  python3 - "${socket_path}" "${pid_file}" "${marker_path}" "${log_file}" <<'PY'
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+
+socket_path, pid_file, marker_path, log_file = (Path(value) for value in sys.argv[1:5])
+
+def log_metadata(path: Path) -> dict[str, object]:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return {"path": str(path), "exists": False, "size_bytes": 0, "mtime": None, "last_event": None}
+    last_event = None
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("service"), str) and isinstance(payload.get("event"), str):
+                last_event = payload
+    except OSError:
+        last_event = None
+    return {
+        "path": str(path),
+        "exists": True,
+        "size_bytes": stat.st_size,
+        "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "last_event": last_event,
+    }
+
+print(json.dumps({
+    "ok": False,
+    "protocol": None,
+    "pid": None,
+    "pid_live": False,
+    "socket_path": str(socket_path),
+    "marker_path": str(marker_path),
+    "marker_value": None,
+    "log_file": str(log_file),
+    "log": log_metadata(log_file),
+    "healthy": False,
+    "error": {
+        "code": "E_RUNTIME_BROKER_UNAVAILABLE",
+        "message": "runtime broker status unavailable",
+        "retriable": True,
+    },
+}, ensure_ascii=True))
+PY
+}
+
 buddyswitch_runtime_broker_ensure() {
   local socket_path pid_file log_file marker_path output ensured_socket
   socket_path="$(_buddyswitch_runtime_broker_effective_socket)"

@@ -69,7 +69,7 @@ def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context
         retryable=True,
         retry_guidance="Retry with only documented task_sys payload fields.",
         allowed_next_actions=[
-            "Use task_sys.close or task_sys.need_parent with documented payload fields.",
+            "Use task_sys.close, task_sys.need_parent, or task_sys.checkpoint_update with documented payload fields.",
         ],
         correctable_fields=unknown,
     )
@@ -99,16 +99,21 @@ def _success(
     frame = result.get("frame")
     if isinstance(frame, dict):
         extra["frame"] = frame
-    effect_summary = f"Recorded Task Sys side result: {result.get('outcome')}."
-    if action == "checkpoint_update":
+    if action == "close":
+        effect_summary = "Closed Task Sys task."
+    elif action == "need_parent":
+        effect_summary = "Recorded Task Sys parent handoff."
+    elif action == "checkpoint_update":
         effect_summary = f"Recorded Task Sys checkpoint update: {result.get('outcome')}."
+    else:
+        effect_summary = f"Recorded Task Sys action: {result.get('outcome')}."
     return tool_results.success(
         tool="task_sys",
         action=f"task_sys.{action}",
         active_actor=_active_actor(context),
         active_role=_active_role(context),
         effect_summary=effect_summary,
-        state_changed=True,
+        state_changed=bool(result.get("state_changed", True)),
         durability="durable",
         updated_ids=[str(result.get("task_id"))],
         state_changes=[
@@ -139,22 +144,18 @@ def _execute_parent_instruction(context: Any, instruction: dict[str, Any]) -> di
 
 def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
-    result = task_sys.record_side_result(
+    result = task_sys.record_task_close(
         str(args.get("task_id") or ""),
-        {
-            "outcome": "close",
-            "summary": args.get("summary"),
-        },
+        {"summary": args.get("summary")},
     )
     return _success("close", result, context)
 
 
 def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
-    result = task_sys.record_side_result(
+    result = task_sys.record_side_need_parent(
         str(args.get("task_id") or ""),
         {
-            "outcome": "need_parent",
             "params": args.get("params"),
         },
     )

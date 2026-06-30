@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -18,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+import runtime_kernel.lifecycle as runtime_lifecycle  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -26,6 +28,20 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    @staticmethod
+    def _json_log_events(path: Path) -> list[dict[str, object]]:
+        events: list[dict[str, object]] = []
+        if not path.exists():
+            return events
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("event"), str):
+                events.append(payload)
+        return events
+
     def test_runtime_dispatcher_integration_surface_avoids_env_store_import(self) -> None:
         dispatcher_source = (ROOT / "scripts" / "runtime_kernel" / "dispatcher.py").read_text(encoding="utf-8")
         self.assertNotIn("import env_store", dispatcher_source)
@@ -227,6 +243,68 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("inputs_explained", summarize_semantics)
         self.assertIn("success_means", summarize_semantics)
         self.assertEqual(env_tools, tool_catalog.env_tools_description())
+
+    def test_runtime_broker_lifecycle_writes_breadcrumb_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = runtime_lifecycle.BrokerPaths(
+                socket_path=root / "runtime-broker.sock",
+                pid_file=root / "runtime-broker.pid",
+                marker_file=root / "runtime-broker.socket",
+                log_file=root / "runtime-broker.log",
+            )
+
+            def fake_start(*_args: object, **_kwargs: object) -> dict[str, object]:
+                paths.pid_file.write_text("999999\n", encoding="utf-8")
+                paths.socket_path.write_text("socket\n", encoding="utf-8")
+                return {"ok": True, "pid": 999999}
+
+            def fake_ping(*_args: object, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "ok": True,
+                    "result": {
+                        "protocol": PROTOCOL,
+                        "actor_id": "act-pm-runless",
+                        "active_role": "pm",
+                        "pid": 999999,
+                        "socket_path": str(paths.socket_path),
+                        "runtime_root": str(ROOT),
+                        "cwd": str(ROOT),
+                        "env_store_root": str(ROOT),
+                        "runtime_workspace": True,
+                    },
+                }
+
+            with patch.object(runtime_lifecycle, "_socket_is_unix", return_value=True), patch.object(
+                runtime_lifecycle,
+                "pid_is_live",
+                side_effect=lambda pid: pid == 999999,
+            ), patch.object(runtime_lifecycle, "start_broker_process", side_effect=fake_start), patch.object(
+                runtime_lifecycle,
+                "ping_broker",
+                side_effect=fake_ping,
+            ):
+                result = runtime_lifecycle.ensure_broker(
+                    paths,
+                    instance_json_path=root / "instance.json",
+                    manifest_path=MANIFEST,
+                    expected_actor_id="act-pm-runless",
+                    expected_active_role="pm",
+                    startup_timeout_seconds=0.05,
+                )
+
+            self.assertTrue(result["ok"], msg=result)
+            with patch.object(runtime_lifecycle, "pid_is_live", return_value=False):
+                runtime_lifecycle.stop_broker(paths)
+
+            events = self._json_log_events(paths.log_file)
+            event_names = [event["event"] for event in events]
+            self.assertIn("runtime_broker_start_requested", event_names)
+            self.assertIn("runtime_broker_ready", event_names)
+            self.assertIn("runtime_broker_stop_requested", event_names)
+            ready = next(event for event in events if event["event"] == "runtime_broker_ready")
+            self.assertEqual(ready["service"], "runtime_broker")
+            self.assertEqual(ready["actor_id"], "act-pm-runless")
 
     def test_context_get_exposes_full_input_schemas(self) -> None:
         instance_json = self._instance_json()

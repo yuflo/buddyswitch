@@ -11,9 +11,10 @@ from env.repos import runtime_files
 
 TASK_STATUSES = ("new", "side_processing", "closed", "needs_parent", "parent_processing", "checkpoint")
 ACTIVE_TASK_STATUSES = ("new", "side_processing", "needs_parent", "parent_processing", "checkpoint")
+TASK_CLOSE_STATUSES = ("side_processing", "parent_processing", "closed")
 RUNTIME_INSTRUCTION_TYPES = ("start_side", "submit_parent", "interrupt_submit_parent", "no_actor_action")
 INITIAL_PROCESSORS = ("side", "none", "checkpoint")
-SIDE_RESULT_OUTCOMES = ("close", "need_parent")
+SIDE_RESULT_OUTCOMES = ("need_parent",)
 CHECKPOINT_UPDATE_OUTCOMES = ("close", "continue")
 
 
@@ -61,6 +62,8 @@ def _normalize_initial_processor(value: Any) -> str:
 
 
 def _normalize_side_result_outcome(value: Any) -> str:
+    if value == "close":
+        raise ValueError("record_side_result no longer closes tasks; use task_sys.close")
     if value not in SIDE_RESULT_OUTCOMES:
         raise ValueError(f"side result outcome must be one of {', '.join(SIDE_RESULT_OUTCOMES)}")
     return str(value)
@@ -275,41 +278,68 @@ def ingest(envelope: Mapping[str, Any]) -> dict[str, Any]:
     return {"ok": True, "task_id": task_id, "task": persisted, "instruction": instruction}
 
 
-def record_side_result(task_id: str, result: Mapping[str, Any]) -> dict[str, Any]:
+def record_task_close(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
     normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _require_mapping(result, "side result")
-    outcome = _normalize_side_result_outcome(payload.get("outcome"))
+    payload = _require_mapping(update, "task close")
     record = _load_task(normalized_task_id)
-    now = runtime_files.now_iso()
+    status = record.get("status")
 
-    if outcome == "close":
-        summary_value = payload.get("summary")
-        side_result: dict[str, Any] = {"outcome": "close"}
-        if isinstance(summary_value, str) and summary_value.strip():
-            side_result["summary"] = summary_value.strip()
-        record.update(
-            {
-                "status": "closed",
-                "active_processor": None,
-                "parent_handoff_params": None,
-                "side_result": side_result,
-                "updated_at": now,
-            }
-        )
-    else:
-        params = _normalize_parent_handoff_params(payload.get("params"))
-        record.update(
-            {
-                "status": "needs_parent",
-                "active_processor": None,
-                "parent_handoff_params": params,
-                "side_result": {"outcome": "need_parent", "params": _payload_copy(params)},
-                "updated_at": now,
-            }
-        )
+    if status == "closed":
+        return {"ok": True, "task_id": normalized_task_id, "outcome": "close", "task": record, "state_changed": False}
+    if status == "checkpoint":
+        raise ValueError("checkpoint tasks must be updated with task_sys.checkpoint_update")
+    if status not in TASK_CLOSE_STATUSES:
+        raise ValueError("task must be in side_processing or parent_processing before close")
+
+    processor = record.get("active_processor")
+    if processor not in {"side", "parent"}:
+        raise ValueError("task active_processor must be side or parent before close")
+    now = runtime_files.now_iso()
+    close_result: dict[str, Any] = {"processor": processor, "updated_at": now}
+    summary = payload.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        close_result["summary"] = summary.strip()
+    record.update(
+        {
+            "status": "closed",
+            "active_processor": None,
+            "close_result": close_result,
+            "updated_at": now,
+        }
+    )
+    if processor == "side":
+        record["parent_handoff_params"] = None
 
     persisted = _persist_task(record)
-    return {"ok": True, "task_id": normalized_task_id, "outcome": outcome, "task": persisted}
+    return {"ok": True, "task_id": normalized_task_id, "outcome": "close", "task": persisted, "state_changed": True}
+
+
+def record_side_need_parent(task_id: str, result: Mapping[str, Any]) -> dict[str, Any]:
+    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    payload = _require_mapping(result, "side need_parent result")
+    params = _normalize_parent_handoff_params(payload.get("params"))
+    record = _load_task(normalized_task_id)
+    if record.get("status") != "side_processing":
+        raise ValueError("task must be in side_processing status before parent handoff")
+    now = runtime_files.now_iso()
+    record.update(
+        {
+            "status": "needs_parent",
+            "active_processor": None,
+            "parent_handoff_params": params,
+            "side_result": {"outcome": "need_parent", "params": _payload_copy(params)},
+            "updated_at": now,
+        }
+    )
+
+    persisted = _persist_task(record)
+    return {"ok": True, "task_id": normalized_task_id, "outcome": "need_parent", "task": persisted, "state_changed": True}
+
+
+def record_side_result(task_id: str, result: Mapping[str, Any]) -> dict[str, Any]:
+    payload = _require_mapping(result, "side result")
+    _normalize_side_result_outcome(payload.get("outcome"))
+    return record_side_need_parent(task_id, {"params": payload.get("params")})
 
 
 def get_task(task_id: str) -> dict[str, Any]:

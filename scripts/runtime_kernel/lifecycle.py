@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import socket
 import subprocess
@@ -23,6 +24,51 @@ class BrokerPaths:
     pid_file: Path
     marker_file: Path
     log_file: Path
+
+
+def _append_runtime_broker_event(paths: BrokerPaths, event: str, **fields: Any) -> None:
+    row = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "service": "runtime_broker",
+        "event": event,
+    }
+    row.update(fields)
+    paths.log_file.parent.mkdir(parents=True, exist_ok=True)
+    with paths.log_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=True, sort_keys=True) + "\n")
+
+
+def _runtime_broker_log_metadata(log_path: Path) -> dict[str, Any]:
+    try:
+        stat = log_path.stat()
+    except FileNotFoundError:
+        return {
+            "path": str(log_path),
+            "exists": False,
+            "size_bytes": 0,
+            "mtime": None,
+            "last_event": None,
+        }
+
+    last_event: dict[str, Any] | None = None
+    try:
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("service"), str) and isinstance(payload.get("event"), str):
+                last_event = payload
+    except OSError:
+        last_event = None
+
+    return {
+        "path": str(log_path),
+        "exists": True,
+        "size_bytes": stat.st_size,
+        "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "last_event": last_event,
+    }
 
 
 def resolve_socket_path(actor_id: str, instance_root: Path, marker_file: Path) -> Path:
@@ -247,6 +293,7 @@ def broker_status(
         "marker_path": str(paths.marker_file),
         "marker_value": marker_value,
         "log_file": str(paths.log_file),
+        "log": _runtime_broker_log_metadata(paths.log_file),
         "healthy": False,
         "runtime_root": None,
         "runtime_workspace_root": None,
@@ -472,6 +519,13 @@ def ensure_broker(
         if not paths.marker_file.parent.exists():
             paths.marker_file.parent.mkdir(parents=True, exist_ok=True)
         paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
+        _append_runtime_broker_event(
+            paths,
+            "runtime_broker_ready",
+            actor_id=expected_actor_id,
+            pid=status.get("pid"),
+            socket_path=str(paths.socket_path),
+        )
         return {
             "ok": True,
             "socket_path": str(paths.socket_path),
@@ -479,6 +533,12 @@ def ensure_broker(
         }
 
     cleanup_stale_broker_state(paths)
+    _append_runtime_broker_event(
+        paths,
+        "runtime_broker_start_requested",
+        actor_id=expected_actor_id,
+        socket_path=str(paths.socket_path),
+    )
 
     started = start_broker_process(
         paths,
@@ -524,6 +584,13 @@ def ensure_broker(
         if latest_status.get("healthy") is True:
             paths.marker_file.parent.mkdir(parents=True, exist_ok=True)
             paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
+            _append_runtime_broker_event(
+                paths,
+                "runtime_broker_ready",
+                actor_id=expected_actor_id,
+                pid=latest_status.get("pid"),
+                socket_path=str(paths.socket_path),
+            )
             return {
                 "ok": True,
                 "socket_path": str(paths.socket_path),
@@ -553,6 +620,11 @@ def ensure_broker(
 
 
 def stop_broker(paths: BrokerPaths) -> dict[str, Any]:
+    _append_runtime_broker_event(
+        paths,
+        "runtime_broker_stop_requested",
+        socket_path=str(paths.socket_path),
+    )
     pid = read_pid(paths.pid_file)
     stopped = False
     if pid is not None and pid > 0 and pid_is_live(pid):

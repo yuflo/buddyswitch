@@ -24,8 +24,10 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import app_server  # noqa: E402
 import daemon_mailbox  # noqa: E402
 import daemon_triggers  # noqa: E402
+import runtime_event_log  # noqa: E402
 import side_thread_registry  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
@@ -67,6 +69,16 @@ def daemon_pid_file(instance_root: Path) -> Path:
 
 def daemon_log_file(instance_root: Path) -> Path:
     return daemon_runtime_dir(instance_root) / "daemon.log"
+
+
+def _append_daemon_event(context: "DaemonContext", event: str, **fields: Any) -> None:
+    runtime_event_log.append_event(
+        daemon_log_file(context.instance_root),
+        service="daemon",
+        event=event,
+        actor_id=context.actor_id,
+        **fields,
+    )
 
 
 def daemon_state_file(instance_root: Path) -> Path:
@@ -1422,6 +1434,12 @@ def dispatch_notification(
         notification,
         target_actor_address=actor_address_for_context(context).to_payload(),
     )
+    _append_daemon_event(
+        context,
+        "notification_received",
+        trigger_type=trigger.type,
+        origin_id=_trigger_origin_id(trigger),
+    )
     result = dispatch_trigger(context, state, runtime, trigger, handlers)
     handled_count = result.get("handled_count")
     return isinstance(handled_count, int) and handled_count > 0
@@ -1454,6 +1472,14 @@ def dispatch_trigger(
         except Exception as exc:
             errors.append(str(exc))
             state.record_handler_error(handler_name, origin_turn_id=origin_id, message=str(exc))
+            _append_daemon_event(
+                context,
+                "handler_failed",
+                handler=handler_name,
+                trigger_type=trigger.type,
+                origin_id=origin_id,
+                error_type=type(exc).__name__,
+            )
             continue
         matched += 1
         handle = getattr(handler, "handle", None)
@@ -1461,12 +1487,28 @@ def dispatch_trigger(
             message = f"handler {handler_name} has no unified handle method"
             errors.append(message)
             state.record_handler_error(handler_name, origin_turn_id=origin_id, message=message)
+            _append_daemon_event(
+                context,
+                "handler_failed",
+                handler=handler_name,
+                trigger_type=trigger.type,
+                origin_id=origin_id,
+                error_type="missing_handle",
+            )
             continue
         try:
             result = handle(context, state, runtime, trigger)
         except Exception as exc:
             errors.append(str(exc))
             state.record_handler_error(handler_name, origin_turn_id=origin_id, message=str(exc))
+            _append_daemon_event(
+                context,
+                "handler_failed",
+                handler=handler_name,
+                trigger_type=trigger.type,
+                origin_id=origin_id,
+                error_type=type(exc).__name__,
+            )
             continue
         status = getattr(result, "status", None)
         message = getattr(result, "message", None)
@@ -1477,9 +1519,25 @@ def dispatch_trigger(
             message = f"handler returned invalid result: {type(result).__name__}"
             errors.append(message)
             state.record_handler_error(handler_name, origin_turn_id=origin_id, message=message)
+            _append_daemon_event(
+                context,
+                "handler_failed",
+                handler=handler_name,
+                trigger_type=trigger.type,
+                origin_id=origin_id,
+                error_type="invalid_result",
+            )
             continue
         normalized = HandlerResult(status, str(message) if status == "failed" and message else None)
         state.record_handler_result(handler_name, normalized, origin_turn_id=origin_id)
+        _append_daemon_event(
+            context,
+            "handler_result",
+            handler=handler_name,
+            trigger_type=trigger.type,
+            origin_id=origin_id,
+            result=normalized.status,
+        )
         if status == "handled":
             handled += 1
         elif status == "failed":
@@ -1586,6 +1644,7 @@ def _handler_status_payload(
             "registered": is_registered,
             "enabled": is_registered,
             "active": is_registered,
+            "result_scope": "trigger_dispatch",
             "last_result": None,
             "last_handled_at": None,
             "last_origin_turn_id": None,
@@ -1632,6 +1691,48 @@ def _schedule_status_payload(state: DaemonState) -> dict[str, Any]:
     return {"ids": list(items), "items": items, "counts": counts}
 
 
+def _task_sys_status_payload(context: DaemonContext) -> dict[str, Any]:
+    actor_target = {"actor_id": context.actor_id, "role_id": context.role}
+    tasks_dir = context.instance_root.parent.parent / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks"
+    active_tasks: list[dict[str, Any]] = []
+    if tasks_dir.exists():
+        for path in sorted(tasks_dir.glob("*.json")):
+            try:
+                record = runtime_files.read_json_object(path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            target = record.get("actor_target")
+            if not isinstance(target, dict):
+                continue
+            if target.get("actor_id") != actor_target["actor_id"] or target.get("role_id") != actor_target["role_id"]:
+                continue
+            if record.get("status") in task_sys.ACTIVE_TASK_STATUSES:
+                active_tasks.append(record)
+    by_status: dict[str, int] = {}
+    summaries: list[dict[str, Any]] = []
+    for record in active_tasks:
+        status = record.get("status")
+        status_key = status if isinstance(status, str) and status else "unknown"
+        by_status[status_key] = by_status.get(status_key, 0) + 1
+        source_ref = record.get("source_ref")
+        summaries.append(
+            {
+                "task_id": record.get("id"),
+                "source_type": record.get("source_type"),
+                "source_ref": dict(source_ref) if isinstance(source_ref, dict) else {},
+                "status": status,
+                "active_processor": record.get("active_processor"),
+                "updated_at": record.get("updated_at"),
+            }
+        )
+    return {
+        "scope": "task_sys_state_projection",
+        "active_count": len(summaries),
+        "by_status": by_status,
+        "active_tasks": summaries,
+    }
+
+
 def daemon_status(
     instance_json: Path,
     *,
@@ -1665,11 +1766,13 @@ def daemon_status(
         "runtime_dir": str(runtime),
         "pid_file": str(pid_path),
         "log_path": str(log_path),
+        "log": runtime_event_log.log_metadata(log_path),
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
         "runtime": _runtime_status_payload(state),
         "schedules": _schedule_status_payload(state),
         "handlers": _handler_status_payload(state, handlers),
+        "task_sys": _task_sys_status_payload(context),
         "notify": {"subscriptions": _notify_subscriptions_payload(notify_subscriptions)},
     }
 
@@ -1727,6 +1830,7 @@ def start_daemon(
             env=child_env,
         )
     _write_text_file(pid_path, str(process.pid))
+    _append_daemon_event(context, "daemon_started", pid=process.pid, main_thread_id=context.main_thread_id)
     deadline = time.monotonic() + DAEMON_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         wait_state = DaemonState.load(
@@ -1765,6 +1869,7 @@ def stop_daemon(instance_json: Path) -> dict[str, Any]:
         terminated = _terminate_pid(pid)
     _remove_path(pid_path)
     unregister = safe_unregister_daemon_actor(context, actor_address, state=state)
+    _append_daemon_event(context, "daemon_stopped", pid=pid, terminated=bool(terminated))
     payload = {
         "ok": True,
         "pid": pid,
@@ -1804,6 +1909,7 @@ def run_daemon(
         ) as client:
             bind_main_thread(context, client)
             state.record_ready(pid=os.getpid(), main_thread_id=context.main_thread_id)
+            _append_daemon_event(context, "daemon_ready", pid=os.getpid(), main_thread_id=context.main_thread_id)
             mailbox_server = start_daemon_mailbox(
                 context=context,
                 state=state,

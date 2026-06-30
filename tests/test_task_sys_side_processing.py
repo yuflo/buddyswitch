@@ -68,14 +68,27 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         path = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks" / f"{task_id}.json"
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def test_side_close_marks_task_closed_without_parent_handoff(self) -> None:
+    def _move_to_parent_processing(self, task_id: str) -> None:
+        task_sys = _task_sys()
+        task_sys.record_side_need_parent(
+            task_id,
+            {
+                "params": {
+                    "parent_frame_context": {"next": "Draft in parent."},
+                    "relation": "Side needs parent work.",
+                    "interrupt": False,
+                },
+            },
+        )
+        task_sys.record_parent_handoff_started(task_id)
+
+    def test_record_task_close_closes_side_processing_task_without_parent_handoff(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
 
-        result = task_sys.record_side_result(
+        result = task_sys.record_task_close(
             task_id,
             {
-                "outcome": "close",
                 "summary": "Handled without parent.",
             },
         )
@@ -86,17 +99,16 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["status"], "closed")
         self.assertIsNone(record["active_processor"])
         self.assertIsNone(record["parent_handoff_params"])
-        self.assertEqual(record["side_result"]["outcome"], "close")
-        self.assertEqual(record["side_result"]["summary"], "Handled without parent.")
+        self.assertEqual(record["close_result"]["processor"], "side")
+        self.assertEqual(record["close_result"]["summary"], "Handled without parent.")
 
     def test_side_need_parent_records_handoff_params_without_interrupt_outcome(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
 
-        result = task_sys.record_side_result(
+        result = task_sys.record_side_need_parent(
             task_id,
             {
-                "outcome": "need_parent",
                 "params": {
                     "parent_frame_context": {"next": "Ask parent to draft the brief."},
                     "relation": "User input requires main-thread work.",
@@ -129,7 +141,20 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "side result outcome"):
             task_sys.record_side_result(task_id, {"outcome": "interrupt"})
 
-    def test_task_sys_tool_registers_only_close_and_need_parent_side_results(self) -> None:
+    def test_record_side_result_no_longer_accepts_close_outcome(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        old_outcome = "cl" + "ose"
+
+        with self.assertRaisesRegex(ValueError, "task_sys.close"):
+            task_sys.record_side_result(task_id, {"outcome": old_outcome})
+
+        record = self._task_record(task_id)
+        self.assertEqual(record["status"], "side_processing")
+        self.assertEqual(record["active_processor"], "side")
+        self.assertNotIn("close_result", record)
+
+    def test_task_sys_tool_registers_close_need_parent_and_checkpoint_update(self) -> None:
         tool_registry.clear_cache()
 
         actions = tool_registry.supported_actions("task_sys")
@@ -137,7 +162,28 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("checkpoint_update", actions)
         self.assertEqual(actions - {"checkpoint_update"}, {"close", "need_parent"})
 
-    def test_task_sys_need_parent_tool_executes_parent_instruction_via_daemon_context(self) -> None:
+    def test_task_sys_close_tool_closes_parent_processing_task(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        self._move_to_parent_processing(task_id)
+        impl = importlib.import_module("env.tools.task_sys._impl")
+
+        result = impl.invoke(
+            action="close",
+            args={"task_id": task_id, "summary": "Parent completed the source task."},
+            context=_TaskSysToolContext(),
+        )
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(result["outcome"], "close")
+        self.assertEqual(result["task_status"], "closed")
+        record = self._task_record(task_id)
+        self.assertEqual(record["status"], "closed")
+        self.assertIsNone(record["active_processor"])
+        self.assertEqual(record["close_result"]["processor"], "parent")
+        self.assertEqual(record["close_result"]["summary"], "Parent completed the source task.")
+
+    def test_task_sys_need_parent_tool_still_marks_parent_processing_after_runtime_submit(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
         impl = importlib.import_module("env.tools.task_sys._impl")
