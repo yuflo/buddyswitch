@@ -18,7 +18,8 @@ Current bottleneck:
 
 - `render_side_frame()` currently names the task, source, context, and two result actions.
 - It does not tell the side processor which resources it may read/write, which resources require parent work, or that short exact IM replies can be closed directly.
-- Because existing side threads can be reused, the resource boundary must appear in every `task_sys.side_frame`, not only in the one-time `SIDE_BOUNDARY_PROMPT`.
+- The resource boundary must appear in every `task_sys.side_frame` because each frame is the active
+  Task Sys task contract, independent of the one-time physical side boundary prompt.
 
 Observable behavior change:
 
@@ -33,7 +34,8 @@ Relevant files:
 - `tools/launcher/task_sys_runtime.py`
   - `render_side_frame(frame)` builds the active `task_sys.side_frame` text.
   - `render_parent_frame()` and `render_checkpoint_frame()` are not part of this phase.
-  - `_execute_start_side()` passes `render_side_frame()` output to either `app_server.input_turn()` for reused side threads or `app_server.side_start()` for new side threads.
+  - `_execute_start_side()` passes `render_side_frame()` output into a fresh Task Sys side dispatch
+    path for each side frame.
 - `tools/launcher/app_server.py`
   - `SIDE_BOUNDARY_PROMPT` is injected when a new side thread is forked. This phase must not modify it.
 - `tests/test_task_sys_runtime_executor.py`
@@ -156,7 +158,8 @@ Expected:
 Behavior acceptance:
 
 - `render_side_frame()` emits the resource-boundary policy for every frame.
-- `execute_instruction(... start_side ...)` continues to submit side-frame text through the existing physical side start/reuse paths.
+- `execute_instruction(... start_side ...)` submits side-frame text through a fresh physical Task Sys
+  side thread for each frame.
 - Side frames still list only `task_sys.close` and `task_sys.need_parent` as side outcomes.
 
 State acceptance:
@@ -228,5 +231,6 @@ Key code references:
 
 Decision record:
 
-- Put the resource policy in `task_sys.side_frame` because reused side threads do not receive the one-time boundary prompt again.
+- Put the resource policy in `task_sys.side_frame` because the frame is the durable task-local
+  contract; the physical side boundary prompt is not the product policy source of truth.
 - Keep this phase prompt-only because the memo explicitly excludes tool-layer hard isolation.

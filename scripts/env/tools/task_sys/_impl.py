@@ -92,6 +92,28 @@ def _success(
     parent_handoff = task.get("parent_handoff_params")
     if isinstance(parent_handoff, dict):
         extra["parent_handoff_params"] = parent_handoff
+    close_result = task.get("close_result")
+    if isinstance(close_result, dict):
+        extra["close_result"] = close_result
+        processor = close_result.get("processor")
+        if isinstance(processor, str) and processor.strip():
+            extra["processor"] = processor.strip()
+        side_thread_id = close_result.get("side_thread_id")
+        if isinstance(side_thread_id, str) and side_thread_id.strip():
+            extra["side_thread_id"] = side_thread_id.strip()
+        cleanup = close_result.get("cleanup")
+        if isinstance(cleanup, dict):
+            extra["side_cleanup"] = cleanup
+    side_result = task.get("side_result")
+    if isinstance(side_result, dict):
+        extra["side_result"] = side_result
+        extra["processor"] = "side"
+        side_thread_id = side_result.get("side_thread_id")
+        if isinstance(side_thread_id, str) and side_thread_id.strip():
+            extra["side_thread_id"] = side_thread_id.strip()
+        cleanup = side_result.get("cleanup")
+        if isinstance(cleanup, dict):
+            extra["side_cleanup"] = cleanup
     if isinstance(parent_instruction, dict):
         extra["parent_instruction"] = parent_instruction
     if isinstance(parent_runtime, dict):
@@ -124,7 +146,7 @@ def _success(
                 "outcome": result.get("outcome"),
             }
         ],
-        allowed_next_actions=[],
+        allowed_next_actions=["Use the returned task_status, processor, and cleanup fields to decide the next frame action."],
         extra=extra,
     )
 
@@ -142,12 +164,53 @@ def _execute_parent_instruction(context: Any, instruction: dict[str, Any]) -> di
     return result
 
 
+def _cleanup_task_sys_side_lease(context: Any, task_id: str) -> dict[str, Any]:
+    daemon = context.get("daemon") if isinstance(context, dict) else None
+    if daemon is None:
+        daemon = getattr(context, "daemon", None)
+    cleanup = getattr(daemon, "cleanup_task_sys_side_lease", None)
+    if not callable(cleanup):
+        return {
+            "side_thread_id": None,
+            "registry_unregistered": False,
+            "physical_close_ok": False,
+            "physical_close_error": "Task Sys side cleanup is unavailable",
+        }
+    result = cleanup(task_id)
+    if not isinstance(result, dict):
+        return {
+            "side_thread_id": None,
+            "registry_unregistered": False,
+            "physical_close_ok": False,
+            "physical_close_error": "Task Sys side cleanup returned a non-object result",
+        }
+    return result
+
+
+def _record_side_cleanup(task_sys: Any, context: Any, task_id: str) -> dict[str, Any]:
+    cleanup = _cleanup_task_sys_side_lease(context, task_id)
+    side_thread_id = cleanup.get("side_thread_id")
+    if not isinstance(side_thread_id, str) or not side_thread_id.strip():
+        side_thread_id = "unknown-side-thread"
+    return task_sys.record_side_cleanup(
+        task_id,
+        {
+            "side_thread_id": side_thread_id,
+            "cleanup": cleanup,
+        },
+    )
+
+
 def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
     result = task_sys.record_task_close(
         str(args.get("task_id") or ""),
         {"summary": args.get("summary")},
     )
+    task = result.get("task") if isinstance(result.get("task"), dict) else {}
+    close_result = task.get("close_result") if isinstance(task, dict) else None
+    if isinstance(close_result, dict) and close_result.get("processor") == "side" and "cleanup" not in close_result:
+        result = dict(result, task=_record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))["task"])
     return _success("close", result, context)
 
 
@@ -160,9 +223,14 @@ def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
         },
     )
     instruction = task_sys.parent_handoff_instruction(str(result.get("task_id") or ""))
-    parent_runtime = _execute_parent_instruction(context, instruction)
+    try:
+        parent_runtime = _execute_parent_instruction(context, instruction)
+    except Exception:
+        _record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))
+        raise
     started = task_sys.record_parent_handoff_started(str(result.get("task_id") or ""))
-    task = started.get("task") if isinstance(started.get("task"), dict) else task_sys.get_task(str(result.get("task_id") or ""))
+    cleaned = _record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))
+    task = cleaned.get("task") if isinstance(cleaned.get("task"), dict) else started.get("task")
     handoff_result = dict(result, task=task)
     return _success(
         "need_parent",

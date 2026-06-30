@@ -32,10 +32,19 @@ class _TaskSysToolContext(dict):
         )
         self.daemon = self
         self.instructions: list[dict[str, Any]] = []
+        self.cleanups: list[str] = []
 
     def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
         self.instructions.append(instruction)
         return {"action": instruction["type"], "task_id": instruction["task_id"], "turn_id": "turn-parent-1"}
+
+    def cleanup_task_sys_side_lease(self, task_id: str) -> dict[str, Any]:
+        self.cleanups.append(task_id)
+        return {
+            "side_thread_id": "thr-side-tool",
+            "registry_unregistered": True,
+            "physical_close_ok": True,
+        }
 
     def submit_parent_prompt(self, *_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("task_sys.need_parent must not submit raw parent prompts")
@@ -167,21 +176,49 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         task_id = task_sys.ingest(self._envelope())["task_id"]
         self._move_to_parent_processing(task_id)
         impl = importlib.import_module("env.tools.task_sys._impl")
+        context = _TaskSysToolContext()
 
         result = impl.invoke(
             action="close",
             args={"task_id": task_id, "summary": "Parent completed the source task."},
-            context=_TaskSysToolContext(),
+            context=context,
         )
 
         self.assertTrue(result["ok"], msg=result)
         self.assertEqual(result["outcome"], "close")
         self.assertEqual(result["task_status"], "closed")
+        self.assertEqual(context.cleanups, [])
         record = self._task_record(task_id)
         self.assertEqual(record["status"], "closed")
         self.assertIsNone(record["active_processor"])
         self.assertEqual(record["close_result"]["processor"], "parent")
         self.assertEqual(record["close_result"]["summary"], "Parent completed the source task.")
+
+    def test_task_sys_close_tool_retires_side_lease_for_side_task(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        impl = importlib.import_module("env.tools.task_sys._impl")
+        context = _TaskSysToolContext()
+
+        result = impl.invoke(
+            action="close",
+            args={"task_id": task_id, "summary": "Side completed the source task."},
+            context=context,
+        )
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(result["outcome"], "close")
+        self.assertEqual(result["task_status"], "closed")
+        self.assertEqual(result["processor"], "side")
+        self.assertEqual(result["side_thread_id"], "thr-side-tool")
+        self.assertEqual(context.cleanups, [task_id])
+        self.assertEqual(result["side_cleanup"]["registry_unregistered"], True)
+        record = self._task_record(task_id)
+        self.assertEqual(record["status"], "closed")
+        self.assertEqual(record["close_result"]["processor"], "side")
+        self.assertEqual(record["close_result"]["side_thread_id"], "thr-side-tool")
+        self.assertEqual(record["close_result"]["cleanup"]["physical_close_ok"], True)
+        self.assertEqual(record["close_result"]["cleanup"]["registry_unregistered"], True)
 
     def test_task_sys_need_parent_tool_still_marks_parent_processing_after_runtime_submit(self) -> None:
         task_sys = _task_sys()
@@ -205,8 +242,11 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(result["ok"], msg=result)
         self.assertEqual(result["outcome"], "need_parent")
         self.assertEqual(result["task_status"], "parent_processing")
+        self.assertEqual(result["processor"], "side")
+        self.assertEqual(result["side_thread_id"], "thr-side-tool")
         self.assertEqual(result["parent_runtime"]["action"], "submit_parent")
         self.assertEqual(len(context.instructions), 1)
+        self.assertEqual(context.cleanups, [task_id])
         instruction = context.instructions[0]
         self.assertEqual(instruction["type"], "submit_parent")
         self.assertEqual(instruction["task_id"], task_id)
@@ -214,6 +254,8 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         record = self._task_record(task_id)
         self.assertEqual(record["status"], "parent_processing")
         self.assertEqual(record["active_processor"], "parent")
+        self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-tool")
+        self.assertEqual(record["side_result"]["cleanup"]["registry_unregistered"], True)
 
     def test_task_sys_need_parent_tool_leaves_task_parent_ready_when_parent_runtime_fails(self) -> None:
         task_sys = _task_sys()
@@ -236,11 +278,14 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             )
 
         self.assertEqual(len(context.instructions), 1)
+        self.assertEqual(context.cleanups, [task_id])
         instruction = context.instructions[0]
         self.assertEqual(instruction["type"], "interrupt_submit_parent")
         record = self._task_record(task_id)
         self.assertEqual(record["status"], "needs_parent")
         self.assertIsNone(record["active_processor"])
+        self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-tool")
+        self.assertEqual(record["side_result"]["cleanup"]["registry_unregistered"], True)
 
 
 if __name__ == "__main__":

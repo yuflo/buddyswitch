@@ -76,6 +76,26 @@ class SideThreadRegistryTests(unittest.TestCase):
             self.assertEqual(payload["side_threads"], [row])
             self.assertEqual(payload["updated_at"], "2026-06-02T00:00:00Z")
 
+    def test_register_can_write_task_bound_side_lease_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+
+            row = self.registry.register_side_thread(
+                instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                side_thread_id="thr-side-task",
+                task_id="task-user-input-abcdef123456",
+                purpose="task_sys.side_frame",
+                now=lambda: "2026-06-30T00:00:00Z",
+            )
+
+            self.assertEqual(row["thread_id"], "thr-side-task")
+            self.assertEqual(row["task_id"], "task-user-input-abcdef123456")
+            self.assertEqual(row["purpose"], "task_sys.side_frame")
+            payload = self._payload(instance_json)
+            self.assertEqual(payload["side_threads"], [row])
+
     def test_register_replaces_existing_side_thread_without_duplicate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(temp_root)
@@ -172,6 +192,30 @@ class SideThreadRegistryTests(unittest.TestCase):
             )
 
             self.assertEqual(row["thread_id"], "thr-side-1")
+
+    def test_find_open_side_thread_skips_task_bound_task_sys_leases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            payload = self._payload(instance_json)
+            payload["side_threads"] = [
+                {
+                    "thread_id": "thr-task-sys",
+                    "parent_thread_id": "thr-main",
+                    "status": "open",
+                    "task_id": "task-user-input-abcdef123456",
+                    "purpose": "task_sys.side_frame",
+                },
+                {"thread_id": "thr-manual", "parent_thread_id": "thr-main", "status": "open"},
+            ]
+            instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+
+            row = self.registry.find_open_side_thread(
+                instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+            )
+
+            self.assertEqual(row["thread_id"], "thr-manual")
 
     def test_unregister_removes_only_matching_side_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

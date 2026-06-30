@@ -63,7 +63,8 @@ Completed:
 ## End-To-End Contracts
 
 - WebUI message composer action -> `/api/web/im/messages` -> IM send/wake path remains covered; old `/api/instances/<actor>/input` Web API is absent.
-- Task Sys side start -> `task_sys.side_frame` prompt -> side receives resource-boundary rules on every frame, including reused side threads.
+- Task Sys side start -> fresh task-bound side thread -> `task_sys.side_frame` prompt -> side
+  receives resource-boundary rules on every frame.
 - Side `task_sys.need_parent(params.interrupt=true)` with idle parent -> Task Sys runtime treats missing active turn as no-op interrupt -> parent frame is submitted and a parent `turn_id` is returned.
 - Side `task_sys.need_parent(params.interrupt=true)` with running parent -> Task Sys runtime interrupts first -> parent frame is submitted and both parent `turn_id` and `interrupted_turn_id` are returned.
 - Parent runtime failure before submit -> task remains `needs_parent`, avoiding a no-turn `parent_processing` orphan.

@@ -424,6 +424,15 @@ class DaemonAccess:
             pass
         return result
 
+    def cleanup_task_sys_side_lease(self, task_id: str) -> dict[str, Any]:
+        launcher_dir = _launcher_dir_for_runtime()
+        if str(launcher_dir) not in sys.path:
+            sys.path.insert(0, str(launcher_dir))
+        import task_sys_runtime  # type: ignore[import-not-found]
+
+        context = task_sys_runtime.context_from_instance_json(self._instance_json)
+        return task_sys_runtime.cleanup_task_sys_side_lease(context, task_id)
+
     def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return daemon_client.wake_im_actor(payload)
 

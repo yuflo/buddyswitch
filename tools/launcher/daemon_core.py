@@ -1695,6 +1695,7 @@ def _task_sys_status_payload(context: DaemonContext) -> dict[str, Any]:
     actor_target = {"actor_id": context.actor_id, "role_id": context.role}
     tasks_dir = context.instance_root.parent.parent / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks"
     active_tasks: list[dict[str, Any]] = []
+    recoverable_tasks: list[dict[str, Any]] = []
     if tasks_dir.exists():
         for path in sorted(tasks_dir.glob("*.json")):
             try:
@@ -1708,15 +1709,18 @@ def _task_sys_status_payload(context: DaemonContext) -> dict[str, Any]:
                 continue
             if record.get("status") in task_sys.ACTIVE_TASK_STATUSES:
                 active_tasks.append(record)
-    by_status: dict[str, int] = {}
-    summaries: list[dict[str, Any]] = []
-    for record in active_tasks:
-        status = record.get("status")
-        status_key = status if isinstance(status, str) and status else "unknown"
-        by_status[status_key] = by_status.get(status_key, 0) + 1
-        source_ref = record.get("source_ref")
-        summaries.append(
-            {
+            elif record.get("status") in task_sys.RECOVERABLE_TASK_STATUSES:
+                recoverable_tasks.append(record)
+
+    def _summaries(records: list[dict[str, Any]], *, include_failure: bool = False) -> tuple[dict[str, int], list[dict[str, Any]]]:
+        by_status: dict[str, int] = {}
+        summaries: list[dict[str, Any]] = []
+        for record in records:
+            status = record.get("status")
+            status_key = status if isinstance(status, str) and status else "unknown"
+            by_status[status_key] = by_status.get(status_key, 0) + 1
+            source_ref = record.get("source_ref")
+            row = {
                 "task_id": record.get("id"),
                 "source_type": record.get("source_type"),
                 "source_ref": dict(source_ref) if isinstance(source_ref, dict) else {},
@@ -1724,12 +1728,22 @@ def _task_sys_status_payload(context: DaemonContext) -> dict[str, Any]:
                 "active_processor": record.get("active_processor"),
                 "updated_at": record.get("updated_at"),
             }
-        )
+            if include_failure:
+                failure_result = record.get("failure_result")
+                row["failure_result"] = dict(failure_result) if isinstance(failure_result, dict) else {}
+            summaries.append(row)
+        return by_status, summaries
+
+    by_status, summaries = _summaries(active_tasks)
+    recoverable_by_status, recoverable_summaries = _summaries(recoverable_tasks, include_failure=True)
     return {
         "scope": "task_sys_state_projection",
         "active_count": len(summaries),
+        "recoverable_count": len(recoverable_summaries),
         "by_status": by_status,
+        "recoverable_by_status": recoverable_by_status,
         "active_tasks": summaries,
+        "recoverable_tasks": recoverable_summaries,
     }
 
 

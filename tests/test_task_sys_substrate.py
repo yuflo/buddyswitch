@@ -215,6 +215,30 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(persisted["status"], "parent_processing")
         self.assertEqual(persisted["active_processor"], "parent")
 
+    def test_record_side_cleanup_updates_need_parent_side_result(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        self._move_to_needs_parent(task_id)
+
+        result = task_sys.record_side_cleanup(
+            task_id,
+            {
+                "side_thread_id": "thr-side-parent",
+                "cleanup": {
+                    "registry_unregistered": True,
+                    "physical_close_ok": True,
+                },
+            },
+        )
+
+        self.assertTrue(result["ok"], msg=result)
+        record = self._task_record(task_id)
+        self.assertEqual(record["status"], "needs_parent")
+        self.assertEqual(record["side_result"]["outcome"], "need_parent")
+        self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-parent")
+        self.assertEqual(record["side_result"]["cleanup"]["registry_unregistered"], True)
+        self.assertEqual(record["side_result"]["cleanup"]["physical_close_ok"], True)
+
     def test_record_task_close_closes_side_processing_task(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
@@ -230,6 +254,31 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["close_result"]["processor"], "side")
         self.assertEqual(record["close_result"]["summary"], "Handled in side.")
         self.assertIsInstance(record["close_result"]["updated_at"], str)
+
+    def test_record_side_cleanup_updates_side_close_result(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_sys.record_task_close(task_id, {"summary": "Handled in side."})
+
+        result = task_sys.record_side_cleanup(
+            task_id,
+            {
+                "side_thread_id": "thr-side-clean",
+                "cleanup": {
+                    "registry_unregistered": True,
+                    "physical_close_ok": False,
+                    "physical_close_error": "thread already gone",
+                },
+            },
+        )
+
+        self.assertTrue(result["ok"], msg=result)
+        record = self._task_record(task_id)
+        self.assertEqual(record["close_result"]["processor"], "side")
+        self.assertEqual(record["close_result"]["side_thread_id"], "thr-side-clean")
+        self.assertEqual(record["close_result"]["cleanup"]["registry_unregistered"], True)
+        self.assertEqual(record["close_result"]["cleanup"]["physical_close_ok"], False)
+        self.assertEqual(record["close_result"]["cleanup"]["physical_close_error"], "thread already gone")
 
     def test_record_task_close_closes_parent_processing_task(self) -> None:
         task_sys = _task_sys()
@@ -271,6 +320,82 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         record = self._task_record(task_id)
         self.assertEqual(record["status"], "checkpoint")
         self.assertEqual(record["active_processor"], "checkpoint")
+        self.assertNotIn("close_result", record)
+
+    def test_side_runtime_failure_is_recoverable_but_not_active(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        original = self._task_record(task_id)
+
+        result = task_sys.record_side_runtime_failure(
+            task_id,
+            {
+                "status": "runtime_failed",
+                "stage": "side_input",
+                "processor": "side",
+                "error": "thread not loaded",
+                "retryable": True,
+                "attempts": 2,
+                "last_side_thread_id": "thr-side-stale",
+                "cleanup": {
+                    "registry_unregistered": True,
+                    "physical_close_ok": False,
+                    "physical_close_error": "thread not loaded",
+                },
+            },
+        )
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(result["outcome"], "runtime_failed")
+        self.assertEqual(result["task_id"], task_id)
+        record = self._task_record(task_id)
+        self.assertEqual(record["status"], "runtime_failed")
+        self.assertIsNone(record["active_processor"])
+        self.assertEqual(record["failure_result"]["stage"], "side_input")
+        self.assertEqual(record["failure_result"]["processor"], "side")
+        self.assertEqual(record["failure_result"]["error"], "thread not loaded")
+        self.assertIs(record["failure_result"]["retryable"], True)
+        self.assertEqual(record["failure_result"]["attempts"], 2)
+        self.assertEqual(record["failure_result"]["last_side_thread_id"], "thr-side-stale")
+        self.assertEqual(record["failure_result"]["cleanup"]["registry_unregistered"], True)
+        self.assertIsInstance(record["failure_result"]["updated_at"], str)
+        for field in ("source_type", "source_ref", "actor_target", "inbound_context"):
+            with self.subTest(field=field):
+                self.assertEqual(record[field], original[field])
+
+        self.assertIn("runtime_failed", task_sys.TASK_STATUSES)
+        self.assertIn("side_no_result", task_sys.TASK_STATUSES)
+        self.assertIn("side_timed_out", task_sys.TASK_STATUSES)
+        self.assertEqual(
+            set(task_sys.RECOVERABLE_TASK_STATUSES),
+            {"runtime_failed", "side_no_result", "side_timed_out"},
+        )
+        self.assertTrue(set(task_sys.RECOVERABLE_TASK_STATUSES).isdisjoint(task_sys.ACTIVE_TASK_STATUSES))
+        self.assertEqual(task_sys.active_tasks_for_actor(self._envelope()["actor_target"]), [])
+        recoverable = task_sys.recoverable_tasks_for_actor(self._envelope()["actor_target"])
+        self.assertEqual([row["id"] for row in recoverable], [task_id])
+
+    def test_failed_side_runtime_task_cannot_be_closed_as_success(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_sys.record_side_runtime_failure(
+            task_id,
+            {
+                "status": "side_no_result",
+                "stage": "side_turn",
+                "processor": "side",
+                "error": "side frame completed without task_sys.close or task_sys.need_parent",
+                "retryable": True,
+                "attempts": 1,
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "side_processing or parent_processing"):
+            task_sys.record_task_close(task_id, {"summary": "Pretend success."})
+
+        record = self._task_record(task_id)
+        self.assertEqual(record["status"], "side_no_result")
+        self.assertIsNone(record["active_processor"])
         self.assertNotIn("close_result", record)
 
     def test_record_task_close_is_retry_safe_for_closed_task(self) -> None:
