@@ -1,138 +1,146 @@
-# fea-webui and fea-daemon Main Merge Plan
+# fea-webui and fea-daemon Current Main Merge Plan
 
-> **For agentic workers:** Implement this plan task-by-task. Keep the merge direct: preserve latest branch behavior, remove replaced legacy paths, and do not add compatibility tracks.
+> **For agentic workers:** Implement this plan task-by-task. Keep the merge direct: preserve the latest branch behavior, remove replaced legacy paths, and do not add compatibility tracks.
 
-**Goal:** Merge current `fea-webui` and `fea-daemon` into `main` with the shared Task Sys rebuild, the iMessage/Web IM API boundary optimization, and daemon/runtime observability all verified together.
+**Goal:** Merge the current `fea-webui` and `fea-daemon` heads into `main` with Web IM history cache correctness and Task Sys side-frame lifecycle fixes verified together.
 
-**Architecture:** `fea-webui` and `fea-daemon` share the Task Sys replacement base, then diverge into independent product heads. The integrated tree should keep one Task Sys path, one External IM/iMessage projection path, and one daemon status/log projection path.
+**Architecture:** `fea-webui` changes only the browser management UI state cache and its Node contract tests. `fea-daemon` changes Task Sys domain/runtime behavior, task tool feedback, side-thread lease tracking, daemon/web status projection, and Python tests. The integrated tree should keep one Web IM state path and one Task Sys side-frame lifecycle path.
 
-**Tech Stack:** Python launcher/runtime code, env tool modules, shell launcher scripts, Node UI contract tests, `pytest`, `unittest`, `py_compile`, `git merge-tree`.
+**Tech Stack:** Python launcher/runtime code, env tool modules, browser management JavaScript, Node UI contract tests, `pytest`, `unittest`, `py_compile`, `bash -n`, `git merge-tree`.
 
 ---
 
 ## Current Baseline
 
-- `main` is clean at `25b44e7f33a65d2cab9b9ed8578391ef386593e4` and matches `origin/main`.
-- `fea-webui` is clean at `3d55b816901b0b4b51241fc754012582ec0ae198` and matches `origin/fea-webui`.
-- `fea-daemon` is clean at `b46ce12943e8eef7023375d8b1f3fee779499461` and matches `origin/fea-daemon`.
 - `git fetch --all --prune` completed with no remote changes.
-- `main` already contains the earlier `fea-webui + fea-tool` merge through `25b44e7`; this plan covers the newer `fea-webui + fea-daemon` heads only.
+- `main` is clean at `1929e32b0c1fdc6ac6e38ba700bfd6f93ba177e6` and matches `origin/main`.
+- `fea-webui` is clean at `f82500dd7c8d074d8204c5c0c2d4184eeb48cf04` and matches `origin/fea-webui`.
+- `fea-daemon` is clean at `5807b8093d9bc1860ea7698ec73ca093d384d3da` and matches `origin/fea-daemon`.
+- `git merge-base main fea-webui`, `git merge-base main fea-daemon`, and `git merge-base fea-webui fea-daemon` all resolve to current `main` (`1929e32`).
 
 ## Conflict, Dependency, And Association Assessment
 
 ### Branch Shape
 
-- `git merge-base main fea-webui` and `git merge-base main fea-daemon` both resolve to `25b44e7`.
-- `fea-webui` and `fea-daemon` share branch base `96621e573c2d89453b3e9698199adc3d82131ef1`.
-- Shared commits on both branches:
-  - `ced94b8 Rebuild task sys proactive model`
-  - `96621e5 Fix task sys memo optimizations`
-- Divergent branch heads:
-  - `3d55b81 Optimize iMessage IM API boundary`
-  - `b46ce12 Complete task sys IM observability`
+- `fea-webui` has one commit over `main`: `f82500d fix webui im history cache`.
+- `fea-daemon` has one commit over `main`: `5807b80 Fix task sys side frame lifecycle`.
+- Both branches start from the same current `main`, so there is no older shared feature stack to reconcile in this pass.
 
 ### Conflict Assessment
 
-- `git merge-tree --write-tree main fea-webui` produced tree `fd39c7f514d07bae9296a97ec691f48509fcc59b` with no conflict records.
-- `git merge-tree --write-tree main fea-daemon` produced tree `563bfedf9741fa3587a9a2eaf90b4e4681810cc8` with no conflict records.
-- Synthetic sequential dry-runs in both orders produced the same final tree `41b3cadee05e7a0a5c4d7da9baf1b3bd99a348af`.
+- `git merge-tree --write-tree main fea-webui` produced tree `23c5dcfd97408408492d7e76daf2ffc61611b9b4` with no conflict records.
+- `git merge-tree --write-tree main fea-daemon` produced tree `c968edce2beba4d79fc70a62e6bc30dc75e5b676` with no conflict records.
+- Synthetic sequential dry-runs in both orders produced the same final tree `30561c44e08b61900c0a6899bc098c62574e0093`.
+- `comm -12` over the two branch file lists returned no paths, so there is no direct file overlap.
 - Result: no textual conflicts are expected, and merge order should not affect final content.
 
 ### Dependency Assessment
 
 - Neither branch changes package, lockfile, Python dependency, Node dependency, Rust, Go, or other dependency manifest files.
-- `git diff --check main...fea-webui` and `git diff --check main...fea-daemon` both passed.
-- Result: no dependency installation, lockfile reconciliation, or whitespace cleanup is expected before testing.
+- `git diff --check main...fea-webui` and `git diff --check main...fea-daemon` both passed with no output.
+- Result: no dependency installation, lockfile reconciliation, or whitespace cleanup is expected before focused verification.
 
 ### Association Assessment
 
-- The large overlap between both branches and `main` is the shared Task Sys rebuild. Keep this as the new single path and do not preserve deleted taskbox/task tool modules.
-- `fea-webui` unique files cover External IM ack semantics, Web-scoped IM projection, split iMessage worker loops, and current iMessage smoke documentation:
-  - `scripts/env/services/messages.py`
-  - `tools/launcher/external_im_session.py`
-  - `tools/launcher/im_http_router.py`
-  - `tools/launcher/imessage_channel.py`
-  - `tools/launcher/web_management.py`
-  - focused iMessage/Web tests and docs under `docs/spec/imessage-channel-im-api-boundary-optimization/`
-- `fea-daemon` unique files cover explicit Task Sys close/status semantics and compact service log metadata:
-  - `scripts/runtime_kernel/lifecycle.py`
-  - `tools/launcher/app_server.py`
+- `fea-webui` changes:
+  - `tools/launcher/assets/web-management/app.js`
+  - `tests/web_management_ui_contract.test.js`
+  - `tests/web_management_ui_state.test.js`
+  - `docs/spec/2026-06-30-webui-im-history-state-forward-fix-plan.md`
+- `fea-webui` behavior to preserve:
+  - IM conversation cache is bound to the selected actor identity.
+  - Switching actors, deleting actors, creating actors, and refreshing actor console clear stale IM rows.
+  - Missing direct conversation history is treated as empty history instead of a user-facing error.
+  - Connection-wide IM events are acknowledged even when off-selected actor messages are not rendered.
+- `fea-daemon` changes:
+  - `scripts/env/domain/task_sys.py`
+  - `scripts/env/tool_runtime/context.py`
+  - `scripts/env/tools/task_sys/_impl.py`
+  - `scripts/env/tools/task_sys/tool.py`
+  - `tools/launcher/task_sys_runtime.py`
+  - `tools/launcher/side_thread_registry.py`
   - `tools/launcher/daemon_core.py`
-  - `tools/launcher/runtime_broker.sh`
-  - `tools/launcher/runtime_event_log.py`
-  - focused daemon/status/runtime tests and docs under `docs/spec/task-sys-im-completion-status-observability/`
-- The divergent `fea-webui` and `fea-daemon` commits do not modify the same files after their shared base.
-- `fea-daemon` explicitly avoided iMessage channel/API files while it was developed; the final merge may contain both branches, but no daemon-specific compatibility path should be added to those files.
+  - `tools/launcher/web_management.py`
+  - focused Python tests and Task Sys lifecycle docs under `docs/spec/task-sys-side-frame-lifecycle/`
+- `fea-daemon` behavior to preserve:
+  - Task Sys can record recoverable side runtime failures without counting them as active tasks.
+  - Task Sys side-frame dispatch creates a task-bound side lease, retries failed dispatch, and records structured failure metadata.
+  - `task_sys.close` and `task_sys.need_parent` clean up task-bound side leases and return cleanup feedback.
+  - Web actor console exposes recoverable Task Sys status separately from active Task Sys status.
+- Cross-branch association:
+  - The only indirect join is Web Management: `fea-webui` updates browser-side actor/IM state, while `fea-daemon` updates server-side actor console Task Sys projection.
+  - The final tree must keep both without adding browser-side daemon compatibility branches or daemon-side iMessage delivery inference.
 
 ## Merge Plan
 
-### Task 1: Record This Plan
+### Task 1: Record Current Plan
 
-- [x] Write the current merge assessment and test plan under `docs/spec`.
-- [x] Commit the plan while `main` is otherwise clean.
+- [x] Replace the stale merge-plan baseline with the current branch hashes and evidence.
+- [x] Commit this plan while `main` is otherwise clean.
 
 Verification:
 
 ```bash
 git status --short --branch
+git diff --check
 ```
 
-Expected: only this plan file is new before the planning commit.
+Expected: only this plan file is modified before the planning commit, and `git diff --check` has no output.
 
 ### Task 2: Merge `fea-webui`
 
-- [x] Run `git merge --no-ff --no-commit fea-webui`.
-- [x] Keep the shared Task Sys replacement and the `fea-webui` iMessage/Web IM API boundary changes.
-- [x] Remove or resolve any unexpected residue by direct replacement, not aliases or dual read/write paths.
-- [x] Run focused Task Sys and iMessage/Web verification.
-- [x] Commit the merge.
+- [ ] Run `git merge --no-ff --no-commit fea-webui`.
+- [ ] Keep the actor-identity-bound Web IM cache behavior.
+- [ ] Remove or resolve any unexpected residue by direct replacement, not aliases or dual read/write paths.
+- [ ] Run focused Web UI verification.
+- [ ] Commit the merge.
 
 Focused verification:
 
 ```bash
-python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/services/messages.py tools/launcher/task_sys_ingress.py tools/launcher/task_sys_runtime.py tools/launcher/external_im_session.py tools/launcher/im_http_router.py tools/launcher/imessage_channel.py tools/launcher/web_management.py
-python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_task_sys_checkpoint.py tests/test_external_im_session.py tests/test_im_product_core.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_external_reply_loop.py tests/test_external_im_projection_contract.py tests/test_imessage_channel.py
+node --check tools/launcher/assets/web-management/app.js
 node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
 git diff --check
 ```
 
-Expected: compile passes, focused Python and Node tests pass, whitespace check has no output.
+Expected: JavaScript syntax passes, Node UI contract/state tests pass, and whitespace check has no output.
 
 ### Task 3: Merge `fea-daemon`
 
-- [x] Run `git merge --no-ff --no-commit fea-daemon`.
-- [x] Keep explicit Task Sys close semantics, parent-frame completion requirements, daemon status Task Sys projection, runtime breadcrumbs, and compact log metadata.
-- [x] Keep daemon/status observability read-only; do not infer external iMessage delivery from daemon health.
-- [x] Run focused daemon/status/runtime verification.
-- [x] Commit the merge.
+- [ ] Run `git merge --no-ff --no-commit fea-daemon`.
+- [ ] Keep explicit recoverable side runtime failure states and side lease cleanup feedback.
+- [ ] Keep daemon/status observability read-only; do not infer external iMessage delivery from daemon health.
+- [ ] Run focused daemon/status/runtime verification.
+- [ ] Commit the merge.
 
 Focused verification:
 
 ```bash
-python3 -m py_compile tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py tools/launcher/task_sys_runtime.py
+python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/tool_runtime/context.py scripts/env/tools/task_sys/_impl.py scripts/env/tools/task_sys/tool.py tools/launcher/task_sys_runtime.py tools/launcher/side_thread_registry.py tools/launcher/daemon_core.py tools/launcher/web_management.py
 bash -n buddyswitch-codex
 bash -n tools/launcher/runtime_broker.sh
-python3 -m pytest -q tests/test_daemon_service_contract.py tests/test_runless_runtime_contract.py tests/test_buddyswitch_launcher.py tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_env_tool_schema_contract.py tests/test_env_tool_semantic_contract.py tests/test_task_management_skill_architecture.py
+python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
 git diff --check
 ```
 
-Expected: compile and shell syntax pass, focused daemon/runtime tests pass, whitespace check has no output.
+Expected: compile and shell syntax pass, focused Python tests pass, and whitespace check has no output.
 
 ### Task 4: Final Integration Verification
 
-- [x] Prove both feature branches are ancestors of `main`.
-- [x] Run broad Python verification from `main`.
-- [x] Run Node UI contract verification.
-- [x] Run residue scans for retired taskbox/task tool paths, retired iMessage worker-ordering residue, sensitive log metadata exposure, and accidental daemon-to-iMessage branch leakage.
-- [x] Inspect final git status and recent history.
+- [ ] Prove both feature branches are ancestors of `main`.
+- [ ] Run combined focused verification that covers both branches and the Web Management association point.
+- [ ] Run residue scans for retired taskbox/task tool paths, browser-side IM compatibility residue, and daemon-side sensitive logging/platform residue.
+- [ ] Inspect final git status and recent history.
 
-Broad verification:
+Final verification:
 
 ```bash
 git merge-base --is-ancestor fea-webui main
 git merge-base --is-ancestor fea-daemon main
-python3 -m pytest -q
+node --check tools/launcher/assets/web-management/app.js
 node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
+python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/tool_runtime/context.py scripts/env/tools/task_sys/_impl.py scripts/env/tools/task_sys/tool.py tools/launcher/task_sys_runtime.py tools/launcher/side_thread_registry.py tools/launcher/daemon_core.py tools/launcher/web_management.py
+python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
 git diff --check
 git status --short --branch
 ```
@@ -141,119 +149,31 @@ Residue scans:
 
 ```bash
 rg -n "task\\.current|task\\.capture|task\\.checkout|task__current|task__checkout|TaskViewModel|E_ACTIVE_TASK_REQUIRED|task\\.active_anchor|taskbox|task_management" scripts tools buddyswitch docs/arch -S
-python3 -m pytest -q tests/test_imessage_channel.py::ImessageChannelResidueTests::test_live_surfaces_do_not_teach_serial_reply_wait_semantics
-rg -n "raw_message|message_content|artifact_body|full_prompt|credentials|tool_payload|event bus|trace id|sampling" tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py tests docs/spec -S
-git diff --name-only 25b44e7..HEAD | rg "imessage_channel.py|external_im_session.py|im_http_router.py|web_management.py|test_imessage_channel.py|test_external_im_session.py|test_im_http_router.py|test_im_web_management_projection.py" -S
+rg -n "buildWebImConversationUrl|ensureWebImSession|applyImEventsPayload|messageTouchesKnownOrSelectedActor|imEventCursor|event_cursor|participant_token|connection_key" tools/launcher/assets/web-management/app.js tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js -S
+rg -n "raw_message|message_content|artifact_body|full_prompt|credentials|tool_payload|event bus|trace id|sampling" tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py -S
+git diff --name-only 1929e32b0c1fdc6ac6e38ba700bfd6f93ba177e6..HEAD
 ```
 
 Expected:
 
 - Both target branches are ancestors of `main`.
-- Broad Python and Node tests pass.
+- Focused Node, Python compile, shell syntax, and Python tests pass.
 - `git diff --check` has no output.
 - Old taskbox/task tool live paths are absent.
-- Retired iMessage worker-ordering residue is absent outside the current iMessage optimization records.
-- Status/logging code does not expose raw message, prompt, credential, or tool payload content.
-- Any final diff hits for iMessage/Web files are attributable to the intentional `fea-webui` merge, not daemon-specific edits.
+- Browser IM residue scan has no output outside negative contract assertions if the tests intentionally mention forbidden symbols by concatenated strings.
+- Status/logging implementation scan does not expose raw message, prompt, credential, or tool payload content.
+- Final changed files are attributable to the two target branch commits plus this merge plan.
 
 ## Acceptance Criteria
 
-- `main` contains the latest `fea-webui` and `fea-daemon` commits.
-- The shared Task Sys rebuild is preserved as the only actor-driving task path.
-- No old taskbox/task tool compatibility path remains live.
-- External IM event ack, Web-scoped projection, and split iMessage worker behavior are preserved.
-- Explicit `task_sys.close`, parent-frame completion requirements, daemon Task Sys status projection, runtime breadcrumb logs, and compact status log metadata are preserved.
-- No generic event bus, tracing platform, feature flag, or dual compatibility mode is introduced.
-- Focused and broad verification pass, or any blocker is recorded with exact failing command and root cause before further changes.
+- `main` contains `f82500d` and `5807b80`.
+- The stale previous merge-plan completion record is replaced by current evidence.
+- Web IM history cache behavior is actor-identity-bound and does not render off-selected actor messages.
+- Recoverable Task Sys side-frame failure and cleanup behavior is preserved.
+- Web actor console exposes active and recoverable Task Sys state without mixing the two.
+- No old taskbox/task tool compatibility path, browser-side Web IM compatibility path, generic event bus, tracing platform, feature flag, or dual compatibility mode is introduced.
+- Focused verification passes, or any blocker is recorded with the exact failing command and root cause before further changes.
 
-## Final Merge Verification 2026-06-30
+## Execution Log
 
-Merge commits:
-
-```text
-b0817bb docs: plan fea webui daemon merge
-3b2b687 Merge branch 'fea-webui'
-367e456 Merge branch 'fea-daemon'
-83fd567 test: classify merge implementation specs
-```
-
-Branch ancestry:
-
-```text
-git merge-base --is-ancestor fea-webui main
-exit 0
-
-git merge-base --is-ancestor fea-daemon main
-exit 0
-```
-
-Focused `fea-webui` verification:
-
-```text
-python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/services/messages.py tools/launcher/task_sys_ingress.py tools/launcher/task_sys_runtime.py tools/launcher/external_im_session.py tools/launcher/im_http_router.py tools/launcher/imessage_channel.py tools/launcher/web_management.py
-passed
-
-python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_task_sys_checkpoint.py tests/test_external_im_session.py tests/test_im_product_core.py tests/test_im_http_router.py tests/test_web_management.py tests/test_im_external_reply_loop.py tests/test_external_im_projection_contract.py tests/test_imessage_channel.py
-144 passed, 60 subtests passed in 113.01s
-
-node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
-2 test files passed
-
-git diff --check
-no output
-```
-
-Focused `fea-daemon` verification:
-
-```text
-python3 -m py_compile tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py tools/launcher/task_sys_runtime.py
-passed
-
-bash -n buddyswitch-codex
-passed
-
-bash -n tools/launcher/runtime_broker.sh
-passed
-
-python3 -m pytest -q tests/test_daemon_service_contract.py tests/test_runless_runtime_contract.py tests/test_buddyswitch_launcher.py tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_env_tool_schema_contract.py tests/test_env_tool_semantic_contract.py tests/test_task_management_skill_architecture.py
-303 passed, 498 subtests passed in 644.84s
-
-git diff --check
-no output
-```
-
-Final integration verification:
-
-```text
-python3 -m pytest -q
-1128 passed, 1605 subtests passed in 804.08s
-
-node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
-2 test files passed
-
-python3 -m pytest -q tests/test_imessage_channel.py::ImessageChannelResidueTests::test_live_surfaces_do_not_teach_serial_reply_wait_semantics
-1 passed
-
-python3 -m pytest -q tests/test_repo_consistency.py::RepoConsistencyTests::test_docs_spec_drift_filter_rejects_unmarked_live_guidance tests/test_repo_consistency.py::RepoConsistencyTests::test_stable_guidance_does_not_point_to_internal_tool_contract_surfaces
-2 passed
-
-rg -n "task\\.current|task\\.capture|task\\.checkout|task__current|task__checkout|TaskViewModel|E_ACTIVE_TASK_REQUIRED|task\\.active_anchor|taskbox|task_management" scripts tools buddyswitch docs/arch -S
-no output
-
-rg -n "raw_message|message_content|artifact_body|full_prompt|credentials|tool_payload|event bus|trace id|sampling" tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py -S
-no output
-
-git diff --check
-no output
-```
-
-Residue interpretation:
-
-- The broad sensitive-term scan across tests and specs reports historical records, current non-goal text, and negative assertions. The implementation-only scan over status/logging code has no hits.
-- Final iMessage/Web file hits from `git diff --name-only 25b44e7..HEAD` are exactly the intentional `fea-webui` files: `tests/test_external_im_session.py`, `tests/test_im_http_router.py`, `tests/test_imessage_channel.py`, `tests/test_web_management.py`, `tools/launcher/external_im_session.py`, `tools/launcher/im_http_router.py`, `tools/launcher/imessage_channel.py`, and `tools/launcher/web_management.py`.
-- The first broad run exposed that the repo-consistency docs/spec context filter did not classify the new implementation-record directories or merge-plan docs. Commit `83fd567` fixed the filter narrowly and added assertions that unmarked stable guidance remains rejected.
-
-Remaining risk:
-
-- Live macOS/iMessage delivery was not manually smoke-tested in this merge pass. Automated worker and projection tests cover the merged delayed-control and ack behavior.
-- Runtime service tests exercise fake launcher/service paths; external daemon behavior still depends on host process state outside the unit test environment.
+This section is updated after each merge or verification block with exact command evidence.
