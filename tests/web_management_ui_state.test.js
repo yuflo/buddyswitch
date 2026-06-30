@@ -6,14 +6,69 @@ const path = require('path');
 
 const app = require(path.join(__dirname, '..', 'tools', 'launcher', 'assets', 'web-management', 'app.js'));
 
+let testChain = Promise.resolve();
+let testsFlushed = false;
+
 function test(name, fn) {
-  try {
-    fn();
-    process.stdout.write(`ok - ${name}\n`);
-  } catch (error) {
-    process.stderr.write(`not ok - ${name}\n`);
-    throw error;
+  testChain = testChain.then(async function () {
+    try {
+      await fn();
+      process.stdout.write(`ok - ${name}\n`);
+    } catch (error) {
+      process.stderr.write(`not ok - ${name}\n`);
+      throw error;
+    }
+  });
+}
+
+process.on('beforeExit', async function () {
+  if (testsFlushed) {
+    return;
   }
+  testsFlushed = true;
+  await testChain;
+});
+
+function createRenderElements() {
+  const node = () => ({
+    textContent: '',
+    value: '',
+    hidden: false,
+    disabled: false,
+    innerHTML: '',
+    classList: { toggle() {} },
+    querySelectorAll() { return []; },
+  });
+  return {
+    serverStatus: node(),
+    messageBanner: node(),
+    instructionInput: node(),
+    actorView: node(),
+    trackView: node(),
+    actorNavButton: node(),
+    tracksNavButton: node(),
+    createButton: node(),
+    roleSelect: Object.assign(node(), { options: [{}], appendChild() {} }),
+    actorsList: node(),
+    actorRuntimeDetail: node(),
+    actorTaskSummary: node(),
+    actorTrackSummary: node(),
+    tracksList: node(),
+    trackDetail: node(),
+    imConversation: node(),
+    sendButton: node(),
+    interruptButton: node(),
+    stopButton: node(),
+    deleteButton: node(),
+    clearButton: node(),
+    resumeButton: node(),
+    actionAvailabilityStatus: node(),
+    openTuiButton: node(),
+    openTuiStatus: node(),
+    openTuiCommand: node(),
+    openTuiFallback: node(),
+    copyTuiCommandButton: node(),
+  };
 }
 
 test('create button requires selected role and no start busy state', () => {
@@ -30,6 +85,7 @@ test('state defaults to actor console as the primary section', () => {
   assert.equal(state.selectedTrackId, '');
   assert.deepEqual(state.actors, []);
   assert.deepEqual(state.tracks, []);
+  assert.equal(state.imConversationIdentityId, '');
 });
 
 test('actor payload sync chooses first actor and clears stale selection', () => {
@@ -37,6 +93,13 @@ test('actor payload sync chooses first actor and clears stale selection', () => 
   state.selectedActorId = 'act-missing';
   state.openTuiMessage = 'Terminal opened.';
   state.openTuiCommand = 'attach command';
+  app.recordImProjectedMessage(state, {
+    id: 'msg-stale',
+    from_identity_id: 'act-missing',
+    to_identity_id: 'ext-web',
+    content: 'stale',
+    reply_to: null,
+  });
 
   app.applyActorsPayload(state, {
     actors: [
@@ -48,6 +111,9 @@ test('actor payload sync chooses first actor and clears stale selection', () => 
   assert.equal(state.selectedActorId, 'act-pm-demo');
   assert.equal(state.openTuiMessage, '');
   assert.equal(state.openTuiCommand, '');
+  assert.equal(state.imConversationIdentityId, 'act-pm-demo');
+  assert.deepEqual(state.imConversation, []);
+  assert.deepEqual(state.imSeenMessageIds, {});
   assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-pm-demo', 'act-dev-demo']);
 });
 
@@ -493,6 +559,23 @@ test('record projected IM messages keeps sent and reply directions', () => {
   ]);
 });
 
+test('clearing im conversation records owner identity and removes stale rows', () => {
+  const state = app.createState();
+  app.recordImProjectedMessage(state, {
+    id: 'msg-stale',
+    from_identity_id: 'act-market-old',
+    to_identity_id: 'ext-web',
+    content: 'stale',
+    reply_to: null,
+  });
+
+  app.clearImConversation(state, 'act-market-new');
+
+  assert.equal(state.imConversationIdentityId, 'act-market-new');
+  assert.deepEqual(state.imConversation, []);
+  assert.deepEqual(state.imSeenMessageIds, {});
+});
+
 test('direct conversation payload replaces local render cache with persisted history', () => {
   const state = app.createState();
   app.recordImSent(state, {
@@ -518,13 +601,66 @@ test('direct conversation payload replaces local render cache with persisted his
         reply_to: 'msg-sent-1',
       },
     ],
-  });
+  }, 'act-market-1');
 
+  assert.equal(state.imConversationIdentityId, 'act-market-1');
   assert.deepEqual(state.imConversation.map((entry) => [entry.id, entry.direction, entry.content]), [
     ['msg-sent-1', 'sent', 'ping'],
     ['msg-reply-1', 'reply', 'pong'],
   ]);
   assert.deepEqual(Object.keys(state.imSeenMessageIds).sort(), ['msg-reply-1', 'msg-sent-1']);
+});
+
+test('selected actor conversation treats missing direct conversation as empty history', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async function (url) {
+    assert.equal(
+      url,
+      '/api/im/conversations/direct?identity_id=act-market-empty&limit=50'
+    );
+    return {
+      ok: false,
+      json: async function () {
+        return {
+          ok: false,
+          error: {
+            code: 'E_IM_NOT_FOUND',
+            message: 'direct conversation not found',
+          },
+        };
+      },
+    };
+  };
+
+  try {
+    const state = app.createState();
+    state.selectedActorId = 'act-market-empty';
+    state.actors = [{ actor_id: 'act-market-empty', role: 'market' }];
+    state.actorConsole = {
+      im: {
+        target: {
+          identity_id: 'act-market-empty',
+          role_id: 'market',
+        },
+      },
+    };
+    app.recordImProjectedMessage(state, {
+      id: 'msg-stale',
+      from_identity_id: 'act-market-old',
+      to_identity_id: 'ext-web',
+      content: 'stale',
+      reply_to: null,
+    });
+
+    await app.refreshSelectedActorConversation(state);
+
+    assert.equal(state.imConversationIdentityId, 'act-market-empty');
+    assert.deepEqual(state.imConversation, []);
+    assert.deepEqual(state.imSeenMessageIds, {});
+    assert.equal(state.message, '');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test('fetched im message appends projected reply without browser cursor state', () => {
@@ -542,4 +678,123 @@ test('fetched im message appends projected reply without browser cursor state', 
   assert.deepEqual(state.imConversation.map((entry) => [entry.id, entry.direction, entry.content]), [
     ['msg-reply-1', 'reply', 'pong'],
   ]);
+});
+
+test('connection-wide fetched event messages only append when they touch selected actor', () => {
+  const state = app.createState();
+  state.selectedActorId = 'act-market-selected';
+  state.imConversationIdentityId = 'act-market-selected';
+
+  const offScopeRecorded = app.recordSelectedActorEventMessage(
+    state,
+    {
+      id: 'msg-dev',
+      from_identity_id: 'act-dev-other',
+      to_identity_id: 'ext-web',
+      content: 'dev pong',
+      reply_to: null,
+    },
+    'act-market-selected'
+  );
+
+  const selectedRecorded = app.recordSelectedActorEventMessage(
+    state,
+    {
+      id: 'msg-market',
+      from_identity_id: 'act-market-selected',
+      to_identity_id: 'ext-web',
+      content: 'market pong',
+      reply_to: null,
+    },
+    'act-market-selected'
+  );
+
+  assert.equal(offScopeRecorded, false);
+  assert.equal(selectedRecorded, true);
+  assert.deepEqual(state.imConversation.map((entry) => [entry.id, entry.content]), [
+    ['msg-market', 'market pong'],
+  ]);
+});
+
+test('polling connection-wide events acks off-selected actor message without rendering it', async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async function (url, options) {
+    calls.push({ url, method: options && options.method ? options.method : 'GET' });
+    if (url === '/api/im/events?wait_ms=15000') {
+      return {
+        ok: true,
+        json: async function () {
+          return {
+            ok: true,
+            events: [{ event_id: 'imev-dev', message_id: 'msg-dev' }],
+          };
+        },
+      };
+    }
+    if (url === '/api/im/messages/msg-dev') {
+      return {
+        ok: true,
+        json: async function () {
+          return {
+            ok: true,
+            message: {
+              id: 'msg-dev',
+              from_identity_id: 'act-dev-other',
+              to_identity_id: 'ext-web',
+              content: 'dev pong',
+              reply_to: null,
+            },
+          };
+        },
+      };
+    }
+    if (url === '/api/im/events/ack') {
+      return {
+        ok: true,
+        json: async function () {
+          return { ok: true };
+        },
+      };
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+
+  try {
+    const state = app.createState();
+    state.imSessionReady = true;
+    state.selectedActorId = 'act-market-selected';
+    state.imConversationIdentityId = 'act-market-selected';
+    state.actors = [
+      {
+        actor_id: 'act-market-selected',
+        role: 'market',
+        runtime: { status: 'active', app_server_health: 'healthy', thread: { status: 'idle' } },
+      },
+      {
+        actor_id: 'act-dev-other',
+        role: 'dev',
+        runtime: { status: 'active', app_server_health: 'healthy', thread: { status: 'idle' } },
+      },
+    ];
+    state.actorConsole = {
+      actor: { actor_id: 'act-market-selected', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread: { status: 'idle' } },
+      task_sys: { active_tasks: [] },
+      tracks: { items: [] },
+      im: { target: { identity_id: 'act-market-selected', role_id: 'market' } },
+    };
+
+    await app.pollImEventsOnce(state, createRenderElements());
+
+    assert.deepEqual(calls, [
+      { url: '/api/im/events?wait_ms=15000', method: 'GET' },
+      { url: '/api/im/messages/msg-dev', method: 'GET' },
+      { url: '/api/im/events/ack', method: 'POST' },
+    ]);
+    assert.equal(state.imConversationIdentityId, 'act-market-selected');
+    assert.deepEqual(state.imConversation, []);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
