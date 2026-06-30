@@ -955,6 +955,20 @@ exec "$real_git" "$@"
             if line.strip()
         ]
 
+    @staticmethod
+    def _read_json_log_events(path: Path) -> list[dict[str, object]]:
+        events: list[dict[str, object]] = []
+        if not path.exists():
+            return events
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("event"), str):
+                events.append(payload)
+        return events
+
     def _read_rpc_rows(self, path: Path) -> list[dict[str, object]]:
         return [row for row in self._read_json_lines(path) if row["argv"][:1] == ["json-rpc"]]
 
@@ -976,6 +990,35 @@ exec "$real_git" "$@"
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(tasks_dir.glob("*.json"))
         ]
+
+    def _write_task_sys_record(
+        self,
+        shared_root: Path,
+        *,
+        actor_id: str,
+        role_id: str,
+        task_id: str = "task-im-message-created-status001",
+        status: str = "parent_processing",
+        active_processor: str = "parent",
+    ) -> dict[str, object]:
+        tasks_dir = shared_root / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks"
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+        record: dict[str, object] = {
+            "id": task_id,
+            "source_type": "im.message.created",
+            "source_ref": {"message_id": "msg-status-1"},
+            "actor_target": {"actor_id": actor_id, "role_id": role_id},
+            "inbound_context": {"text": "Need parent help", "surface": "imessage"},
+            "status": status,
+            "active_processor": active_processor,
+            "parent_handoff_params": {"parent_frame_context": {"next": "Reply from parent."}},
+            "side_result": {"outcome": "need_parent", "params": {"interrupt": False}},
+            "checkpoint_metadata": {},
+            "created_at": "2026-06-30T00:00:00+00:00",
+            "updated_at": "2026-06-30T00:00:01+00:00",
+        }
+        (tasks_dir / f"{task_id}.json").write_text(json.dumps(record, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return record
 
     def _wait_for_task_sys_records(self, shared_root: Path, *, count: int = 1, timeout: float = 5.0) -> list[dict[str, object]]:
         deadline = time.monotonic() + timeout
@@ -2561,6 +2604,25 @@ exec "$real_git" "$@"
                 if row.get("rpc_method") == "thread/resume" and row.get("client_name") == "buddyswitch_daemon"
             )
             self.assertEqual(daemon_resume["params"]["threadId"], instance_payload["thread_id"])
+
+    def test_start_with_role_writes_daemon_and_app_server_breadcrumbs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_root = Path(str(ctx["instance_root"]))
+            daemon_events = self._read_json_log_events(instance_root / "runtime" / "daemon" / "daemon.log")
+            app_server_events = self._read_json_log_events(instance_root / "runtime" / "app-server.log")
+
+            self.assertIn("daemon_started", [event["event"] for event in daemon_events])
+            self.assertIn("daemon_ready", [event["event"] for event in daemon_events])
+            self.assertIn("app_server_start_requested", [event["event"] for event in app_server_events])
+            self.assertIn("app_server_ready", [event["event"] for event in app_server_events])
+            daemon_ready = next(event for event in daemon_events if event["event"] == "daemon_ready")
+            self.assertEqual(daemon_ready["service"], "daemon")
+            self.assertEqual(daemon_ready["actor_id"], ctx["actor_id"])
 
     def test_fake_codex_thread_start_is_unmaterialized_until_inject_or_turn_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -5217,6 +5279,92 @@ exec "$real_git" "$@"
             self.assertTrue(payload["daemon"]["handlers"]["items"]["browser_page_expired"]["active"])
             self.assertEqual(payload["thread"]["status"], "idle")
 
+    def test_instance_status_json_reports_task_sys_active_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self._write_task_sys_record(
+                Path(str(ctx["shared_root"])),
+                actor_id=str(ctx["actor_id"]),
+                role_id="pm",
+            )
+
+            status_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "status",
+                    str(ctx["actor_id"]),
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
+            payload = json.loads(status_result.stdout)
+            task_sys_status = payload["daemon"]["task_sys"]
+            self.assertEqual(task_sys_status["scope"], "task_sys_state_projection")
+            self.assertEqual(task_sys_status["active_count"], 1)
+            self.assertEqual(task_sys_status["by_status"], {"parent_processing": 1})
+            self.assertEqual(task_sys_status["active_tasks"][0]["task_id"], "task-im-message-created-status001")
+            self.assertEqual(task_sys_status["active_tasks"][0]["source_type"], "im.message.created")
+            self.assertEqual(task_sys_status["active_tasks"][0]["source_ref"], {"message_id": "msg-status-1"})
+            self.assertEqual(task_sys_status["active_tasks"][0]["active_processor"], "parent")
+
+    def test_instance_status_json_reports_log_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            status_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "status",
+                    str(ctx["actor_id"]),
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
+            payload = json.loads(status_result.stdout)
+            checks = (
+                (payload["daemon"]["log"], "daemon", "daemon_ready"),
+                (payload["app_server"]["log"], "app_server", "app_server_ready"),
+                (payload["runtime_broker"]["log"], "runtime_broker", "runtime_broker_ready"),
+            )
+            forbidden_fields = {
+                "raw_message",
+                "message_content",
+                "artifact_body",
+                "full_prompt",
+                "credentials",
+                "tool_payload",
+            }
+            for log_metadata, service, expected_event in checks:
+                self.assertTrue(Path(str(log_metadata["path"])).exists())
+                self.assertEqual(log_metadata["exists"], True)
+                self.assertGreater(log_metadata["size_bytes"], 0)
+                self.assertIsInstance(log_metadata["mtime"], str)
+                last_event = log_metadata["last_event"]
+                self.assertIsInstance(last_event, dict)
+                self.assertEqual(last_event["service"], service)
+                self.assertEqual(last_event["event"], expected_event)
+                self.assertFalse(forbidden_fields.intersection(last_event))
+
     def test_human_status_reports_daemon_health_line(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
@@ -5241,6 +5389,40 @@ exec "$real_git" "$@"
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
             self.assertIn("Daemon health:", status_result.stdout)
             self.assertIn("Daemon handlers: task_checkout", status_result.stdout)
+
+    def test_human_status_reports_task_sys_active_and_delivery_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self._write_task_sys_record(
+                Path(str(ctx["shared_root"])),
+                actor_id=str(ctx["actor_id"]),
+                role_id="pm",
+            )
+
+            status_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "status",
+                    str(ctx["actor_id"]),
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
+            self.assertIn("Task Sys active: 1", status_result.stdout)
+            self.assertIn("Task Sys active statuses: parent_processing=1", status_result.stdout)
+            self.assertIn(
+                "Delivery scope: daemon handler status is trigger-dispatch only; external channel delivery is separate.",
+                status_result.stdout,
+            )
 
     def test_fake_codex_requires_daemon_thread_resume_before_notifications(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

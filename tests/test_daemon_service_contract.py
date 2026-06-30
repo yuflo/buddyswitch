@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import tempfile
@@ -81,6 +82,41 @@ class DaemonServiceContractTests(unittest.TestCase):
         runtime_calls = saved.get("daemon_runtime_calls", {})
         return [runtime_calls[runtime_call_id] for runtime_call_id in runtime_call_ids]
 
+    def _json_log_events(self, path: Path) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        if not path.exists():
+            return events
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("event"), str):
+                events.append(payload)
+        return events
+
+    def _bind_task_sys_state_root(self, instance_root: Path) -> Path:
+        state_root = instance_root.parent.parent / "state"
+        self.core.runtime_files.set_runtime_root_override(state_root)
+        self.addCleanup(self.core.runtime_files.reset_runtime_root_override)
+        return state_root
+
+    def _im_task_envelope(self, actor_id: str, role_id: str = "dev") -> dict[str, Any]:
+        return {
+            "source": {
+                "type": "im.message.created",
+                "ref": {"message_id": "msg-status-1"},
+            },
+            "actor_target": {
+                "role_id": role_id,
+                "actor_id": actor_id,
+            },
+            "context": {
+                "text": "Need parent help",
+                "surface": "imessage",
+            },
+        }
+
     def _completed(self, *, turn_id: str = "turn-user-1") -> dict[str, object]:
         return {
             "method": "turn/completed",
@@ -148,6 +184,57 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(status["schedules"]["items"][delivered["schedule_id"]]["status"], "delivered")
             self.assertEqual(status["schedules"]["items"][failed["schedule_id"]]["last_error"], "close failed")
             self.assertEqual(status["schedules"]["items"][canceled["schedule_id"]]["status"], "canceled")
+
+    def test_daemon_status_includes_task_sys_active_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            self._bind_task_sys_state_root(instance["instance_root"])
+            task_sys = importlib.import_module("env.domain.task_sys")
+            task_id = task_sys.ingest(self._im_task_envelope(instance["payload"]["actor_id"]))["task_id"]
+            task_sys.record_side_need_parent(
+                task_id,
+                {
+                    "params": {
+                        "parent_frame_context": {"next": "Reply from parent."},
+                        "relation": "IM source needs parent work.",
+                    },
+                },
+            )
+            task_sys.record_parent_handoff_started(task_id)
+
+            status = self.core.daemon_status(instance["instance_json"])
+
+            projection = status["task_sys"]
+            self.assertEqual(projection["scope"], "task_sys_state_projection")
+            self.assertEqual(projection["active_count"], 1)
+            self.assertEqual(projection["by_status"], {"parent_processing": 1})
+            self.assertEqual(len(projection["active_tasks"]), 1)
+            active = projection["active_tasks"][0]
+            self.assertEqual(active["task_id"], task_id)
+            self.assertEqual(active["source_type"], "im.message.created")
+            self.assertEqual(active["source_ref"], {"message_id": "msg-status-1"})
+            self.assertEqual(active["status"], "parent_processing")
+            self.assertEqual(active["active_processor"], "parent")
+            self.assertIsInstance(active["updated_at"], str)
+
+    def test_handler_status_result_scope_does_not_claim_external_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            state = self._state(instance["instance_root"])
+
+            class MessageHandler:
+                name = "im_message_created"
+
+            state.register_handlers(["im_message_created"])
+            state.record_handler_result("im_message_created", self.core.HandlerResult.handled(), origin_turn_id="msg-1")
+
+            status = self.core.daemon_status(instance["instance_json"], handlers=[MessageHandler()])
+
+            item = status["handlers"]["items"]["im_message_created"]
+            self.assertEqual(item["last_result"], "handled")
+            self.assertEqual(item["result_scope"], "trigger_dispatch")
+            self.assertNotIn("external_delivery", item)
+            self.assertNotIn("phone_delivery", item)
 
     def test_daemon_runtime_replaces_action_gateway_without_alias(self) -> None:
         self.assertTrue(hasattr(self.core, "DaemonRuntime"))
@@ -280,6 +367,44 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(saved["handlers"]["exploder"]["last_result"], "failed")
             self.assertEqual(saved["handlers"]["exploder"]["last_error"]["message"], "handler exploded")
             self.assertEqual(saved["handlers"]["exploder"]["last_error"]["origin_turn_id"], "turn-user-1")
+
+    def test_dispatch_writes_handler_result_breadcrumb_without_message_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            client = FakeRuntimeClient()
+            notification = self._completed()
+            assert isinstance(notification["params"], dict)
+            notification["params"]["raw_message"] = "secret message body"
+
+            class RecordingHandler:
+                name = "im_message_created"
+
+                def handles(self, trigger: object) -> bool:
+                    return getattr(trigger, "type", None) == "app_server.turn_completed"
+
+                def handle(self, *_args: object) -> object:
+                    return self_core.HandlerResult.handled()
+
+            self_core = self.core
+
+            handled = self.core.dispatch_notification(context, state, client, notification, [RecordingHandler()])
+
+            self.assertTrue(handled)
+            log_path = self.core.daemon_log_file(instance["instance_root"])
+            log_text = log_path.read_text(encoding="utf-8")
+            self.assertNotIn("secret message body", log_text)
+            events = self._json_log_events(log_path)
+            self.assertIn("notification_received", [event["event"] for event in events])
+            handler_events = [event for event in events if event["event"] == "handler_result"]
+            self.assertEqual(len(handler_events), 1)
+            self.assertEqual(handler_events[0]["service"], "daemon")
+            self.assertEqual(handler_events[0]["actor_id"], "act-dev-daed00000001")
+            self.assertEqual(handler_events[0]["handler"], "im_message_created")
+            self.assertEqual(handler_events[0]["trigger_type"], "app_server.turn_completed")
+            self.assertEqual(handler_events[0]["origin_id"], "turn-user-1")
+            self.assertEqual(handler_events[0]["result"], "handled")
 
     def test_submit_parent_prompt_none_delegates_to_launcher_submit_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

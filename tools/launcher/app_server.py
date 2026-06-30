@@ -22,6 +22,7 @@ HELPER_DIR = Path(__file__).resolve().parent
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
+import runtime_event_log  # noqa: E402
 
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WEBSOCKET_VERSION = "13"
@@ -555,6 +556,7 @@ def app_server_status(socket_path: Path, pid_path: Path, marker_path: Path, log_
         "marker_socket": marker_socket or None,
         "pid_file": str(pid_path),
         "log_file": str(log_path),
+        "log": runtime_event_log.log_metadata(log_path),
         "probe": probe,
     }
 
@@ -576,6 +578,13 @@ def ensure_app_server(
     runtime_dir(instance_root).mkdir(parents=True, exist_ok=True)
     _cleanup_runtime_files(socket_path, pid_path, marker_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_event_log.append_event(
+        log_path,
+        service="app_server",
+        event="app_server_start_requested",
+        actor_id=actor_id,
+        socket_path=str(socket_path),
+    )
     with log_path.open("ab") as handle:
         launch_cwd = instance_root / "workspace"
         process = subprocess.Popen(
@@ -598,6 +607,14 @@ def ensure_app_server(
             )
         status = app_server_status(socket_path, pid_path, marker_path, log_path)
         if status["healthy"]:
+            runtime_event_log.append_event(
+                log_path,
+                service="app_server",
+                event="app_server_ready",
+                actor_id=actor_id,
+                pid=process.pid,
+                socket_path=str(socket_path),
+            )
             return status
         time.sleep(APP_SERVER_STARTUP_POLL_SECONDS)
 
@@ -606,7 +623,12 @@ def ensure_app_server(
 
 
 def stop_app_server(socket_path: Path, pid_path: Path, marker_path: Path, log_path: Path) -> dict[str, Any]:
-    del log_path
+    runtime_event_log.append_event(
+        log_path,
+        service="app_server",
+        event="app_server_stop_requested",
+        socket_path=str(socket_path),
+    )
     pid = _read_pid(pid_path)
     terminated = False
     if pid is not None and _pid_is_live(pid):

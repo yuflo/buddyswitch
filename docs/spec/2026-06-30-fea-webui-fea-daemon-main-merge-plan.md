@@ -100,11 +100,11 @@ Expected: compile passes, focused Python and Node tests pass, whitespace check h
 
 ### Task 3: Merge `fea-daemon`
 
-- [ ] Run `git merge --no-ff --no-commit fea-daemon`.
-- [ ] Keep explicit Task Sys close semantics, parent-frame completion requirements, daemon status Task Sys projection, runtime breadcrumbs, and compact log metadata.
-- [ ] Keep daemon/status observability read-only; do not infer external iMessage delivery from daemon health.
-- [ ] Run focused daemon/status/runtime verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-daemon`.
+- [x] Keep explicit Task Sys close semantics, parent-frame completion requirements, daemon status Task Sys projection, runtime breadcrumbs, and compact log metadata.
+- [x] Keep daemon/status observability read-only; do not infer external iMessage delivery from daemon health.
+- [x] Run focused daemon/status/runtime verification.
+- [x] Commit the merge.
 
 Focused verification:
 

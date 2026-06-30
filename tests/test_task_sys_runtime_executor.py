@@ -177,7 +177,9 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("source files, git, config, dependencies, tests, builds, app runtime, or workspace state", text)
         self.assertIn("artifacts, evidence, durable deliverables", text)
         self.assertIn("checkpoint state or task_sys.checkpoint_update", text)
-        self.assertIn("Finish this frame with exactly one Task Sys side result", text)
+        self.assertIn("Allowed frame completion operations:", text)
+        stale_side_result = "Task Sys side " + "result"
+        self.assertNotIn(stale_side_result, text)
         self.assertNotIn("[IM MESSAGE " + "TRIAGE]", text)
         self.assertNotIn("[TRACK COMMENT " + "TRIAGE]", text)
         self.assertNotIn("submit parent", text.lower())
@@ -253,6 +255,41 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("Draft the brief in parent.", text)
         self.assertNotIn("[MESSAGE NEEDS " + "PARENT]", text)
         self.assertNotIn("[TRACK COMMENT", text)
+
+    def test_render_parent_frame_requires_task_sys_close(self) -> None:
+        text = self.module.render_parent_frame(self._parent_instruction()["frame"])
+
+        self.assertIn("When the source task is complete, call task_sys.close(task_id=..., summary=...).", text)
+        self.assertIn("Do not rely on parent turn completion to close this Task Sys task.", text)
+        self.assertIn("Allowed parent frame operation:", text)
+        self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
+
+    def test_render_parent_frame_names_im_closure_order(self) -> None:
+        instruction = self._parent_instruction()
+        instruction["frame"]["source"] = {"type": "im.message.created", "ref": {"message_id": "msg-1"}}
+
+        text = self.module.render_parent_frame(instruction["frame"])
+
+        self.assertIn("For an IM source message:", text)
+        self.assertIn("first call message.send(reply_to=source_message_id, content=...)", text)
+        self.assertIn("first call message.mark(message_id=source_message_id, disposition=absorbed)", text)
+        self.assertIn("Only after the source-bound IM action succeeds, call task_sys.close.", text)
+        self.assertIn("If the IM action succeeds but task_sys.close fails, retry task_sys.close and do not send a duplicate reply.", text)
+
+    def test_render_parent_frame_forbids_checkpoint_update(self) -> None:
+        text = self.module.render_parent_frame(self._parent_instruction()["frame"])
+
+        self.assertIn("Checkpoint updates are not legal in Task Sys parent frames.", text)
+        self.assertIn("Do not call task_sys.checkpoint_update.", text)
+
+    def test_render_side_frame_no_longer_calls_close_a_side_result(self) -> None:
+        text = self.module.render_side_frame(self._instruction()["frame"])
+
+        self.assertIn("Allowed frame completion operations:", text)
+        self.assertIn("task_sys.close(task_id=..., summary=...) when the task is completed in side.", text)
+        stale_side_result = "Task Sys side " + "result"
+        self.assertNotIn(stale_side_result, text)
+        self.assertNotIn("side result:", text.lower())
 
     def test_render_checkpoint_frame_is_task_sys_scoped_without_legacy_prompt(self) -> None:
         text = self.module.render_checkpoint_frame(self._checkpoint_instruction()["frame"])

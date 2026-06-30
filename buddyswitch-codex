@@ -1252,7 +1252,7 @@ PY
 }
 
 instance_status_json() {
-  local actor_id="$1" app_status_json daemon_status_json thread_id thread_json=""
+  local actor_id="$1" app_status_json daemon_status_json runtime_broker_status_json thread_id thread_json=""
   buddyswitch_validate_actor_id "${actor_id}" || return $?
   buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
   buddyswitch_env_bind_instance "${actor_id}" || return $?
@@ -1264,6 +1264,10 @@ instance_status_json() {
   daemon_status_json="$(buddyswitch_daemon_status_json 2>/dev/null || true)"
   if [[ -z "${daemon_status_json}" ]]; then
     daemon_status_json='{"live": false, "pid": null, "pid_live": false, "last_error": null}'
+  fi
+  runtime_broker_status_json="$(buddyswitch_runtime_broker_status_json 2>/dev/null || true)"
+  if [[ -z "${runtime_broker_status_json}" ]]; then
+    runtime_broker_status_json='{"healthy": false, "pid": null, "pid_live": false, "socket_path": "", "log_file": "", "log": {"path": "", "exists": false, "size_bytes": 0, "mtime": null, "last_event": null}}'
   fi
   if [[ -n "${thread_id}" ]]; then
     if python3 - "${app_status_json}" <<'PY'
@@ -1277,7 +1281,7 @@ PY
       thread_json="$(buddyswitch_app_server_thread_read "${thread_id}" 2>/dev/null || true)"
     fi
   fi
-  python3 - "${BUDDYSWITCH_INSTANCE_JSON}" "${app_status_json}" "${daemon_status_json}" "${thread_json}" <<'PY'
+  python3 - "${BUDDYSWITCH_INSTANCE_JSON}" "${app_status_json}" "${daemon_status_json}" "${runtime_broker_status_json}" "${thread_json}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1285,7 +1289,8 @@ from pathlib import Path
 instance_payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 app_server = json.loads(sys.argv[2]) if sys.argv[2] else {}
 daemon = json.loads(sys.argv[3]) if sys.argv[3] else {}
-thread_payload = json.loads(sys.argv[4]) if sys.argv[4] else {}
+runtime_broker = json.loads(sys.argv[4]) if sys.argv[4] else {}
+thread_payload = json.loads(sys.argv[5]) if sys.argv[5] else {}
 
 thread = thread_payload.get("thread") if isinstance(thread_payload, dict) else None
 thread_status = None
@@ -1308,6 +1313,7 @@ payload = {
     "thread_id": instance_payload.get("thread_id"),
     "app_server": app_server,
     "daemon": daemon,
+    "runtime_broker": runtime_broker,
     "thread": {
         "status": thread_status,
         "raw": thread,
@@ -1355,6 +1361,14 @@ thread = payload.get("thread") if isinstance(payload.get("thread"), dict) else {
 daemon_handlers = daemon.get("handlers") if isinstance(daemon.get("handlers"), dict) else {}
 registered_handlers = daemon_handlers.get("registered") if isinstance(daemon_handlers.get("registered"), list) else []
 handler_text = ", ".join(str(item) for item in registered_handlers if isinstance(item, str))
+task_sys = daemon.get("task_sys") if isinstance(daemon.get("task_sys"), dict) else {}
+task_sys_active = task_sys.get("active_count") if isinstance(task_sys.get("active_count"), int) else 0
+task_sys_by_status = task_sys.get("by_status") if isinstance(task_sys.get("by_status"), dict) else {}
+task_sys_status_text = ", ".join(
+    f"{status}={count}"
+    for status, count in sorted(task_sys_by_status.items())
+    if isinstance(status, str) and isinstance(count, int)
+)
 
 print(f"Instance: {payload.get('actor_id')}")
 print(f"Buddy: {payload.get('role')}")
@@ -1362,6 +1376,10 @@ print(f"Status: {payload.get('status')}")
 print(f"App-server health: {'healthy' if app_server.get('healthy') else 'unhealthy'}")
 print(f"Daemon health: {'healthy' if daemon.get('live') else 'unhealthy'}")
 print(f"Daemon handlers: {handler_text}")
+print(f"Task Sys active: {task_sys_active}")
+if task_sys_status_text:
+    print(f"Task Sys active statuses: {task_sys_status_text}")
+print("Delivery scope: daemon handler status is trigger-dispatch only; external channel delivery is separate.")
 print(f"Thread id: {payload.get('thread_id') or ''}")
 print(f"Thread status: {thread.get('status') or ''}")
 print(f"Browser port: {payload.get('browser_port') or ''}")

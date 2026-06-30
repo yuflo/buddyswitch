@@ -73,6 +73,20 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             with self.subTest(token=old_token):
                 self.assertNotIn(old_token, lowered)
 
+    def test_task_management_skill_teaches_frame_specific_task_sys_operations(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+
+        self.assertIn("Use `task_sys.close` when a `task_sys.side_frame` is completed in side.", skill_text)
+        self.assertIn("When a `task_sys.parent_frame` completes the source task, call `task_sys.close`.", skill_text)
+        self.assertIn("If replying to an IM source, first call `message.send(reply_to=...)`.", skill_text)
+        self.assertIn("If no reply is needed for an IM source, first call `message.mark(..., disposition=absorbed)`.", skill_text)
+        self.assertIn("Checkpoint updates are not legal in parent frames; do not call `task_sys.checkpoint_update` there.", skill_text)
+        stale_finish = "finish with exactly one Task Sys side " + "result"
+        stale_label = "Task Sys side " + "result"
+        self.assertNotIn(stale_finish, skill_text)
+        self.assertNotIn(stale_label, skill_text)
+
     def test_runtime_role_guidance_prefers_task_sys_tools(self) -> None:
         for path in sorted((ROOT / "tools" / "launcher" / "assets" / "roles").glob("*/AGENTS.md")):
             text = path.read_text(encoding="utf-8")

@@ -113,7 +113,7 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             (
                 "A side thread may handle the task only when completion requires this task_sys.side_frame, exact "
                 "source objects referenced by this frame, bounded read-only inspection, current-source IM "
-                "disposition/reply, and one Task Sys side result."
+                "disposition/reply, and one Task Sys frame operation."
             ),
             (
                 "If the task requires parent attention, workspace resources, browser/web/research resources, shared "
@@ -153,9 +153,9 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             ),
             "\n".join(
                 (
-                    "3. Task Sys side result",
-                    "Finish this frame with exactly one Task Sys side result:",
-                    "- task_sys.close(task_id=..., summary=...) when the task is fully handled without parent work.",
+                    "3. Task Sys frame operation",
+                    "Finish this frame with exactly one legal Task Sys operation:",
+                    "- task_sys.close(task_id=..., summary=...) when the task is completed in side.",
                     (
                         "- task_sys.need_parent(task_id=..., params={parent_frame_context, relation, interrupt, "
                         "ordering}) when parent work is required."
@@ -226,10 +226,10 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     ),
                 )
             ),
-            "Allowed result actions:",
-            "- task_sys.close(task_id=..., summary=...)",
+            "Allowed frame completion operations:",
+            "- task_sys.close(task_id=..., summary=...) when the task is completed in side.",
             "- task_sys.need_parent(task_id=..., params={parent_frame_context, relation, interrupt, ordering})",
-            "Do not use any other side outcome. Treat interrupt only as a task_sys.need_parent params field.",
+            "Do not use any other Task Sys operation from side. Treat interrupt only as a task_sys.need_parent params field.",
         )
     )
 
@@ -251,6 +251,25 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             _json_block(_require_mapping(payload.get("parent_handoff_params"), "frame.parent_handoff_params")),
             "Required action:",
             "Process this Task Sys parent frame. Use source refs and task context; do not assume raw inbound outside this frame.",
+            "When the source task is complete, call task_sys.close(task_id=..., summary=...).",
+            "Do not rely on parent turn completion to close this Task Sys task.",
+            "For an IM source message:",
+            "\n".join(
+                (
+                    "- If replying, first call message.send(reply_to=source_message_id, content=...).",
+                    "- If no reply is needed, first call message.mark(message_id=source_message_id, disposition=absorbed).",
+                    "- Only after the source-bound IM action succeeds, call task_sys.close.",
+                    (
+                        "- If the IM action succeeds but task_sys.close fails, retry task_sys.close and do not send a "
+                        "duplicate reply."
+                    ),
+                )
+            ),
+            "Allowed parent frame operation:",
+            "- task_sys.close(task_id=..., summary=...)",
+            "Forbidden parent frame operations:",
+            "Checkpoint updates are not legal in Task Sys parent frames.",
+            "Do not call task_sys.checkpoint_update.",
         )
     )
 

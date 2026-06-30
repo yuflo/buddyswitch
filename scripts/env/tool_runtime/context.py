@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -404,9 +405,24 @@ class DaemonAccess:
         if str(launcher_dir) not in sys.path:
             sys.path.insert(0, str(launcher_dir))
         import task_sys_runtime  # type: ignore[import-not-found]
+        import runtime_event_log  # type: ignore[import-not-found]
 
         context = task_sys_runtime.context_from_instance_json(self._instance_json)
-        return task_sys_runtime.execute_instruction(context, instruction)
+        result = task_sys_runtime.execute_instruction(context, instruction)
+        try:
+            payload = json.loads(self._instance_json.read_text(encoding="utf-8"))
+            instance_root = Path(str(payload.get("instance_root")))
+            runtime_event_log.append_event(
+                instance_root / "runtime" / "daemon" / "daemon.log",
+                service="daemon",
+                event="task_sys_instruction_executed",
+                actor_id=payload.get("actor_id"),
+                instruction_type=instruction.get("type"),
+                task_id=instruction.get("task_id"),
+            )
+        except Exception:
+            pass
+        return result
 
     def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return daemon_client.wake_im_actor(payload)
