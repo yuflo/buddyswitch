@@ -415,6 +415,32 @@ textarea:focus-visible,
   opacity: 0.48;
 }
 
+.is-loading {
+  cursor: progress;
+}
+
+.button.is-pending {
+  cursor: progress;
+}
+
+.selectable-row.is-loading {
+  background: var(--surface-soft);
+}
+
+.inline-loading {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.im-row.pending {
+  border-style: dashed;
+}
+
+.im-row.failed {
+  border-color: #efc2bd;
+  background: var(--danger-soft);
+}
+
 .status-pill,
 .status-badge,
 .metric-chip {
@@ -793,6 +819,15 @@ textarea:focus-visible,
   .track-workspace-grid,
   .actor-console-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .runtime-column {
+    order: -1;
+  }
+
+  #instruction-input {
+    min-height: 96px;
+    height: 96px;
   }
 
   .actor-list,

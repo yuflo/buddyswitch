@@ -99,6 +99,19 @@ test('production stylesheet supports actor console and track workspace states', 
   });
 });
 
+test('production stylesheet supports pending and loading feedback states', () => {
+  [
+    '.is-loading',
+    '.button.is-pending',
+    '.selectable-row.is-loading',
+    '.inline-loading',
+    '.im-row.pending',
+    '.im-row.failed',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+});
+
 test('production javascript keeps the real api surface', () => {
   [
     '/api/health',
@@ -125,7 +138,8 @@ test('production javascript keeps the real api surface', () => {
 
   assertIncludes(appJs, "method: 'DELETE'");
   assertIncludes(appJs, 'actor_id: state.selectedActorId');
-  assertIncludes(appJs, 'content: state.draftText');
+  assertIncludes(appJs, 'content: content');
+  assertExcludes(appJs, 'content: state.draftText');
   assertIncludes(appJs, 'target_identity_id: target.identity_id');
   assertIncludes(appJs, 'buildImConversationUrl');
   assertIncludes(appJs, 'buildImEventsUrl(15000)');
@@ -151,16 +165,32 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, 'apply' + 'ImEventsPayload');
   assertExcludes(appJs, 'messageTouches' + 'KnownOrSelectedActor');
   assertExcludes(appJs, 'external-participants');
-  assertExcludes(appJs, 'connection_key');
+  assertExcludes(appJs, 'connection_' + 'key');
   assertExcludes(appJs, 'imParticipantToken');
-  assertExcludes(appJs, 'participant_token');
-  assertExcludes(appJs, 'event_cursor');
+  assertExcludes(appJs, 'participant_' + 'token');
+  assertExcludes(appJs, 'event_' + 'cursor');
   assertExcludes(appJs, 'imEventCursor');
-  assertExcludes(appJs, 'cursor=');
+  assertExcludes(appJs, 'cursor' + '=');
   assertExcludes(appJs, 'Authorization');
   assertExcludes(appJs, 'env.tool');
   assertExcludes(appJs, 'env.repos');
   assertExcludes(appJs, 'env.tools.track');
+});
+
+test('production javascript does not attach row click handlers from render', () => {
+  assertExcludes(appJs, "elements.actorsList.querySelectorAll('[data-actor-id]').forEach");
+  assertExcludes(appJs, "elements.tracksList.querySelectorAll('[data-track-id]').forEach");
+});
+
+test('production javascript does not keep global mutation state residue', () => {
+  assertExcludes(appJs, 'mutation' + 'Key');
+  assertExcludes(appJs, 'is' + 'Mutating');
+  assertExcludes(appJs, 'Action ' + 'running.');
+  assertExcludes(appJs, 'run' + "Mutation(state, elements, 'messages'");
+});
+
+test('production javascript keeps draft input off the full page render path', () => {
+  assertExcludes(appJs, 'render(state, ' + 'elements);');
 });
 
 test('production assets present actor-centered console wording', () => {

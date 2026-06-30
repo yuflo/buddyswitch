@@ -41,6 +41,9 @@ function createRenderElements() {
   });
   return {
     serverStatus: node(),
+    pageTitle: node(),
+    pageSummary: node(),
+    refreshButton: node(),
     messageBanner: node(),
     instructionInput: node(),
     actorView: node(),
@@ -139,6 +142,79 @@ test('track payload sync chooses first track and keeps comments inside detail st
   assert.deepEqual(state.selectedTrackDetail.comment_threads[0].comments.map((row) => row.id), ['comment-1']);
 });
 
+test('actor selection clears stale feedback before fetch completes', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-new/console') {
+      return {
+        ok: true,
+        json: async function () {
+          return {
+            ok: true,
+            console: {
+              actor: { actor_id: 'act-new', role: 'market' },
+              runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+              task_sys: { active_tasks: [] },
+              tracks: { items: [] },
+              im: { target: { identity_id: 'act-new', role_id: 'market' } },
+            },
+          };
+        },
+      };
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-new&limit=50') {
+      return {
+        ok: false,
+        json: async function () {
+          return {
+            ok: false,
+            error: { code: 'E_IM_NOT_FOUND', message: 'direct conversation not found' },
+          };
+        },
+      };
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.healthOk = true;
+    state.message = 'Created act-old.';
+    state.selectedActorId = 'act-old';
+    state.actors = [
+      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-new', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    app.recordImProjectedMessage(state, {
+      id: 'msg-old',
+      from_identity_id: 'act-old',
+      to_identity_id: 'ext-web',
+      content: 'old actor message',
+      reply_to: null,
+    });
+    elements.messageBanner.textContent = 'Created act-old.';
+
+    const selection = app.selectActor(state, elements, 'act-new');
+    selection.catch(function () {});
+
+    assert.equal(state.selectedActorId, 'act-new');
+    assert.equal(state.message, '');
+    assert.equal(elements.messageBanner.textContent, '');
+    assert.deepEqual(state.imConversation, []);
+    assert.match(elements.actorRuntimeDetail.innerHTML, /Loading/);
+
+    await selection;
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('selected actor runtime drives existing lifecycle controls', () => {
   const state = app.createState();
   app.applyActorConsolePayload(state, {
@@ -157,7 +233,11 @@ test('selected actor runtime drives existing lifecycle controls', () => {
   });
 
   assert.deepEqual(
-    app.computeInstanceActionState(app.selectedActorRuntime(state), { draftText: 'ping', isMutating: false }),
+    app.computeInstanceActionState(app.selectedActorRuntime(state), {
+      draftText: 'ping',
+      sendPending: false,
+      lifecyclePendingAction: '',
+    }),
     {
       canSend: true,
       canInterrupt: false,
@@ -171,7 +251,11 @@ test('selected actor runtime drives existing lifecycle controls', () => {
 
 test('action state explains why clear is disabled', () => {
   assert.equal(
-    app.describeInstanceActionState(null, { draftText: '', isMutating: false }).clearReason,
+    app.describeInstanceActionState(null, {
+      draftText: '',
+      sendPending: false,
+      lifecyclePendingAction: '',
+    }).clearReason,
     'Select an actor.'
   );
   assert.equal(
@@ -181,7 +265,11 @@ test('action state explains why clear is disabled', () => {
         app_server_health: 'healthy',
         thread: { status: 'in_progress' },
       },
-      { draftText: '', isMutating: false }
+      {
+        draftText: '',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ).clearReason,
     'Thread running.'
   );
@@ -192,7 +280,11 @@ test('action state explains why clear is disabled', () => {
         app_server_health: 'healthy',
         thread: { status: 'idle' },
       },
-      { draftText: '', isMutating: false }
+      {
+        draftText: '',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ).clearReason,
     ''
   );
@@ -219,9 +311,49 @@ test('web product route builders target coarse phase-two APIs only', () => {
   assert.equal(app.buildTrackDetailUrl('track-alpha'), '/api/tracks/track-alpha');
 });
 
+test('section copy follows selected workspace', () => {
+  assert.deepEqual(app.sectionCopy('actors'), {
+    title: 'Actor Console',
+    summary: 'Select an actor, inspect runtime and task state, message directly, and use lifecycle controls in one place.',
+  });
+  assert.deepEqual(app.sectionCopy('tracks'), {
+    title: 'Track workspace',
+    summary: 'Review shared Tracks, materials, proofs, updates, and comments.',
+  });
+});
+
+test('renderComposer updates the input and send button without actor list writes', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.draftText = 'ping';
+  state.actors = [
+    {
+      actor_id: 'act-market-demo',
+      role: 'market',
+      runtime: { status: 'active', app_server_health: 'healthy' },
+    },
+  ];
+  state.selectedActorId = 'act-market-demo';
+  state.actorConsole = {
+    actor: { actor_id: 'act-market-demo', role: 'market' },
+    runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+  };
+  elements.actorsList.innerHTML = 'unchanged';
+
+  app.renderComposer(state, elements);
+
+  assert.equal(elements.instructionInput.value, 'ping');
+  assert.equal(elements.sendButton.disabled, false);
+  assert.equal(elements.actorsList.innerHTML, 'unchanged');
+});
+
 test('no selection disables all instance actions', () => {
   assert.deepEqual(
-    app.computeInstanceActionState(null, { draftText: 'Advance the brief', isMutating: false }),
+    app.computeInstanceActionState(null, {
+      draftText: 'Advance the brief',
+      sendPending: false,
+      lifecyclePendingAction: '',
+    }),
     {
       canSend: false,
       canInterrupt: false,
@@ -241,7 +373,11 @@ test('active healthy instance allows send, stop, and clear, but not delete', () 
         app_server_health: 'healthy',
         thread: { status: 'idle' },
       },
-      { draftText: 'Advance the brief', isMutating: false }
+      {
+        draftText: 'Advance the brief',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ),
     {
       canSend: true,
@@ -262,7 +398,11 @@ test('active in-progress instance enables interrupt and still allows steering in
         app_server_health: 'healthy',
         thread: { status: 'in_progress' },
       },
-      { draftText: 'Refine the plan', isMutating: false }
+      {
+        draftText: 'Refine the plan',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ),
     {
       canSend: true,
@@ -283,7 +423,11 @@ test('active app-server thread enables interrupt and still allows steering input
         app_server_health: 'healthy',
         thread: { status: 'active' },
       },
-      { draftText: 'Refine the plan', isMutating: false }
+      {
+        draftText: 'Refine the plan',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ),
     {
       canSend: true,
@@ -304,7 +448,11 @@ test('inactive instance allows resume and delete only', () => {
         app_server_health: 'unhealthy',
         thread: { status: 'stopped' },
       },
-      { draftText: 'Advance the brief', isMutating: false }
+      {
+        draftText: 'Advance the brief',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ),
     {
       canSend: false,
@@ -317,18 +465,47 @@ test('inactive instance allows resume and delete only', () => {
   );
 });
 
-test('mutation busy state disables all instance controls', () => {
+test('send pending disables only send while preserving independent actor controls', () => {
   assert.deepEqual(
     app.computeInstanceActionState(
       {
         status: 'active',
         app_server_health: 'healthy',
-        thread: { status: 'in_progress' },
+        thread: { status: 'idle' },
       },
-      { draftText: 'Advance the brief', isMutating: true }
+      {
+        draftText: 'Advance the brief',
+        sendPending: true,
+        lifecyclePendingAction: '',
+      }
     ),
     {
       canSend: false,
+      canInterrupt: false,
+      canStop: true,
+      canDelete: false,
+      canClear: true,
+      canResume: false,
+    }
+  );
+});
+
+test('lifecycle pending disables lifecycle buttons without disabling send', () => {
+  assert.deepEqual(
+    app.computeInstanceActionState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread: { status: 'idle' },
+      },
+      {
+        draftText: 'keep typing',
+        sendPending: false,
+        lifecyclePendingAction: 'clear',
+      }
+    ),
+    {
+      canSend: true,
       canInterrupt: false,
       canStop: false,
       canDelete: false,
@@ -346,7 +523,11 @@ test('active idle instance allows clear even without draft text', () => {
         app_server_health: 'healthy',
         thread: { status: 'idle' },
       },
-      { draftText: '', isMutating: false }
+      {
+        draftText: '',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ),
     {
       canSend: false,
@@ -367,7 +548,11 @@ test('active in-progress instance disables clear while allowing interrupt', () =
         app_server_health: 'healthy',
         thread: { status: 'in_progress' },
       },
-      { draftText: 'Steer', isMutating: false }
+      {
+        draftText: 'Steer',
+        sendPending: false,
+        lifecyclePendingAction: '',
+      }
     ),
     {
       canSend: true,
@@ -382,7 +567,7 @@ test('active in-progress instance disables clear while allowing interrupt', () =
 
 test('open tui is disabled without a selected instance', () => {
   assert.deepEqual(
-    app.computeOpenTuiState(null, { isMutating: false }),
+    app.computeOpenTuiState(null, { openTuiPending: false }),
     {
       canOpenTui: false,
       message: '',
@@ -398,7 +583,7 @@ test('active healthy instance with a thread enables open tui', () => {
         app_server_health: 'healthy',
         thread_id: 'thread-main',
       },
-      { isMutating: false }
+      { openTuiPending: false }
     ),
     {
       canOpenTui: true,
@@ -415,7 +600,7 @@ test('inactive instance tells user to resume before opening tui', () => {
         app_server_health: 'unhealthy',
         thread_id: 'thread-main',
       },
-      { isMutating: false }
+      { openTuiPending: false }
     ),
     {
       canOpenTui: false,
@@ -432,7 +617,7 @@ test('unhealthy instance blocks open tui', () => {
         app_server_health: 'unhealthy',
         thread_id: 'thread-main',
       },
-      { isMutating: false }
+      { openTuiPending: false }
     ),
     {
       canOpenTui: false,
@@ -449,7 +634,7 @@ test('missing thread blocks open tui', () => {
         app_server_health: 'healthy',
         thread_id: null,
       },
-      { isMutating: false }
+      { openTuiPending: false }
     ),
     {
       canOpenTui: false,
@@ -458,7 +643,7 @@ test('missing thread blocks open tui', () => {
   );
 });
 
-test('mutation busy state disables open tui', () => {
+test('open tui pending disables only open tui', () => {
   assert.deepEqual(
     app.computeOpenTuiState(
       {
@@ -466,11 +651,11 @@ test('mutation busy state disables open tui', () => {
         app_server_health: 'healthy',
         thread_id: 'thread-main',
       },
-      { isMutating: true }
+      { openTuiPending: true }
     ),
     {
       canOpenTui: false,
-      message: '',
+      message: 'Opening...',
     }
   );
 });
@@ -516,6 +701,45 @@ test('record sent IM message keeps compact delivery status', () => {
       replyTo: '',
     },
   ]);
+});
+
+test('pending sent IM message is replaced with accepted server message', () => {
+  const state = app.createState();
+  const pendingId = app.recordImPendingSend(state, 'ping');
+
+  assert.equal(state.imConversation.length, 1);
+  assert.equal(state.imConversation[0].id, pendingId);
+  assert.equal(state.imConversation[0].deliveryStatus, 'sending');
+
+  app.replaceImPendingSend(state, pendingId, {
+    message: { id: 'msg-sent-1' },
+    delivery_status: 'accepted',
+    wake_status: 'submitted',
+  }, 'ping');
+
+  assert.deepEqual(state.imConversation, [
+    {
+      id: 'msg-sent-1',
+      direction: 'sent',
+      sender: 'you',
+      content: 'ping',
+      deliveryStatus: 'accepted',
+      wakeStatus: 'submitted',
+      replyTo: '',
+    },
+  ]);
+  assert.equal(state.imSeenMessageIds['msg-sent-1'], true);
+  assert.equal(state.imSeenMessageIds[pendingId], undefined);
+});
+
+test('failed pending send is removed and draft can be restored by caller', () => {
+  const state = app.createState();
+  const pendingId = app.recordImPendingSend(state, 'ping');
+
+  app.removeImEntry(state, pendingId);
+
+  assert.deepEqual(state.imConversation, []);
+  assert.equal(state.imSeenMessageIds[pendingId], undefined);
 });
 
 test('record projected IM messages keeps sent and reply directions', () => {
