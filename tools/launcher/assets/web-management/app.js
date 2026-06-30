@@ -185,16 +185,23 @@
     return '/api/tracks/' + encodeURIComponent(trackId);
   }
 
-  function buildImEventsUrl(identityId, waitMs) {
+  function buildImEventsUrl(waitMs) {
     const normalizedWait = Number.isFinite(waitMs) && waitMs >= 0 ? Math.floor(waitMs) : 0;
-    return '/api/web/im/events?identity_id=' + encodeURIComponent(identityId || '')
-      + '&wait_ms=' + encodeURIComponent(String(normalizedWait));
+    return '/api/im/events?wait_ms=' + encodeURIComponent(String(normalizedWait));
   }
 
-  function buildWebImConversationUrl(identityId, limit) {
+  function buildImConversationUrl(identityId, limit) {
     const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 20;
-    return '/api/web/im/conversations/direct?identity_id=' + encodeURIComponent(identityId || '')
+    return '/api/im/conversations/direct?identity_id=' + encodeURIComponent(identityId || '')
       + '&limit=' + encodeURIComponent(String(normalizedLimit));
+  }
+
+  function buildImMessageUrl(messageId) {
+    return '/api/im/messages/' + encodeURIComponent(messageId || '');
+  }
+
+  function buildImAckPayload(eventId) {
+    return { event_id: eventId || '' };
   }
 
   function clearOpenTuiFeedback(state) {
@@ -359,16 +366,26 @@
     });
   }
 
-  function applyImConversationPayload(state, payload) {
-    state.imConversation = [];
-    state.imSeenMessageIds = {};
-    const messages = payload && Array.isArray(payload.messages) ? payload.messages : [];
-    messages.forEach(function (message) {
-      recordImProjectedMessage(state, message);
+  function messageTouchesActor(message, identityId) {
+    if (!message || typeof message !== 'object' || typeof identityId !== 'string' || !identityId) {
+      return false;
+    }
+    return message.from_identity_id === identityId || message.to_identity_id === identityId;
+  }
+
+  function messageTouchesKnownOrSelectedActor(state, message) {
+    const target = selectedActorImTarget(state);
+    if (target && messageTouchesActor(message, target.identity_id)) {
+      return true;
+    }
+    return state.actors.some(function (actor) {
+      return actor && typeof actor.actor_id === 'string' && messageTouchesActor(message, actor.actor_id);
     });
   }
 
-  function applyImEventsPayload(state, payload) {
+  function applyImConversationPayload(state, payload) {
+    state.imConversation = [];
+    state.imSeenMessageIds = {};
     const messages = payload && Array.isArray(payload.messages) ? payload.messages : [];
     messages.forEach(function (message) {
       recordImProjectedMessage(state, message);
@@ -705,7 +722,7 @@
       refreshSelectedActorConsole(state),
       refreshSelectedTrackDetail(state),
     ]);
-    await ensureWebImSession(state, elements);
+    await ensureImSession(state, elements);
     await refreshSelectedActorConversation(state);
     render(state, elements);
     scheduleActorConsoleRefresh(state, elements);
@@ -727,7 +744,7 @@
       return;
     }
     const payload = await fetchJson(
-      buildWebImConversationUrl(target.identity_id, 50)
+      buildImConversationUrl(target.identity_id, 50)
     );
     applyImConversationPayload(state, payload);
   }
@@ -869,24 +886,24 @@
     }
   }
 
-  async function ensureWebImSession(state, elements) {
+  async function ensureImSession(state, elements) {
     if (state.imSessionReady) {
       startImPolling(state, elements);
       return;
     }
-    await fetchJson('/api/web/im/session');
+    await fetchJson('/api/im/session');
     state.imSessionReady = true;
     startImPolling(state, elements);
   }
 
   async function sendImDraft(state, elements) {
-    await ensureWebImSession(state, elements);
+    await ensureImSession(state, elements);
     const target = selectedActorImTarget(state);
     if (!target) {
       throw new Error('Select an actor first.');
     }
     const content = state.draftText;
-    const payload = await fetchJson('/api/web/im/messages', {
+    const payload = await fetchJson('/api/im/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -909,16 +926,34 @@
     if (!target || !target.identity_id) {
       return;
     }
-    const payload = await fetchJson(
-      buildImEventsUrl(target.identity_id, 15000)
-    );
+    const selectedIdentityId = target.identity_id;
+    const payload = await fetchJson(buildImEventsUrl(15000));
     if (state.selectedActorId !== target.identity_id) {
       return;
     }
     const events = Array.isArray(payload.events) ? payload.events : [];
-    applyImEventsPayload(state, payload);
-    if (events.length) {
-      await refreshSelectedActorConsoleAndRender(state, elements);
+    let selectedActorMessageProcessed = false;
+    for (const event of events) {
+      if (!event || typeof event !== 'object' || typeof event.message_id !== 'string' || !event.message_id) {
+        continue;
+      }
+      const fetched = await fetchJson(buildImMessageUrl(event.message_id));
+      const message = fetched && fetched.message && typeof fetched.message === 'object' ? fetched.message : null;
+      if (message && messageTouchesKnownOrSelectedActor(state, message)) {
+        recordImProjectedMessage(state, message);
+        selectedActorMessageProcessed = selectedActorMessageProcessed || messageTouchesActor(message, selectedIdentityId);
+      }
+      await fetchJson('/api/im/events/ack', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(buildImAckPayload(event.event_id)),
+      });
+    }
+    if (selectedActorMessageProcessed && state.selectedActorId === selectedIdentityId) {
+      await refreshSelectedActorConsole(state);
+      await refreshSelectedActorConversation(state);
     }
     render(state, elements);
   }
@@ -1172,13 +1207,14 @@
     applyActorConsolePayload,
     applyActorsPayload,
     applyImConversationPayload,
-    applyImEventsPayload,
     applyTrackDetailPayload,
     applyTracksPayload,
     buildActorConsoleUrl,
+    buildImAckPayload,
     buildImEventsUrl,
+    buildImConversationUrl,
+    buildImMessageUrl,
     buildTrackDetailUrl,
-    buildWebImConversationUrl,
     computeCreateEnabled,
     computeInstanceActionState,
     computeOpenTuiState,

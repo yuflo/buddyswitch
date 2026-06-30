@@ -59,6 +59,23 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("participant_" + "token", created)
         self.assertNotIn("event_" + "cursor", created)
 
+        auth = message_service.authenticate_external_connection_key(key)
+        self.assertTrue(auth["ok"], msg=auth)
+
+        status, session = router.handle(
+            "GET",
+            "/api/im/session",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(session["ok"], msg=session)
+        self.assertEqual(session["identity"], auth["identity"])
+        self.assertNotIn("connection_key", session)
+        self.assertNotIn("participant", session)
+        self.assertNotIn("participant_" + "token", session)
+        self.assertNotIn("event_" + "cursor", session)
+
         old_route = "/api/im/" + "external-" + "participants"
         status, old_registration = router.handle("POST", old_route, b"{}", {})
         self.assertEqual(status, 404)
@@ -137,8 +154,6 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(message["message"]["content"], "ping")
 
-        auth = message_service.authenticate_external_connection_key(key)
-        self.assertTrue(auth["ok"], msg=auth)
         actor_reply = message_service.send_im_message(
             sender_participant={"kind": "actor", "actor_address": actor_address},
             to=auth["participant"],

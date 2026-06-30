@@ -133,11 +133,18 @@ class _FakeExternalImSession:
 class _FakeWebIdentityProvider:
     def __init__(self, connection: dict[str, Any]) -> None:
         self.connection = connection
+        self.calls: list[str] = []
 
     def ensure(self) -> dict[str, Any]:
+        self.calls.append("ensure")
         return {
             "identity": {"id": "ext-fake", "type": "external"},
             "connection": self.connection,
+            "connection_key": "imck-secret",
+            "participant_token": "pt-secret",
+            "event_cursor": "imev-secret",
+            "client_kind": "web-management",
+            "display_name": "BuddySwitch Web",
         }
 
 
@@ -211,26 +218,92 @@ class ExternalImProjectionContractTests(unittest.TestCase):
             ],
         )
 
-    def test_web_bff_rejects_cursor_before_session_read(self) -> None:
+    def test_router_web_provider_session_and_protected_routes_use_shared_session(self) -> None:
         session = _FakeExternalImSession()
-        service = web_management.WebManagementService(
-            repo_root=ROOT,
-            web_im_identity_provider=_FakeWebIdentityProvider(session.connection),
+        provider = _FakeWebIdentityProvider(session.connection)
+        router = im_http_router.ImHttpRouter(
+            actor_lister=lambda _role_id: [],
+            wake_actor=lambda _payload: {},
             im_session=session,
+            web_connection_provider=provider.ensure,
         )
 
-        with self.assertRaises(web_management.HttpError) as raised:
-            service.handle_api(
-                "GET",
-                "/api/web/im/events?identity_id=act-market-demo&cursor=imev-old&wait_ms=0",
-                b"",
-                {},
-            )
+        status, web_session = router.handle("GET", "/api/im/session", b"", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            web_session,
+            {
+                "ok": True,
+                "identity": {"id": "ext-fake", "type": "external"},
+                "client_kind": "web-management",
+                "display_name": "BuddySwitch Web",
+            },
+        )
+        self.assertNotIn("connection_key", web_session)
+        self.assertNotIn("participant_token", web_session)
+        self.assertNotIn("event_cursor", web_session)
+        self.assertNotIn("connection", web_session)
 
-        self.assertEqual(raised.exception.status, 400)
+        status, sent = router.handle(
+            "POST",
+            "/api/im/messages",
+            json.dumps(
+                {
+                    "target_identity_id": "act-market-demo",
+                    "content": "ping",
+                    "reply_to": None,
+                }
+            ).encode("utf-8"),
+            {},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(sent["delivery_status"], "accepted")
+
+        status, events = router.handle("GET", "/api/im/events?wait_ms=25&limit=3", b"", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(events, {"ok": True, "events": []})
+
+        status, acked = router.handle("POST", "/api/im/events/ack", b'{"event_id":"imev-fake"}', {})
+        self.assertEqual(status, 200)
+        self.assertEqual(acked, {"ok": True, "event_id": "imev-fake"})
+
+        self.assertEqual(provider.calls, ["ensure", "ensure", "ensure", "ensure"])
+        self.assertEqual(
+            session.calls,
+            [
+                (
+                    "send_message",
+                    {
+                        "connection": session.connection,
+                        "target_identity_id": "act-market-demo",
+                        "content": "ping",
+                        "reply_to": None,
+                    },
+                ),
+                ("read_events", {"connection": session.connection, "limit": 3, "wait_ms": 25}),
+                ("ack_event", {"connection": session.connection, "event_id": "imev-fake"}),
+            ],
+        )
+
+    def test_router_rejects_malformed_authorization_without_web_provider_fallback(self) -> None:
+        session = _FakeExternalImSession()
+        provider = _FakeWebIdentityProvider(session.connection)
+        router = im_http_router.ImHttpRouter(
+            actor_lister=lambda _role_id: [],
+            wake_actor=lambda _payload: {},
+            im_session=session,
+            web_connection_provider=provider.ensure,
+        )
+
+        status, payload = router.handle("GET", "/api/im/session", b"", {"Authorization": "Basic nope"})
+
+        self.assertEqual(status, 401)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_IM_AUTH")
+        self.assertEqual(provider.calls, [])
         self.assertEqual(session.calls, [])
 
-    def test_web_bff_shapes_events_and_empty_direct_conversation_around_session(self) -> None:
+    def test_web_management_browser_im_projection_uses_unified_router_without_bff_event_shaping(self) -> None:
         session = _FakeExternalImSession()
         session.read_events = lambda **kwargs: (  # type: ignore[method-assign]
             session.calls.append(("read_events", dict(kwargs)))
@@ -246,6 +319,10 @@ class ExternalImProjectionContractTests(unittest.TestCase):
                 ],
             }
         )
+        session.get_direct_conversation = lambda **kwargs: (  # type: ignore[method-assign]
+            session.calls.append(("get_direct_conversation", dict(kwargs)))
+            or {"ok": True, "conversation": {"id": "conv-direct"}, "messages": [], "count": 0}
+        )
         service = web_management.WebManagementService(
             repo_root=ROOT,
             web_im_identity_provider=_FakeWebIdentityProvider(session.connection),
@@ -254,22 +331,31 @@ class ExternalImProjectionContractTests(unittest.TestCase):
 
         status, events = service.handle_api(
             "GET",
-            "/api/web/im/events?identity_id=act-market-demo&wait_ms=0&limit=10",
+            "/api/im/events?wait_ms=0&limit=10",
             b"",
             {},
         )
         self.assertEqual(status, 200)
         self.assertEqual([event["event_id"] for event in events["events"]], ["imev-reply"])
-        self.assertEqual(events["messages"], [{"id": "msg-reply", "content": "pong"}])
+        self.assertNotIn("messages", events)
+        self.assertEqual(session.calls, [("read_events", {"connection": session.connection, "limit": 10, "wait_ms": 0})])
+
+        status, message = service.handle_api("GET", "/api/im/messages/msg-reply", b"", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(message["message"], {"id": "msg-reply", "content": "pong"})
+
+        status, acked = service.handle_api("POST", "/api/im/events/ack", b'{"event_id":"imev-reply"}', {})
+        self.assertEqual(status, 200)
+        self.assertEqual(acked, {"ok": True, "event_id": "imev-reply"})
 
         status, conversation = service.handle_api(
             "GET",
-            "/api/web/im/conversations/direct?identity_id=act-market-demo&limit=20",
+            "/api/im/conversations/direct?identity_id=act-market-demo&limit=20",
             b"",
             {},
         )
         self.assertEqual(status, 200)
-        self.assertEqual(conversation, {"ok": True, "conversation": None, "messages": [], "count": 0})
+        self.assertEqual(conversation, {"ok": True, "conversation": {"id": "conv-direct"}, "messages": [], "count": 0})
         self.assertEqual(
             session.calls,
             [

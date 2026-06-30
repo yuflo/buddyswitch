@@ -21,6 +21,7 @@ import external_im_session  # noqa: E402
 
 
 JsonResponse = tuple[int, dict[str, Any]]
+WebConnectionProvider = Callable[[], dict[str, Any]]
 
 
 class ImHttpRouter:
@@ -30,11 +31,13 @@ class ImHttpRouter:
         actor_lister: Callable[[str | None], list[dict[str, Any]]],
         wake_actor: Callable[[dict[str, Any]], dict[str, Any]],
         im_session: Any | None = None,
+        web_connection_provider: WebConnectionProvider | None = None,
     ) -> None:
         self._session = im_session or external_im_session.ExternalImSession(
             actor_lister=actor_lister,
             wake_actor=wake_actor,
         )
+        self._web_connection_provider = web_connection_provider
 
     def handle(
         self,
@@ -63,6 +66,9 @@ class ImHttpRouter:
         if auth.get("ok") is not True:
             return 401, auth
         connection = auth["connection"]
+
+        if normalized_method == "GET" and route == "/api/im/session":
+            return 200, _session_response(auth)
 
         if normalized_method == "GET" and route == "/api/im/actors":
             return 200, self._session.list_actors(role_id=_first_query_value(query, "role_id"))
@@ -139,9 +145,44 @@ class ImHttpRouter:
         if headers is not None:
             auth_value = headers.get("Authorization") or headers.get("authorization") or ""
         prefix = "Bearer "
-        if not auth_value.startswith(prefix):
-            return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "Authorization: Bearer connection_key is required"}}
-        return self._session.authenticate(auth_value[len(prefix) :])
+        if auth_value:
+            if not auth_value.startswith(prefix):
+                return _auth_error("Authorization: Bearer connection_key is required")
+            return self._session.authenticate(auth_value[len(prefix) :])
+        if self._web_connection_provider is None:
+            return _auth_error("Authorization: Bearer connection_key is required")
+        record = self._web_connection_provider()
+        identity = record.get("identity") if isinstance(record, dict) else None
+        connection = record.get("connection") if isinstance(record, dict) else None
+        if not isinstance(identity, dict) or not isinstance(connection, dict):
+            return _auth_error("Web IM connection is unavailable")
+        resolved = {
+            "ok": True,
+            "identity": identity,
+            "connection": connection,
+        }
+        client_kind = record.get("client_kind")
+        if isinstance(client_kind, str) and client_kind.strip():
+            resolved["client_kind"] = client_kind.strip()
+        display_name = record.get("display_name")
+        if isinstance(display_name, str) and display_name.strip():
+            resolved["display_name"] = display_name.strip()
+        return resolved
+
+
+def _auth_error(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": "E_IM_AUTH", "message": message}}
+
+
+def _session_response(auth: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {"ok": True, "identity": dict(auth["identity"])}
+    client_kind = auth.get("client_kind")
+    if isinstance(client_kind, str) and client_kind:
+        payload["client_kind"] = client_kind
+    display_name = auth.get("display_name")
+    if isinstance(display_name, str) and display_name:
+        payload["display_name"] = display_name
+    return payload
 
 
 def _json_body(body: bytes) -> dict[str, Any]:
@@ -181,6 +222,8 @@ def _status_for_direct_conversation(result: dict[str, Any]) -> int:
 
 
 def _is_authenticated_im_route(method: str, route: str) -> bool:
+    if method == "GET" and route == "/api/im/session":
+        return True
     if method == "GET" and route in {"/api/im/actors", "/api/im/events", "/api/im/conversations/direct"}:
         return True
     if method == "POST" and route in {"/api/im/messages", "/api/im/events/ack"}:

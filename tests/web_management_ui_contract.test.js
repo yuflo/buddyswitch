@@ -108,10 +108,11 @@ test('production javascript keeps the real api surface', () => {
     '/console',
     '/api/tracks',
     '/api/instances',
-    '/api/web/im/session',
-    '/api/web/im/messages',
-    '/api/web/im/events',
-    '/api/web/im/conversations/direct',
+    '/api/im/session',
+    '/api/im/messages',
+    '/api/im/events',
+    '/api/im/events/ack',
+    '/api/im/conversations/direct',
     "'interrupt'",
     "'stop'",
     "'clear'",
@@ -126,9 +127,11 @@ test('production javascript keeps the real api surface', () => {
   assertIncludes(appJs, 'actor_id: state.selectedActorId');
   assertIncludes(appJs, 'content: state.draftText');
   assertIncludes(appJs, 'target_identity_id: target.identity_id');
-  assertIncludes(appJs, 'buildWebImConversationUrl');
-  assertIncludes(appJs, 'buildImEventsUrl(target.identity_id, 15000)');
-  assertIncludes(appJs, "'&wait_ms='");
+  assertIncludes(appJs, 'buildImConversationUrl');
+  assertIncludes(appJs, 'buildImEventsUrl(15000)');
+  assertIncludes(appJs, 'buildImMessageUrl');
+  assertIncludes(appJs, 'buildImAckPayload');
+  assertIncludes(appJs, '/api/im/events?wait_ms=');
   assertExcludes(appJs, "role_id=' + encodeURIComponent");
   assertExcludes(appJs, "actor_id=' + encodeURIComponent");
   assertIncludes(appJs, 'buildActorConsoleUrl');
@@ -142,8 +145,9 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tasks'");
   assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tracks'");
   assertExcludes(appJs, "/api/tracks/' + encodeURIComponent(state.selectedTrackId) + '/comments'");
-  assertExcludes(appJs, '/api/im');
+  assertExcludes(appJs, '/api/web/' + 'im');
   assertExcludes(appJs, 'external-participants');
+  assertExcludes(appJs, 'connection_key');
   assertExcludes(appJs, 'imParticipantToken');
   assertExcludes(appJs, 'participant_token');
   assertExcludes(appJs, 'event_cursor');

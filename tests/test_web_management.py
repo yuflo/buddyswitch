@@ -346,7 +346,7 @@ class WebManagementUnitTests(unittest.TestCase):
 
             WEB_MANAGEMENT.bind_web_runtime_state()
             service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
-            status, payload = service.handle_api("GET", "/api/web/im/session", b"", {})
+            status, payload = service.handle_api("GET", "/api/im/session", b"", {})
 
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
@@ -1115,11 +1115,27 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             ]
         }
 
-    def test_web_im_session_creates_one_stable_identity_per_runtime(self) -> None:
+    def test_retired_web_im_routes_are_not_live(self) -> None:
+        service = self._service()
+        retired_prefix = "/api/web/" + "im"
+
+        for method, path, body in (
+            ("GET", retired_prefix + "/session", b""),
+            ("POST", retired_prefix + "/messages", b'{"target_identity_id":"act-market-demo","content":"ping"}'),
+            ("GET", retired_prefix + "/events?identity_id=act-market-demo&wait_ms=0", b""),
+            ("GET", retired_prefix + "/conversations/direct?identity_id=act-market-demo&limit=20", b""),
+        ):
+            with self.subTest(method=method, path=path):
+                with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                    service.handle_api(method, path, body, {})
+                self.assertEqual(raised.exception.status, 404)
+                self.assertEqual(raised.exception.code, "NOT_FOUND")
+
+    def test_im_session_creates_one_stable_web_identity_per_runtime(self) -> None:
         first = self._service()
-        first_status, first_payload = first.handle_api("GET", "/api/web/im/session", b"", {})
+        first_status, first_payload = first.handle_api("GET", "/api/im/session", b"", {})
         second = self._service()
-        second_status, second_payload = second.handle_api("GET", "/api/web/im/session", b"", {})
+        second_status, second_payload = second.handle_api("GET", "/api/im/session", b"", {})
 
         self.assertEqual(first_status, 200)
         self.assertEqual(second_status, 200)
@@ -1149,7 +1165,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertNotIn("actor_history", identity)
 
     def test_invalid_web_im_identity_is_replaced_once_then_reused(self) -> None:
-        first_status, first_payload = self._service().handle_api("GET", "/api/web/im/session", b"", {})
+        first_status, first_payload = self._service().handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(first_status, 200)
         first_external_id = first_payload["identity"]["id"]
         identity_path = self._identity_path()
@@ -1157,8 +1173,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         identity["connection_key"] = "imck-invalid"
         identity_path.write_text(json.dumps(identity, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-        replaced_status, replaced_payload = self._service().handle_api("GET", "/api/web/im/session", b"", {})
-        reused_status, reused_payload = self._service().handle_api("GET", "/api/web/im/session", b"", {})
+        replaced_status, replaced_payload = self._service().handle_api("GET", "/api/im/session", b"", {})
+        reused_status, reused_payload = self._service().handle_api("GET", "/api/im/session", b"", {})
 
         self.assertEqual(replaced_status, 200)
         self.assertEqual(reused_status, 200)
@@ -1166,7 +1182,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(replaced_payload["identity"], reused_payload["identity"])
         self.assertEqual(len(self._participant_files()), 2)
 
-    def test_web_im_routes_send_read_events_and_restore_direct_history_without_browser_token(self) -> None:
+    def test_browser_style_im_routes_send_read_fetch_ack_and_restore_history_without_browser_token(self) -> None:
+        """Browser-style Web request sends actor-directed IM through /api/im/messages, actor reply becomes visible through /api/im/events, browser fetches the reply through /api/im/messages/<id>, browser acks through /api/im/events/ack, and direct conversation shows both messages without exposing connection_key."""
         actor_address = {
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-history"),
@@ -1174,7 +1191,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         runner = FakeRunner()
         runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_actor_addresses([actor_address])))
         service = self._service(runner)
-        status, session = service.handle_api("GET", "/api/web/im/session", b"", {})
+        status, session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(status, 200)
         web_participant = {"kind": "external", "external_id": session["identity"]["id"]}
 
@@ -1185,7 +1202,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         ) as wake_im_actor:
             status, sent = service.handle_api(
                 "POST",
-                "/api/web/im/messages",
+                "/api/im/messages",
                 json.dumps(
                     {
                         "target_identity_id": actor_address["actor_id"],
@@ -1211,24 +1228,15 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         )
         self.assertTrue(reply["ok"], msg=reply)
 
-        status, history = service.handle_api(
-            "GET",
-            f"/api/web/im/conversations/direct?identity_id={actor_address['actor_id']}&limit=20",
-            b"",
-            {},
-        )
-        self.assertEqual(status, 200, msg=history)
-        self.assertEqual([row["id"] for row in history["messages"]], [sent_message_id, reply["message"]["id"]])
-
         status, events = service.handle_api(
             "GET",
-            f"/api/web/im/events?identity_id={actor_address['actor_id']}&wait_ms=0",
+            "/api/im/events?wait_ms=0",
             b"",
             {},
         )
         self.assertEqual(status, 200, msg=events)
         self.assertEqual([event["message_id"] for event in events["events"]], [reply["message"]["id"]])
-        self.assertEqual([row["content"] for row in events["messages"]], ["pong"])
+        self.assertNotIn("messages", events)
         self.assertNotIn("participant_token", events)
         self.assertNotIn("connection_key", events)
         self.assertNotIn("next_cursor", events)
@@ -1236,15 +1244,44 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         status, repeated_events = service.handle_api(
             "GET",
-            f"/api/web/im/events?identity_id={actor_address['actor_id']}&wait_ms=0",
+            "/api/im/events?wait_ms=0",
             b"",
             {},
         )
         self.assertEqual(status, 200, msg=repeated_events)
-        self.assertEqual(repeated_events["events"], [])
-        self.assertEqual(repeated_events["messages"], [])
+        self.assertEqual([event["message_id"] for event in repeated_events["events"]], [reply["message"]["id"]])
 
-    def test_web_im_events_are_scoped_to_requested_actor_conversation(self) -> None:
+        reply_id = reply["message"]["id"]
+        status, fetched = service.handle_api("GET", f"/api/im/messages/{reply_id}", b"", {})
+        self.assertEqual(status, 200, msg=fetched)
+        self.assertEqual(fetched["message"]["content"], "pong")
+        self.assertNotIn("connection_key", fetched)
+
+        status, acked = service.handle_api(
+            "POST",
+            "/api/im/events/ack",
+            json.dumps({"event_id": reply["event_id"]}).encode("utf-8"),
+            {},
+        )
+        self.assertEqual(status, 200, msg=acked)
+        self.assertTrue(acked["ok"])
+        self.assertNotIn("connection_key", acked)
+
+        status, after_ack = service.handle_api("GET", "/api/im/events?wait_ms=0", b"", {})
+        self.assertEqual(status, 200, msg=after_ack)
+        self.assertEqual(after_ack["events"], [])
+
+        status, history = service.handle_api(
+            "GET",
+            f"/api/im/conversations/direct?identity_id={actor_address['actor_id']}&limit=20",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=history)
+        self.assertEqual([row["id"] for row in history["messages"]], [sent_message_id, reply_id])
+        self.assertNotIn("connection_key", history)
+
+    def test_im_events_are_connection_wide_and_do_not_fetch_or_ack_messages(self) -> None:
         market_actor = {
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-market"),
@@ -1256,7 +1293,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         runner = FakeRunner()
         runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_actor_addresses([market_actor, dev_actor])))
         service = self._service(runner)
-        session_status, session = service.handle_api("GET", "/api/web/im/session", b"", {})
+        session_status, session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(session_status, 200)
         web_participant = {"kind": "external", "external_id": session["identity"]["id"]}
         sent_by_actor: dict[str, dict[str, object]] = {}
@@ -1266,7 +1303,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         ):
             status, payload = service.handle_api(
                 "POST",
-                "/api/web/im/messages",
+                "/api/im/messages",
                 json.dumps(
                     {
                         "target_identity_id": actor_address["actor_id"],
@@ -1294,31 +1331,40 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         status, events = service.handle_api(
             "GET",
-            f"/api/web/im/events?identity_id={dev_actor['actor_id']}&wait_ms=0&limit=50",
+            "/api/im/events?wait_ms=0&limit=50",
             b"",
             {},
         )
 
         self.assertEqual(status, 200, msg=events)
-        self.assertEqual([row["content"] for row in events["messages"]], ["dev pong"])
         self.assertEqual(
             [event["from_identity_id"] for event in events["events"]],
-            [dev_actor["actor_id"]],
+            [market_actor["actor_id"], dev_actor["actor_id"]],
+        )
+        self.assertNotIn("messages", events)
+
+        status, repeated = service.handle_api("GET", "/api/im/events?wait_ms=0&limit=50", b"", {})
+        self.assertEqual(status, 200, msg=repeated)
+        self.assertEqual(
+            [event["from_identity_id"] for event in repeated["events"]],
+            [market_actor["actor_id"], dev_actor["actor_id"]],
         )
 
-        status, later_market_events = service.handle_api(
-            "GET",
-            f"/api/web/im/events?identity_id={market_actor['actor_id']}&wait_ms=0&limit=50",
-            b"",
-            {},
-        )
-        self.assertEqual(status, 200, msg=later_market_events)
-        self.assertEqual(later_market_events["events"], [])
-        self.assertEqual(later_market_events["messages"], [])
+        for event in events["events"]:
+            status, fetched = service.handle_api("GET", f"/api/im/messages/{event['message_id']}", b"", {})
+            self.assertEqual(status, 200, msg=fetched)
+            self.assertIn(fetched["message"]["content"], {"market pong", "dev pong"})
+            status, acked = service.handle_api(
+                "POST",
+                "/api/im/events/ack",
+                json.dumps({"event_id": event["event_id"]}).encode("utf-8"),
+                {},
+            )
+            self.assertEqual(status, 200, msg=acked)
 
         status, market_history = service.handle_api(
             "GET",
-            f"/api/web/im/conversations/direct?identity_id={market_actor['actor_id']}&limit=20",
+            f"/api/im/conversations/direct?identity_id={market_actor['actor_id']}&limit=20",
             b"",
             {},
         )
@@ -1328,31 +1374,15 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             ["market ping", "market pong"],
         )
 
-    def test_web_im_events_requires_actor_scope(self) -> None:
+    def test_im_events_rejects_browser_supplied_cursor(self) -> None:
         service = self._service()
-        service.handle_api("GET", "/api/web/im/session", b"", {})
+        service.handle_api("GET", "/api/im/session", b"", {})
 
-        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
-            service.handle_api("GET", "/api/web/im/events?wait_ms=0", b"", {})
+        status, payload = service.handle_api("GET", "/api/im/events?cursor=imev-000000000000&wait_ms=0", b"", {})
 
-        self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
-
-    def test_web_im_events_rejects_browser_supplied_cursor(self) -> None:
-        actor_id = self._runtime_actor_id(role="market", label="web-im-cursor")
-        service = self._service()
-        service.handle_api("GET", "/api/web/im/session", b"", {})
-
-        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
-            service.handle_api(
-                "GET",
-                f"/api/web/im/events?identity_id={actor_id}&cursor=imev-000000000000&wait_ms=0",
-                b"",
-                {},
-            )
-
-        self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+        self.assertEqual(status, 400)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_IM_PAYLOAD")
 
 
 class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -1570,7 +1600,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         ) as wake_im_actor:
             status, payload = service.handle_api(
                 "POST",
-                "/api/web/im/messages",
+                "/api/im/messages",
                 json.dumps({"target_identity_id": target_identity_id, "content": "ping"}).encode("utf-8"),
                 {},
             )

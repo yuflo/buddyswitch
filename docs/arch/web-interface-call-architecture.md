@@ -114,12 +114,14 @@ Web-interface APIs should fall into one of these families:
    - Compose host-control facts and domain/service read models.
    - Return Web DTOs, not raw repo rows or tool results.
 
-2. External IM projection APIs
-   - Integration routes such as `/api/im/*` serve non-browser channel adapters.
-   - Browser routes such as `/api/web/im/*` serve the Web console.
-   - Both surfaces project one `External IM Session` semantic boundary for
-     connection identity, actor discovery, message send, events, replies,
-     direct conversations, and disposition.
+2. IM HTTP product APIs
+   - `/api/im/*` is the single IM HTTP product contract for channel adapters,
+     third-party callers, and the Web interface.
+   - The Web interface differs only by server-owned auth context; it does not
+     own a separate IM route family.
+   - `ExternalImSession` owns external participant and actor-directed IM
+     application semantics: connection identity, actor discovery, message send,
+     events, replies, explicit ack, direct conversations, and disposition.
 
 3. Control-plane APIs
    - Instance lifecycle and runtime operations.
@@ -155,10 +157,13 @@ Track:
 IM:
 
 - External participant semantics belong to `External IM Session`.
-- `/api/im/*` is the integration projection for local channel adapters.
-- `/api/web/im/*` is the browser-facing projection for the Web console.
-- Both projections reuse the same session boundary and must not invent
-  actor-owned message state.
+- `/api/im/*` is the single IM HTTP product contract for local channel
+  adapters, third-party callers, and the Web console.
+- Web Management supplies a server-owned Web IM connection for browser calls,
+  but message, event, ack, reply, conversation, and disposition semantics still
+  flow through `ExternalImSession`.
+- The Web console must not invent actor-owned message state or a separate IM
+  route family.
 
 Runtime:
 

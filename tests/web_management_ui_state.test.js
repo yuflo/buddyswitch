@@ -409,18 +409,26 @@ test('mutation busy state disables open tui', () => {
   );
 });
 
-test('im event URL targets selected actor with bounded wait only', () => {
+test('im event URL is connection-wide with bounded wait only', () => {
   assert.equal(
-    app.buildImEventsUrl('act-market demo', 15000),
-    '/api/web/im/events?identity_id=act-market%20demo&wait_ms=15000'
+    app.buildImEventsUrl(15000),
+    '/api/im/events?wait_ms=15000'
   );
 });
 
-test('im conversation URL targets selected actor without lower im route leakage', () => {
+test('im conversation URL targets selected actor through unified im route', () => {
   assert.equal(
-    app.buildWebImConversationUrl('act-market demo', 20),
-    '/api/web/im/conversations/direct?identity_id=act-market%20demo&limit=20'
+    app.buildImConversationUrl('act-market demo', 20),
+    '/api/im/conversations/direct?identity_id=act-market%20demo&limit=20'
   );
+});
+
+test('im message URL fetches an individual message through unified im route', () => {
+  assert.equal(app.buildImMessageUrl('msg demo/1'), '/api/im/messages/msg%20demo%2F1');
+});
+
+test('im ack payload uses explicit event id only', () => {
+  assert.deepEqual(app.buildImAckPayload('imev-1'), { event_id: 'imev-1' });
 });
 
 test('record sent IM message keeps compact delivery status', () => {
@@ -519,19 +527,15 @@ test('direct conversation payload replaces local render cache with persisted his
   assert.deepEqual(Object.keys(state.imSeenMessageIds).sort(), ['msg-reply-1', 'msg-sent-1']);
 });
 
-test('web im event payload appends projected messages without browser cursor state', () => {
+test('fetched im message appends projected reply without browser cursor state', () => {
   const state = app.createState();
 
-  app.applyImEventsPayload(state, {
-    messages: [
-      {
-        id: 'msg-reply-1',
-        from_identity_id: 'act-market-1',
-        to_identity_id: 'ext-web',
-        content: 'pong',
-        reply_to: null,
-      },
-    ],
+  app.recordImProjectedMessage(state, {
+    id: 'msg-reply-1',
+    from_identity_id: 'act-market-1',
+    to_identity_id: 'ext-web',
+    content: 'pong',
+    reply_to: null,
   });
 
   assert.equal(Object.prototype.hasOwnProperty.call(state, 'imEventCursor'), false);

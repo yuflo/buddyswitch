@@ -28,7 +28,11 @@ class _FakeExternalImSession:
 
     def authenticate(self, connection_key: str) -> dict[str, object]:
         self.calls.append(("authenticate", {"connection_key": connection_key}))
-        return {"ok": True, "connection": {"identity_id": "ext-bridge"}}
+        return {
+            "ok": True,
+            "identity": {"id": "ext-bridge", "type": "external"},
+            "connection": {"identity_id": "ext-bridge"},
+        }
 
     def list_actors(self, *, role_id: str | None = None) -> dict[str, object]:
         self.calls.append(("list_actors", {"role_id": role_id}))
@@ -43,6 +47,51 @@ class _FakeExternalImSession:
                 }
             ],
             "count": 1,
+        }
+
+    def send_message(
+        self,
+        *,
+        connection: dict[str, object],
+        target_identity_id: object,
+        content: str,
+        reply_to: object = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "send_message",
+                {
+                    "connection": connection,
+                    "target_identity_id": target_identity_id,
+                    "content": content,
+                    "reply_to": reply_to,
+                },
+            )
+        )
+        return {"ok": True, "delivery_status": "accepted", "message": {"id": "msg-bridge"}}
+
+    def read_events(self, *, connection: dict[str, object], limit: int = 50, wait_ms: int = 0) -> dict[str, object]:
+        self.calls.append(("read_events", {"connection": connection, "limit": limit, "wait_ms": wait_ms}))
+        return {"ok": True, "events": [{"event_id": "imev-bridge", "message_id": "msg-reply"}]}
+
+    def ack_event(self, *, connection: dict[str, object], event_id: str) -> dict[str, object]:
+        self.calls.append(("ack_event", {"connection": connection, "event_id": event_id}))
+        return {"ok": True, "event_id": event_id}
+
+
+class _FakeWebIdentityProvider:
+    def __init__(self) -> None:
+        self.connection = {"identity_id": "ext-web"}
+        self.calls: list[str] = []
+
+    def ensure(self) -> dict[str, object]:
+        self.calls.append("ensure")
+        return {
+            "identity": {"id": "ext-web", "type": "external"},
+            "connection": self.connection,
+            "connection_key": "imck-secret",
+            "client_kind": "web-management",
+            "display_name": "BuddySwitch Web",
         }
 
 
@@ -73,6 +122,70 @@ class ImWebManagementProjectionTests(unittest.TestCase):
                 ("list_actors", {"role_id": "market"}),
             ],
         )
+
+    def test_web_management_exposes_browser_im_routes_through_shared_router(self) -> None:
+        session = _FakeExternalImSession()
+        provider = _FakeWebIdentityProvider()
+        service = web_management.WebManagementService(
+            repo_root=ROOT,
+            im_session=session,  # type: ignore[arg-type]
+            web_im_identity_provider=provider,  # type: ignore[arg-type]
+        )
+
+        status, web_session = service.handle_api("GET", "/api/im/session", b"", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(web_session["identity"], {"id": "ext-web", "type": "external"})
+        self.assertNotIn("connection_key", web_session)
+
+        status, sent = service.handle_api(
+            "POST",
+            "/api/im/messages",
+            b'{"target_identity_id":"act-market-demo","content":"ping"}',
+            {},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(sent["delivery_status"], "accepted")
+
+        status, events = service.handle_api("GET", "/api/im/events?limit=5&wait_ms=10", b"", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(events["events"][0]["event_id"], "imev-bridge")
+
+        status, acked = service.handle_api("POST", "/api/im/events/ack", b'{"event_id":"imev-bridge"}', {})
+        self.assertEqual(status, 200)
+        self.assertTrue(acked["ok"])
+
+        self.assertEqual(provider.calls, ["ensure", "ensure", "ensure", "ensure"])
+        self.assertEqual(
+            session.calls,
+            [
+                (
+                    "send_message",
+                    {
+                        "connection": provider.connection,
+                        "target_identity_id": "act-market-demo",
+                        "content": "ping",
+                        "reply_to": None,
+                    },
+                ),
+                ("read_events", {"connection": provider.connection, "limit": 5, "wait_ms": 10}),
+                ("ack_event", {"connection": provider.connection, "event_id": "imev-bridge"}),
+            ],
+        )
+
+    def test_web_management_does_not_expose_retired_web_im_route_family(self) -> None:
+        service = web_management.WebManagementService(repo_root=ROOT)
+        retired_prefix = "/api/web/" + "im"
+
+        for method, path, body in (
+            ("GET", retired_prefix + "/session", b""),
+            ("POST", retired_prefix + "/messages", b"{}"),
+            ("GET", retired_prefix + "/events?identity_id=act-market-demo&wait_ms=0", b""),
+            ("GET", retired_prefix + "/conversations/direct?identity_id=act-market-demo&limit=20", b""),
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(web_management.HttpError) as raised:
+                    service.handle_api(method, path, body, {})
+                self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_removes_old_message_send_route(self) -> None:
         service = web_management.WebManagementService(repo_root=ROOT)
@@ -106,6 +219,11 @@ class ImWebManagementProjectionTests(unittest.TestCase):
             "message_service." + "get_im_message",
             "message_service." + "list_im_replies",
             "message_service." + "update_im_disposition",
+            "self._im_session." + "send_message",
+            "self._im_session." + "read_events",
+            "self._im_session." + "get_message",
+            "self._im_session." + "ack_event",
+            "self._im_session." + "get_direct_conversation",
         )
 
         for surface in surfaces:
@@ -147,6 +265,37 @@ class ImWebManagementProjectionTests(unittest.TestCase):
                     if any(marker in line for marker in negative_assertion_markers):
                         continue
                     self.fail(f"{surface}:{line_number} contains retired IM architecture wording: {forbidden}")
+
+    def test_live_surfaces_have_no_retired_web_im_route_or_helper_residue(self) -> None:
+        surfaces = (
+            ROOT / "tools" / "launcher" / "web_management.py",
+            ROOT / "tools" / "launcher" / "im_http_router.py",
+            ROOT / "tools" / "launcher" / "external_im_session.py",
+            ROOT / "tools" / "launcher" / "web_im_identity.py",
+            ROOT / "tools" / "launcher" / "assets" / "web-management" / "app.js",
+            ROOT / "tests" / "test_web_management.py",
+            ROOT / "tests" / "test_im_http_router.py",
+            ROOT / "tests" / "test_im_web_management_projection.py",
+            ROOT / "tests" / "test_external_im_projection_contract.py",
+            ROOT / "tests" / "web_management_ui_contract.test.js",
+            ROOT / "tests" / "web_management_ui_state.test.js",
+            ROOT / "docs" / "arch" / "web-interface-call-architecture.md",
+        )
+        forbidden_fragments = (
+            "/api/web/" + "im",
+            "_handle_" + "web_im",
+            "_web_im_" + "send_message",
+            "_web_im_" + "events",
+            "_web_im_" + "direct_conversation",
+            "_im_event_" + "targets_identity",
+            "assertExcludes(appJs, " + "'/api/im')",
+        )
+
+        for surface in surfaces:
+            source = surface.read_text(encoding="utf-8")
+            for forbidden in forbidden_fragments:
+                with self.subTest(surface=surface.name, forbidden=forbidden):
+                    self.assertNotIn(forbidden, source)
 
 
 if __name__ == "__main__":

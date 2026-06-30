@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 HELPER_DIR = Path(__file__).resolve().parent
 SCRIPTS = HELPER_DIR.parents[1] / "scripts"
@@ -288,13 +288,14 @@ class WebManagementService:
             actor_lister=self._external_im_actor_rows,
             wake_actor=self._wake_im_actor,
         )
+        self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider(
+            im_session=self._im_session
+        )
         self._im_router = im_http_router.ImHttpRouter(
             actor_lister=self._external_im_actor_rows,
             wake_actor=self._wake_im_actor,
             im_session=self._im_session,
-        )
-        self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider(
-            im_session=self._im_session
+            web_connection_provider=self.ensure_web_im_identity,
         )
 
     def handle_api(
@@ -306,7 +307,6 @@ class WebManagementService:
     ) -> tuple[int, dict[str, Any]]:
         parsed = urlsplit(path)
         route = parsed.path
-        query = parse_qs(parsed.query)
         if method == "GET" and path == "/api/health":
             return 200, {"ok": True}
         if method == "GET" and path == "/api/roles":
@@ -335,8 +335,6 @@ class WebManagementService:
             if detail is None:
                 raise HttpError(status=404, code="NOT_FOUND", message=f"track not found: {track_id}")
             return 200, {"ok": True, "track": detail}
-        if route.startswith("/api/web/im/"):
-            return self._handle_web_im(method, route, query, body)
         if route.startswith("/api/im/"):
             return self._im_router.handle(method, path, body, headers)
 
@@ -416,110 +414,6 @@ class WebManagementService:
             raise HttpError(status=502, code="IM_IDENTITY_FAILED", message=str(exc)) from exc
         except ValueError as exc:
             raise HttpError(status=409, code="IM_IDENTITY_BLOCKED", message=str(exc)) from exc
-
-    def _handle_web_im(
-        self,
-        method: str,
-        route: str,
-        query: dict[str, list[str]],
-        body: bytes,
-    ) -> tuple[int, dict[str, Any]]:
-        normalized_method = method.upper()
-        if normalized_method == "GET" and route == "/api/web/im/session":
-            record = self.ensure_web_im_identity()
-            return 200, {
-                "ok": True,
-                "identity": dict(record["identity"]),
-                "client_kind": web_im_identity.CLIENT_KIND,
-                "display_name": web_im_identity.DISPLAY_NAME,
-            }
-        if normalized_method == "POST" and route == "/api/web/im/messages":
-            return self._web_im_send_message(body)
-        if normalized_method == "GET" and route == "/api/web/im/events":
-            return 200, self._web_im_events(query)
-        if normalized_method == "GET" and route == "/api/web/im/conversations/direct":
-            return self._web_im_direct_conversation(query)
-        raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
-
-    def _web_im_connection(self) -> dict[str, Any]:
-        record = self.ensure_web_im_identity()
-        connection = record.get("connection")
-        if not isinstance(connection, dict):
-            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message="Web IM identity connection is invalid.")
-        return connection
-
-    def _web_im_send_message(self, body: bytes) -> tuple[int, dict[str, Any]]:
-        payload = self._parse_json_body(body)
-        result = self._im_session.send_message(
-            connection=self._web_im_connection(),
-            target_identity_id=payload.get("target_identity_id"),
-            content=str(payload.get("content") or ""),
-            reply_to=payload.get("reply_to") if payload.get("reply_to") is not None else None,
-        )
-        return (200 if result.get("ok") is True else 400), result
-
-    def _web_im_events(self, query: dict[str, list[str]]) -> dict[str, Any]:
-        if "cursor" in query:
-            raise HttpError(status=400, code="INVALID_REQUEST", message="cursor is internal to the Web IM session.")
-        connection = self._web_im_connection()
-        target_identity_id = self._actor_identity_id_from_query(query)
-        result = self._im_session.read_events(
-            connection=connection,
-            limit=_int_query_value(query, "limit", 50),
-            wait_ms=_int_query_value(query, "wait_ms", 0),
-        )
-        messages: list[dict[str, Any]] = []
-        events: list[dict[str, Any]] = []
-        for event in result.get("events") if isinstance(result.get("events"), list) else []:
-            if not isinstance(event, dict):
-                continue
-            message_id = event.get("message_id")
-            if not isinstance(message_id, str) or not message_id:
-                continue
-            fetched = self._im_session.get_message(connection=connection, message_id=message_id)
-            if fetched.get("ok") is not True or not isinstance(fetched.get("message"), dict):
-                continue
-            acked = self._im_session.ack_event(connection=connection, event_id=str(event.get("event_id") or ""))
-            if acked.get("ok") is not True:
-                error = acked.get("error") if isinstance(acked.get("error"), dict) else {}
-                raise HttpError(
-                    status=502,
-                    code="IM_EVENT_ACK_FAILED",
-                    message=str(error.get("message") or "Web IM event acknowledgement failed."),
-                )
-            if _im_event_targets_identity(event, target_identity_id):
-                events.append(event)
-                messages.append(fetched["message"])
-        payload = dict(result)
-        payload["events"] = events
-        payload["messages"] = messages
-        return payload
-
-    def _web_im_direct_conversation(self, query: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
-        result = self._im_session.get_direct_conversation(
-            connection=self._web_im_connection(),
-            identity_id=self._actor_identity_id_from_query(query),
-            limit=_int_query_value(query, "limit", 20),
-        )
-        if result.get("ok") is True:
-            return 200, result
-        error = result.get("error") if isinstance(result.get("error"), dict) else {}
-        if error.get("code") == "E_IM_NOT_FOUND":
-            return 200, {"ok": True, "conversation": None, "messages": [], "count": 0}
-        return 400, result
-
-    def _actor_identity_id_from_query(self, query: dict[str, list[str]]) -> str:
-        return self._actor_identity_id(_first_query_value(query, "identity_id"), field="identity_id")
-
-    def _actor_identity_id(self, value: Any, *, field: str) -> str:
-        if not isinstance(value, str) or not value.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message=f"{field} is required.")
-        identity_id = value.strip()
-        try:
-            validate_actor_id(identity_id)
-        except ValueError as exc:
-            raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
-        return identity_id
 
     def _create_instance(self, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
@@ -1012,28 +906,6 @@ def _header_value(headers: Mapping[str, str] | None, name: str) -> str | None:
         if key.lower() == lower_name:
             return str(candidate)
     return None
-
-
-def _first_query_value(query: dict[str, list[str]], name: str) -> str | None:
-    values = query.get(name)
-    if not values:
-        return None
-    return values[0]
-
-
-def _int_query_value(query: dict[str, list[str]], name: str, default: int) -> int:
-    raw = _first_query_value(query, name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value >= 0 else default
-
-
-def _im_event_targets_identity(event: dict[str, Any], identity_id: str) -> bool:
-    return event.get("from_identity_id") == identity_id or event.get("to_identity_id") == identity_id
 
 
 def _hostname_from_host_header(value: str | None) -> str | None:
