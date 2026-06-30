@@ -80,7 +80,7 @@
 ### Task 1: Record This Current Plan
 
 - [x] Add this merge and test plan under `docs/spec`.
-- [ ] Commit the plan before feature merges if the worktree is otherwise clean.
+- [x] Commit the plan before feature merges if the worktree is otherwise clean.
 
 Verification:
 
@@ -93,11 +93,11 @@ Expected: only this plan file is modified before the planning commit, and whites
 
 ### Task 2: Merge `fea-tool`
 
-- [ ] Run `git merge --no-ff --no-commit fea-tool`.
-- [ ] Keep lazy browser startup/release as the only browser cockpit lifecycle path.
-- [ ] Reject fixes that preserve eager startup through flags, wrappers, or alternate compatibility branches.
-- [ ] Run focused browser lifecycle verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-tool`.
+- [x] Keep lazy browser startup/release as the only browser cockpit lifecycle path.
+- [x] Reject fixes that preserve eager startup through flags, wrappers, or alternate compatibility branches.
+- [x] Run focused browser lifecycle verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -120,11 +120,11 @@ Expected: shell syntax and Python compile pass, focused browser/search/launcher 
 
 ### Task 3: Merge `fea-webui`
 
-- [ ] Run `git merge --no-ff --no-commit fea-webui`.
-- [ ] Keep action-scoped pending state, focused render functions, event delegation, selected-console send refresh, and mobile priority CSS.
-- [ ] Remove or adjust any stale global mutation/full-render path directly; do not keep old and new UI paths side by side.
-- [ ] Run focused WebUI verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-webui`.
+- [x] Keep action-scoped pending state, focused render functions, event delegation, selected-console send refresh, and mobile priority CSS.
+- [x] Remove or adjust any stale global mutation/full-render path directly; do not keep old and new UI paths side by side.
+- [x] Run focused WebUI verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -147,11 +147,11 @@ Expected: syntax and Node tests pass; residue scans have no live `app.js` hits e
 
 ### Task 4: Merge `fea-im`
 
-- [ ] Run `git merge --no-ff --no-commit fea-im`.
-- [ ] Keep Central IM actor handoff quality guidance.
-- [ ] Update tests only where their older guard conflicts with the current product decision: reject retired handoff tool/next-role guidance, while allowing actionable IM handoff wording inside `message-tool`.
-- [ ] Run focused message-tool verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-im`.
+- [x] Keep Central IM actor handoff quality guidance.
+- [x] Update tests only where their older guard conflicts with the current product decision: reject retired handoff tool/next-role guidance, while allowing actionable IM handoff wording inside `message-tool`.
+- [x] Run focused message-tool verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -171,10 +171,10 @@ Expected: compile and focused tests pass; residue scan has no retired handoff to
 
 ### Task 5: Final Integration Verification
 
-- [ ] Prove all three feature branches are ancestors of `main`.
-- [ ] Run combined focused verification covering browser lifecycle, WebUI state, and message tool guidance.
-- [ ] Run scoped residue scans for old browser eager startup, old WebUI global mutation/full-render paths, retired Web IM frontend routes, and retired message/handoff guidance.
-- [ ] Inspect final status and recent history.
+- [x] Prove all three feature branches are ancestors of `main`.
+- [x] Run combined focused verification covering browser lifecycle, WebUI state, and message tool guidance.
+- [x] Run scoped residue scans for old browser eager startup, old WebUI global mutation/full-render paths, retired Web IM frontend routes, and retired message/handoff guidance.
+- [x] Inspect final status and recent history.
 
 Final verification:
 
@@ -231,3 +231,109 @@ Expected:
 - WebUI uses one action-scoped pending/render path and does not retain old global mutation/full-render compatibility.
 - Central IM message guidance teaches actionable actor handoff content without reintroducing a retired handoff tool, next-role route, or alternate message path.
 - Focused verification passes, or any blocker is recorded with exact failing command and root cause before further changes.
+
+## Execution Log
+
+Merge commits:
+
+```text
+68ddd18 docs: plan tool webui im merge
+0d8db74 Merge branch 'fea-tool'
+1c1a07c docs: split browser merge verification commands
+fd72260 Merge branch 'fea-webui'
+5283c1c Merge branch 'fea-im'
+```
+
+Integration fix:
+
+- `tests/test_repo_consistency.py` now classifies `docs/spec/browser-cockpit-lazy-release/**` as execution-spec context. This keeps the stable-guidance guard strict while allowing the new browser execution specs to mention response-structure verification files.
+
+Branch ancestry:
+
+```text
+git merge-base --is-ancestor fea-tool main
+exit 0
+
+git merge-base --is-ancestor fea-webui main
+exit 0
+
+git merge-base --is-ancestor fea-im main
+exit 0
+```
+
+Focused verification:
+
+```text
+bash -n buddyswitch-codex tools/launcher/browser_cockpit.sh tools/launcher/env.sh
+exit 0
+
+node --check tools/launcher/assets/web-management/app.js
+exit 0
+
+python3 -m py_compile scripts/env/cdp_browser_lifecycle.py scripts/env/tools/search/_impl.py scripts/env/tools/message/tool.py tools/launcher/browser_page_expired_handler.py tools/launcher/browser_release_handler.py tools/launcher/browser_inbound.py tools/launcher/chrome_devtools_cockpit_proxy.py
+exit 0
+
+node tests/web_management_ui_state.test.js
+40 checks passed
+
+node tests/web_management_ui_contract.test.js
+11 checks passed
+
+python3 -m pytest -q tests/test_env_tool_schema_contract.py tests/test_env_tool_semantic_contract.py tests/test_runtime_skills.py tests/test_repo_consistency.py
+96 passed, 844 subtests passed in 0.64s
+```
+
+Browser unittest verification:
+
+```text
+python3 -m unittest tests.test_browser_cockpit_launcher
+13 tests passed
+
+python3 -m unittest tests.test_browser_cockpit_proxy
+29 tests passed
+
+python3 -m unittest tests.test_browser_page_expired_handler
+22 tests passed
+
+python3 -m unittest tests.test_cdp_browser_session
+14 tests passed
+
+python3 -m unittest tests.test_search_env_tool
+29 tests passed
+
+python3 -m unittest tests.test_env_tool_response_contract
+14 tests passed
+
+python3 -m unittest tests.test_buddyswitch_launcher
+206 tests passed
+
+python3 -m unittest tests.test_instance_daemon_entrypoint
+7 tests passed
+
+python3 -m unittest tests.test_browser_lazy_release_integration
+1 test passed
+```
+
+Residue and status verification:
+
+```text
+git diff --check
+no output
+
+WebUI old global mutation/full-render and retired `/api/web/im` scans
+no output
+
+Browser eager-start residue scan
+accepted hits only: host status output, internal upstream argv construction, stale-config repair fixtures, and negative tests
+
+Search endpoint leak scan
+accepted hits only: internal helper names and negative no-leak assertions
+
+Message/handoff residue scan
+accepted hits only: negative assertions in tests; no live message skill/tool hits
+
+git status --short --branch
+## main...origin/main [ahead 8]
+```
+
+Acceptance decision: accepted.
