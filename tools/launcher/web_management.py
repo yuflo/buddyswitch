@@ -473,13 +473,21 @@ class WebManagementService:
         for event in result.get("events") if isinstance(result.get("events"), list) else []:
             if not isinstance(event, dict):
                 continue
-            if not _im_event_targets_identity(event, target_identity_id):
-                continue
             message_id = event.get("message_id")
             if not isinstance(message_id, str) or not message_id:
                 continue
             fetched = self._im_session.get_message(connection=connection, message_id=message_id)
-            if fetched.get("ok") is True and isinstance(fetched.get("message"), dict):
+            if fetched.get("ok") is not True or not isinstance(fetched.get("message"), dict):
+                continue
+            acked = self._im_session.ack_event(connection=connection, event_id=str(event.get("event_id") or ""))
+            if acked.get("ok") is not True:
+                error = acked.get("error") if isinstance(acked.get("error"), dict) else {}
+                raise HttpError(
+                    status=502,
+                    code="IM_EVENT_ACK_FAILED",
+                    message=str(error.get("message") or "Web IM event acknowledgement failed."),
+                )
+            if _im_event_targets_identity(event, target_identity_id):
                 events.append(event)
                 messages.append(fetched["message"])
         payload = dict(result)

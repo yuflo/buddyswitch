@@ -119,6 +119,15 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(cursor_rejected["ok"])
         self.assertEqual(cursor_rejected["error"]["code"], "E_IM_PAYLOAD")
 
+        status, non_visible_ack = router.handle(
+            "POST",
+            "/api/im/events/ack",
+            json.dumps({"event_id": "imev-not-visible"}).encode("utf-8"),
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 400)
+        self.assertFalse(non_visible_ack["ok"])
+
         status, message = router.handle(
             "GET",
             f"/api/im/messages/{message_id}",
@@ -155,7 +164,25 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200)
-        self.assertEqual(repeated["events"], [])
+        self.assertEqual([event["message_id"] for event in repeated["events"]], [reply_id])
+
+        status, acked = router.handle(
+            "POST",
+            "/api/im/events/ack",
+            json.dumps({"event_id": actor_reply["event_id"]}).encode("utf-8"),
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(acked["ok"], msg=acked)
+
+        status, after_ack = router.handle(
+            "GET",
+            "/api/im/events?wait_ms=0",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(after_ack["events"], [])
 
         status, mark = router.handle(
             "PATCH",

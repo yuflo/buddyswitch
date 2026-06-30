@@ -131,6 +131,14 @@ class BuddySwitchImApi:
             timeout_seconds=_request_timeout_seconds(wait_ms=wait_ms),
         )
 
+    def ack_event(self, *, connection_key: str, event_id: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/im/events/ack",
+            {"event_id": event_id},
+            connection_key=connection_key,
+        )
+
     def get_message(self, *, connection_key: str, message_id: str) -> dict[str, Any]:
         return self._request("GET", f"/api/im/messages/{message_id}", None, connection_key=connection_key)
 
@@ -406,6 +414,7 @@ class ImessageChannelController:
         self.api = api or BuddySwitchImApi(config.server)
         self.imsg = imsg or CommandImsgClient(config.imsg_bin)
         self.state_store = state_store or ImessageChannelStateStore(config.effective_state_path())
+        self._state_lock = threading.RLock()
 
     def handle_inbound_message(self, row: dict[str, Any]) -> dict[str, Any]:
         if _truthy(row.get("is_from_me")):
@@ -417,52 +426,72 @@ class ImessageChannelController:
         if not content:
             return {"ok": True, "status": "ignored_empty"}
 
-        state = self.state_store.load()
-        contact = self._contact(state, sender)
-        connection_key = self._connection_key(contact)
-        route = _route_from_row(row, sender=sender)
+        with self._state_lock:
+            state = self.state_store.load()
+            contact = self._contact(state, sender)
+            connection_key = self._connection_key(contact)
+            route = _route_from_row(row, sender=sender)
 
-        if content == "/actors":
-            return self._handle_actors(state, contact, connection_key, route)
-        if _is_numeric_choice(content) and contact.get("pending_actor_choices"):
-            return self._handle_numeric_choice(state, contact, content, route)
-        return self._handle_ordinary_message(state, contact, connection_key, row, sender=sender, content=content, route=route)
+            if content == "/actors":
+                return self._handle_actors(state, contact, connection_key, route)
+            if _is_numeric_choice(content) and contact.get("pending_actor_choices"):
+                return self._handle_numeric_choice(state, contact, content, route)
+            return self._handle_ordinary_message(state, contact, connection_key, row, sender=sender, content=content, route=route)
 
     def poll_outbound_once(self, *, wait_ms: int = 0, limit: int = 50) -> dict[str, Any]:
-        state = self.state_store.load()
+        with self._state_lock:
+            state = self.state_store.load()
+            poll_targets = [
+                (sender_key, _contact_connection_key(contact))
+                for sender_key, contact in _contacts(state).items()
+                if _contact_connection_key(contact)
+            ]
         sent_count = 0
-        for contact in _contacts(state).values():
-            connection_key = _contact_connection_key(contact)
-            if not connection_key:
-                continue
+        for sender_key, connection_key in poll_targets:
             events = self.api.read_events(connection_key=connection_key, limit=limit, wait_ms=wait_ms)
             if events.get("ok") is not True:
                 raise ChannelError(str((events.get("error") or {}).get("message") or "BuddySwitch events read failed"))
-            sent_ids = set(_string_list(contact.get("sent_outbound_event_ids")))
-            for event in events.get("events") if isinstance(events.get("events"), list) else []:
-                if not isinstance(event, dict):
+            with self._state_lock:
+                state = self.state_store.load()
+                contact = _contacts(state).get(sender_key)
+                if not isinstance(contact, dict):
                     continue
-                event_id = str(event.get("event_id") or "")
-                message_id = str(event.get("message_id") or "")
-                if not event_id or event_id in sent_ids or not message_id:
-                    continue
-                fetched = self.api.get_message(connection_key=connection_key, message_id=message_id)
-                if fetched.get("ok") is not True or not isinstance(fetched.get("message"), dict):
-                    continue
-                message = fetched["message"]
-                reply_to = str(message.get("reply_to") or event.get("reply_to") or "")
-                route = _contact_routes(contact).get(reply_to)
-                content = str(message.get("content") or "").strip()
-                actor_id = _actor_id_for_reply(event, message)
-                if not route or not content or not actor_id:
-                    continue
-                self.imsg.send(route=route, text=f"[Message From {actor_id}]\n\n{content}")
-                sent_ids.add(event_id)
-                sent_count += 1
-            contact["sent_outbound_event_ids"] = sorted(sent_ids)
-        if sent_count:
-            self.state_store.save(state)
+                sent_ids = set(_string_list(contact.get("sent_outbound_event_ids")))
+                contact_sent_count = 0
+                for event in events.get("events") if isinstance(events.get("events"), list) else []:
+                    if not isinstance(event, dict):
+                        continue
+                    event_id = str(event.get("event_id") or "")
+                    message_id = str(event.get("message_id") or "")
+                    if not event_id or not message_id:
+                        continue
+                    if event_id in sent_ids:
+                        self._ack_outbound_event(connection_key=connection_key, event_id=event_id)
+                        continue
+                    fetched = self.api.get_message(connection_key=connection_key, message_id=message_id)
+                    if fetched.get("ok") is not True or not isinstance(fetched.get("message"), dict):
+                        continue
+                    message = fetched["message"]
+                    reply_to = str(message.get("reply_to") or event.get("reply_to") or "")
+                    route = _contact_routes(contact).get(reply_to)
+                    content = str(message.get("content") or "").strip()
+                    actor_id = _actor_id_for_reply(event, message)
+                    if not route or not content or not actor_id:
+                        self._ack_outbound_event(connection_key=connection_key, event_id=event_id)
+                        continue
+                    self.imsg.send(route=route, text=f"[Message From {actor_id}]\n\n{content}")
+                    sent_ids.add(event_id)
+                    contact_sent_count += 1
+                    contact["sent_outbound_event_ids"] = sorted(sent_ids)
+                    self.state_store.save(state)
+                    self._ack_outbound_event(connection_key=connection_key, event_id=event_id)
+                if contact_sent_count:
+                    sent_count += contact_sent_count
         return {"ok": True, "sent": sent_count}
+
+    def _ack_outbound_event(self, *, connection_key: str, event_id: str) -> bool:
+        result = self.api.ack_event(connection_key=connection_key, event_id=event_id)
+        return result.get("ok") is True
 
     def _handle_actors(
         self,
@@ -573,37 +602,47 @@ class ImessageChannelWorker:
     def __init__(self, controller: ImessageChannelController, *, reply_wait_ms: int = DEFAULT_REPLY_WAIT_MS) -> None:
         self.controller = controller
         self.reply_wait_ms = reply_wait_ms
-        self._stopped = False
-        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._threads: list[threading.Thread] = []
 
     def start(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
+        if any(thread.is_alive() for thread in self._threads):
             return
-        self._stopped = False
-        self._thread = threading.Thread(target=self._run_with_error_capture, daemon=True)
-        self._thread.start()
+        self._stop_event.clear()
+        self._threads = [
+            threading.Thread(target=self._run_with_error_capture, args=("inbound", self.run_forever), daemon=True),
+            threading.Thread(target=self._run_with_error_capture, args=("outbound", self.run_outbound_forever), daemon=True),
+        ]
+        for thread in self._threads:
+            thread.start()
 
     def run_forever(self) -> None:
         self.controller.imsg.status()
         for row in self.controller.imsg.watch_messages():
-            if self._stopped:
+            if self._stop_event.is_set():
                 break
             self.controller.handle_inbound_message(row)
-            self.controller.poll_outbound_once(wait_ms=max(self.reply_wait_ms, 0))
+
+    def run_outbound_forever(self) -> None:
+        wait_ms = max(self.reply_wait_ms, 0)
+        while not self._stop_event.is_set():
+            self.controller.poll_outbound_once(wait_ms=wait_ms)
+            self._stop_event.wait(0.01)
 
     def stop(self) -> None:
-        self._stopped = True
+        self._stop_event.set()
         stopper = getattr(self.controller.imsg, "stop", None)
         if callable(stopper):
             stopper()
-        if self._thread is not None and self._thread.is_alive() and threading.current_thread() is not self._thread:
-            self._thread.join(timeout=5)
+        for thread in self._threads:
+            if thread.is_alive() and threading.current_thread() is not thread:
+                thread.join(timeout=5)
 
-    def _run_with_error_capture(self) -> None:
+    def _run_with_error_capture(self, loop_name: str, runner: Callable[[], None]) -> None:
         try:
-            self.run_forever()
+            runner()
         except Exception as exc:  # pragma: no cover - defensive background guard
-            print(f"iMessage channel worker stopped: {exc}", file=sys.stderr, flush=True)
+            print(f"iMessage channel {loop_name} worker stopped: {exc}", file=sys.stderr, flush=True)
 
 
 def _default_state() -> dict[str, Any]:

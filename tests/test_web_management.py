@@ -1232,6 +1232,17 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertNotIn("participant_token", events)
         self.assertNotIn("connection_key", events)
         self.assertNotIn("next_cursor", events)
+        self.assertNotIn("ack", events)
+
+        status, repeated_events = service.handle_api(
+            "GET",
+            f"/api/web/im/events?identity_id={actor_address['actor_id']}&wait_ms=0",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=repeated_events)
+        self.assertEqual(repeated_events["events"], [])
+        self.assertEqual(repeated_events["messages"], [])
 
     def test_web_im_events_are_scoped_to_requested_actor_conversation(self) -> None:
         market_actor = {
@@ -1293,6 +1304,28 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(
             [event["from_identity_id"] for event in events["events"]],
             [dev_actor["actor_id"]],
+        )
+
+        status, later_market_events = service.handle_api(
+            "GET",
+            f"/api/web/im/events?identity_id={market_actor['actor_id']}&wait_ms=0&limit=50",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=later_market_events)
+        self.assertEqual(later_market_events["events"], [])
+        self.assertEqual(later_market_events["messages"], [])
+
+        status, market_history = service.handle_api(
+            "GET",
+            f"/api/web/im/conversations/direct?identity_id={market_actor['actor_id']}&limit=20",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=market_history)
+        self.assertEqual(
+            [row["content"] for row in market_history["messages"]],
+            ["market ping", "market pong"],
         )
 
     def test_web_im_events_requires_actor_scope(self) -> None:

@@ -92,6 +92,17 @@ class ImHttpRouter:
             )
             return 200, result
 
+        if normalized_method == "POST" and route == "/api/im/events/ack":
+            try:
+                payload = _json_body(body)
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": str(exc)}}
+            result = self._session.ack_event(
+                connection=connection,
+                event_id=str(payload.get("event_id") or ""),
+            )
+            return (200 if result.get("ok") is True else 400), result
+
         if normalized_method == "GET" and route == "/api/im/conversations/direct":
             result = self._session.get_direct_conversation(
                 connection=connection,
@@ -172,7 +183,7 @@ def _status_for_direct_conversation(result: dict[str, Any]) -> int:
 def _is_authenticated_im_route(method: str, route: str) -> bool:
     if method == "GET" and route in {"/api/im/actors", "/api/im/events", "/api/im/conversations/direct"}:
         return True
-    if method == "POST" and route == "/api/im/messages":
+    if method == "POST" and route in {"/api/im/messages", "/api/im/events/ack"}:
         return True
     message_prefix = "/api/im/messages/"
     if not route.startswith(message_prefix):

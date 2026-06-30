@@ -100,6 +100,12 @@ class ExternalImSession:
             wait_ms=wait_ms,
         )
 
+    def ack_event(self, *, connection: dict[str, Any], event_id: str) -> dict[str, Any]:
+        return message_service.ack_external_connection_event(
+            connection=connection,
+            event_id=event_id,
+        )
+
     def get_direct_conversation(
         self,
         *,

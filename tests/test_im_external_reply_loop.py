@@ -178,7 +178,25 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {"Authorization": f"Bearer {key}"},
         )
         self.assertEqual(status, 200, msg=repeated)
-        self.assertEqual(repeated["events"], [])
+        self.assertEqual([event["message_id"] for event in repeated["events"]], [reply["message"]["id"]])
+
+        status, acked = router.handle(
+            "POST",
+            "/api/im/events/ack",
+            json.dumps({"event_id": reply["event_id"]}).encode("utf-8"),
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200, msg=acked)
+        self.assertTrue(acked["ok"], msg=acked)
+
+        status, after_ack = router.handle(
+            "GET",
+            "/api/im/events?wait_ms=0",
+            b"",
+            {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 200, msg=after_ack)
+        self.assertEqual(after_ack["events"], [])
 
         status, fetched = router.handle(
             "GET",

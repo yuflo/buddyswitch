@@ -362,8 +362,6 @@ def send_external_connection_message(
         reply_to=reply_to,
         wake_actor=wake_actor,
     )
-    if result.get("ok") is True:
-        _save_connection_last_event(connection, str(result["event_id"]))
     external_response = dict(result)
     external_response.pop("next_cursor", None)
     return external_response
@@ -383,18 +381,114 @@ def read_external_connection_events(
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     last_event_id = connection.get("last_event_id")
     cursor = last_event_id if isinstance(last_event_id, str) and last_event_id.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
-    result = read_im_events(
+    normalized_limit = limit if isinstance(limit, int) and limit > 0 else 50
+    wait_seconds = min(wait_ms if isinstance(wait_ms, int) and wait_ms > 0 else 0, 30000) / 1000
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        events = _external_consumable_events_after_cursor(
+            message_repo=message_repo,
+            participant=participant,
+            cursor=cursor,
+            limit=normalized_limit,
+        )
+        if events or wait_seconds <= 0 or time.monotonic() >= deadline:
+            break
+        time.sleep(min(0.05, max(0.001, deadline - time.monotonic())))
+    return {"ok": True, "events": events}
+
+
+def ack_external_connection_event(
+    *,
+    connection: dict[str, Any],
+    event_id: str,
+) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    try:
+        participant = _connection_participant_ref(connection)
+    except ValueError as exc:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
+    normalized_event_id = event_id.strip() if isinstance(event_id, str) else ""
+    if not normalized_event_id:
+        return _im_payload_error("event_id must be a non-empty string")
+
+    events = message_repo.list_im_events_for_participant(participant)
+    visible_index_by_id = {str(event.get("event_id") or ""): index for index, event in enumerate(events)}
+    event_index = visible_index_by_id.get(normalized_event_id)
+    if event_index is None:
+        return _im_scope_error("event is not visible to the connection")
+    event = events[event_index]
+    participant_identity_id = message_repo.im_identity_id_for_participant(participant)
+    if event.get("from_identity_id") == participant_identity_id:
+        return _im_scope_error("event is not consumable by the connection")
+
+    last_event_id = connection.get("last_event_id")
+    cursor = last_event_id if isinstance(last_event_id, str) and last_event_id.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
+    cursor_index = visible_index_by_id.get(cursor)
+    if cursor == normalized_event_id or (cursor_index is not None and event_index <= cursor_index):
+        return {
+            "ok": True,
+            "event_id": normalized_event_id,
+            "last_event_id": cursor,
+            "state_changed": False,
+        }
+
+    next_events = _external_consumable_events_after_cursor(
+        message_repo=message_repo,
         participant=participant,
         cursor=cursor,
-        limit=limit,
-        wait_ms=wait_ms,
+        limit=1,
     )
-    if result.get("ok") is not True:
-        return result
-    events = result.get("events") if isinstance(result.get("events"), list) else []
-    if events:
-        _save_connection_last_event(connection, str(events[-1]["event_id"]))
-    return {"ok": True, "events": events}
+    next_event_id = str(next_events[0].get("event_id") or "") if next_events else ""
+    if next_event_id != normalized_event_id:
+        return {
+            "ok": False,
+            "error": {
+                "code": "E_IM_CURSOR",
+                "message": "event_id is not the next unacknowledged event for the connection",
+            },
+        }
+
+    saved = _save_connection_last_event(connection, normalized_event_id)
+    return {
+        "ok": True,
+        "event_id": normalized_event_id,
+        "last_event_id": saved["last_event_id"],
+        "state_changed": True,
+    }
+
+
+def _external_consumable_events_after_cursor(
+    *,
+    message_repo: Any,
+    participant: dict[str, Any],
+    cursor: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    participant_identity_id = message_repo.im_identity_id_for_participant(participant)
+    events = message_repo.list_im_events_for_participant(participant)
+    after_cursor = _events_after_cursor(events, cursor=cursor, initial_cursor=message_repo.INITIAL_IM_EVENT_CURSOR)
+    consumable: list[dict[str, Any]] = []
+    for event in after_cursor:
+        if event.get("from_identity_id") == participant_identity_id:
+            continue
+        consumable.append(event)
+        if len(consumable) >= limit:
+            break
+    return consumable
+
+
+def _events_after_cursor(events: list[dict[str, Any]], *, cursor: str, initial_cursor: str) -> list[dict[str, Any]]:
+    if cursor == initial_cursor:
+        return list(events)
+    visible: list[dict[str, Any]] = []
+    seen_cursor = False
+    for event in events:
+        if seen_cursor:
+            visible.append(event)
+        elif event.get("event_id") == cursor:
+            seen_cursor = True
+    return visible
 
 
 def read_im_events(
@@ -554,4 +648,3 @@ def update_im_disposition(
         "disposition": disposition,
         "state_changed": previous != disposition or current.get("reason") != updated["reason"],
     }
-

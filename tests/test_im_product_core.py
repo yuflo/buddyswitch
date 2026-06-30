@@ -189,14 +189,14 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         _created, connection, sender = self._external_connection()
         sender_ref = {"kind": "external", "external_id": sender["external_id"]}
         actor = self._actor_participant()
-        send_response = message_service.send_im_message(
-            sender_participant=sender,
+        initial_cursor = connection["last_event_id"]
+        send_response = message_service.send_external_connection_message(
+            connection=connection,
             to=actor,
             content="ping",
-            reply_to=None,
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
-        connection["last_event_id"] = send_response["event_id"]
+        self.assertEqual(connection["last_event_id"], initial_cursor)
         actor_reply = message_service.send_im_message(
             sender_participant=actor,
             to=sender_ref,
@@ -209,6 +209,14 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             wait_ms=0,
         )
         second_read = message_service.read_external_connection_events(
+            connection=connection,
+            wait_ms=0,
+        )
+        ack = message_service.ack_external_connection_event(
+            connection=connection,
+            event_id=actor_reply["event_id"],
+        )
+        third_read = message_service.read_external_connection_events(
             connection=connection,
             wait_ms=0,
         )
@@ -226,7 +234,72 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("participant", event)
         self.assertEqual(event["type"], "message.created")
         self.assertEqual(event["reply_to"], send_response["message"]["id"])
-        self.assertEqual(second_read["events"], [])
+        self.assertEqual([row["event_id"] for row in second_read["events"]], [actor_reply["event_id"]])
+        self.assertTrue(ack.get("ok"), msg=ack)
+        self.assertEqual(connection["last_event_id"], actor_reply["event_id"])
+        self.assertEqual(third_read["events"], [])
+
+    def test_external_connection_ack_rejects_non_visible_event_without_advancing_cursor(self) -> None:
+        _created_a, connection_a, _sender_a = self._external_connection(display_name="sender a")
+        _created_b, _connection_b, sender_b = self._external_connection(display_name="sender b")
+        actor = self._actor_participant()
+        before = connection_a["last_event_id"]
+        actor_reply = message_service.send_im_message(
+            sender_participant=actor,
+            to={"kind": "external", "external_id": sender_b["external_id"]},
+            content="private pong",
+            reply_to=None,
+            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
+        )
+
+        ack = message_service.ack_external_connection_event(
+            connection=connection_a,
+            event_id=actor_reply["event_id"],
+        )
+
+        self.assertFalse(ack.get("ok"), msg=ack)
+        self.assertEqual(ack["error"]["code"], "E_IM_SCOPE")
+        self.assertEqual(connection_a["last_event_id"], before)
+
+    def test_external_connection_ack_rejects_out_of_order_consumable_event(self) -> None:
+        _created, connection, sender = self._external_connection()
+        sender_ref = {"kind": "external", "external_id": sender["external_id"]}
+        actor = self._actor_participant()
+        root = message_service.send_external_connection_message(
+            connection=connection,
+            to=actor,
+            content="ping",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
+        before = connection["last_event_id"]
+        first_reply = message_service.send_im_message(
+            sender_participant=actor,
+            to=sender_ref,
+            content="pong one",
+            reply_to=root["message"]["id"],
+            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
+        )
+        second_reply = message_service.send_im_message(
+            sender_participant=actor,
+            to=sender_ref,
+            content="pong two",
+            reply_to=root["message"]["id"],
+            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
+        )
+
+        read = message_service.read_external_connection_events(connection=connection, wait_ms=0)
+        ack = message_service.ack_external_connection_event(
+            connection=connection,
+            event_id=second_reply["event_id"],
+        )
+
+        self.assertEqual(
+            [row["event_id"] for row in read["events"]],
+            [first_reply["event_id"], second_reply["event_id"]],
+        )
+        self.assertFalse(ack.get("ok"), msg=ack)
+        self.assertEqual(ack["error"]["code"], "E_IM_CURSOR")
+        self.assertEqual(connection["last_event_id"], before)
 
     def test_external_connection_events_waits_for_new_visible_events_until_timeout(self) -> None:
         _created, connection, sender = self._external_connection(display_name="long poll smoke")
