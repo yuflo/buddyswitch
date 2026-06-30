@@ -26,6 +26,14 @@ Send direct messages to online actor identities and read message context through
 - Use `message__conversation` to read active actor visible bidirectional context with a selected target identity.
 - Runtime response fields are authoritative for effects, rejection reasons, and recovery.
 
+## Actor Handoff Quality
+
+When sending to another actor, write the message so the recipient can act from their visible context.
+
+Include the relevant user or source intent, concrete target or missing input, known constraints, and the output you need back.
+
+Do not use a bare message id or conversation id as the task context unless you know the recipient can see it. Private ids may be included as audit references, but the actionable context must be in the message body.
+
 ## Key Boundary Rules
 
 - `message__contacts` returns online contact rows with `contact.identity_id`.

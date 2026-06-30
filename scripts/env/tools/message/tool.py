@@ -92,7 +92,13 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='send',
                 title='message.send',
-                description='Send one Central IM message: provide target_identity_id for a new actor-directed message, or provide reply_to only to reply inside the existing direct conversation.',
+                description=(
+                    'Send one Central IM message: provide target_identity_id for a new actor-directed message, '
+                    'or provide reply_to only to reply inside the existing direct conversation. For actor-to-actor '
+                    "handoffs, make the content actionable from the recipient's visible context; include the relevant "
+                    'source intent, concrete inputs, and requested output instead of relying on private '
+                    'message/conversation ids.'
+                ),
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,

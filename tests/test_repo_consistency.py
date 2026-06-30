@@ -100,6 +100,8 @@ class RepoConsistencyTests(unittest.TestCase):
             return True
         if path_text.startswith("docs/spec/task-sys-side-frame-lifecycle/"):
             return True
+        if path_text.startswith("docs/spec/browser-cockpit-lazy-release/"):
+            return True
         name = Path(path_text).name
         return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
 
@@ -688,6 +690,11 @@ print(json.dumps({{
         self.assertTrue(
             self._is_docs_spec_context_hit(
                 "docs/spec/task-sys-side-frame-lifecycle/phase-05-tool-feedback-contract.md:1:tests/test_env_tool_response_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/browser-cockpit-lazy-release/phase-06-search-open-browser-ensure.md:1:tests/test_env_tool_response_contract.py"
             )
         )
         self.assertFalse(
