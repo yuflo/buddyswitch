@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import os
+import shlex
 import subprocess
 from typing import Any, TypedDict
 from urllib.parse import urlencode
@@ -68,12 +70,54 @@ def _load_search_boundary(context: SearchServiceContext) -> dict[str, Any]:
 def _browser_endpoint(instance_payload: dict[str, Any]) -> tuple[str | None, str | None]:
     port = instance_payload.get("browser_port")
     if port is None:
-        return None, "instance browser_port is missing"
+        return None, "browser endpoint is not recorded"
     if isinstance(port, bool) or not isinstance(port, int):
         return None, f"invalid browser port: {port}"
     if port < 1 or port > 65535:
         return None, f"invalid browser port: {port}"
     return f"http://127.0.0.1:{port}", None
+
+
+def _reload_instance_payload(context: SearchServiceContext) -> dict[str, Any]:
+    try:
+        payload = json.loads(Path(context["instance_json"]).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"failed to reload instance browser state: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("failed to reload instance browser state: instance JSON was not an object")
+    return payload
+
+
+def _ensure_browser_runtime(context: SearchServiceContext) -> tuple[bool, str | None]:
+    override = os.environ.get("BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND")
+    if override:
+        command = shlex.split(override)
+    else:
+        command = [
+            str(env_profiles.ROOT / "buddyswitch-codex"),
+            "env",
+            "browser",
+            "ensure",
+            "--instance",
+            context["actor_id"],
+        ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=env_profiles.ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30.0,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "browser ensure timed out"
+    except OSError as exc:
+        return False, f"browser ensure failed: {exc}"
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
+        return False, detail
+    return True, None
 
 
 def _normalize_query(args: dict[str, Any]) -> str | None:
@@ -315,15 +359,12 @@ def _browser_unavailable(
     context: SearchServiceContext,
     reason: str,
     target_url: str | None = None,
-    browser_endpoint: str | None = None,
 ) -> dict[str, Any]:
     extra: dict[str, Any] = {
         "reason": reason,
     }
     if target_url is not None:
         extra["target_url"] = target_url
-    if browser_endpoint is not None:
-        extra["browser_endpoint"] = browser_endpoint
     return tool_results.rejection(
         tool="search",
         action=action,
@@ -359,6 +400,46 @@ def _browser_unavailable(
             )
         ],
         extra=extra,
+    )
+
+
+def _browser_ensure_failed(
+    *,
+    context: SearchServiceContext,
+    target_url: str,
+    reason: str,
+) -> dict[str, Any]:
+    return tool_results.rejection(
+        tool="search",
+        action="search.open_browser",
+        active_actor=context["active_actor"],
+        active_role=context["active_role"],
+        code="E_SEARCH_BROWSER_ENSURE_FAILED",
+        message="failed to ensure browser runtime for search",
+        permission_boundary="search.browser",
+        human_summary="Browser runtime could not be started for search.",
+        why_blocked=reason,
+        impact="No browser page was opened and no BuddySwitch runtime state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Check browser runtime readiness, then retry search.open_browser.",
+        allowed_next_actions=[
+            "Use search.status to inspect browser capability before retrying.",
+            "Retry search.open_browser after browser runtime ensure succeeds.",
+        ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_browser_ensure_failure",
+                reason="Use when you need browser capability metadata before retrying.",
+            )
+        ],
+        extra={
+            "target_url": target_url,
+            "page_opened": False,
+            "reason": reason,
+        },
     )
 
 
@@ -416,7 +497,6 @@ def _browser_open_failed(
         ],
         extra={
             "target_url": target_url,
-            "browser_endpoint": browser_endpoint,
             "reason": reason,
         },
     )
@@ -456,7 +536,6 @@ def _browser_page_count_unverified(
         ],
         extra={
             "target_url": target_url,
-            "browser_endpoint": browser_endpoint,
             "browser_page_limit": BROWSER_PAGE_LIMIT,
             "page_opened": False,
             "reason": reason,
@@ -490,7 +569,6 @@ def _browser_page_limit_reached(
         ],
         extra={
             "target_url": target_url,
-            "browser_endpoint": browser_endpoint,
             "browser_page_count": browser_page_count,
             "browser_page_limit": BROWSER_PAGE_LIMIT,
             "page_opened": False,
@@ -512,7 +590,6 @@ def _browser_lifecycle_registration_failed(
 ) -> dict[str, Any]:
     extra: dict[str, Any] = {
         "target_url": target_url,
-        "browser_endpoint": browser_endpoint,
         "page_opened": False,
         "page_reused": page_reused,
         "idle_refreshed": False,
@@ -679,7 +756,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
 
 def _status_payload(context: SearchServiceContext, boundary: dict[str, Any]) -> dict[str, Any]:
     browser_endpoint, browser_reason = _browser_endpoint(context["instance_payload"])
-    browser_available = browser_endpoint is not None and boundary.get("browser_cockpit") != "unavailable"
+    browser_available = boundary.get("browser_cockpit") != "unavailable"
     search_api_permission = boundary.get("search_api")
     search_api_available = bool(SEARCH_API_PROVIDER_AVAILABLE and search_api_permission == "available")
     available_backends: list[str] = []
@@ -693,7 +770,6 @@ def _status_payload(context: SearchServiceContext, boundary: dict[str, Any]) -> 
         "backend_status": {
             "browser": {
                 "available": browser_available,
-                "browser_url": browser_endpoint,
                 "required_cockpit_tool": REQUIRED_COCKPIT_TOOL,
                 **({"reason": browser_reason} if browser_reason else {}),
             },
@@ -763,13 +839,6 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
             context=context,
             reason="profile search browser_cockpit is unavailable",
         )
-    browser_endpoint, browser_reason = _browser_endpoint(context["instance_payload"])
-    if browser_endpoint is None:
-        return _browser_unavailable(
-            action="search.request",
-            context=context,
-            reason=browser_reason or "instance browser endpoint is missing",
-        )
     target_url = _build_search_url(query, engine)
     return tool_results.success(
         tool="search",
@@ -796,7 +865,6 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
             "engine": engine,
             "query": query,
             "target_url": target_url,
-            "browser_endpoint": browser_endpoint,
             "required_cockpit_tool": REQUIRED_COCKPIT_TOOL,
             "page_opened": False,
             "permission_boundary": "search.browser",
@@ -822,7 +890,18 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             reason="profile search browser_cockpit is unavailable",
         )
     target_url = _build_search_url(query, engine)
-    browser_endpoint, browser_reason = _browser_endpoint(context["instance_payload"])
+    ensure_ok, ensure_reason = _ensure_browser_runtime(context)
+    if not ensure_ok:
+        return _browser_ensure_failed(
+            context=context,
+            target_url=target_url,
+            reason=ensure_reason or "browser ensure failed",
+        )
+    try:
+        fresh_payload = _reload_instance_payload(context)
+    except RuntimeError as exc:
+        return _browser_ensure_failed(context=context, target_url=target_url, reason=str(exc))
+    browser_endpoint, browser_reason = _browser_endpoint(fresh_payload)
     if browser_endpoint is None:
         return _browser_unavailable(
             action="search.open_browser",
@@ -881,7 +960,6 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
                 "engine": engine,
                 "query": query,
                 "target_url": target_url,
-                "browser_endpoint": browser_endpoint,
                 "page_opened": False,
                 "page_reused": True,
                 "reused_target_id": target_id,
@@ -953,7 +1031,6 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "engine": engine,
             "query": query,
             "target_url": target_url,
-            "browser_endpoint": browser_endpoint,
             "page_opened": True,
             "browser_page_count": page_gate.projected_page_count,
             "browser_page_limit": BROWSER_PAGE_LIMIT,

@@ -32,6 +32,9 @@ from env.tool_runtime import daemon_client  # noqa: E402
 
 BROWSER_PAGE_IDLE_SECONDS = 300
 BROWSER_PAGE_EXPIRED_TRIGGER = "browser.page.expired"
+BROWSER_COCKPIT_RELEASE_DELAY_SECONDS = 10
+BROWSER_COCKPIT_RELEASE_TRIGGER = "browser.cockpit.release"
+BROWSER_COCKPIT_RELEASE_SCHEDULE_KEY = "browser.cockpit.release"
 
 
 class BrowserLifecycleError(RuntimeError):
@@ -434,6 +437,26 @@ def refresh_current_page_idle(
         now=timestamp_value,
     )
     return result
+
+
+def schedule_browser_cockpit_release(
+    *,
+    instance_root: Path,
+    reason: str = "page_idle_empty",
+    delay_seconds: int = BROWSER_COCKPIT_RELEASE_DELAY_SECONDS,
+) -> dict[str, Any]:
+    if not isinstance(reason, str) or not reason.strip():
+        raise BrowserLifecycleError("release reason must be a non-empty string")
+    if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, int) or delay_seconds < 0:
+        raise BrowserLifecycleError("release delay_seconds must be a non-negative integer")
+    return daemon_client.schedule_trigger(
+        instance_root=Path(instance_root),
+        delay_seconds=delay_seconds,
+        trigger_type=BROWSER_COCKPIT_RELEASE_TRIGGER,
+        payload={"reason": reason.strip()},
+        source_context={"owner": "browser"},
+        schedule_key=BROWSER_COCKPIT_RELEASE_SCHEDULE_KEY,
+    )
 
 
 def forget_page_idle_target(*, instance_root: Path, target_id: str) -> dict[str, Any]:

@@ -25,8 +25,15 @@ EXPECTED_HANDLER_TYPES = [
     "ImMessageCreatedHandler",
     "TrackCommentAddedHandler",
     "BrowserPageExpiredHandler",
+    "BrowserReleaseHandler",
 ]
-EXPECTED_HANDLER_NAMES = ["task_checkout", "im_message_created", "track_comment_added", "browser_page_expired"]
+EXPECTED_HANDLER_NAMES = [
+    "task_checkout",
+    "im_message_created",
+    "track_comment_added",
+    "browser_page_expired",
+    "browser_cockpit_release",
+]
 
 
 def load_instance_daemon() -> Any:

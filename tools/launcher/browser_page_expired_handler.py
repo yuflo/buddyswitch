@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -56,13 +57,27 @@ def _trigger_due_at(trigger: Any) -> str | None:
 
 
 def _browser_endpoint(context: Any) -> str | None:
-    instance_payload = getattr(context, "instance_payload", None)
-    if not isinstance(instance_payload, dict):
-        return None
-    port = instance_payload.get("browser_port")
+    payload = _fresh_instance_payload(context)
+    if payload is None:
+        cached_payload = getattr(context, "instance_payload", None)
+        if not isinstance(cached_payload, dict):
+            return None
+        payload = cached_payload
+    port = payload.get("browser_port")
     if isinstance(port, bool) or not isinstance(port, int) or port < 1 or port > 65535:
         return None
     return f"http://127.0.0.1:{port}"
+
+
+def _fresh_instance_payload(context: Any) -> dict[str, Any] | None:
+    instance_json = getattr(context, "instance_json", None)
+    if instance_json is None:
+        return None
+    try:
+        payload = json.loads(Path(instance_json).read_text(encoding="utf-8"))
+    except (OSError, TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _instance_root(context: Any) -> Path | None:
@@ -84,6 +99,20 @@ def _is_stale_browser_error(message: str) -> bool:
         or "connection refused" in message
         or "timed out" in message
     )
+
+
+def _schedule_release_if_empty(instance_root: Path, state: dict[str, Any]) -> None:
+    targets = state.get("targets")
+    if isinstance(targets, dict) and not targets:
+        browser_lifecycle.schedule_browser_cockpit_release(instance_root=instance_root, reason="page_idle_empty")
+
+
+def _forget_tracked_target(instance_root: Path, target_id: str) -> dict[str, Any] | None:
+    before = browser_lifecycle._read_page_idle_state(instance_root)
+    targets = before.get("targets")
+    if not isinstance(targets, dict) or target_id not in targets:
+        return None
+    return browser_lifecycle.forget_page_idle_target(instance_root=instance_root, target_id=target_id)
 
 
 class BrowserPageExpiredHandler:
@@ -137,19 +166,29 @@ class BrowserPageExpiredHandler:
 
     def _auto_close(self, context: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
         browser_endpoint = _browser_endpoint(context)
+        root = _instance_root(context)
         if browser_endpoint is None:
+            if root is not None:
+                state = _forget_tracked_target(root, payload["target_id"])
+                if state is not None:
+                    _schedule_release_if_empty(root, state)
             return daemon_core.HandlerResult.handled()
         try:
             close_result = browser_lifecycle.close_page_target(browser_endpoint, payload["target_id"])
         except browser_lifecycle.BrowserLifecycleError as exc:
             message = str(exc)
             if _is_stale_browser_error(message):
+                if root is not None:
+                    state = _forget_tracked_target(root, payload["target_id"])
+                    if state is not None:
+                        _schedule_release_if_empty(root, state)
                 return daemon_core.HandlerResult.handled()
             return daemon_core.HandlerResult.failed(message)
         if close_result.get("status") in {"closed", "already_gone"}:
-            root = _instance_root(context)
             if root is not None:
-                browser_lifecycle.forget_page_idle_target(instance_root=root, target_id=payload["target_id"])
+                state = _forget_tracked_target(root, payload["target_id"])
+                if state is not None:
+                    _schedule_release_if_empty(root, state)
         return daemon_core.HandlerResult.handled()
 
 

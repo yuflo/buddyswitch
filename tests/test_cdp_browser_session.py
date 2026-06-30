@@ -325,6 +325,35 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
             self.assertEqual(state["page_id_to_target_id"], {"3": "target-current-idle"})
             self.assertEqual(state["targets"]["target-current-idle"]["target_url"], "https://example.com/current")
 
+    def test_schedule_browser_cockpit_release_uses_keyed_browser_release_trigger(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"schedule": {"schedule_id": "schedule-release"}}
+
+        self.lifecycle.daemon_client.schedule_trigger = fake_schedule_trigger
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-browser"
+
+            result = self.lifecycle.schedule_browser_cockpit_release(instance_root=instance_root)
+
+        self.assertEqual(result, {"schedule": {"schedule_id": "schedule-release"}})
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "instance_root": instance_root,
+                    "delay_seconds": 10,
+                    "trigger_type": "browser.cockpit.release",
+                    "payload": {"reason": "page_idle_empty"},
+                    "source_context": {"owner": "browser"},
+                    "schedule_key": "browser.cockpit.release",
+                }
+            ],
+        )
+
     def test_refresh_page_idle_schedule_failure_leaves_no_idle_state(self) -> None:
         def failing_schedule_trigger(**_kwargs: object) -> dict[str, object]:
             raise RuntimeError("daemon unavailable")
