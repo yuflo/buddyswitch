@@ -92,9 +92,13 @@ class RepoConsistencyTests(unittest.TestCase):
             return True
         if path_text.startswith("docs/spec/imessage-channel-im-api-boundary-optimization/"):
             return True
+        if path_text.startswith("docs/spec/im-api-unified-rebuild-forward/"):
+            return True
         if path_text.startswith("docs/spec/task-sys-im-completion-status-observability/"):
             return True
         if path_text.startswith("docs/spec/task-sys-proactive-rebuild/"):
+            return True
+        if path_text.startswith("docs/spec/task-sys-side-frame-lifecycle/"):
             return True
         name = Path(path_text).name
         return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
@@ -673,7 +677,17 @@ print(json.dumps({{
         )
         self.assertTrue(
             self._is_docs_spec_context_hit(
+                "docs/spec/im-api-unified-rebuild-forward/phase-01-unified-auth-context.md:1:tests/test_external_im_projection_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
                 "docs/spec/task-sys-im-completion-status-observability/phase-1-task-sys-close.md:1:tests/test_env_tool_semantic_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/task-sys-side-frame-lifecycle/phase-05-tool-feedback-contract.md:1:tests/test_env_tool_response_contract.py"
             )
         )
         self.assertFalse(

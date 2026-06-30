@@ -251,7 +251,21 @@ git diff --check
 no output
 
 git status --short --branch
-## main...origin/main [ahead 5]
+clean working tree; main ahead of origin/main
+```
+
+Repo consistency follow-up:
+
+```text
+python3 -m pytest -q tests/test_repo_consistency.py::RepoConsistencyTests::test_docs_spec_drift_filter_rejects_unmarked_live_guidance tests/test_repo_consistency.py::RepoConsistencyTests::test_stable_guidance_does_not_point_to_internal_tool_contract_surfaces
+initial result: 1 failed, 1 passed
+
+Root cause: the docs/spec drift filter did not classify `docs/spec/im-api-unified-rebuild-forward/` or `docs/spec/task-sys-side-frame-lifecycle/` as implementation-record context, so stable-guidance scanning treated historical test-command references as live guidance.
+
+Fix: update `tests/test_repo_consistency.py` to classify both implementation-record directories and assert that classification.
+
+python3 -m pytest -q tests/test_repo_consistency.py::RepoConsistencyTests::test_docs_spec_drift_filter_rejects_unmarked_live_guidance tests/test_repo_consistency.py::RepoConsistencyTests::test_stable_guidance_does_not_point_to_internal_tool_contract_surfaces
+2 passed in 0.03s
 ```
 
 Residue interpretation:
@@ -259,7 +273,7 @@ Residue interpretation:
 - Old taskbox/task tool scan over `scripts tools buddyswitch docs/arch` had no matches.
 - Sensitive status/logging implementation scan had no matches.
 - Browser IM compatibility scan matched only negative assertions in `tests/web_management_ui_contract.test.js` and `tests/web_management_ui_state.test.js`; live `app.js` had no matches.
-- Final file list from `1929e32..HEAD` is attributable to the plan update, the `fea-webui` history-cache commit, and the `fea-daemon` side-frame lifecycle commit.
+- Final file list from `1929e32..HEAD` is attributable to the plan update, the `fea-webui` history-cache commit, the `fea-daemon` side-frame lifecycle commit, and the repo-consistency classification fix needed by the merged implementation-record docs.
 
 Remaining risk:
 
