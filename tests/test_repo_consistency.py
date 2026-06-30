@@ -37,6 +37,7 @@ _DOC_SPEC_CONTEXT_MARKERS = (
     "completion-implementation-plan",
     "development-plan",
     "implementation-plan",
+    "merge-plan",
     "objective",
     "parallel-agent-execution-plan",
     "remove-" + "dash" + "board-and-skill-create",
@@ -88,6 +89,10 @@ class RepoConsistencyTests(unittest.TestCase):
         if not path_text.startswith("docs/spec/"):
             return False
         if path_text.startswith("docs/spec/identity-redesign/"):
+            return True
+        if path_text.startswith("docs/spec/imessage-channel-im-api-boundary-optimization/"):
+            return True
+        if path_text.startswith("docs/spec/task-sys-im-completion-status-observability/"):
             return True
         if path_text.startswith("docs/spec/task-sys-proactive-rebuild/"):
             return True
@@ -655,6 +660,24 @@ print(json.dumps({{
             self._is_docs_spec_context_hit(
                 "docs/spec/2026-05-22-tool-layer-semantic-source-of-truth-implementation-plan.md:1:TOOL_SPEC"
             )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/2026-06-30-fea-webui-fea-daemon-main-merge-plan.md:1:tests/test_env_tool_schema_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/imessage-channel-im-api-boundary-optimization/99-final-acceptance.md:1:tests/test_external_im_projection_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/task-sys-im-completion-status-observability/phase-1-task-sys-close.md:1:tests/test_env_tool_semantic_contract.py"
+            )
+        )
+        self.assertFalse(
+            self._is_docs_spec_context_hit("docs/spec/runtime-guidance.md:1:TOOL_SPEC")
         )
 
     def test_active_guidance_does_not_reference_capture_as_env_tool(self) -> None:
