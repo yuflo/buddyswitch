@@ -9,8 +9,19 @@ from uuid import uuid4
 
 from env.repos import runtime_files
 
-TASK_STATUSES = ("new", "side_processing", "closed", "needs_parent", "parent_processing", "checkpoint")
+TASK_STATUSES = (
+    "new",
+    "side_processing",
+    "closed",
+    "needs_parent",
+    "parent_processing",
+    "checkpoint",
+    "runtime_failed",
+    "side_no_result",
+    "side_timed_out",
+)
 ACTIVE_TASK_STATUSES = ("new", "side_processing", "needs_parent", "parent_processing", "checkpoint")
+RECOVERABLE_TASK_STATUSES = ("runtime_failed", "side_no_result", "side_timed_out")
 TASK_CLOSE_STATUSES = ("side_processing", "parent_processing", "closed")
 RUNTIME_INSTRUCTION_TYPES = ("start_side", "submit_parent", "interrupt_submit_parent", "no_actor_action")
 INITIAL_PROCESSORS = ("side", "none", "checkpoint")
@@ -72,6 +83,12 @@ def _normalize_side_result_outcome(value: Any) -> str:
 def _normalize_checkpoint_update_outcome(value: Any) -> str:
     if value not in CHECKPOINT_UPDATE_OUTCOMES:
         raise ValueError(f"checkpoint update outcome must be one of {', '.join(CHECKPOINT_UPDATE_OUTCOMES)}")
+    return str(value)
+
+
+def _normalize_recoverable_task_status(value: Any) -> str:
+    if value not in RECOVERABLE_TASK_STATUSES:
+        raise ValueError(f"side runtime failure status must be one of {', '.join(RECOVERABLE_TASK_STATUSES)}")
     return str(value)
 
 
@@ -225,6 +242,10 @@ def active_tasks_for_actor(actor_target: Mapping[str, Any]) -> list[dict[str, An
     return list_tasks(actor_target=actor_target, statuses=ACTIVE_TASK_STATUSES)
 
 
+def recoverable_tasks_for_actor(actor_target: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return list_tasks(actor_target=actor_target, statuses=RECOVERABLE_TASK_STATUSES)
+
+
 def has_active_task_for_actor(actor_target: Mapping[str, Any]) -> bool:
     return bool(active_tasks_for_actor(actor_target))
 
@@ -340,6 +361,89 @@ def record_side_result(task_id: str, result: Mapping[str, Any]) -> dict[str, Any
     payload = _require_mapping(result, "side result")
     _normalize_side_result_outcome(payload.get("outcome"))
     return record_side_need_parent(task_id, {"params": payload.get("params")})
+
+
+def record_side_runtime_failure(task_id: str, failure: Mapping[str, Any]) -> dict[str, Any]:
+    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    payload = _payload_copy(_require_mapping(failure, "side runtime failure"))
+    status = _normalize_recoverable_task_status(payload.pop("status", None))
+    record = _load_task(normalized_task_id)
+    if record.get("status") != "side_processing":
+        raise ValueError("task must be in side_processing status before side runtime failure")
+
+    now = runtime_files.now_iso()
+    failure_result: dict[str, Any] = {
+        "stage": _require_text(payload.get("stage"), "failure.stage"),
+        "processor": _require_text(payload.get("processor", "side"), "failure.processor"),
+        "error": _require_text(payload.get("error"), "failure.error"),
+        "updated_at": now,
+    }
+    retryable = payload.get("retryable")
+    if retryable is not None:
+        if not isinstance(retryable, bool):
+            raise ValueError("failure.retryable must be a bool")
+        failure_result["retryable"] = retryable
+    attempts = payload.get("attempts")
+    if attempts is not None:
+        if not isinstance(attempts, int) or attempts < 1:
+            raise ValueError("failure.attempts must be a positive integer")
+        failure_result["attempts"] = attempts
+    last_side_thread_id = payload.get("last_side_thread_id")
+    if isinstance(last_side_thread_id, str) and last_side_thread_id.strip():
+        failure_result["last_side_thread_id"] = last_side_thread_id.strip()
+    cleanup = payload.get("cleanup")
+    if cleanup is not None:
+        failure_result["cleanup"] = _payload_copy(_require_mapping(cleanup, "failure.cleanup"))
+
+    record.update(
+        {
+            "status": status,
+            "active_processor": None,
+            "failure_result": failure_result,
+            "updated_at": now,
+        }
+    )
+    persisted = _persist_task(record)
+    return {
+        "ok": True,
+        "task_id": normalized_task_id,
+        "outcome": status,
+        "task": persisted,
+        "state_changed": True,
+    }
+
+
+def record_side_cleanup(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
+    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    payload = _require_mapping(update, "side cleanup")
+    side_thread_id = _require_text(payload.get("side_thread_id"), "cleanup.side_thread_id")
+    cleanup = _payload_copy(_require_mapping(payload.get("cleanup"), "cleanup.cleanup"))
+    record = _load_task(normalized_task_id)
+    now = runtime_files.now_iso()
+
+    close_result = record.get("close_result")
+    if record.get("status") == "closed" and isinstance(close_result, Mapping):
+        normalized_close = _payload_copy(close_result)
+        if normalized_close.get("processor") != "side":
+            raise ValueError("side cleanup can only update side close results")
+        normalized_close["side_thread_id"] = side_thread_id
+        normalized_close["cleanup"] = cleanup
+        normalized_close["updated_at"] = now
+        record.update({"close_result": normalized_close, "updated_at": now})
+        persisted = _persist_task(record)
+        return {"ok": True, "task_id": normalized_task_id, "task": persisted, "state_changed": True}
+
+    side_result = record.get("side_result")
+    if isinstance(side_result, Mapping) and side_result.get("outcome") == "need_parent":
+        normalized_side_result = _payload_copy(side_result)
+        normalized_side_result["side_thread_id"] = side_thread_id
+        normalized_side_result["cleanup"] = cleanup
+        normalized_side_result["updated_at"] = now
+        record.update({"side_result": normalized_side_result, "updated_at": now})
+        persisted = _persist_task(record)
+        return {"ok": True, "task_id": normalized_task_id, "task": persisted, "state_changed": True}
+
+    raise ValueError("task must have a side close or side need_parent result before side cleanup")
 
 
 def get_task(task_id: str) -> dict[str, Any]:

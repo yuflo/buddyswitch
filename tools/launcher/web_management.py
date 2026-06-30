@@ -812,11 +812,13 @@ class WebManagementService:
             instance_payload["instance_root"] = str(Path(workspace_dir).expanduser().resolve(strict=False).parent)
         del instance_payload
         task_sys_tasks = task_sys.active_tasks_for_actor(active_actor)
+        recoverable_task_sys_tasks = task_sys.recoverable_tasks_for_actor(active_actor)
         return {
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
             "task_sys": {
                 "active_count": len(task_sys_tasks),
+                "recoverable_count": len(recoverable_task_sys_tasks),
                 "active_tasks": [
                     {
                         "task_id": row.get("id"),
@@ -826,6 +828,17 @@ class WebManagementService:
                         "updated_at": row.get("updated_at"),
                     }
                     for row in task_sys_tasks[:10]
+                ],
+                "recoverable_tasks": [
+                    {
+                        "task_id": row.get("id"),
+                        "source_type": row.get("source_type"),
+                        "status": row.get("status"),
+                        "active_processor": row.get("active_processor"),
+                        "failure_result": dict(row.get("failure_result")) if isinstance(row.get("failure_result"), dict) else {},
+                        "updated_at": row.get("updated_at"),
+                    }
+                    for row in recoverable_task_sys_tasks[:10]
                 ],
             },
             "tracks": {

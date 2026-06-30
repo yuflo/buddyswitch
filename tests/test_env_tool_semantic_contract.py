@@ -498,6 +498,27 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIn("tracks", " ".join(row["does_not_write"]).lower())
                 self.assertIn("artifacts", " ".join(row["does_not_write"]).lower())
 
+    def test_task_sys_operation_semantics_name_state_and_cleanup_feedback(self) -> None:
+        op = catalog.operation_semantics()
+        close_returns = set(op["task_sys.close"]["returns"])
+        need_parent_returns = set(op["task_sys.need_parent"]["returns"])
+
+        for field in ("task_id", "task_status", "state_changed", "processor", "side_thread_id", "side_cleanup"):
+            with self.subTest(action="task_sys.close", field=field):
+                self.assertIn(field, close_returns)
+        for field in (
+            "task_id",
+            "task_status",
+            "state_changed",
+            "processor",
+            "side_thread_id",
+            "side_cleanup",
+            "parent_handoff_params",
+            "parent_runtime",
+        ):
+            with self.subTest(action="task_sys.need_parent", field=field):
+                self.assertIn(field, need_parent_returns)
+
     def test_high_risk_object_boundaries_are_explicit(self) -> None:
         desc = self._desc()
         track_model = str(desc["track"].get("object_model", "")).lower()

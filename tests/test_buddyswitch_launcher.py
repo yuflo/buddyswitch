@@ -999,7 +999,7 @@ exec "$real_git" "$@"
         role_id: str,
         task_id: str = "task-im-message-created-status001",
         status: str = "parent_processing",
-        active_processor: str = "parent",
+        active_processor: str | None = "parent",
     ) -> dict[str, object]:
         tasks_dir = shared_root / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks"
         tasks_dir.mkdir(parents=True, exist_ok=True)
@@ -1017,6 +1017,15 @@ exec "$real_git" "$@"
             "created_at": "2026-06-30T00:00:00+00:00",
             "updated_at": "2026-06-30T00:00:01+00:00",
         }
+        if status in {"runtime_failed", "side_no_result", "side_timed_out"}:
+            record["failure_result"] = {
+                "stage": "side_input",
+                "processor": "side",
+                "error": "thread not loaded",
+                "retryable": True,
+                "attempts": 2,
+                "updated_at": "2026-06-30T00:00:01+00:00",
+            }
         (tasks_dir / f"{task_id}.json").write_text(json.dumps(record, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         return record
 
@@ -5290,6 +5299,14 @@ exec "$real_git" "$@"
                 actor_id=str(ctx["actor_id"]),
                 role_id="pm",
             )
+            self._write_task_sys_record(
+                Path(str(ctx["shared_root"])),
+                actor_id=str(ctx["actor_id"]),
+                role_id="pm",
+                task_id="task-im-message-created-runtimefailed",
+                status="runtime_failed",
+                active_processor=None,
+            )
 
             status_result = subprocess.run(
                 [
@@ -5311,11 +5328,16 @@ exec "$real_git" "$@"
             task_sys_status = payload["daemon"]["task_sys"]
             self.assertEqual(task_sys_status["scope"], "task_sys_state_projection")
             self.assertEqual(task_sys_status["active_count"], 1)
+            self.assertEqual(task_sys_status["recoverable_count"], 1)
             self.assertEqual(task_sys_status["by_status"], {"parent_processing": 1})
+            self.assertEqual(task_sys_status["recoverable_by_status"], {"runtime_failed": 1})
             self.assertEqual(task_sys_status["active_tasks"][0]["task_id"], "task-im-message-created-status001")
             self.assertEqual(task_sys_status["active_tasks"][0]["source_type"], "im.message.created")
             self.assertEqual(task_sys_status["active_tasks"][0]["source_ref"], {"message_id": "msg-status-1"})
             self.assertEqual(task_sys_status["active_tasks"][0]["active_processor"], "parent")
+            self.assertEqual(task_sys_status["recoverable_tasks"][0]["task_id"], "task-im-message-created-runtimefailed")
+            self.assertEqual(task_sys_status["recoverable_tasks"][0]["status"], "runtime_failed")
+            self.assertEqual(task_sys_status["recoverable_tasks"][0]["failure_result"]["stage"], "side_input")
 
     def test_instance_status_json_reports_log_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

@@ -101,11 +101,11 @@ class DaemonServiceContractTests(unittest.TestCase):
         self.addCleanup(self.core.runtime_files.reset_runtime_root_override)
         return state_root
 
-    def _im_task_envelope(self, actor_id: str, role_id: str = "dev") -> dict[str, Any]:
+    def _im_task_envelope(self, actor_id: str, role_id: str = "dev", message_id: str = "msg-status-1") -> dict[str, Any]:
         return {
             "source": {
                 "type": "im.message.created",
-                "ref": {"message_id": "msg-status-1"},
+                "ref": {"message_id": message_id},
             },
             "actor_target": {
                 "role_id": role_id,
@@ -201,13 +201,31 @@ class DaemonServiceContractTests(unittest.TestCase):
                 },
             )
             task_sys.record_parent_handoff_started(task_id)
+            failed_task_id = task_sys.ingest(
+                self._im_task_envelope(instance["payload"]["actor_id"], message_id="msg-status-failed")
+            )["task_id"]
+            task_sys.record_side_runtime_failure(
+                failed_task_id,
+                {
+                    "status": "runtime_failed",
+                    "stage": "side_input",
+                    "processor": "side",
+                    "error": "thread not loaded",
+                    "retryable": True,
+                    "attempts": 2,
+                    "last_side_thread_id": "thr-side-failed",
+                    "cleanup": {"registry_unregistered": True, "physical_close_ok": False},
+                },
+            )
 
             status = self.core.daemon_status(instance["instance_json"])
 
             projection = status["task_sys"]
             self.assertEqual(projection["scope"], "task_sys_state_projection")
             self.assertEqual(projection["active_count"], 1)
+            self.assertEqual(projection["recoverable_count"], 1)
             self.assertEqual(projection["by_status"], {"parent_processing": 1})
+            self.assertEqual(projection["recoverable_by_status"], {"runtime_failed": 1})
             self.assertEqual(len(projection["active_tasks"]), 1)
             active = projection["active_tasks"][0]
             self.assertEqual(active["task_id"], task_id)
@@ -216,6 +234,14 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(active["status"], "parent_processing")
             self.assertEqual(active["active_processor"], "parent")
             self.assertIsInstance(active["updated_at"], str)
+            recoverable = projection["recoverable_tasks"][0]
+            self.assertEqual(recoverable["task_id"], failed_task_id)
+            self.assertEqual(recoverable["source_ref"], {"message_id": "msg-status-failed"})
+            self.assertEqual(recoverable["status"], "runtime_failed")
+            self.assertIsNone(recoverable["active_processor"])
+            self.assertEqual(recoverable["failure_result"]["stage"], "side_input")
+            self.assertEqual(recoverable["failure_result"]["retryable"], True)
+            self.assertEqual(recoverable["failure_result"]["attempts"], 2)
 
     def test_handler_status_result_scope_does_not_claim_external_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

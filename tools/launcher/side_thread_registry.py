@@ -77,6 +77,8 @@ def register_side_thread(
     actor_id: str,
     parent_thread_id: str,
     side_thread_id: str,
+    task_id: str | None = None,
+    purpose: str | None = None,
     now: NowFn | None = None,
 ) -> dict[str, Any]:
     actor = _require_id(actor_id, "Actor id")
@@ -90,11 +92,21 @@ def register_side_thread(
         "created_at": timestamp,
         "updated_at": timestamp,
     }
+    if task_id is not None:
+        row["task_id"] = _require_id(task_id, "Task id")
+    if purpose is not None:
+        row["purpose"] = _require_id(purpose, "Side thread purpose")
     payload["side_threads"] = [item for item in _side_rows(payload) if item.get("thread_id") != side]
     payload["side_threads"].append(row)
     payload["updated_at"] = timestamp
     _write_payload(Path(instance_json), payload)
     return row
+
+
+def _is_task_bound_lease(row: dict[str, Any]) -> bool:
+    task_id = row.get("task_id")
+    purpose = row.get("purpose")
+    return (isinstance(task_id, str) and bool(task_id.strip())) or purpose == "task_sys.side_frame"
 
 
 def require_side_thread(
@@ -130,6 +142,35 @@ def find_open_side_thread(
             and thread_id != parent
             and row.get("parent_thread_id") == parent
             and row.get("status") == "open"
+            and not _is_task_bound_lease(row)
+        ):
+            return row
+    return None
+
+
+def find_task_side_thread(
+    instance_json: Path,
+    *,
+    actor_id: str,
+    parent_thread_id: str,
+    task_id: str,
+    purpose: str = "task_sys.side_frame",
+) -> dict[str, Any] | None:
+    actor = _require_id(actor_id, "Actor id")
+    parent = _require_id(parent_thread_id, "Parent thread id")
+    task = _require_id(task_id, "Task id")
+    normalized_purpose = _require_id(purpose, "Side thread purpose")
+    payload = _load_payload(Path(instance_json), actor)
+    for row in _side_rows(payload):
+        thread_id = row.get("thread_id")
+        if (
+            isinstance(thread_id, str)
+            and thread_id
+            and thread_id != parent
+            and row.get("parent_thread_id") == parent
+            and row.get("status") == "open"
+            and row.get("task_id") == task
+            and row.get("purpose") == normalized_purpose
         ):
             return row
     return None

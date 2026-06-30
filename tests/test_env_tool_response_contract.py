@@ -796,6 +796,47 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         assert isinstance(state, dict)
         self.assertEqual(state["disposition"], "unseen")
 
+    def test_task_sys_close_response_exposes_side_cleanup_contract(self) -> None:
+        actor_label = "act-dev-task-sys-feedback"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        task_id = task_sys.ingest(
+            {
+                "source": {"type": "test.feedback", "ref": {"id": "task-sys-close-feedback"}},
+                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
+                "context": {"fixture": "task sys close feedback"},
+            }
+        )["task_id"]
+
+        with patch.object(
+            runtime_context.DaemonAccess,
+            "cleanup_task_sys_side_lease",
+            autospec=True,
+            return_value={
+                "side_thread_id": "thr-side-response",
+                "registry_unregistered": True,
+                "physical_close_ok": True,
+            },
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="close",
+                args={"task_id": task_id, "summary": "Side completed the feedback fixture."},
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["task_id"], task_id)
+        self.assertEqual(response["task_status"], "closed")
+        self.assertEqual(response["processor"], "side")
+        self.assertEqual(response["side_thread_id"], "thr-side-response")
+        self.assertEqual(response["side_cleanup"]["registry_unregistered"], True)
+        self.assertEqual(response["side_cleanup"]["physical_close_ok"], True)
+        self.assertEqual(response["close_result"]["processor"], "side")
+        self.assertEqual(response["close_result"]["side_thread_id"], "thr-side-response")
+
     def test_rejection_supports_canonical_field_errors(self) -> None:
         payload = tool_results.rejection(
             tool="track",
