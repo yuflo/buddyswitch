@@ -75,11 +75,13 @@ buddyswitch_browser_usage() {
 Usage:
   buddyswitch-codex env browser status [--instance <actor-id>] [--port <port>] [--profile-dir <dir>]
   buddyswitch-codex env browser ensure --instance <actor-id> [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser release --instance <actor-id>
   buddyswitch-codex env browser help
 
 Commands:
   status  Check whether the browser cockpit has a usable ready page for MCP operations.
   ensure  Ensure the instance browser cockpit has a usable ready page and BuddySwitch browser MCPs are ready.
+  release Release the instance browser cockpit runtime after browser idle rechecks.
   help    Show this help message.
 
 Environment:
@@ -175,6 +177,37 @@ buddyswitch_browser_allocate_instance_port() {
 
   echo "No free browser cockpit port found in range 9222..9321." >&2
   return 1
+}
+
+buddyswitch_browser_prepare_instance_ensure_port() {
+  local actor_id="$1"
+  local recorded_port ownership
+
+  recorded_port="$(_buddyswitch_browser_instance_recorded_port "${actor_id}")"
+  if [[ -n "${recorded_port}" ]]; then
+    export BUDDYSWITCH_BROWSER_PORT="${recorded_port}"
+    export BUDDYSWITCH_BROWSER_PORT_EXPLICIT=1
+    ownership="$(buddyswitch_browser_instance_endpoint_ownership_state "${actor_id}")"
+    case "${ownership}" in
+      owned)
+        return 0
+        ;;
+      inactive)
+        if buddyswitch_browser_port_is_available "${recorded_port}"; then
+          return 0
+        fi
+        ;;
+      foreign|unknown)
+        ;;
+      *)
+        ;;
+    esac
+  fi
+
+  unset BUDDYSWITCH_BROWSER_PORT
+  unset BUDDYSWITCH_BROWSER_PORT_EXPLICIT
+  unset BUDDYSWITCH_BROWSER_DEFAULTS_INITIALIZED
+  buddyswitch_browser_allocate_instance_port
 }
 
 buddyswitch_browser_check_endpoint() {
@@ -291,51 +324,63 @@ buddyswitch_browser_disable_cockpit_mcp() {
 }
 
 buddyswitch_browser_mcp_browser_url() {
-  local server_name="$1"
-  local config_path section
-
-  config_path="$(buddyswitch_codex_config_path)"
-  if [[ ! -f "${config_path}" ]]; then
-    return 1
-  fi
-
-  section="[mcp_servers.${server_name}]"
-  awk -v section="${section}" '
-    $0 == section { in_section = 1; next }
-    /^\[/ && in_section { exit }
-    in_section {
-      if (match($0, /--browser-url=[^" ,\]]+/)) {
-        value = substr($0, RSTART, RLENGTH)
-        sub(/^--browser-url=/, "", value)
-        print value
-        exit
-      }
-    }
-  ' "${config_path}"
+  buddyswitch_browser_mcp_arg_value "$1" "--browser-url"
 }
 
 buddyswitch_browser_mcp_instance_root() {
+  buddyswitch_browser_mcp_arg_value "$1" "--instance-root"
+}
+
+buddyswitch_browser_mcp_upstream_command() {
+  buddyswitch_browser_mcp_arg_value "$1" "--upstream-command"
+}
+
+buddyswitch_browser_mcp_arg_value() {
   local server_name="$1"
-  local config_path section
+  local flag="$2"
+  local config_path
 
   config_path="$(buddyswitch_codex_config_path)"
   if [[ ! -f "${config_path}" ]]; then
     return 1
   fi
 
-  section="[mcp_servers.${server_name}]"
-  awk -v section="${section}" '
-    $0 == section { in_section = 1; next }
-    /^\[/ && in_section { exit }
-    in_section {
-      if (match($0, /--instance-root=[^" ,\]]+/)) {
-        value = substr($0, RSTART, RLENGTH)
-        sub(/^--instance-root=/, "", value)
-        print value
-        exit
-      }
-    }
-  ' "${config_path}"
+  python3 - "${config_path}" "${server_name}" "${flag}" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+server_name = sys.argv[2]
+flag = sys.argv[3]
+
+try:
+    payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+servers = payload.get("mcp_servers")
+if not isinstance(servers, dict):
+    raise SystemExit(1)
+server = servers.get(server_name)
+if not isinstance(server, dict):
+    raise SystemExit(1)
+args = server.get("args")
+if not isinstance(args, list):
+    raise SystemExit(1)
+
+for index, arg in enumerate(args):
+    if not isinstance(arg, str):
+        continue
+    if arg == flag and index + 1 < len(args) and isinstance(args[index + 1], str):
+        print(args[index + 1])
+        raise SystemExit(0)
+    prefix = f"{flag}="
+    if arg.startswith(prefix):
+        print(arg[len(prefix):])
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
 }
 
 buddyswitch_browser_mcp_uses_cockpit_proxy() {
@@ -357,18 +402,19 @@ buddyswitch_browser_mcp_uses_cockpit_proxy() {
 }
 
 buddyswitch_browser_ensure_cockpit_mcp() {
-  local server_name expected_browser_url expected_instance_root recorded_browser_url recorded_instance_root upstream_command
+  local server_name expected_instance_root recorded_browser_url recorded_instance_root recorded_upstream_command upstream_command
 
   server_name="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"
-  expected_browser_url="$(buddyswitch_browser_url)"
   expected_instance_root="$(buddyswitch_browser_instance_root)"
   upstream_command="npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}"
 
   if buddyswitch_browser_has_mcp_server "${server_name}"; then
     recorded_browser_url="$(buddyswitch_browser_mcp_browser_url "${server_name}" || true)"
     recorded_instance_root="$(buddyswitch_browser_mcp_instance_root "${server_name}" || true)"
-    if [[ "${recorded_browser_url}" == "${expected_browser_url}" ]] \
+    recorded_upstream_command="$(buddyswitch_browser_mcp_upstream_command "${server_name}" || true)"
+    if [[ -z "${recorded_browser_url}" ]] \
       && [[ "${recorded_instance_root}" == "${expected_instance_root}" ]] \
+      && [[ "${recorded_upstream_command}" == "${upstream_command}" ]] \
       && buddyswitch_browser_mcp_uses_cockpit_proxy "${server_name}"; then
       return 0
     fi
@@ -380,7 +426,6 @@ buddyswitch_browser_ensure_cockpit_mcp() {
     python3 \
     "${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" \
     --upstream-command "${upstream_command}" \
-    --browser-url="${expected_browser_url}" \
     --instance-root="${expected_instance_root}"
 }
 
@@ -706,6 +751,81 @@ print(capability)
 PY
 }
 
+buddyswitch_browser_requires_cockpit_for_active_role() {
+  local strict_mode active_role capability
+  strict_mode="${BUDDYSWITCH_BROWSER_ENSURE_STRICT:-0}"
+  if [[ "${strict_mode}" == "1" ]]; then
+    return 0
+  fi
+  if buddyswitch_browser_is_instance_mode; then
+    active_role="$(buddyswitch_browser_active_role || true)"
+    if [[ -n "${active_role}" ]]; then
+      capability="$(buddyswitch_browser_profile_capability "${active_role}" || true)"
+      if [[ "${capability}" == "available" ]]; then
+        return 1
+      fi
+    fi
+  fi
+  return 0
+}
+
+buddyswitch_browser_preflight_static() {
+  local upstream_command upstream_executable chrome_bin
+
+  if [[ ! -f "${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" ]]; then
+    echo "Browser cockpit proxy not found: ${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" >&2
+    return 1
+  fi
+
+  upstream_command="npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}"
+  upstream_executable="${upstream_command%% *}"
+  if [[ -z "${upstream_executable}" ]] || ! command -v "${upstream_executable}" >/dev/null 2>&1; then
+    echo "Browser cockpit upstream command not found: ${upstream_executable:-${upstream_command}}" >&2
+    return 1
+  fi
+
+  chrome_bin="$(buddyswitch_browser_find_chrome_bin)" || {
+    echo "Chrome binary not found. Set BUDDYSWITCH_BROWSER_CHROME_BIN or install Chrome." >&2
+    return 1
+  }
+  [[ -n "${chrome_bin}" ]]
+}
+
+buddyswitch_browser_register_cockpit_mcp() {
+  local require_browser=1
+  buddyswitch_browser_init_defaults
+  buddyswitch_ensure_shared_env
+
+  if ! buddyswitch_browser_requires_cockpit_for_active_role; then
+    require_browser=0
+  fi
+
+  if ! buddyswitch_browser_preflight_static; then
+    if [[ "${require_browser}" -eq 1 ]]; then
+      return 1
+    fi
+    if ! buddyswitch_browser_disable_cockpit_mcp; then
+      echo "Warning: browser cockpit MCP setup failed and stale cockpit MCP could not be removed; stopping optional-browser registration." >&2
+      return 1
+    fi
+    echo "Warning: browser cockpit unavailable for non-required role; continuing without browser cockpit MCP." >&2
+    return 0
+  fi
+
+  if buddyswitch_browser_ensure_cockpit_mcp; then
+    return 0
+  fi
+  if [[ "${require_browser}" -eq 1 ]]; then
+    return 1
+  fi
+  if ! buddyswitch_browser_disable_cockpit_mcp; then
+    echo "Warning: browser cockpit MCP setup failed and stale cockpit MCP could not be removed; stopping optional-browser registration." >&2
+    return 1
+  fi
+  echo "Warning: browser cockpit MCP setup failed for non-required role; continuing without browser cockpit MCP." >&2
+  return 0
+}
+
 buddyswitch_browser_bootstrap() {
   local strict_mode active_role capability require_browser
   buddyswitch_browser_init_defaults
@@ -773,6 +893,125 @@ buddyswitch_browser_instance_stop() {
   rm -f "${marker_file}"
 }
 
+_buddyswitch_browser_numeric_pid() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]] && [[ "${1:-0}" -gt 0 ]]
+}
+
+_buddyswitch_browser_current_pgid() {
+  ps -o pgid= -p "$$" 2>/dev/null | tr -d '[:space:]' || true
+}
+
+_buddyswitch_browser_wait_pid_gone() {
+  local pid="$1" attempt
+  for attempt in {1..20}; do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  return 1
+}
+
+_buddyswitch_browser_wait_pgid_gone() {
+  local pgid="$1" attempt
+  for attempt in {1..20}; do
+    if ! kill -0 -- "-${pgid}" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  return 1
+}
+
+_buddyswitch_browser_terminate_pid_value() {
+  local pid="$1"
+  _buddyswitch_browser_numeric_pid "${pid}" || return 0
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    return 0
+  fi
+  kill "${pid}" 2>/dev/null || true
+  if ! _buddyswitch_browser_wait_pid_gone "${pid}"; then
+    kill -9 "${pid}" 2>/dev/null || true
+    _buddyswitch_browser_wait_pid_gone "${pid}" || true
+  fi
+}
+
+_buddyswitch_browser_terminate_pgid_value() {
+  local pgid="$1" current_pgid
+  _buddyswitch_browser_numeric_pid "${pgid}" || return 1
+  current_pgid="$(_buddyswitch_browser_current_pgid)"
+  if [[ -n "${current_pgid}" && "${pgid}" == "${current_pgid}" ]]; then
+    return 1
+  fi
+  if ! kill -0 -- "-${pgid}" 2>/dev/null; then
+    return 0
+  fi
+  kill -TERM -- "-${pgid}" 2>/dev/null || true
+  if ! _buddyswitch_browser_wait_pgid_gone "${pgid}"; then
+    kill -KILL -- "-${pgid}" 2>/dev/null || true
+    _buddyswitch_browser_wait_pgid_gone "${pgid}" || true
+  fi
+}
+
+buddyswitch_browser_instance_stop_cockpit_upstream() {
+  local actor_id="$1"
+  local runtime_browser_dir pid_file pgid_file marker_pid marker_pgid
+
+  runtime_browser_dir="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/runtime/browser"
+  pid_file="${runtime_browser_dir}/cockpit-upstream.pid"
+  pgid_file="${runtime_browser_dir}/cockpit-upstream.pgid"
+
+  marker_pid="$(cat "${pid_file}" 2>/dev/null || true)"
+  marker_pgid="$(cat "${pgid_file}" 2>/dev/null || true)"
+
+  if ! _buddyswitch_browser_terminate_pgid_value "${marker_pgid}"; then
+    _buddyswitch_browser_terminate_pid_value "${marker_pid}"
+  fi
+
+  rm -f "${pid_file}" "${pgid_file}"
+}
+
+buddyswitch_browser_instance_clear_page_idle_state() {
+  local actor_id="$1"
+  local runtime_browser_dir="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/runtime/browser"
+  rm -f "${runtime_browser_dir}/page_idle.json" "${runtime_browser_dir}/page_idle.lock"
+}
+
+buddyswitch_browser_instance_release() {
+  local actor_id="$1"
+  local recorded_port ownership
+
+  if [[ -z "${actor_id}" ]]; then
+    echo "actor id is required" >&2
+    return 2
+  fi
+
+  recorded_port="$(_buddyswitch_browser_instance_recorded_port "${actor_id}")"
+  if [[ -z "${recorded_port}" ]]; then
+    echo "Browser cockpit release skipped: no browser port recorded for ${actor_id}"
+    return 0
+  fi
+
+  ownership="$(buddyswitch_browser_instance_endpoint_ownership_state "${actor_id}")"
+  case "${ownership}" in
+    owned|inactive)
+      buddyswitch_browser_instance_stop_cockpit_upstream "${actor_id}"
+      buddyswitch_browser_instance_stop "${actor_id}"
+      buddyswitch_browser_instance_clear_page_idle_state "${actor_id}"
+      buddyswitch_instance_clear_browser_port "${actor_id}"
+      echo "Browser cockpit released: ${actor_id}"
+      ;;
+    foreign|unknown)
+      buddyswitch_instance_clear_browser_port "${actor_id}"
+      echo "Browser cockpit release skipped: ${ownership} endpoint on ${recorded_port}; cleared stale browser_port for ${actor_id}"
+      ;;
+    *)
+      echo "Browser cockpit release failed: unknown ownership state '${ownership}'" >&2
+      return 1
+      ;;
+  esac
+}
+
 buddyswitch_browser_main() {
   local command arg
 
@@ -824,6 +1063,13 @@ buddyswitch_browser_main() {
       ;;
     ensure)
       BUDDYSWITCH_BROWSER_ENSURE_STRICT=1 buddyswitch_browser_bootstrap
+      ;;
+    release)
+      if ! buddyswitch_browser_is_instance_mode; then
+        echo "Browser release requires an instance-scoped actor." >&2
+        return 2
+      fi
+      buddyswitch_browser_instance_release "${BUDDYSWITCH_ACTOR_ID}"
       ;;
     help)
       buddyswitch_browser_usage

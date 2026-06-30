@@ -7,6 +7,7 @@ import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import os
 import sys
 import threading
 import unittest
@@ -151,6 +152,11 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
     def setUp(self) -> None:
         super().setUp()
+        ensure_noop = self._runtime_path("fake-search-browser-ensure-noop.py")
+        ensure_noop.write_text("raise SystemExit(0)\n", encoding="utf-8")
+        ensure_patch = patch.dict(os.environ, {"BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND": f"{sys.executable} {ensure_noop}"})
+        ensure_patch.start()
+        self.addCleanup(ensure_patch.stop)
         original_refresh = search_impl.browser_lifecycle.refresh_page_idle
 
         def default_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
@@ -650,6 +656,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self._assert_success_matches_declared_action_semantics("search.open_browser", browser_open)
         self.assertFalse(browser_open.get("mutates_product_state"), msg=browser_open)
         self.assertEqual(browser_open.get("page_opened"), True, msg=browser_open)
+        self.assertNotIn("browser_endpoint", json.dumps(browser_open, ensure_ascii=True))
+        self.assertNotIn("browser_url", json.dumps(browser_open, ensure_ascii=True))
 
         no_browser_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev-no-browser")
         browser_rejection = self._dispatch(
@@ -698,6 +706,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(browser_reuse.get("state_changed"), False, msg=browser_reuse)
         self.assertEqual(browser_reuse.get("durability"), "none", msg=browser_reuse)
         self.assertEqual(browser_reuse.get("mutates_product_state"), False, msg=browser_reuse)
+        self.assertNotIn("browser_endpoint", json.dumps(browser_reuse, ensure_ascii=True))
+        self.assertNotIn("browser_url", json.dumps(browser_reuse, ensure_ascii=True))
         self.assertEqual(cdp_state.get("rpc_requests", []), [], msg=cdp_state)
 
     def test_relation_success_responses_describe_object_mutations(self) -> None:

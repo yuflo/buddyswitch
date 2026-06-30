@@ -59,6 +59,7 @@ Usage:
   buddyswitch-codex env status [--json]
   buddyswitch-codex env browser status [--instance <actor-id>] [--port <port>] [--profile-dir <dir>]
   buddyswitch-codex env browser ensure --instance <actor-id> [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser release --instance <actor-id>
   buddyswitch-codex env reset [--yes]
 
   buddyswitch-codex help
@@ -272,7 +273,6 @@ start_locked_bootstrap() {
   buddyswitch_require_env_profile "${requested_role}" || return $?
   buddyswitch_require_role_agents_template "${requested_role}" || return $?
   buddyswitch_env_bind_instance "${requested_actor_id}" || return $?
-  buddyswitch_browser_allocate_instance_port
 
   buddyswitch_ensure_shared_env
   buddyswitch_workspace_prepare_execution_worktree
@@ -287,18 +287,17 @@ start_locked_bootstrap() {
     buddyswitch_runtime_broker_stop
     return 1
   fi
-  if ! buddyswitch_browser_bootstrap; then
+  if ! buddyswitch_browser_register_cockpit_mcp; then
     buddyswitch_runtime_broker_stop
     return 1
   fi
-  buddyswitch_instance_set_browser_port "${requested_actor_id}" "${BUDDYSWITCH_BROWSER_PORT}"
   app_server_json="$(buddyswitch_app_server_ensure)" || {
     buddyswitch_start_failure_cleanup \
       "${requested_actor_id}" \
       "app_server_ensure" \
       "App-server ensure failed." \
       "" \
-      "${BUDDYSWITCH_BROWSER_PORT:-}"
+      ""
     return 1
   }
   thread_json="$(buddyswitch_app_server_thread_start)" || {
@@ -307,7 +306,7 @@ start_locked_bootstrap() {
       "thread_start" \
       "${thread_json:-thread/start failed.}" \
       "" \
-      "${BUDDYSWITCH_BROWSER_PORT:-}"
+      ""
     return 1
   }
   thread_id="$(
@@ -331,7 +330,7 @@ PY
       "thread_start" \
       "App-server thread start did not return thread.id." \
       "" \
-      "${BUDDYSWITCH_BROWSER_PORT:-}"
+      ""
     return 1
   fi
   if ! buddyswitch_start_thread_bootstrap_with_retry "${thread_id}"; then
@@ -341,7 +340,7 @@ PY
       "thread_bootstrap" \
       "${BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR:-Thread bootstrap failed for ${thread_id}.}" \
       "${thread_id}" \
-      "${BUDDYSWITCH_BROWSER_PORT:-}"
+      ""
     return 1
   fi
   buddyswitch_instance_set_app_server \
@@ -1088,7 +1087,7 @@ PY
 }
 
 instance_resume_locked() {
-  local actor_id="${1:-}" role thread_id browser_port app_server_json
+  local actor_id="${1:-}" role thread_id app_server_json
   local browser_output="" resume_json="" resumed_thread_id
 
   buddyswitch_require_runtime_lock
@@ -1134,19 +1133,11 @@ PY
   export BUDDYSWITCH_ROLE_ID="${role}"
   buddyswitch_patch_codex_config
 
-  browser_port="$(buddyswitch_instance_record_field "${actor_id}" "browser_port" || true)"
-  if [[ -n "${browser_port}" ]]; then
-    export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
-  else
-    buddyswitch_browser_allocate_instance_port || return $?
-  fi
-
-  browser_output="$(buddyswitch_browser_bootstrap 2>&1)" || {
+  browser_output="$(buddyswitch_browser_register_cockpit_mcp 2>&1)" || {
     [[ -n "${browser_output}" ]] && echo "${browser_output}" >&2
     buddyswitch_runtime_broker_stop
     return 1
   }
-  buddyswitch_instance_set_browser_port "${actor_id}" "${BUDDYSWITCH_BROWSER_PORT}"
 
   app_server_json="$(buddyswitch_app_server_ensure)" || {
     buddyswitch_runtime_broker_stop
@@ -1549,22 +1540,46 @@ instance_delete_locked() {
 }
 
 browser_ensure_locked() {
-  local actor_id="${BUDDYSWITCH_BROWSER_INSTANCE_ID:-}" browser_port
+  local actor_id="${BUDDYSWITCH_BROWSER_INSTANCE_ID:-}" browser_port explicit_port_requested=0 arg
   buddyswitch_require_runtime_lock
+  for arg in "$@"; do
+    if [[ "${arg}" == "--port" ]]; then
+      explicit_port_requested=1
+      break
+    fi
+  done
   if [[ -n "${actor_id}" ]]; then
     buddyswitch_validate_actor_id "${actor_id}" || return $?
     buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
     buddyswitch_env_bind_instance "${actor_id}" || return $?
-    browser_port="$(buddyswitch_instance_record_field "${actor_id}" "browser_port" || true)"
-    if [[ -n "${browser_port}" ]]; then
-      export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
+    if [[ "${explicit_port_requested}" -eq 0 ]]; then
+      buddyswitch_browser_prepare_instance_ensure_port "${actor_id}" || return $?
+    else
+      browser_port="$(buddyswitch_instance_record_field "${actor_id}" "browser_port" || true)"
+      if [[ -n "${browser_port}" ]]; then
+        export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
+      fi
+      buddyswitch_browser_init_defaults
     fi
-    buddyswitch_browser_init_defaults
   fi
   buddyswitch_browser_main ensure "$@"
   if [[ -n "${actor_id}" ]]; then
     buddyswitch_instance_set_browser_port "${actor_id}" "${BUDDYSWITCH_BROWSER_PORT}"
   fi
+}
+
+browser_release_locked() {
+  local actor_id="${BUDDYSWITCH_BROWSER_INSTANCE_ID:-}"
+  buddyswitch_require_runtime_lock
+  if [[ -z "${actor_id}" ]]; then
+    echo "actor id is required" >&2
+    return 2
+  fi
+  buddyswitch_validate_actor_id "${actor_id}" || return $?
+  buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
+  buddyswitch_env_bind_instance "${actor_id}" || return $?
+  buddyswitch_browser_init_defaults
+  buddyswitch_browser_main release
 }
 
 validate_reset_request() {
@@ -1830,6 +1845,20 @@ env_browser_main() {
           buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-browser-ensure"
       fi
       ;;
+    release)
+      if [[ -z "${actor_id}" ]]; then
+        echo "env browser release requires --instance <actor-id>" >&2
+        env_usage >&2
+        return 2
+      fi
+      if [[ "${#browser_args[@]}" -gt 0 ]]; then
+        echo "env browser release does not accept browser options" >&2
+        env_usage >&2
+        return 2
+      fi
+      BUDDYSWITCH_BROWSER_INSTANCE_ID="${actor_id}" \
+        buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-browser-release"
+      ;;
     help|-h|--help|"")
       env_usage
       ;;
@@ -1847,6 +1876,7 @@ Usage:
   buddyswitch-codex env status [--json]
   buddyswitch-codex env browser status [--instance <actor-id>] [--port <port>] [--profile-dir <dir>]
   buddyswitch-codex env browser ensure --instance <actor-id> [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser release --instance <actor-id>
   buddyswitch-codex env reset [--yes]
 EOF
 }
@@ -1946,6 +1976,10 @@ main() {
     __locked-browser-ensure)
       shift || true
       browser_ensure_locked "$@"
+      ;;
+    __locked-browser-release)
+      shift || true
+      browser_release_locked "$@"
       ;;
     __locked-instance-set-inactive)
       shift || true

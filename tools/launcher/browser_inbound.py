@@ -15,12 +15,17 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import browser_page_expired_handler  # noqa: E402
+import browser_release_handler  # noqa: E402
 import notification_center  # noqa: E402
 
 
 BROWSER_PAGE_EXPIRED_EVENT_TYPE = "browser.page.expired"
 BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT = {
     "required_fields": ("target_id",),
+}
+BROWSER_COCKPIT_RELEASE_EVENT_TYPE = "browser.cockpit.release"
+BROWSER_COCKPIT_RELEASE_PAYLOAD_CONTRACT = {
+    "required_fields": ("reason",),
 }
 OWNER_MODULE = "browser_inbound"
 
@@ -34,8 +39,17 @@ def browser_page_expired_registration() -> notification_center.InboundSourceRegi
     )
 
 
+def browser_cockpit_release_registration() -> notification_center.InboundSourceRegistration:
+    return notification_center.InboundSourceRegistration(
+        event_type=BROWSER_COCKPIT_RELEASE_EVENT_TYPE,
+        payload_contract=BROWSER_COCKPIT_RELEASE_PAYLOAD_CONTRACT,
+        handler_factory=browser_release_handler.BrowserReleaseHandler,
+        owner_module=OWNER_MODULE,
+    )
+
+
 def inbound_registrations() -> list[notification_center.InboundSourceRegistration]:
-    return [browser_page_expired_registration()]
+    return [browser_page_expired_registration(), browser_cockpit_release_registration()]
 
 
 if __name__ == "__main__":

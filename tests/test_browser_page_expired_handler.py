@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 HANDLER_PATH = ROOT / "tools" / "launcher" / "browser_page_expired_handler.py"
+RELEASE_HANDLER_PATH = ROOT / "tools" / "launcher" / "browser_release_handler.py"
 TRIGGERS_PATH = ROOT / "tools" / "launcher" / "daemon_triggers.py"
 BROWSER_INBOUND_PATH = ROOT / "tools" / "launcher" / "browser_inbound.py"
 MODULE_COUNTER = count()
@@ -147,6 +148,9 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
                 return {"status": "closed", "target_id": target_id}
 
             self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = lambda **_kwargs: {
+                "schedule": {"schedule_id": "schedule-release"}
+            }
             handler = self.handler_module.BrowserPageExpiredHandler()
 
             result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
@@ -156,6 +160,44 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             self.assertEqual(state["targets"], {})
             self.assertEqual(state["page_id_to_target_id"], {})
             self.assertNotIn("current_target_id", state)
+
+    def test_final_tracked_page_schedules_release_after_close(self) -> None:
+        release_calls: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self.handler_module.browser_lifecycle._write_page_idle_state(
+                instance_root,
+                {
+                    "current_target_id": "target-idle-1",
+                    "current_page_updated_at": "2026-06-24T00:00:00Z",
+                    "targets": {
+                        "target-idle-1": {
+                            "target_id": "target-idle-1",
+                            "target_url": "https://example.com/old",
+                            "last_used_at": "2026-06-24T00:00:00Z",
+                        }
+                    },
+                    "page_id_to_target_id": {},
+                },
+            )
+            context = FakeContext()
+            context.instance_root = instance_root
+
+            def fake_close_page_target(_browser_url: str, target_id: str) -> dict[str, str]:
+                return {"status": "closed", "target_id": target_id}
+
+            def fake_schedule_browser_cockpit_release(**kwargs: object) -> dict[str, object]:
+                release_calls.append(kwargs)
+                return {"schedule": {"schedule_id": "schedule-release"}}
+
+            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = fake_schedule_browser_cockpit_release
+            handler = self.handler_module.BrowserPageExpiredHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(release_calls, [{"instance_root": instance_root, "reason": "page_idle_empty"}])
 
     def test_expiry_already_gone_forgets_idle_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -181,6 +223,9 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
                 return {"status": "already_gone", "target_id": target_id}
 
             self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = lambda **_kwargs: {
+                "schedule": {"schedule_id": "schedule-release"}
+            }
             handler = self.handler_module.BrowserPageExpiredHandler()
 
             result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
@@ -189,6 +234,49 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(state["targets"], {})
             self.assertEqual(state["page_id_to_target_id"], {})
+
+    def test_stale_endpoint_forgets_target_and_schedules_release(self) -> None:
+        release_calls: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self.handler_module.browser_lifecycle._write_page_idle_state(
+                instance_root,
+                {
+                    "current_target_id": "target-idle-1",
+                    "current_page_updated_at": "2026-06-24T00:00:00Z",
+                    "targets": {
+                        "target-idle-1": {
+                            "target_id": "target-idle-1",
+                            "target_url": "https://example.com/old",
+                            "last_used_at": "2026-06-24T00:00:00Z",
+                        }
+                    },
+                    "page_id_to_target_id": {},
+                },
+            )
+            context = FakeContext()
+            context.instance_root = instance_root
+
+            def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
+                raise self.handler_module.browser_lifecycle.BrowserLifecycleError(
+                    "failed to read Chrome DevTools /json/list: connection refused"
+                )
+
+            def fake_schedule_browser_cockpit_release(**kwargs: object) -> dict[str, object]:
+                release_calls.append(kwargs)
+                return {"schedule": {"schedule_id": "schedule-release"}}
+
+            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = fake_schedule_browser_cockpit_release
+            handler = self.handler_module.BrowserPageExpiredHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+            self.assertEqual(result.status, "handled")
+            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(state["targets"], {})
+            self.assertNotIn("current_target_id", state)
+            self.assertEqual(release_calls, [{"instance_root": instance_root, "reason": "page_idle_empty"}])
 
     def test_auto_close_browser_unavailable_is_handled_as_stale(self) -> None:
         def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
@@ -202,6 +290,44 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
 
         self.assertEqual(result.status, "handled")
+
+    def test_expiry_reads_fresh_browser_port_from_instance_json(self) -> None:
+        calls: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            instance_root.mkdir(parents=True)
+            instance_json = instance_root / "instance.json"
+            instance_json.write_text(
+                json.dumps(
+                    {
+                        "actor_id": "act-dev-browser",
+                        "role": "dev",
+                        "browser_port": 9555,
+                    },
+                    ensure_ascii=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            context = FakeContext()
+            context.instance_payload = {"browser_port": None}
+            context.instance_root = instance_root
+            context.instance_json = instance_json
+
+            def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
+                calls.append({"browser_url": browser_url, "target_id": target_id})
+                return {"status": "already_gone", "target_id": target_id}
+
+            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = lambda **_kwargs: {
+                "schedule": {"schedule_id": "schedule-release"}
+            }
+            handler = self.handler_module.BrowserPageExpiredHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9555", "target_id": "target-idle-1"}])
 
     def test_auto_close_close_failure_returns_failed_once(self) -> None:
         def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
@@ -315,6 +441,16 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
 
         self.assertEqual(inbound.BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT["required_fields"], ("target_id",))
 
+    def test_inbound_registers_browser_release_event(self) -> None:
+        inbound = load_module(BROWSER_INBOUND_PATH)
+
+        registrations = inbound.inbound_registrations()
+
+        by_type = {registration.event_type: registration for registration in registrations}
+        self.assertIn("browser.page.expired", by_type)
+        self.assertIn("browser.cockpit.release", by_type)
+        self.assertEqual(by_type["browser.cockpit.release"].payload_contract["required_fields"], ("reason",))
+
     def test_handler_rejects_wrong_target_actor(self) -> None:
         handler = self.handler_module.BrowserPageExpiredHandler()
 
@@ -324,6 +460,158 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             runtime=FakeRuntime(),
             trigger=self._trigger(target_actor_address={"role_id": "pm", "actor_id": "act-pm-browser"}),
         )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("wrong target actor", result.message)
+
+
+class BrowserReleaseHandlerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.release_module = load_module(RELEASE_HANDLER_PATH)
+        self.triggers = load_module(TRIGGERS_PATH)
+
+    def _trigger(self, *, reason: str = "page_idle_empty", target_actor_address: dict[str, str] | None = None) -> Any:
+        return self.triggers.DaemonTrigger(
+            source="scheduled_trigger",
+            type="browser.cockpit.release",
+            target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
+            origin_id="schedule-release",
+            correlation_id=None,
+            payload={"reason": reason},
+            source_context={"schedule_id": "schedule-release", "owner": "browser"},
+        )
+
+    def _context(self, instance_root: Path, *, browser_port: int | None = 9444) -> Any:
+        instance_root.mkdir(parents=True, exist_ok=True)
+        instance_json = instance_root / "instance.json"
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "actor_id": "act-dev-browser",
+                    "role": "dev",
+                    "instance_root": str(instance_root),
+                    "workspace_dir": str(instance_root / "workspace"),
+                    "thread_id": "thr-main",
+                    "browser_port": browser_port,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        context = FakeContext()
+        context.instance_root = instance_root
+        context.instance_json = instance_json
+        context.instance_payload = {"browser_port": None}
+        return context
+
+    def _write_page_idle(self, instance_root: Path, targets: dict[str, object]) -> None:
+        state_path = instance_root / "runtime" / "browser" / "page_idle.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            json.dumps({"targets": targets, "page_id_to_target_id": {}}, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _install_launcher_recorder(self, returncode: int = 0) -> list[list[str]]:
+        calls: list[list[str]] = []
+        if not hasattr(self.release_module, "subprocess"):
+            return calls
+
+        class Completed:
+            def __init__(self, code: int) -> None:
+                self.returncode = code
+                self.stdout = ""
+                self.stderr = "release failed" if code else ""
+
+        def fake_run(argv: list[str], **_kwargs: object) -> Completed:
+            calls.append([str(item) for item in argv])
+            return Completed(returncode)
+
+        self.release_module.subprocess.run = fake_run
+        return calls
+
+    def _install_cdp_targets(self, targets: list[dict[str, object]]) -> None:
+        if hasattr(self.release_module, "browser_lifecycle"):
+            self.release_module.browser_lifecycle.read_page_targets = lambda *_args, **_kwargs: targets
+
+    def test_release_noops_when_parent_turn_running(self) -> None:
+        calls = self._install_launcher_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([])
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(activity_status="running"), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [])
+
+    def test_release_noops_when_page_idle_targets_remain(self) -> None:
+        calls = self._install_launcher_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {"target-active": {"target_id": "target-active"}})
+            self._install_cdp_targets([])
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [])
+
+    def test_release_noops_when_browser_port_missing(self) -> None:
+        calls = self._install_launcher_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser", browser_port=None)
+            self._write_page_idle(context.instance_root, {})
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [])
+
+    def test_release_noops_when_cdp_has_real_user_page(self) -> None:
+        calls = self._install_launcher_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([{"id": "target-user", "type": "page", "url": "https://example.com/open"}])
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [])
+
+    def test_release_invokes_launcher_after_rechecks_pass(self) -> None:
+        calls = self._install_launcher_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([{"id": "target-blank", "type": "page", "url": "about:blank"}])
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][-5:], ["env", "browser", "release", "--instance", "act-dev-browser"])
+
+    def test_release_rejects_wrong_target_actor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(
+                context,
+                state=object(),
+                runtime=FakeRuntime(),
+                trigger=self._trigger(target_actor_address={"role_id": "pm", "actor_id": "act-pm-browser"}),
+            )
 
         self.assertEqual(result.status, "failed")
         self.assertIn("wrong target actor", result.message)

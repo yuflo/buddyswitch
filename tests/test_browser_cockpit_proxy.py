@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from itertools import count
 from pathlib import Path
@@ -175,9 +176,11 @@ from pathlib import Path
 
 
 calls_path = Path(os.environ["BUDDYSWITCH_TEST_PROXY_CALLS"])
+all_calls_path = Path(os.environ.get("BUDDYSWITCH_TEST_PROXY_ALL_CALLS", str(calls_path)))
 argv_path = Path(os.environ["BUDDYSWITCH_TEST_PROXY_ARGV"])
 calls_path.parent.mkdir(parents=True, exist_ok=True)
-argv_path.write_text(json.dumps(sys.argv[1:], ensure_ascii=True) + "\\n", encoding="utf-8")
+with argv_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(sys.argv[1:], ensure_ascii=True) + "\\n")
 
 TOOLS = [
     {
@@ -211,22 +214,62 @@ TOOLS = [
     },
 ]
 
+initialized = False
 
 for raw_line in sys.stdin:
     line = raw_line.strip()
     if not line:
         continue
     message = json.loads(line)
-    with calls_path.open("a", encoding="utf-8") as handle:
+    with all_calls_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(message, ensure_ascii=True) + "\\n")
 
     request_id = message.get("id")
     method = message.get("method")
+    if method == "tools/call":
+        with calls_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(message, ensure_ascii=True) + "\\n")
     if request_id is None:
+        if method == "notifications/initialized":
+            initialized = True
         continue
-    if method == "tools/list":
+    if method == "initialize":
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "fake-chrome-devtools-mcp", "version": "test"},
+            },
+        }
+    elif method == "tools/list":
         response = {"jsonrpc": "2.0", "id": request_id, "result": {"tools": TOOLS}}
     elif method == "tools/call":
+        marker_snapshot = os.environ.get("BUDDYSWITCH_TEST_PROXY_MARKER_SNAPSHOT")
+        instance_root = os.environ.get("BUDDYSWITCH_TEST_PROXY_INSTANCE_ROOT")
+        if marker_snapshot and instance_root:
+            pid_path = Path(instance_root) / "runtime" / "browser" / "cockpit-upstream.pid"
+            pgid_path = Path(instance_root) / "runtime" / "browser" / "cockpit-upstream.pgid"
+            for _ in range(50):
+                if pid_path.exists() and pgid_path.exists():
+                    break
+                time.sleep(0.02)
+            Path(marker_snapshot).write_text(
+                json.dumps(
+                    {
+                        "pid": pid_path.read_text(encoding="ascii").strip() if pid_path.exists() else None,
+                        "pgid": pgid_path.read_text(encoding="ascii").strip() if pgid_path.exists() else None,
+                    },
+                    ensure_ascii=True,
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+        once_path = os.environ.get("BUDDYSWITCH_TEST_PROXY_EXIT_WITHOUT_RESPONSE_ONCE")
+        if once_path and not Path(once_path).exists():
+            Path(once_path).write_text("1\\n", encoding="utf-8")
+            raise SystemExit(0)
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         if arguments.get("forceError"):
@@ -244,6 +287,8 @@ for raw_line in sys.stdin:
                 },
             }
             print(json.dumps(response, ensure_ascii=True), flush=True)
+            if os.environ.get("BUDDYSWITCH_TEST_PROXY_EXIT_AFTER_RESPONSE") == "1":
+                raise SystemExit(0)
             continue
         response_text = "called " + str(params.get("name"))
         if params.get("name") == "select_page":
@@ -263,6 +308,8 @@ for raw_line in sys.stdin:
     else:
         response = {"jsonrpc": "2.0", "id": request_id, "result": {}}
     print(json.dumps(response, ensure_ascii=True), flush=True)
+    if method == "tools/call" and os.environ.get("BUDDYSWITCH_TEST_PROXY_EXIT_AFTER_RESPONSE") == "1":
+        raise SystemExit(0)
 """,
         )
 
@@ -283,19 +330,77 @@ for raw_line in sys.stdin:
         instance_root: Path | None = None,
         extra_env: dict[str, str] | None = None,
         clear_instance_root_env: bool = False,
+        initial_browser_port_missing: bool = False,
+        message_delay_seconds: float = 0.0,
+        exit_without_response_once: bool = False,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
+        self._last_proxy_all_calls: list[dict[str, Any]] = []
+        self._last_proxy_marker_snapshot: dict[str, Any] = {}
         if browser_url is None:
             browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
+            if instance_root is None and not clear_instance_root_env:
+                instance_root = temp_root_path / "instances" / "act-dev-browser"
+            if instance_root is not None:
+                browser_port = urlparse(browser_url).port
+                if browser_port is None:
+                    raise AssertionError(f"test browser_url has no port: {browser_url}")
+                instance_root.mkdir(parents=True, exist_ok=True)
+                (instance_root / "instance.json").write_text(
+                    json.dumps(
+                        {
+                            "actor_id": "act-dev-browser",
+                            "role": "dev",
+                            "browser_port": None if initial_browser_port_missing else browser_port,
+                        },
+                        ensure_ascii=True,
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
             upstream = temp_root_path / "fake_upstream.py"
+            ensure_helper = temp_root_path / "fake_ensure.py"
             calls_path = temp_root_path / "calls.jsonl"
+            all_calls_path = temp_root_path / "all-calls.jsonl"
             argv_path = temp_root_path / "argv.jsonl"
+            ensure_calls_path = temp_root_path / "ensure-calls.jsonl"
+            marker_snapshot_path = temp_root_path / "marker-snapshot.json"
+            exit_without_response_once_path = temp_root_path / "exit-without-response.once"
             self._write_fake_upstream(upstream)
+            ensure_helper.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+instance_root = Path(sys.argv[1])
+calls_path = Path(os.environ["BUDDYSWITCH_TEST_PROXY_ENSURE_CALLS"])
+browser_port = int(os.environ["BUDDYSWITCH_TEST_PROXY_ENSURE_PORT"])
+calls_path.write_text(json.dumps({"instance_root": str(instance_root)}, ensure_ascii=True) + "\\n", encoding="utf-8")
+instance_json = instance_root / "instance.json"
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+payload["browser_port"] = browser_port
+instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
+            ensure_helper.chmod(ensure_helper.stat().st_mode | stat.S_IXUSR)
 
             env = os.environ.copy()
             env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
+            env["BUDDYSWITCH_TEST_PROXY_ALL_CALLS"] = str(all_calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
+            env["BUDDYSWITCH_TEST_PROXY_MARKER_SNAPSHOT"] = str(marker_snapshot_path)
+            env["BUDDYSWITCH_TEST_PROXY_ENSURE_CALLS"] = str(ensure_calls_path)
+            env["BUDDYSWITCH_TEST_PROXY_ENSURE_PORT"] = str(urlparse(browser_url).port)
+            env["BUDDYSWITCH_BROWSER_COCKPIT_ENSURE_COMMAND"] = f"{sys.executable} {ensure_helper}"
+            if instance_root is not None:
+                env["BUDDYSWITCH_TEST_PROXY_INSTANCE_ROOT"] = str(instance_root)
+            if exit_without_response_once:
+                env["BUDDYSWITCH_TEST_PROXY_EXIT_WITHOUT_RESPONSE_ONCE"] = str(exit_without_response_once_path)
             if clear_instance_root_env:
                 env.pop("BUDDYSWITCH_INSTANCE_ROOT", None)
             if extra_env:
@@ -305,7 +410,6 @@ for raw_line in sys.stdin:
                 str(PROXY),
                 "--upstream-command",
                 f"{sys.executable} {upstream}",
-                f"--browser-url={browser_url}",
             ]
             if instance_root is not None:
                 command.append(f"--instance-root={instance_root}")
@@ -321,7 +425,22 @@ for raw_line in sys.stdin:
             )
             input_text = "".join(json.dumps(message, ensure_ascii=True) + "\n" for message in messages)
             try:
-                stdout, stderr = proc.communicate(input=input_text, timeout=5)
+                if message_delay_seconds > 0:
+                    assert proc.stdin is not None
+                    assert proc.stdout is not None
+                    assert proc.stderr is not None
+                    for message in messages:
+                        proc.stdin.write(json.dumps(message, ensure_ascii=True) + "\n")
+                        proc.stdin.flush()
+                        time.sleep(message_delay_seconds)
+                    proc.stdin.close()
+                    stdout = proc.stdout.read()
+                    stderr = proc.stderr.read()
+                    proc.stdout.close()
+                    proc.stderr.close()
+                    proc.wait(timeout=5)
+                else:
+                    stdout, stderr = proc.communicate(input=input_text, timeout=5)
             except subprocess.TimeoutExpired:
                 os.killpg(proc.pid, signal.SIGKILL)
                 stdout, stderr = proc.communicate()
@@ -333,6 +452,16 @@ for raw_line in sys.stdin:
                 [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines() if line.strip()]
                 if calls_path.exists()
                 else []
+            )
+            self._last_proxy_all_calls = (
+                [json.loads(line) for line in all_calls_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                if all_calls_path.exists()
+                else []
+            )
+            self._last_proxy_marker_snapshot = (
+                json.loads(marker_snapshot_path.read_text(encoding="utf-8"))
+                if marker_snapshot_path.exists()
+                else {}
             )
             upstream_argv = json.loads(argv_path.read_text(encoding="utf-8").splitlines()[0]) if argv_path.exists() else []
             return responses, forwarded, upstream_argv, stderr
@@ -347,6 +476,101 @@ for raw_line in sys.stdin:
                 "arguments": arguments,
             },
         }
+
+    def test_initialize_and_tools_list_do_not_start_upstream_without_browser_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            upstream = temp_root_path / "fake_upstream.py"
+            calls_path = temp_root_path / "calls.jsonl"
+            argv_path = temp_root_path / "argv.jsonl"
+            instance_root = temp_root_path / "instance"
+            instance_root.mkdir()
+            self._write_fake_upstream(upstream)
+
+            env = os.environ.copy()
+            env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
+            env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
+            command = [
+                sys.executable,
+                str(PROXY),
+                "--upstream-command",
+                f"{sys.executable} {upstream}",
+                f"--instance-root={instance_root}",
+            ]
+            proc = subprocess.Popen(
+                command,
+                cwd=ROOT,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            messages = [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "test"}}},
+                {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            ]
+            input_text = "".join(json.dumps(message, ensure_ascii=True) + "\n" for message in messages)
+            try:
+                stdout, stderr = proc.communicate(input=input_text, timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                stdout, stderr = proc.communicate()
+                self.fail(f"proxy timed out\nstdout:\n{stdout}\nstderr:\n{stderr}")
+
+            self.assertEqual(proc.returncode, 0, msg=f"proxy failed\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            self.assertFalse(argv_path.exists(), "initialize/tools-list must not spawn upstream")
+            self.assertFalse(calls_path.exists(), "initialize/tools-list must not forward to upstream")
+            responses = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+            self.assertEqual([response.get("id") for response in responses], [1, 2])
+            self.assertEqual(responses[0]["result"]["serverInfo"]["name"], "chrome-devtools-cockpit")
+            tools = responses[1]["result"]["tools"]
+            by_name = {tool["name"]: tool for tool in tools}
+            self.assertIn("new_page", by_name)
+            self.assertIn("BuddySwitch", json.dumps(by_name["new_page"], ensure_ascii=True))
+
+    def test_invalid_json_before_upstream_does_not_start_upstream(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            upstream = temp_root_path / "fake_upstream.py"
+            calls_path = temp_root_path / "calls.jsonl"
+            argv_path = temp_root_path / "argv.jsonl"
+            instance_root = temp_root_path / "instance"
+            instance_root.mkdir()
+            self._write_fake_upstream(upstream)
+
+            env = os.environ.copy()
+            env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
+            env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
+            command = [
+                sys.executable,
+                str(PROXY),
+                "--upstream-command",
+                f"{sys.executable} {upstream}",
+                f"--instance-root={instance_root}",
+            ]
+            proc = subprocess.Popen(
+                command,
+                cwd=ROOT,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            try:
+                stdout, stderr = proc.communicate(input="{not-json}\n", timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                stdout, stderr = proc.communicate()
+                self.fail(f"proxy timed out\nstdout:\n{stdout}\nstderr:\n{stderr}")
+
+            self.assertEqual(proc.returncode, 0, msg=f"proxy failed\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            self.assertEqual(stdout, "")
+            self.assertFalse(argv_path.exists(), "invalid JSON before a tool call must not spawn upstream")
 
     def _start_mailbox(self, instance_root: Path, *, now: str = "2026-06-24T00:00:00Z") -> tuple[Any, Any, threading.Thread]:
         daemon_core = load_module(DAEMON_CORE_PATH)
@@ -387,6 +611,95 @@ for raw_line in sys.stdin:
         arguments = forwarded[0]["params"]["arguments"]
         self.assertEqual(arguments["url"], "https://example.com")
         self.assertIs(arguments["background"], True)
+
+    def test_first_tools_call_ensures_browser_and_starts_upstream(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            responses, forwarded, upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                initial_browser_port_missing=True,
+            )
+            instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(responses[0]["id"], 1)
+        self.assertEqual(len(forwarded), 1)
+        arguments = forwarded[0]["params"]["arguments"]
+        self.assertEqual(arguments["url"], "https://example.com/new")
+        self.assertIs(arguments["background"], True)
+        self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+        self.assertEqual(instance_payload["browser_port"], urlparse(browser_url).port)
+        self.assertEqual(
+            [message.get("method") for message in self._last_proxy_all_calls],
+            ["initialize", "notifications/initialized", "tools/call"],
+        )
+        self.assertNotEqual(self._last_proxy_all_calls[0].get("id"), responses[0].get("id"))
+        self.assertTrue(self._last_proxy_marker_snapshot.get("pid"), msg=self._last_proxy_marker_snapshot)
+        self.assertTrue(self._last_proxy_marker_snapshot.get("pgid"), msg=self._last_proxy_marker_snapshot)
+        self.assertFalse((instance_root / "runtime" / "browser" / "cockpit-upstream.pid").exists())
+        self.assertFalse((instance_root / "runtime" / "browser" / "cockpit-upstream.pgid").exists())
+
+    def test_upstream_exit_does_not_stop_proxy_and_next_call_restarts(self) -> None:
+        messages = [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_pages", "arguments": {}},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "close_page", "arguments": {"pageId": 1}},
+            },
+        ]
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            messages,
+            extra_env={"BUDDYSWITCH_TEST_PROXY_EXIT_AFTER_RESPONSE": "1"},
+            message_delay_seconds=0.2,
+        )
+
+        self.assertEqual([response.get("id") for response in responses], [1, 2])
+        self.assertEqual(
+            [item["params"]["name"] for item in forwarded if item.get("method") == "tools/call"],
+            ["list_pages", "close_page"],
+        )
+
+    def test_upstream_exit_during_request_returns_error_and_next_call_restarts(self) -> None:
+        messages = [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_pages", "arguments": {}},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "close_page", "arguments": {"pageId": 1}},
+            },
+        ]
+
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            messages,
+            exit_without_response_once=True,
+            message_delay_seconds=0.2,
+        )
+
+        self.assertEqual([response.get("id") for response in responses], [1, 2])
+        self.assertTrue(responses[0]["result"].get("isError"), msg=responses[0])
+        self.assertIn("exited", responses[0]["result"]["content"][0]["text"])
+        self.assertFalse(responses[1]["result"].get("isError"), msg=responses[1])
+        self.assertEqual(
+            [item["params"]["name"] for item in forwarded if item.get("method") == "tools/call"],
+            ["list_pages", "close_page"],
+        )
 
     def test_new_page_below_hint_threshold_forwards_without_page_hint(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(3)})
@@ -902,7 +1215,7 @@ for raw_line in sys.stdin:
             [{"jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": {}}]
         )
 
-        self.assertEqual(forwarded[0]["method"], "tools/list")
+        self.assertEqual(forwarded, [])
         tools = responses[0]["result"]["tools"]
         by_name = {tool["name"]: tool for tool in tools}
         self.assertIn("BuddySwitch", json.dumps(by_name["new_page"], ensure_ascii=True))

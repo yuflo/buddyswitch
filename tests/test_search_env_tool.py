@@ -7,11 +7,13 @@ import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import os
 import subprocess
 import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -189,6 +191,11 @@ def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
 class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_noop = self._runtime_path("fake-search-browser-ensure-noop.py")
+        ensure_noop.write_text("raise SystemExit(0)\n", encoding="utf-8")
+        ensure_patch = patch.dict(os.environ, {"BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND": f"{sys.executable} {ensure_noop}"})
+        ensure_patch.start()
+        self.addCleanup(ensure_patch.stop)
         original_refresh = search_impl.browser_lifecycle.refresh_page_idle
 
         def default_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
@@ -286,6 +293,11 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 return
         self.fail(f"missing next action option {expected_native}: {response}")
 
+    def _assert_no_browser_endpoint_leak(self, response: dict[str, object]) -> None:
+        dumped = json.dumps(response, ensure_ascii=True)
+        self.assertNotIn("browser_endpoint", dumped, msg=response)
+        self.assertNotIn("browser_url", dumped, msg=response)
+
     def test_search_cli_help_exposes_status_request_and_open_browser(self) -> None:
         resource_help = subprocess.run(
             ["python3", "scripts/env/client.py", "search", "--help"],
@@ -359,7 +371,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(backend_status, dict, msg=response)
         assert isinstance(backend_status, dict)
         self.assertEqual(backend_status["browser"]["available"], True)
-        self.assertEqual(backend_status["browser"]["browser_url"], "http://127.0.0.1:9222")
+        self.assertNotIn("browser_url", backend_status["browser"])
         self.assertEqual(backend_status["search_api"]["available"], False)
         self.assertEqual(backend_status["search_api"]["permission"], "user-approved-only")
         self.assertEqual(
@@ -403,7 +415,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("engine"), "reddit")
         self.assertEqual(response.get("query"), "creator analytics pain")
         self.assertEqual(response.get("target_url"), "https://www.reddit.com/search/?q=creator+analytics+pain")
-        self.assertEqual(response.get("browser_endpoint"), "http://127.0.0.1:9222")
+        self._assert_no_browser_endpoint_leak(response)
         self.assertEqual(response.get("required_cockpit_tool"), "chrome-devtools-cockpit")
         self.assertEqual(response.get("page_opened"), False)
         self.assertNotIn("tool_evidence", response)
@@ -828,17 +840,79 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(params["url"], expected_target_url)
                 self.assertIs(params["background"], True)
 
-    def test_search_open_browser_returns_recovery_feedback_when_browser_missing(self) -> None:
+    def test_search_open_browser_ensures_browser_when_port_missing(self) -> None:
+        state: dict[str, object] = {"requests": []}
+        _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=None)
+        ensure_script = self._runtime_path("fake-search-browser-ensure.py")
+        ensure_calls = self._runtime_path("fake-search-browser-ensure.jsonl")
+        ensure_script.write_text(
+            """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
 
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
+instance_json = Path(os.environ["BUDDYSWITCH_TEST_SEARCH_INSTANCE_JSON"])
+calls_path = Path(os.environ["BUDDYSWITCH_TEST_SEARCH_ENSURE_CALLS"])
+browser_port = int(os.environ["BUDDYSWITCH_TEST_SEARCH_BROWSER_PORT"])
+calls_path.write_text(json.dumps({"instance_json": str(instance_json)}, ensure_ascii=True) + "\\n", encoding="utf-8")
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+payload["browser_port"] = browser_port
+instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")
+""",
+            encoding="utf-8",
         )
 
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND": f"{sys.executable} {ensure_script}",
+                "BUDDYSWITCH_TEST_SEARCH_INSTANCE_JSON": str(instance_json),
+                "BUDDYSWITCH_TEST_SEARCH_ENSURE_CALLS": str(ensure_calls),
+                "BUDDYSWITCH_TEST_SEARCH_BROWSER_PORT": str(port),
+            },
+        ):
+            response = self._dispatch(
+                action="open_browser",
+                args={"query": "creator analytics pain", "engine": "google"},
+                instance_json=instance_json,
+            )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("page_opened"), True, msg=response)
+        self.assertTrue(ensure_calls.exists())
+        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(instance_payload["browser_port"], port)
+        self._assert_no_browser_endpoint_leak(response)
+        rpc_requests = state.get("rpc_requests")
+        self.assertIsInstance(rpc_requests, list, msg=state)
+        assert isinstance(rpc_requests, list)
+        self.assertEqual(rpc_requests[0]["method"], "Target.createTarget")
+
+    def test_search_open_browser_reports_ensure_failure_without_endpoint_leak(self) -> None:
+        instance_json = self._instance_json(browser_port=None)
+        ensure_script = self._runtime_path("fake-search-browser-ensure-fail.py")
+        ensure_script.write_text(
+            """#!/usr/bin/env python3
+import sys
+print("simulated browser ensure failure", file=sys.stderr)
+raise SystemExit(7)
+""",
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND": f"{sys.executable} {ensure_script}"}):
+            response = self._dispatch(
+                action="open_browser",
+                args={"query": "creator analytics pain", "engine": "google"},
+                instance_json=instance_json,
+            )
+
         self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_UNAVAILABLE")
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_ENSURE_FAILED")
+        self.assertEqual(response.get("state_changed"), False, msg=response)
+        self.assertEqual(response.get("page_opened"), False, msg=response)
+        self._assert_no_browser_endpoint_leak(response)
         self._assert_no_env_cli_hint(response)
         self._assert_next_option(response, tool="search", action="status")
 
@@ -856,7 +930,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_OPEN_FAILED")
         self.assertEqual(response.get("target_url"), "https://www.google.com/search?q=creator+analytics+pain")
-        self.assertEqual(response.get("browser_endpoint"), f"http://127.0.0.1:{port}")
+        self._assert_no_browser_endpoint_leak(response)
         self._assert_no_env_cli_hint(response)
         self._assert_next_option(response, tool="search", action="status")
 
@@ -919,7 +993,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_browser_and_search_dependency_rejections_include_semantic_impact(self) -> None:
         self.test_search_request_search_api_returns_market_approval_required()
         self.test_search_request_search_api_returns_non_market_provider_unavailable()
-        self.test_search_open_browser_returns_recovery_feedback_when_browser_missing()
+        self.test_search_open_browser_reports_ensure_failure_without_endpoint_leak()
         self.test_search_open_browser_reports_cdp_open_failure_with_target_url()
 
 
