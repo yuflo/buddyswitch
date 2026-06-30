@@ -27,7 +27,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import web_im_identity
 import im_http_router
 import imessage_channel
-from env.domain import task_management, track_read
+from env.domain import task_sys, track_read
 from env.repos import runtime_files
 from env.tool_runtime import daemon_client
 import external_im_session
@@ -152,8 +152,6 @@ def map_command_failure(command_label: str, result: CommandResult) -> HttpError:
     if result.returncode == 2:
         return HttpError(status=400, code="INVALID_REQUEST", message=message)
     if result.returncode == 3:
-        return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=message)
-    if result.returncode == 1 and result.stderr.startswith("Instance input blocked:"):
         return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=message)
     return HttpError(status=502, code="COMMAND_FAILED", message=message)
 
@@ -355,8 +353,6 @@ class WebManagementService:
             return 200, {"ok": True, "instance": self._get_instance_status(actor_id)}
         if method == "POST" and action == "clear":
             return 200, self._clear(actor_id)
-        if method == "POST" and action == "input":
-            return 200, self._send_input(actor_id, body)
         if method == "POST" and action == "side":
             return 200, self._side(actor_id, body)
         if method == "POST" and action == "side-close":
@@ -379,8 +375,6 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/status")], "status"
         if path.startswith(status_prefix) and path.endswith("/clear"):
             return path[len(status_prefix) : -len("/clear")], "clear"
-        if path.startswith(status_prefix) and path.endswith("/input"):
-            return path[len(status_prefix) : -len("/input")], "input"
         if path.startswith(status_prefix) and path.endswith("/side/close"):
             return path[len(status_prefix) : -len("/side/close")], "side-close"
         if path.startswith(status_prefix) and path.endswith("/side"):
@@ -479,13 +473,21 @@ class WebManagementService:
         for event in result.get("events") if isinstance(result.get("events"), list) else []:
             if not isinstance(event, dict):
                 continue
-            if not _im_event_targets_identity(event, target_identity_id):
-                continue
             message_id = event.get("message_id")
             if not isinstance(message_id, str) or not message_id:
                 continue
             fetched = self._im_session.get_message(connection=connection, message_id=message_id)
-            if fetched.get("ok") is True and isinstance(fetched.get("message"), dict):
+            if fetched.get("ok") is not True or not isinstance(fetched.get("message"), dict):
+                continue
+            acked = self._im_session.ack_event(connection=connection, event_id=str(event.get("event_id") or ""))
+            if acked.get("ok") is not True:
+                error = acked.get("error") if isinstance(acked.get("error"), dict) else {}
+                raise HttpError(
+                    status=502,
+                    code="IM_EVENT_ACK_FAILED",
+                    message=str(error.get("message") or "Web IM event acknowledgement failed."),
+                )
+            if _im_event_targets_identity(event, target_identity_id):
                 events.append(event)
                 messages.append(fetched["message"])
         payload = dict(result)
@@ -543,30 +545,6 @@ class WebManagementService:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for role {role}.")
         return {"ok": True, "actor_id": actor_id, "instance": self._get_instance_status(actor_id)}
 
-    def _send_input(self, actor_id: str, body: bytes) -> dict[str, Any]:
-        payload = self._parse_json_body(body)
-        text = payload.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._send_input_under_lock(actor_id, text),
-        )
-
-    def _send_input_under_lock(self, actor_id: str, text: str) -> dict[str, Any]:
-        parsed = self._run_input_command(actor_id, text, timeout_seconds=60)
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
-        action = parsed.get("action")
-        turn_id = parsed.get("turn_id")
-        expected_turn_id = parsed.get("expected_turn_id")
-        if isinstance(action, str):
-            payload["action"] = action
-        if isinstance(turn_id, str):
-            payload["turn_id"] = turn_id
-        if isinstance(expected_turn_id, str):
-            payload["expected_turn_id"] = expected_turn_id
-        return payload
-
     def _clear(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
             f"instance:{actor_id}",
@@ -587,16 +565,6 @@ class WebManagementService:
         if isinstance(thread_id, str):
             payload["thread_id"] = thread_id
         return payload
-
-    def _run_input_command(self, actor_id: str, text: str, *, timeout_seconds: float) -> dict[str, Any]:
-        result = self._run_command(
-            ["instance", "input", actor_id, "--text", text, "--json"],
-            timeout_seconds=timeout_seconds,
-        )
-        return load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance input for {actor_id}.",
-        )
 
     def _run_side_command(
         self,
@@ -948,16 +916,24 @@ class WebManagementService:
         workspace_dir = instance_payload.get("workspace_dir")
         if "instance_root" not in instance_payload and isinstance(workspace_dir, str) and workspace_dir.strip():
             instance_payload["instance_root"] = str(Path(workspace_dir).expanduser().resolve(strict=False).parent)
-        task = task_management.current_view(
-            active_role=role,
-            active_actor=active_actor,
-            instance_json=None,
-            instance_payload=instance_payload,
-        )
+        del instance_payload
+        task_sys_tasks = task_sys.active_tasks_for_actor(active_actor)
         return {
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
-            "task": task,
+            "task_sys": {
+                "active_count": len(task_sys_tasks),
+                "active_tasks": [
+                    {
+                        "task_id": row.get("id"),
+                        "source_type": row.get("source_type"),
+                        "status": row.get("status"),
+                        "active_processor": row.get("active_processor"),
+                        "updated_at": row.get("updated_at"),
+                    }
+                    for row in task_sys_tasks[:10]
+                ],
+            },
             "tracks": {
                 "items": track_read.list_track_summaries(owner_actor=active_actor),
                 "source": "web-track-summary",

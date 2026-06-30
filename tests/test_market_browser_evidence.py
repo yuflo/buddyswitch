@@ -224,10 +224,10 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         task_id = "task-market-evidence"
         actual_actor_id = self._runtime_actor_id(role="market", label=actor_id)
-        self._write_taskbox_task(
+        self._write_task_sys_task(
             actor_id=actual_actor_id,
             role="market",
-            task_id=task_id,
+            task_slug=task_id,
             title="Market evidence task",
             track_id=track["id"],
         )

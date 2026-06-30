@@ -11,6 +11,8 @@ start ./buddyswitch-codex web
   -> Apple ID A sends /actors
   -> Apple ID A selects an actor by number
   -> Apple ID A sends a normal message
+  -> Apple ID A immediately sends /actors before the actor reply arrives
+  -> the actor list returns promptly
   -> the actor reply returns to the same iMessage chat with the channel prefix
   -> Apple ID B repeats the flow with independent connection and actor selection
 ```
@@ -46,9 +48,12 @@ Manual iMessage flow:
 3. Reply with one number.
 4. Confirm the reply is the selected actor id.
 5. Send one normal message.
-6. Confirm the reply arrives in the same chat and starts with [Message From act-...].
-7. Repeat 1-6 from Apple ID B.
-8. Confirm Apple ID B has an independent actor selection and reply route.
+6. Immediately send /actors before the actor reply arrives.
+7. Confirm the actor list returns promptly.
+8. Confirm the original actor reply still arrives once in the same chat.
+9. Confirm the actor reply starts with [Message From act-...].
+10. Repeat 1-9 from Apple ID B.
+11. Confirm Apple ID B has an independent actor selection and reply route.
 ```
 
 ## Evidence To Record
@@ -59,6 +64,7 @@ Manual iMessage flow:
 - Numbered actor list received by each sender.
 - Selected actor id for each sender.
 - The normal message id created by BuddySwitch if visible in logs.
+- The prompt `/actors` reply received after the normal message and before or independently of the actor reply.
 - The outbound prefixed reply text, with sensitive content redacted.
 - Whether Apple ID A and B stayed isolated.
 
@@ -69,6 +75,7 @@ Manual iMessage flow:
 - `/actors` gets no reply: iMessage worker lifecycle, `imsg watch`, or `/api/im/actors`.
 - Number selection fails: channel pending choice state.
 - Normal message does not reach actor: channel active actor state or `/api/im/messages`.
+- `/actors` after a normal message is delayed: inbound worker and outbound poll loop separation.
 - Actor reply is not returned: per-sender event polling, route storage, or `imsg send`.
 - `imsg send` reports command success but Messages.app shows a failed outbound: local Messages.app send state; inspect the `message` row for `error`, `is_sent`, `is_finished`, and delivery fields.
 - Reply lacks prefix: channel outbound projection.

@@ -78,10 +78,10 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             outcome="Runless router outcome",
             now={"next": "seed", "blocker": None},
         )
-        self._write_taskbox_task(
+        self._write_task_sys_task(
             actor_id="act-pm-runless",
             role="pm",
-            task_id="task-pm-router",
+            task_slug="task-pm-router",
             title="Prepare design intake",
             track_id=track["id"],
         )

@@ -196,6 +196,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         actor_address = self._actor_address()
         session = self._session([{"actor_address": actor_address, "status": "online"}])
         _key, connection, participant = self._connection(session)
+        initial_cursor = connection["last_event_id"]
         sent = session.send_message(
             connection=connection,
             target_identity_id=actor_address["actor_id"],
@@ -203,6 +204,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             reply_to=None,
         )
         self.assertTrue(sent.get("ok"), msg=sent)
+        self.assertEqual(connection["last_event_id"], initial_cursor)
         actor_reply = message_service.send_im_message(
             sender_participant={"kind": "actor", "actor_address": actor_address},
             to=participant,
@@ -214,9 +216,13 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         first = session.read_events(connection=connection, limit=50, wait_ms=0)
         second = session.read_events(connection=connection, limit=50, wait_ms=0)
+        ack = session.ack_event(connection=connection, event_id=actor_reply["event_id"])
+        third = session.read_events(connection=connection, limit=50, wait_ms=0)
 
         self.assertEqual([event["message_id"] for event in first["events"]], [actor_reply["message"]["id"]])
-        self.assertEqual(second["events"], [])
+        self.assertEqual([event["message_id"] for event in second["events"]], [actor_reply["message"]["id"]])
+        self.assertTrue(ack.get("ok"), msg=ack)
+        self.assertEqual(third["events"], [])
 
 
 if __name__ == "__main__":

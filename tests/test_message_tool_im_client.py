@@ -94,13 +94,9 @@ class _RealImContext(dict[str, Any]):
         self.daemon = daemon
 
 
-class _FailingParentDaemon:
+class _RecordingParentDaemon:
     def __init__(self) -> None:
         self.parent_requests: list[dict[str, Any]] = []
-
-    def request_parent_message_handling(self, *, message_id: str, prompt: str) -> dict[str, Any]:
-        self.parent_requests.append({"message_id": message_id, "prompt": prompt})
-        raise RuntimeError("parent submit unavailable")
 
 
 class _RecordingWakeDaemon:
@@ -191,7 +187,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(persisted["owner_identity_id"], actor.actor_id)
         self.assertEqual(persisted["disposition"], "replied")
 
-    def test_mark_needs_parent_submit_failure_leaves_im_state_unseen(self) -> None:
+    def test_mark_needs_parent_is_rejected_without_parent_submit(self) -> None:
         active_actor = ActorAddress(
             role_id="dev",
             actor_id=self._runtime_actor_id(role="dev", label="act-dev-im-parent-fail"),
@@ -207,7 +203,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         message_id = incoming["message"]["id"]
-        daemon = _FailingParentDaemon()
+        daemon = _RecordingParentDaemon()
         client = im_client_module.ActorImClient(_RealImContext(actor_address=active_actor, daemon=daemon))
 
         response = client.mark(
@@ -219,13 +215,9 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PARENT_REQUIRED_SUBMIT_FAILED")
-        self.assertEqual(len(daemon.parent_requests), 1)
-        self.assertEqual(daemon.parent_requests[0]["message_id"], message_id)
-        self.assertIn(message_id, daemon.parent_requests[0]["prompt"])
-        self.assertIs(response.get("parent_prompt_submitted"), False, msg=response)
-        self.assertEqual(response.get("original_previous_disposition"), "unseen")
-        self.assertEqual(response.get("original_final_disposition"), "unseen")
+        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+        self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
+        self.assertEqual(daemon.parent_requests, [])
 
         state_path = (
             self.runtime_state_root

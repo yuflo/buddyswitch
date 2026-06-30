@@ -135,46 +135,7 @@ def instance_root_from_context(
             return Path(raw_root.strip()).expanduser().resolve(strict=False)
     if instance_json is not None:
         return Path(instance_json).expanduser().resolve(strict=False).parent
-    raise ValueError("instance context is required for taskbox access")
-
-
-def taskbox_root(
-    *,
-    active_role: str,
-    instance_json: Path | str | None,
-    instance_payload: Mapping[str, object] | None,
-) -> Path:
-    require_id(active_role, "role")
-    return instance_root_from_context(
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    ) / "taskbox" / active_role
-
-
-def taskbox_tasks_dir(
-    *,
-    active_role: str,
-    instance_json: Path | str | None,
-    instance_payload: Mapping[str, object] | None,
-) -> Path:
-    return taskbox_root(
-        active_role=active_role,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    ) / "tasks"
-
-
-def taskbox_history_file(
-    *,
-    active_role: str,
-    instance_json: Path | str | None,
-    instance_payload: Mapping[str, object] | None,
-) -> Path:
-    return taskbox_root(
-        active_role=active_role,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    ) / "history.md"
+    raise ValueError("instance context is required for instance-root access")
 
 
 def rel(path: Path) -> str:

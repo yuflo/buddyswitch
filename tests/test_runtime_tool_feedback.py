@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import env_legacy_store as env_store  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -78,37 +79,14 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
     def _ensure_active_task(self, *, role: str, actor_id: str) -> None:
-        taskbox = self.instance_json.parent / "taskbox" / role
-        tasks_dir = taskbox / "tasks"
-        tasks_dir.mkdir(parents=True, exist_ok=True)
         task_id = f"task-0001-{role}-feedback"
-        (tasks_dir / f"{task_id}.json").write_text(
-            json.dumps(
-                {
-                    "id": task_id,
-                    "owner_actor": {"actor_id": actor_id, "role_id": role},
-                    "title": "Feedback contract active task",
-                    "summary": "Active task for handler-level feedback contract tests.",
-                    "body": "Active task for handler-level feedback contract tests.",
-                    "status": "active",
-                    "priority": "normal",
-                    "origin": {"type": "manual"},
-                    "track_id": None,
-                    "refs": [],
-                    "progress_summary": "Active task for handler-level feedback contract tests.",
-                    "created_at": "2026-06-07T10:00:00+08:00",
-                    "updated_at": "2026-06-07T10:00:00+08:00",
-                    "closed_at": None,
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        (taskbox / "history.md").write_text(
-            f"- 2026-06-07T10:00:00+08:00 task.selected {task_id} reason=\"seed feedback active task\"\n",
-            encoding="utf-8",
+        task_sys.ingest(
+            {
+                "source": {"type": "test.feedback", "ref": {"id": task_id}},
+                "actor_target": {"actor_id": actor_id, "role_id": role},
+                "context": {"fixture": "runtime feedback"},
+                "initial_processor": "checkpoint",
+            }
         )
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
@@ -382,7 +360,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         payload_cases = [
             self._dispatch(
                 role="pm",
-                tool="task",
+                tool="task_sys",
                 action="create",
                 args={"summary": "missing title"},
             ),
@@ -422,10 +400,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             outcome="scope",
             now={"next": "seed", "blocker": None},
         )
-        self._write_taskbox_task(
+        self._write_task_sys_task(
             actor_id="act-feedback-runless",
             role="pm",
-            task_id="task-pm-feedback-foreign",
+            task_slug="task-pm-feedback-foreign",
             title="PM foreign task",
             summary="scope",
             track_id=None,

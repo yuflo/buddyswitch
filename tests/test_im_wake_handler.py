@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import im_wake_handler  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
 
@@ -33,22 +36,42 @@ class _Trigger:
 
 
 class _Runtime:
-    def __init__(self, status: str) -> None:
-        self.status = status
-        self.parent_prompts: list[dict[str, Any]] = []
-        self.side_prompts: list[dict[str, Any]] = []
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
 
     def parent_activity(self) -> dict[str, str]:
-        return {"status": self.status}
+        self.calls.append({"method": "parent_activity"})
+        raise AssertionError("IM wake handler must not inspect parent activity")
 
     def submit_parent_prompt(self, prompt: str, **kwargs: Any) -> None:
-        self.parent_prompts.append({"prompt": prompt, **kwargs})
+        self.calls.append({"method": "submit_parent_prompt", "prompt": prompt, **kwargs})
+        raise AssertionError("IM wake handler must not submit parent prompts")
 
     def submit_side_triage_prompt(self, prompt: str, **kwargs: Any) -> None:
-        self.side_prompts.append({"prompt": prompt, **kwargs})
+        self.calls.append({"method": "submit_side_triage_prompt", "prompt": prompt, **kwargs})
+        raise AssertionError("IM wake handler must not submit side prompts")
 
 
 class ImWakeHandlerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.runtime_root = Path(self._tmp_dir.name)
+        runtime_files.set_runtime_root_override(self.runtime_root)
+        self.executed_instructions: list[dict[str, Any]] = []
+        original_execute = im_wake_handler.task_sys_runtime.execute_instruction
+
+        def fake_execute(_context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
+            self.executed_instructions.append(instruction)
+            return {"action": instruction["type"], "task_id": instruction["task_id"]}
+
+        self.addCleanup(setattr, im_wake_handler.task_sys_runtime, "execute_instruction", original_execute)
+        im_wake_handler.task_sys_runtime.execute_instruction = fake_execute
+
+    def tearDown(self) -> None:
+        runtime_files.reset_runtime_root_override()
+        self._tmp_dir.cleanup()
+        super().tearDown()
+
     def _actor(self) -> ActorAddress:
         return ActorAddress(role_id="market", actor_id="act-market-test")
 
@@ -64,42 +87,40 @@ class ImWakeHandlerTests(unittest.TestCase):
             },
         )
 
-    def test_idle_parent_receives_im_message_prompt_with_ids_only(self) -> None:
+    def _task_records(self) -> list[dict[str, Any]]:
+        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        return [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(tasks_dir.glob("*.json"))
+        ]
+
+    def test_im_message_ingests_task_without_parent_or_side_prompt(self) -> None:
         actor = self._actor()
-        runtime = _Runtime("idle")
+        runtime = _Runtime()
         handler = im_wake_handler.ImMessageCreatedHandler()
 
         result = handler.handle(_Context(actor), None, runtime, self._trigger(actor))
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual(len(runtime.parent_prompts), 1)
-        self.assertEqual(runtime.side_prompts, [])
-        submitted = runtime.parent_prompts[0]
-        self.assertEqual(submitted["handler_name"], "im_message_created")
-        self.assertEqual(submitted["origin_id"], "msg-abc123")
-        self.assertEqual(submitted["interrupt_policy"], "none")
-        self.assertIn('message__get with message_id="msg-abc123"', submitted["prompt"])
-        self.assertIn('message__send(content=..., reply_to="msg-abc123")', submitted["prompt"])
-        self.assertNotIn("target_actor_address", submitted["prompt"])
-
-    def test_running_parent_receives_side_triage(self) -> None:
-        actor = self._actor()
-        runtime = _Runtime("running")
-        handler = im_wake_handler.ImMessageCreatedHandler()
-
-        result = handler.handle(_Context(actor), None, runtime, self._trigger(actor))
-
-        self.assertEqual(result.status, "handled")
-        self.assertEqual(runtime.parent_prompts, [])
-        self.assertEqual(len(runtime.side_prompts), 1)
-        self.assertEqual(runtime.side_prompts[0]["handler_name"], "im_message_created")
-        self.assertEqual(runtime.side_prompts[0]["origin_id"], "msg-abc123")
+        self.assertEqual(runtime.calls, [])
+        records = self._task_records()
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["source_type"], "im.message.created")
+        self.assertEqual(record["source_ref"], {"message_id": "msg-abc123", "conversation_id": "conv-abc123", "event_id": "imev-abc123"})
+        self.assertEqual(record["actor_target"], actor.to_payload())
+        self.assertEqual(record["inbound_context"]["message_id"], "msg-abc123")
+        self.assertEqual(record["status"], "side_processing")
+        self.assertEqual(record["active_processor"], "side")
+        self.assertEqual(len(self.executed_instructions), 1)
+        self.assertEqual(self.executed_instructions[0]["type"], "start_side")
+        self.assertEqual(self.executed_instructions[0]["task_id"], record["id"])
 
     def test_wrong_target_actor_fails(self) -> None:
         handler = im_wake_handler.ImMessageCreatedHandler()
         wrong = ActorAddress(role_id="market", actor_id="act-market-other")
 
-        result = handler.handle(_Context(self._actor()), None, _Runtime("idle"), self._trigger(wrong))
+        result = handler.handle(_Context(self._actor()), None, _Runtime(), self._trigger(wrong))
 
         self.assertEqual(result.status, "failed")
         self.assertIn("wrong target actor", result.message)

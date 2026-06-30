@@ -8,13 +8,15 @@ WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
 SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"
+TASK_SYS_INGRESS_HELPER="${REPO_ROOT}/tools/launcher/task_sys_ingress.py"
+TASK_SYS_RUNTIME_HELPER="${REPO_ROOT}/tools/launcher/task_sys_runtime.py"
 DAEMON_HELPER="${REPO_ROOT}/tools/launcher/daemon.sh"
 INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${TASK_SYS_RUNTIME_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -278,7 +280,6 @@ start_locked_bootstrap() {
   buddyswitch_workspace_ensure_project_worktree
   buddyswitch_workspace_repair_runtime_projects_app_projection
   buddyswitch_instance_ensure_private_writable_surface
-  buddyswitch_instance_ensure_taskbox "${requested_role}"
   buddyswitch_instance_activate "${requested_actor_id}" "${requested_role}" "inactive" >/dev/null
   buddyswitch_runtime_broker_ensure
   buddyswitch_patch_codex_config
@@ -380,7 +381,7 @@ instance_set_inactive_locked() {
 }
 
 instance_input() {
-  local actor_id="${1:-}" text="" thread_id="" arg output action turn_id json
+  local actor_id="${1:-}" text="" thread_id="" role_id="" arg output runtime_output instruction_json task_id json
   json=0
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
@@ -419,8 +420,13 @@ instance_input() {
   buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
   buddyswitch_env_bind_instance "${actor_id}" || return $?
   thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
+  role_id="$(buddyswitch_instance_record_field "${actor_id}" "role" || true)"
   if [[ -z "${thread_id}" ]]; then
     echo "Instance input blocked: ${actor_id} has no thread id; stop/delete it and start a new instance." >&2
+    return 3
+  fi
+  if [[ -z "${role_id}" ]]; then
+    echo "Instance input blocked: ${actor_id} has no role; stop/delete it and start a new instance." >&2
     return 3
   fi
   if ! buddyswitch_app_server_is_active; then
@@ -429,85 +435,63 @@ instance_input() {
   fi
 
   output="$(
-    python3 "${SUBMIT_TURN_HELPER}" \
-      --socket "$(buddyswitch_app_server_socket)" \
+    BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state" \
+    python3 "${TASK_SYS_INGRESS_HELPER}" user-input \
+      --actor-id "${actor_id}" \
+      --role-id "${role_id}" \
       --thread-id "${thread_id}" \
       --text "${text}" \
-      --permissions "buddyswitch-runtime" 2>&1
+      --surface "cli" 2>&1
   )" || {
-    if [[ "${output}" == *"turn/steer failed"* ]]; then
-      echo "Instance input blocked: active turn is not steerable; retry later or interrupt it." >&2
-      echo "${output}" >&2
-      return 1
-    fi
     if [[ -n "${output}" ]]; then
       echo "${output}" >&2
     fi
     return 1
   }
-
-  action="$(
+  instruction_json="$(
     python3 - "${output}" <<'PY'
 import json
 import sys
 
 payload = json.loads(sys.argv[1])
-value = payload.get("action")
-if isinstance(value, str):
-    print(value)
+instruction = payload.get("instruction")
+if not isinstance(instruction, dict):
+    raise SystemExit("Task Sys ingress did not return an instruction")
+print(json.dumps(instruction, ensure_ascii=True))
 PY
-  )"
-  turn_id="$(
-    python3 - "${output}" <<'PY'
+  )" || return 1
+  runtime_output="$(
+    python3 "${TASK_SYS_RUNTIME_HELPER}" execute \
+      --instance-json "${BUDDYSWITCH_INSTANCE_JSON}" \
+      --instruction-json "${instruction_json}" 2>&1
+  )" || {
+    [[ -n "${runtime_output}" ]] && echo "${runtime_output}" >&2
+    return 1
+  }
+
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${output}" "${runtime_output}" <<'PY'
 import json
 import sys
 
 payload = json.loads(sys.argv[1])
-value = payload.get("turn_id")
-if isinstance(value, str):
-    print(value)
-PY
-  )"
-  if [[ "${action}" == "steer" ]]; then
-    if [[ "${json}" -eq 1 ]]; then
-      python3 - "${output}" "${actor_id}" "${thread_id}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-payload = {
-    "actor_id": sys.argv[2],
-    "thread_id": sys.argv[3],
-    "action": source.get("action"),
-    "turn_id": source.get("turn_id"),
-}
-expected_turn_id = source.get("expected_turn_id")
-if isinstance(expected_turn_id, str) and expected_turn_id:
-    payload["expected_turn_id"] = expected_turn_id
+payload["runtime"] = json.loads(sys.argv[2])
 print(json.dumps(payload, ensure_ascii=True))
 PY
-      return 0
-    fi
-    echo "Steered turn: ${turn_id}"
-  else
-    if [[ "${json}" -eq 1 ]]; then
-      python3 - "${output}" "${actor_id}" "${thread_id}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-payload = {
-    "actor_id": sys.argv[2],
-    "thread_id": sys.argv[3],
-    "action": source.get("action"),
-    "turn_id": source.get("turn_id"),
-}
-print(json.dumps(payload, ensure_ascii=True))
-PY
-      return 0
-    fi
-    echo "Started turn: ${turn_id}"
+    return 0
   fi
+  task_id="$(
+    python3 - "${output}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+value = payload.get("task_id")
+if isinstance(value, str):
+    print(value)
+PY
+  )"
+  echo "Task created: ${task_id}"
 }
 
 instance_side_print_start_result() {
@@ -1146,7 +1130,6 @@ PY
   buddyswitch_workspace_ensure_project_worktree
   buddyswitch_workspace_repair_runtime_projects_app_projection
   buddyswitch_instance_ensure_private_writable_surface
-  buddyswitch_instance_ensure_taskbox "${role}"
   buddyswitch_runtime_broker_ensure
   export BUDDYSWITCH_ROLE_ID="${role}"
   buddyswitch_patch_codex_config

@@ -81,11 +81,11 @@ Expected: only this plan file is new before the planning commit.
 
 ### Task 2: Merge `fea-webui`
 
-- [ ] Run `git merge --no-ff --no-commit fea-webui`.
-- [ ] Keep the shared Task Sys replacement and the `fea-webui` iMessage/Web IM API boundary changes.
-- [ ] Remove or resolve any unexpected residue by direct replacement, not aliases or dual read/write paths.
-- [ ] Run focused Task Sys and iMessage/Web verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-webui`.
+- [x] Keep the shared Task Sys replacement and the `fea-webui` iMessage/Web IM API boundary changes.
+- [x] Remove or resolve any unexpected residue by direct replacement, not aliases or dual read/write paths.
+- [x] Run focused Task Sys and iMessage/Web verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -123,7 +123,7 @@ Expected: compile and shell syntax pass, focused daemon/runtime tests pass, whit
 - [ ] Prove both feature branches are ancestors of `main`.
 - [ ] Run broad Python verification from `main`.
 - [ ] Run Node UI contract verification.
-- [ ] Run residue scans for retired taskbox/task tool paths, old serial iMessage worker semantics, sensitive log metadata exposure, and accidental daemon-to-iMessage branch leakage.
+- [ ] Run residue scans for retired taskbox/task tool paths, retired iMessage worker-ordering residue, sensitive log metadata exposure, and accidental daemon-to-iMessage branch leakage.
 - [ ] Inspect final git status and recent history.
 
 Broad verification:
@@ -141,7 +141,7 @@ Residue scans:
 
 ```bash
 rg -n "task\\.current|task\\.capture|task\\.checkout|task__current|task__checkout|TaskViewModel|E_ACTIVE_TASK_REQUIRED|task\\.active_anchor|taskbox|task_management" scripts tools buddyswitch docs/arch -S
-rg -n "poll_outbound_once\\(wait_ms=.*reply_wait_ms|handle_inbound_message\\(row\\).*poll_outbound_once|waits? for the actor reply before|serial iMessage" tools tests docs/spec -S -g '!docs/spec/imessage-channel-im-api-boundary-optimization/**'
+python3 -m pytest -q tests/test_imessage_channel.py::ImessageChannelResidueTests::test_live_surfaces_do_not_teach_serial_reply_wait_semantics
 rg -n "raw_message|message_content|artifact_body|full_prompt|credentials|tool_payload|event bus|trace id|sampling" tools/launcher/runtime_event_log.py tools/launcher/daemon_core.py tools/launcher/app_server.py scripts/runtime_kernel/lifecycle.py scripts/env/tool_runtime/context.py tests docs/spec -S
 git diff --name-only 25b44e7..HEAD | rg "imessage_channel.py|external_im_session.py|im_http_router.py|web_management.py|test_imessage_channel.py|test_external_im_session.py|test_im_http_router.py|test_im_web_management_projection.py" -S
 ```
@@ -152,7 +152,7 @@ Expected:
 - Broad Python and Node tests pass.
 - `git diff --check` has no output.
 - Old taskbox/task tool live paths are absent.
-- Old serial iMessage worker semantics are absent outside the current iMessage optimization records.
+- Retired iMessage worker-ordering residue is absent outside the current iMessage optimization records.
 - Status/logging code does not expose raw message, prompt, credential, or tool payload content.
 - Any final diff hits for iMessage/Web files are attributable to the intentional `fea-webui` merge, not daemon-specific edits.
 

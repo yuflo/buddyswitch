@@ -15,7 +15,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_legacy_store as env_store  # noqa: E402
-from env.repos import tasks as task_repo  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -248,32 +248,23 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
 
         instance_root = self._instance_root("act-task-track-hint")
-        task = task_repo.create_task(
-            task_id="task-dev-track-hint",
-            title="Task hint",
-            active_role="dev",
-            active_actor={"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
-            instance_json=None,
-            instance_payload={"instance_root": str(instance_root)},
-            track_id="track-task-hint",
-            status="active",
-            priority="normal",
-            summary="",
-            refs=[],
+        result = task_sys.ingest(
+            {
+                "source": {"type": "test.fixture", "ref": {"title": "Task hint", "track_id": "track-task-hint"}},
+                "actor_target": {"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
+                "context": {"instance_root": str(instance_root)},
+                "initial_processor": "side",
+            }
         )
+        task = result["task"]
 
         after = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
         self.assertEqual(after, before)
-        self.assertEqual(task["track_id"], "track-task-hint")
+        self.assertEqual(task["source_ref"]["track_id"], "track-task-hint")
         self.assertNotIn("artifact_ids", task)
         self.assertNotIn("artifact_slots", task)
 
-        stored = task_repo.get_task(
-            "task-dev-track-hint",
-            active_role="dev",
-            instance_json=None,
-            instance_payload={"instance_root": str(instance_root)},
-        )
+        stored = task_sys.get_task(result["task_id"])
         self.assertIsNotNone(stored)
         assert isinstance(stored, dict)
         self.assertNotIn("artifact_ids", stored)

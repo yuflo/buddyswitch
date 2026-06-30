@@ -372,16 +372,6 @@ class WebManagementUnitTests(unittest.TestCase):
                 "LIFECYCLE_BLOCKED",
             ),
             (
-                WEB_MANAGEMENT.CommandResult(
-                    returncode=1,
-                    stdout="",
-                    stderr="Instance input blocked: active turn is not healthy",
-                    timed_out=False,
-                ),
-                409,
-                "LIFECYCLE_BLOCKED",
-            ),
-            (
                 WEB_MANAGEMENT.CommandResult(returncode=1, stdout="", stderr="internal error", timed_out=True),
                 504,
                 "COMMAND_TIMEOUT",
@@ -1038,109 +1028,18 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(status, 502)
         self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
 
-    def test_input_route_rejects_empty_text(self) -> None:
+    def test_input_route_returns_404_without_launcher_call(self) -> None:
         runner, base_url = self._start_server()
+        removed_route = "/".join(("", "api", "instances", "act-pm-demo", "input"))
         status, payload = self._request_json(
             base_url,
             method="POST",
-            path="/api/instances/act-pm-demo/input",
-            payload={"text": "   "},
+            path=removed_route,
+            payload={"text": "Advance the brief"},
         )
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["error"]["code"], "NOT_FOUND")
         self.assertEqual(runner.calls, [])
-
-    def test_input_route_delegates_and_reports_started_vs_steered_turn(self) -> None:
-        for command_payload, expected_action, expected_turn_id in (
-            (
-                {
-                    "actor_id": "act-pm-demo",
-                    "thread_id": "thread-demo",
-                    "action": "start",
-                    "turn_id": "turn-demo",
-                },
-                "start",
-                None,
-            ),
-            (
-                {
-                    "actor_id": "act-pm-demo",
-                    "thread_id": "thread-demo",
-                    "action": "steer",
-                    "turn_id": "turn-steer",
-                    "expected_turn_id": "turn-steer",
-                },
-                "steer",
-                "turn-steer",
-            ),
-        ):
-            with self.subTest(command_payload=command_payload):
-                runner = FakeRunner()
-                runner.add(
-                    [
-                        "instance",
-                        "input",
-                        "act-pm-demo",
-                        "--text",
-                        "Advance the brief",
-                        "--json",
-                    ],
-                    WEB_MANAGEMENT.CommandResult(
-                        returncode=0,
-                        stdout=json.dumps(command_payload, ensure_ascii=True),
-                        stderr="",
-                        timed_out=False,
-                    ),
-                )
-                runner.add(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    WEB_MANAGEMENT.CommandResult(
-                        returncode=0,
-                        stdout=json.dumps(
-                            {
-                                "actor_id": "act-pm-demo",
-                                "role": "pm",
-                                "status": "active",
-                                "workspace_dir": "/tmp/shared/instances/act-pm-demo/workspace",
-                                "browser_port": 9222,
-                                "updated_at": "2026-05-24T10:00:00Z",
-                                "thread_id": "thread-demo",
-                                "app_server": {"healthy": True},
-                                "thread": {"status": "idle", "raw": {}},
-                            },
-                            ensure_ascii=True,
-                        ),
-                        stderr="",
-                        timed_out=False,
-                    ),
-                )
-                _, base_url = self._start_server(runner)
-                status, payload = self._request_json(
-                    base_url,
-                    method="POST",
-                    path="/api/instances/act-pm-demo/input",
-                    payload={"text": "Advance the brief"},
-                )
-                self.assertEqual(status, 200)
-                self.assertEqual(payload["action"], expected_action)
-                if expected_turn_id is None:
-                    self.assertNotIn("expected_turn_id", payload)
-                else:
-                    self.assertEqual(payload["expected_turn_id"], expected_turn_id)
-                self.assertEqual(
-                    runner.calls,
-                    [
-                        [
-                            "instance",
-                            "input",
-                            "act-pm-demo",
-                            "--text",
-                            "Advance the brief",
-                            "--json",
-                        ],
-                        ["instance", "status", "act-pm-demo", "--json"],
-                    ],
-                )
 
     def test_web_management_does_not_write_message_rows_or_construct_signals(self) -> None:
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
@@ -1153,6 +1052,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             "message." + "available",
             "signal_id",
             "daemon_client.deliver_signal",
+            "Instance " + "input blocked:",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
@@ -1332,6 +1232,17 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertNotIn("participant_token", events)
         self.assertNotIn("connection_key", events)
         self.assertNotIn("next_cursor", events)
+        self.assertNotIn("ack", events)
+
+        status, repeated_events = service.handle_api(
+            "GET",
+            f"/api/web/im/events?identity_id={actor_address['actor_id']}&wait_ms=0",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=repeated_events)
+        self.assertEqual(repeated_events["events"], [])
+        self.assertEqual(repeated_events["messages"], [])
 
     def test_web_im_events_are_scoped_to_requested_actor_conversation(self) -> None:
         market_actor = {
@@ -1393,6 +1304,28 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(
             [event["from_identity_id"] for event in events["events"]],
             [dev_actor["actor_id"]],
+        )
+
+        status, later_market_events = service.handle_api(
+            "GET",
+            f"/api/web/im/events?identity_id={market_actor['actor_id']}&wait_ms=0&limit=50",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=later_market_events)
+        self.assertEqual(later_market_events["events"], [])
+        self.assertEqual(later_market_events["messages"], [])
+
+        status, market_history = service.handle_api(
+            "GET",
+            f"/api/web/im/conversations/direct?identity_id={market_actor['actor_id']}&limit=20",
+            b"",
+            {},
+        )
+        self.assertEqual(status, 200, msg=market_history)
+        self.assertEqual(
+            [row["content"] for row in market_history["messages"]],
+            ["market ping", "market pong"],
         )
 
     def test_web_im_events_requires_actor_scope(self) -> None:
@@ -1649,39 +1582,35 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             {"actor_id": target_identity_id, "role_id": "market"},
         )
 
-    def test_actor_console_api_composes_runtime_task_track_and_im_projection(self) -> None:
-        from env.domain import task_management
+    def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
+        from env.domain import task_sys
 
         self._seed_track_pages()
         runner = FakeRunner()
         runner.add(["instance", "status", "act-pm-demo", "--json"], command_json(self._instance_status_payload()))
         service = self._service(runner)
-        task_view = {
-            "owner_actor": {"actor_id": "act-pm-demo", "role_id": "pm"},
-            "current_anchor": None,
-            "task_state": "none",
-            "shelf": [],
-            "warnings": [],
-        }
+        task_result = task_sys.ingest(
+            {
+                "source": {"type": "test.console", "ref": {"id": "console"}},
+                "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
+                "context": {"fixture": "web console"},
+                "initial_processor": "checkpoint",
+            }
+        )
 
-        with mock.patch.object(task_management, "current_view", return_value=task_view) as current_view:
-            status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
+        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
 
         self.assertEqual(status, 200)
         console = payload["console"]
         self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
         self.assertEqual(console["runtime"]["thread_status"], "idle")
-        self.assertEqual(console["task"], task_view)
+        self.assertEqual(console["task_sys"]["active_count"], 1)
+        self.assertEqual(console["task_sys"]["active_tasks"][0]["task_id"], task_result["task_id"])
         self.assertEqual(console["im"]["target"]["identity"], {"id": "act-pm-demo", "type": "actor"})
         self.assertEqual(console["im"]["target"]["identity_id"], "act-pm-demo")
         self.assertEqual(console["im"]["target"]["role_id"], "pm")
         self.assertNotIn("actor_address", console["im"]["target"])
         self.assertEqual([row["id"] for row in console["tracks"]["items"]], ["track-alpha"])
-        current_view.assert_called_once()
-        call_kwargs = current_view.call_args.kwargs
-        self.assertEqual(call_kwargs["active_role"], "pm")
-        self.assertEqual(call_kwargs["active_actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
-        self.assertEqual(call_kwargs["instance_payload"]["actor_id"], "act-pm-demo")
 
     def test_actor_console_api_rejects_invalid_actor_ids(self) -> None:
         service = self._service()
@@ -1895,70 +1824,6 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
         self.assertEqual(runner.calls, [])
-
-    def test_user_input_does_not_use_internal_bootstrap_marker(self) -> None:
-        runner = OrderedRunner(
-            [
-                CommandStep(
-                    [
-                        "instance",
-                        "input",
-                        "act-pm-demo",
-                        "--text",
-                        "User task",
-                        "--json",
-                    ],
-                    command_json(
-                        {
-                            "actor_id": "act-pm-demo",
-                            "thread_id": "thread-1",
-                            "action": "start",
-                            "turn_id": "turn-user",
-                        }
-                    ),
-                ),
-                CommandStep(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    command_json(active_status("act-pm-demo", "thread-1", "active")),
-                ),
-            ]
-        )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
-
-        status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/input", b'{"text":"User task"}')
-
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["turn_id"], "turn-user")
-        self.assertNotIn("Initialize this " "BuddySwitch thread", json.dumps(runner.calls))
-        self.assertNotIn("[BuddySwitch internal bootstrap marker]", json.dumps(runner.calls))
-
-    def test_input_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
-        runner = FakeRunner()
-        runner.add(
-            [
-                "instance",
-                "input",
-                "act-pm-demo",
-                "--text",
-                "Advance the brief",
-                "--json",
-            ],
-            WEB_MANAGEMENT.CommandResult(
-                returncode=0,
-                stdout="{bad json",
-                stderr="",
-                timed_out=False,
-            ),
-        )
-        _, base_url = self._start_server(runner)
-        status, payload = self._request_json(
-            base_url,
-            method="POST",
-            path="/api/instances/act-pm-demo/input",
-            payload={"text": "Advance the brief"},
-        )
-        self.assertEqual(status, 502)
-        self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
 
     def test_interrupt_route_delegates_and_parses_turn_id(self) -> None:
         runner = FakeRunner()

@@ -356,26 +356,6 @@ buddyswitch_env_bind_instance() {
   export BUDDYSWITCH_XDG_CONFIG_HOME="${instance_root}/xdg-config"
 }
 
-buddyswitch_instance_ensure_taskbox() {
-  local role="${1:-}"
-  local taskbox_root
-
-  if [[ -z "${role}" ]]; then
-    echo "buddyswitch: role is required to create taskbox" >&2
-    return 2
-  fi
-  if [[ -z "${BUDDYSWITCH_INSTANCE_ROOT:-}" ]]; then
-    echo "buddyswitch: BUDDYSWITCH_INSTANCE_ROOT is not set" >&2
-    return 2
-  fi
-
-  taskbox_root="${BUDDYSWITCH_INSTANCE_ROOT}/taskbox/${role}"
-  mkdir -p "${taskbox_root}/tasks"
-  if [[ ! -e "${taskbox_root}/history.md" ]]; then
-    : > "${taskbox_root}/history.md"
-  fi
-}
-
 buddyswitch_instance_ensure_private_writable_surface() {
   if [[ -z "${BUDDYSWITCH_ACTOR_PRIVATE_DIR:-}" || -z "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
     echo "buddyswitch: actor private workspace and tmp must be bound" >&2

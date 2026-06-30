@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import queue
 import sys
 import tempfile
 import unittest
 import re
 import sqlite3
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +34,10 @@ class _FakeBuddySwitchImApi:
         self.actors = actors if actors is not None else [_actor("market", "act-market-demo")]
         self.created: list[dict[str, Any]] = []
         self.sent: list[dict[str, Any]] = []
+        self.ack_calls: list[dict[str, Any]] = []
+        self.acked: list[dict[str, Any]] = []
+        self.ack_failures: dict[str, list[dict[str, Any]]] = {}
+        self.fetched_message_ids: list[str] = []
         self.events_by_key: dict[str, list[dict[str, Any]]] = {}
         self.messages: dict[str, dict[str, Any]] = {}
 
@@ -67,10 +74,55 @@ class _FakeBuddySwitchImApi:
         }
 
     def read_events(self, *, connection_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
-        return {"ok": True, "events": list(self.events_by_key.get(connection_key, []))}
+        acked_ids = {row["event_id"] for row in self.acked if row["connection_key"] == connection_key}
+        return {
+            "ok": True,
+            "events": [
+                dict(row)
+                for row in self.events_by_key.get(connection_key, [])
+                if str(row.get("event_id") or "") not in acked_ids
+            ],
+        }
 
     def get_message(self, *, connection_key: str, message_id: str) -> dict[str, Any]:
+        self.fetched_message_ids.append(message_id)
+        if message_id not in self.messages:
+            return {"ok": False, "error": {"code": "E_IM_NOT_FOUND", "message": "message not found"}}
         return {"ok": True, "message": dict(self.messages[message_id])}
+
+    def ack_event(self, *, connection_key: str, event_id: str) -> dict[str, Any]:
+        self.ack_calls.append({"connection_key": connection_key, "event_id": event_id})
+        failures = self.ack_failures.get(event_id)
+        if failures:
+            return failures.pop(0)
+        self.acked.append({"connection_key": connection_key, "event_id": event_id})
+        return {"ok": True, "event_id": event_id}
+
+
+class _BlockingReadApi(_FakeBuddySwitchImApi):
+    def __init__(self) -> None:
+        super().__init__()
+        self.read_started = threading.Event()
+        self.release_read = threading.Event()
+
+    def read_events(self, *, connection_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
+        self.read_started.set()
+        self.release_read.wait(timeout=2)
+        return super().read_events(connection_key=connection_key, limit=limit, wait_ms=wait_ms)
+
+
+class _LateReplyApi(_FakeBuddySwitchImApi):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_read = threading.Event()
+        self.read_calls = 0
+
+    def read_events(self, *, connection_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
+        self.read_calls += 1
+        if self.read_calls == 1:
+            self.first_read.set()
+            return {"ok": True, "events": []}
+        return super().read_events(connection_key=connection_key, limit=limit, wait_ms=wait_ms)
 
 
 class _FakeImsg:
@@ -86,6 +138,31 @@ class _FakeImsg:
 
     def stop(self) -> None:
         self.stopped = True
+
+
+class _QueueImsg(_FakeImsg):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self.watch_started = threading.Event()
+
+    def push(self, row: dict[str, Any]) -> None:
+        self.rows.put(row)
+
+    def watch_messages(self) -> Any:
+        self.watch_started.set()
+        while not self.stopped:
+            try:
+                row = self.rows.get(timeout=0.02)
+            except queue.Empty:
+                continue
+            if row is None:
+                break
+            yield row
+
+    def stop(self) -> None:
+        super().stop()
+        self.rows.put(None)
 
 
 class _FailingImsg(_FakeImsg):
@@ -139,6 +216,15 @@ def _controller(
         state_path=temp_root / "state.json",
     )
     return imessage_channel.ImessageChannelController(config=config, api=api, imsg=imsg), api, imsg
+
+
+def _wait_until(predicate: Any, *, timeout: float = 1.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
 
 
 class ImessageChannelTests(unittest.TestCase):
@@ -281,6 +367,8 @@ class ImessageChannelTests(unittest.TestCase):
             imsg.sent[-1],
             {"route": {"chat_id": "9", "sender": "user-a@example.com"}, "text": "[Message From act-market-demo]\n\npong"},
         )
+        self.assertEqual(api.ack_calls, [{"connection_key": "imck-1", "event_id": "imev-reply-1"}])
+        self.assertEqual(api.acked, [{"connection_key": "imck-1", "event_id": "imev-reply-1"}])
 
     def test_poll_outbound_does_not_mark_event_sent_when_imessage_send_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -308,15 +396,235 @@ class ImessageChannelTests(unittest.TestCase):
             state = controller.state_store.load()
 
         self.assertEqual(state["contacts"]["sender:user-a@example.com"]["sent_outbound_event_ids"], [])
+        self.assertEqual(api.ack_calls, [])
+
+    def test_poll_outbound_retries_ack_without_duplicate_imessage_after_ack_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, imsg = _controller(Path(temp_root))
+            controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
+            controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
+            controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
+            api.events_by_key["imck-1"] = [
+                {
+                    "event_id": "imev-reply-1",
+                    "message_id": "msg-reply-1",
+                    "reply_to": "msg-in-1",
+                    "from_identity_id": "act-market-demo",
+                }
+            ]
+            api.messages["msg-reply-1"] = {
+                "id": "msg-reply-1",
+                "content": "pong",
+                "reply_to": "msg-in-1",
+                "from_identity_id": "act-market-demo",
+            }
+            api.ack_failures["imev-reply-1"] = [
+                {"ok": False, "error": {"code": "E_ACK", "message": "temporary ack failure"}}
+            ]
+
+            first = controller.poll_outbound_once(wait_ms=0)
+            second = controller.poll_outbound_once(wait_ms=0)
+            state = controller.state_store.load()
+
+        reply_sends = [row for row in imsg.sent if row["text"] == "[Message From act-market-demo]\n\npong"]
+        self.assertEqual(first["sent"], 1)
+        self.assertEqual(second["sent"], 0)
+        self.assertEqual(len(reply_sends), 1)
+        self.assertEqual(
+            api.ack_calls,
+            [
+                {"connection_key": "imck-1", "event_id": "imev-reply-1"},
+                {"connection_key": "imck-1", "event_id": "imev-reply-1"},
+            ],
+        )
+        self.assertEqual(api.acked, [{"connection_key": "imck-1", "event_id": "imev-reply-1"}])
+        self.assertEqual(state["contacts"]["sender:user-a@example.com"]["sent_outbound_event_ids"], ["imev-reply-1"])
+
+    def test_poll_outbound_acks_unrouteable_event_after_fetch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, imsg = _controller(Path(temp_root))
+            controller.handle_inbound_message(_row(text="hello", guid="guid-seed", chat_id="9"))
+            imsg.sent.clear()
+            api.events_by_key["imck-1"] = [
+                {
+                    "event_id": "imev-unrouteable",
+                    "message_id": "msg-unrouteable",
+                    "reply_to": "msg-missing",
+                    "from_identity_id": "act-market-demo",
+                }
+            ]
+            api.messages["msg-unrouteable"] = {
+                "id": "msg-unrouteable",
+                "content": "orphan pong",
+                "reply_to": "msg-missing",
+                "from_identity_id": "act-market-demo",
+            }
+
+            result = controller.poll_outbound_once(wait_ms=0)
+
+        self.assertEqual(result["sent"], 0)
+        self.assertEqual(imsg.sent, [])
+        self.assertEqual(api.fetched_message_ids, ["msg-unrouteable"])
+        self.assertEqual(api.ack_calls, [{"connection_key": "imck-1", "event_id": "imev-unrouteable"}])
+        self.assertEqual(api.acked, [{"connection_key": "imck-1", "event_id": "imev-unrouteable"}])
+
+    def test_poll_outbound_does_not_ack_when_message_fetch_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, imsg = _controller(Path(temp_root))
+            controller.handle_inbound_message(_row(text="hello", guid="guid-seed", chat_id="9"))
+            imsg.sent.clear()
+            api.events_by_key["imck-1"] = [
+                {
+                    "event_id": "imev-missing-message",
+                    "message_id": "msg-missing",
+                    "reply_to": "msg-in-1",
+                    "from_identity_id": "act-market-demo",
+                }
+            ]
+
+            result = controller.poll_outbound_once(wait_ms=0)
+
+        self.assertEqual(result["sent"], 0)
+        self.assertEqual(imsg.sent, [])
+        self.assertEqual(api.fetched_message_ids, ["msg-missing"])
+        self.assertEqual(api.ack_calls, [])
+
+    def test_worker_processes_actors_while_outbound_poll_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            api = _BlockingReadApi()
+            imsg = _QueueImsg()
+            controller, _api, _imsg = _controller(Path(temp_root), api=api, imsg=imsg)
+            controller.handle_inbound_message(_row(text="hello", guid="guid-seed", chat_id="9"))
+            imsg.sent.clear()
+            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=30000)
+            worker.start()
+            self.addCleanup(api.release_read.set)
+            self.addCleanup(worker.stop)
+
+            self.assertTrue(imsg.watch_started.wait(timeout=1), "inbound watch did not start")
+            self.assertTrue(api.read_started.wait(timeout=1), "outbound read did not start")
+            imsg.push(_row(text="/actors", guid="guid-actors", chat_id="9"))
+
+            self.assertTrue(
+                _wait_until(lambda: any(row["text"] == "[1] market act-market-demo" for row in imsg.sent), timeout=1),
+                "actor list was not sent while outbound read was blocked",
+            )
+            api.release_read.set()
+            worker.stop()
+
+        self.assertTrue(imsg.stopped)
+
+    def test_worker_delivers_late_reply_without_new_inbound_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            api = _LateReplyApi()
+            imsg = _QueueImsg()
+            controller, _api, _imsg = _controller(Path(temp_root), api=api, imsg=imsg)
+            controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
+            controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
+            controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
+            imsg.sent.clear()
+            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=1)
+            worker.start()
+            self.addCleanup(worker.stop)
+
+            self.assertTrue(imsg.watch_started.wait(timeout=1), "inbound watch did not start")
+            self.assertTrue(api.first_read.wait(timeout=1), "first outbound poll did not happen")
+            api.events_by_key["imck-1"] = [
+                {
+                    "event_id": "imev-reply-1",
+                    "message_id": "msg-reply-1",
+                    "reply_to": "msg-in-1",
+                    "from_identity_id": "act-market-demo",
+                }
+            ]
+            api.messages["msg-reply-1"] = {
+                "id": "msg-reply-1",
+                "content": "pong",
+                "reply_to": "msg-in-1",
+                "from_identity_id": "act-market-demo",
+            }
+
+            self.assertTrue(
+                _wait_until(lambda: any(row["text"] == "[Message From act-market-demo]\n\npong" for row in imsg.sent), timeout=1),
+                "late actor reply was not sent without another inbound iMessage",
+            )
+            worker.stop()
+
+        self.assertTrue(imsg.stopped)
+
+    def test_worker_keeps_control_prompt_prompt_while_delayed_reply_returns_once_to_same_chat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            api = _BlockingReadApi()
+            imsg = _QueueImsg()
+            controller, _api, _imsg = _controller(Path(temp_root), api=api, imsg=imsg)
+            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=30000)
+            worker.start()
+            self.addCleanup(api.release_read.set)
+            self.addCleanup(worker.stop)
+
+            self.assertTrue(imsg.watch_started.wait(timeout=1), "inbound watch did not start")
+            imsg.push(_row(text="/actors", guid="guid-actors-1", chat_id="9"))
+            self.assertTrue(
+                _wait_until(lambda: any(row["text"] == "[1] market act-market-demo" for row in imsg.sent), timeout=1),
+                "initial actor list was not sent",
+            )
+            self.assertTrue(api.read_started.wait(timeout=1), "outbound read did not start")
+
+            imsg.push(_row(text="1", guid="guid-select", chat_id="9"))
+            imsg.push(_row(text="ping", guid="guid-message", chat_id="9"))
+            imsg.push(_row(text="/actors", guid="guid-actors-2", chat_id="9"))
+            self.assertTrue(
+                _wait_until(
+                    lambda: sum(1 for row in imsg.sent if row["text"] == "[1] market act-market-demo") >= 2,
+                    timeout=1,
+                ),
+                "actor list was not prompt while outbound read was blocked",
+            )
+            api.events_by_key["imck-1"] = [
+                {
+                    "event_id": "imev-reply-1",
+                    "message_id": "msg-reply-1",
+                    "reply_to": "msg-in-1",
+                    "from_identity_id": "act-market-demo",
+                }
+            ]
+            api.messages["msg-reply-1"] = {
+                "id": "msg-reply-1",
+                "content": "pong",
+                "reply_to": "msg-in-1",
+                "from_identity_id": "act-market-demo",
+            }
+            api.release_read.set()
+
+            self.assertTrue(
+                _wait_until(lambda: any(row["text"] == "[Message From act-market-demo]\n\npong" for row in imsg.sent), timeout=1),
+                "delayed actor reply was not sent",
+            )
+            worker.stop()
+
+        reply_sends = [row for row in imsg.sent if row["text"] == "[Message From act-market-demo]\n\npong"]
+        self.assertEqual(reply_sends, [{"route": {"chat_id": "9", "sender": "user-a@example.com"}, "text": "[Message From act-market-demo]\n\npong"}])
+        self.assertTrue(imsg.stopped)
 
     def test_worker_stop_terminates_watch_client(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
-            controller, _api, imsg = _controller(Path(temp_root))
-            worker = imessage_channel.ImessageChannelWorker(controller)
+            api = _BlockingReadApi()
+            imsg = _QueueImsg()
+            controller, _api, _imsg = _controller(Path(temp_root), api=api, imsg=imsg)
+            controller.handle_inbound_message(_row(text="hello", guid="guid-seed", chat_id="9"))
+            imsg.sent.clear()
+            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=30000)
+            worker.start()
+
+            self.assertTrue(imsg.watch_started.wait(timeout=1), "inbound watch did not start")
+            self.assertTrue(api.read_started.wait(timeout=1), "outbound read did not start")
+            api.release_read.set()
 
             worker.stop()
 
         self.assertTrue(imsg.stopped)
+        threads = getattr(worker, "_threads", [getattr(worker, "_thread", None)])
+        self.assertTrue(all(thread is None or not thread.is_alive() for thread in threads))
 
 
 class CommandImsgClientSendStatusTests(unittest.TestCase):
@@ -451,6 +759,54 @@ class ImessageChannelResidueTests(unittest.TestCase):
                     if term in text:
                         hits.append(f"{file_path.relative_to(ROOT)}: contains {term}")
         self.assertEqual(hits, [])
+
+    def test_worker_source_no_longer_uses_serial_inbound_outbound_loop(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "imessage_channel.py").read_text(encoding="utf-8")
+
+        self.assertIn("def run_outbound_forever", source)
+        self.assertIsNone(
+            re.search(
+                r"handle_inbound_message\(row\)\s*\n\s*self\.controller\.poll_outbound_once\(",
+                source,
+            )
+        )
+
+    def test_live_surfaces_do_not_teach_serial_reply_wait_semantics(self) -> None:
+        patterns = (
+            re.compile(r"poll_outbound_once\(wait_ms=.*reply_wait_ms"),
+            re.compile(r"handle_inbound_message\(row\).*poll_outbound_once"),
+            re.compile(r"waits? for the actor reply before", re.IGNORECASE),
+            re.compile("serial " + "iMessage", re.IGNORECASE),
+        )
+        live_roots = [
+            ROOT / "tools" / "launcher",
+            ROOT / "tests",
+            ROOT / "docs" / "spec",
+        ]
+        excluded = ROOT / "docs" / "spec" / "imessage-channel-im-api-boundary-optimization"
+        hits: list[str] = []
+        for path in live_roots:
+            files = [path] if path.is_file() else [row for row in path.rglob("*") if row.is_file()]
+            for file_path in files:
+                if "__pycache__" in file_path.parts:
+                    continue
+                if excluded in file_path.parents:
+                    continue
+                text = file_path.read_text(encoding="utf-8", errors="ignore")
+                for line_number, line in enumerate(text.splitlines(), start=1):
+                    if "re.compile" in line:
+                        continue
+                    for pattern in patterns:
+                        if pattern.search(line):
+                            hits.append(f"{file_path.relative_to(ROOT)}:{line_number}: {line.strip()}")
+        self.assertEqual(hits, [])
+
+    def test_smoke_runbook_covers_delayed_control_regression(self) -> None:
+        source = (ROOT / "docs" / "spec" / "imessage-channel-smoke-runbook.md").read_text(encoding="utf-8")
+
+        self.assertIn("Immediately send /actors before the actor reply arrives.", source)
+        self.assertIn("Confirm the actor list returns promptly.", source)
+        self.assertIn("Confirm the original actor reply still arrives once in the same chat.", source)
 
 
 def _create_chat_db(path: Path, *, chat_id: int) -> None:

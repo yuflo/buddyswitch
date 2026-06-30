@@ -19,61 +19,41 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message"}
+_EXPECTED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "search", "message"}
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _taskbox_root(self, *, actor_id: str, role: str) -> Path:
-        return self._runtime_path(f"instances/{actor_id}/taskbox/{role}")
-
     def _write_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def _seed_taskbox_task(
+    def _seed_task_sys_task(
         self,
         *,
         actor_id: str,
         role: str,
-        task_id: str,
-        title: str,
-        summary: str = "",
-        status: str = "active",
-        priority: str = "normal",
+        source_type: str,
         track_id: str | None = None,
-        refs: list[dict[str, object]] | None = None,
-        updated_at: str = "2026-05-23T12:00:00+08:00",
-        closed_at: str | None = None,
-    ) -> None:
-        if closed_at is None and status in {"done", "archived"}:
-            closed_at = updated_at
-        taskbox_root = self._taskbox_root(actor_id=actor_id, role=role)
-        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
-        history_file = taskbox_root / "history.md"
-        if not history_file.exists():
-            history_file.write_text("", encoding="utf-8")
-        self._write_json(
-            taskbox_root / "tasks" / f"{task_id}.json",
+    ) -> str:
+        source_ref: dict[str, object] = {"fixture": source_type}
+        if track_id is not None:
+            source_ref["track_id"] = track_id
+        result = task_sys.ingest(
             {
-                "id": task_id,
-                "owner_actor": {"actor_id": actor_id, "role_id": role},
-                "title": title,
-                "summary": summary,
-                "status": status,
-                "priority": priority,
-                "track_id": track_id,
-                "refs": refs or [],
-                "created_at": "2026-05-23T12:00:00+08:00",
-                "updated_at": updated_at,
-                "closed_at": closed_at,
+                "source": {"type": source_type, "ref": source_ref},
+                "actor_target": {"actor_id": actor_id, "role_id": role},
+                "context": {"fixture": "context binding"},
+                "initial_processor": "checkpoint",
             },
         )
+        return str(result["task_id"])
 
     def _seed_legacy_shared_task(self) -> None:
         self._write_json(
@@ -104,11 +84,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json_path = path if path is not None else instance_root / "instance.json"
         resolved_workspace_dir = workspace_dir if workspace_dir is not None else self.runtime_root
         resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
-        taskbox_root = self._taskbox_root(actor_id=actor_id, role=role)
-        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
-        history_file = taskbox_root / "history.md"
-        if not history_file.exists():
-            history_file.write_text("", encoding="utf-8")
         payload: dict[str, object] = {
             "actor_id": actor_id,
             "role": role,
@@ -184,15 +159,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             outcome="Context outcome",
             now={"next": "seed", "blocker": None},
         )
-        self._seed_taskbox_task(
+        self.context_task_id = self._seed_task_sys_task(
             actor_id=actor_id,
             role="dev",
-            task_id="task-dev-context",
-            title="Context Task",
-            summary="seed",
-            priority="high",
+            source_type="test.context.active",
             track_id="track-context-active",
-            refs=[{"type": "track", "id": "track-context-active"}],
         )
         env_store.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r1",
@@ -238,15 +209,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             outcome="Archived outcome",
             now={"next": "archived", "blocker": None},
         )
-        self._seed_taskbox_task(
+        self.archived_task_id = self._seed_task_sys_task(
             actor_id=actor_id,
             role="dev",
-            task_id="task-dev-archived",
-            title="Archived task",
-            status="archived",
-            priority="low",
+            source_type="test.context.archived",
             track_id="track-context-archived",
-            updated_at="2026-05-23T12:05:00+08:00",
         )
         archived_artifact = env_store.create_artifact_revision(
             artifact_id="art-task-dev-archived-r1",
@@ -291,7 +258,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("payload_fields", dumped)
         self.assertNotIn("action_semantics", dumped)
         self.assertNotIn('"properties"', dumped)
-        for tool_name in ("track", "artifact", "task", "context"):
+        for tool_name in ("track", "artifact", "task_sys", "context"):
             with self.subTest(tool=tool_name):
                 compact = affordances.get(tool_name)
                 self.assertIsInstance(compact, dict, msg=summary)
@@ -375,7 +342,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(preview.get("restricted_actions"), [])
         self.assertEqual(preview.get("restricted_action_details"), {})
         self.assertNotIn("object_" + "permissions", json.dumps(snapshot, ensure_ascii=True))
-        self.assertIn("active actor private", str(snapshot.get("task_visibility")))
+        self.assertIn("Task Sys frames", str(snapshot.get("task_visibility")))
         artifact_create = tool_registry.operation_semantics()["artifact.create_revision"]
         self.assertEqual(
             snapshot.get("artifact_publication_path"),
@@ -432,10 +399,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("track-context-active", track_ids)
         self.assertNotIn("track-context-archived", candidate_ids)
         self.assertNotIn("track-context-archived", track_ids)
-        self.assertIn("task-dev-context", task_ids)
-        self.assertNotIn("task-dev-archived", task_ids)
+        self.assertIn(self.context_task_id, task_ids)
+        self.assertNotIn(self.archived_task_id, task_ids)
 
-    def test_context_candidate_tasks_use_instance_taskbox_metadata_and_ignore_legacy_shared_tasks(self) -> None:
+    def test_context_candidate_tasks_use_task_sys_metadata_and_ignore_legacy_shared_tasks(self) -> None:
         self._seed_context_state()
         instance_json = self._instance_json()
 
@@ -446,13 +413,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(candidate_tasks, list, msg=payload)
         assert isinstance(candidate_tasks, list)
         task_ids = {row.get("task_id") for row in candidate_tasks if isinstance(row, dict)}
-        self.assertIn("task-dev-context", task_ids)
+        self.assertIn(self.context_task_id, task_ids)
         self.assertNotIn("task-legacy-shared", task_ids)
 
-        candidate_task = next(row for row in candidate_tasks if isinstance(row, dict) and row.get("task_id") == "task-dev-context")
-        self.assertEqual(candidate_task.get("priority"), "high")
-        self.assertIsNone(candidate_task.get("closed_at"))
-        self.assertEqual(candidate_task.get("ref_count"), 1)
+        candidate_task = next(row for row in candidate_tasks if isinstance(row, dict) and row.get("task_id") == self.context_task_id)
+        self.assertEqual(candidate_task.get("source_type"), "test.context.active")
+        self.assertEqual(candidate_task.get("status"), "checkpoint")
+        self.assertEqual(candidate_task.get("active_processor"), "checkpoint")
 
     def test_context_artifact_summaries_are_current_only(self) -> None:
         self._seed_context_state()
@@ -963,7 +930,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
             tool="context",
             action="get",
-            args={"track_id": "track-context-active", "task_id": "task-dev-context", "limit": 5},
+            args={"track_id": "track-context-active", "task_id": self.context_task_id, "limit": 5},
         )
         self.assertTrue(filtered.get("ok"), msg=filtered)
         tasks = filtered.get("tasks")
@@ -975,7 +942,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(tasks, list)
         assert isinstance(tracks, list)
         assert isinstance(artifacts, list)
-        self.assertEqual({row.get("id") for row in tasks if isinstance(row, dict)}, {"task-dev-context"})
+        self.assertEqual({row.get("id") for row in tasks if isinstance(row, dict)}, {self.context_task_id})
         self.assertEqual({row.get("id") for row in tracks if isinstance(row, dict)}, {"track-context-active"})
         self.assertEqual({row.get("artifact_id") for row in artifacts if isinstance(row, dict)}, {"art-task-dev-context-note-r2"})
 

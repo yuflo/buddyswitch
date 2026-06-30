@@ -16,7 +16,7 @@ from env.domain import artifact_relations as _artifact_relations_domain
 from env.domain import artifact_visibility as _artifact_visibility_domain
 from env.domain import actor_private_workspace as _actor_private_workspace_domain
 from env.domain import source_refs as _source_ref_domain
-from env.domain import tasks as _task_domain
+from env.domain import task_sys as _task_sys_domain
 from env.domain import track_comments as _track_comment_domain
 from env.domain import track_artifact_relations as _track_artifact_relations_domain
 from env.domain.identity import IdentityRef
@@ -26,7 +26,6 @@ from env.repos import artifacts as _artifact_repo
 from env.repos import actor_private_files as _actor_private_repo
 from env.repos import messages as _message_repo
 from env.repos import runtime_files
-from env.repos import tasks as _task_repo
 from env.repos import track_comments as _track_comment_repo
 from env.repos import tracks as _track_repo
 from env.tool_runtime.actor_profile import Actor
@@ -173,7 +172,7 @@ class RuntimeObjectAccess:
     def runtime_sources(self) -> dict[str, Any]:
         return {
             "tracks": "track.list / track.open",
-            "tasks": "task.current / task.capture / task.select / task.switch_request / task.switch_confirm / task.progress / task.checkout / task.review",
+            "tasks": "task_sys.close / task_sys.need_parent / task_sys.checkpoint_update",
             "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
             "track_comments": "track.list_comments",
@@ -400,25 +399,14 @@ class DaemonAccess:
             payload={"track_id": track_id, "comment_id": comment_id, "thread_id": thread_id},
         )
 
-    def request_parent_message_handling(self, *, message_id: str, prompt: str) -> dict[str, Any]:
+    def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
         launcher_dir = _launcher_dir_for_runtime()
         if str(launcher_dir) not in sys.path:
             sys.path.insert(0, str(launcher_dir))
-        import daemon_core  # type: ignore[import-not-found]
+        import task_sys_runtime  # type: ignore[import-not-found]
 
-        daemon_context = daemon_core.load_daemon_context(self._instance_json)
-        daemon_state = daemon_core.DaemonState.load(
-            instance_root=daemon_context.instance_root,
-            actor_id=daemon_context.actor_id,
-            main_thread_id=daemon_context.main_thread_id,
-        )
-        runtime = daemon_core.DaemonRuntime(context=daemon_context, state=daemon_state)
-        return runtime.submit_parent_prompt(
-            prompt,
-            handler_name="message_mark",
-            origin_id=message_id,
-            interrupt_policy="ensure_stopped",
-        )
+        context = task_sys_runtime.context_from_instance_json(self._instance_json)
+        return task_sys_runtime.execute_instruction(context, instruction)
 
     def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return daemon_client.wake_im_actor(payload)
@@ -432,7 +420,7 @@ class DomainAccess:
     artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
     actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
-    task: Any = field(default_factory=lambda: _task_domain)
+    task_sys: Any = field(default_factory=lambda: _task_sys_domain)
     track_comment: Any = field(default_factory=lambda: _track_comment_domain)
     track_artifact_relations: Any = field(default_factory=lambda: _track_artifact_relations_domain)
 
@@ -445,7 +433,6 @@ class RepoAccess:
     actor_private: Any = field(default_factory=lambda: _actor_private_repo)
     message: Any = field(default_factory=lambda: _message_repo)
     runtime_files: Any = field(default_factory=lambda: runtime_files)
-    task: Any = field(default_factory=lambda: _task_repo)
     track_comment: Any = field(default_factory=lambda: _track_comment_repo)
     track: Any = field(default_factory=lambda: _track_repo)
 

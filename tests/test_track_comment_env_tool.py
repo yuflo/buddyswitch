@@ -18,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
@@ -77,37 +78,14 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         return path
 
     def _seed_active_task(self, *, instance_root: Path, actor_id: str, role: str) -> None:
-        taskbox = instance_root / "taskbox" / role
-        tasks_dir = taskbox / "tasks"
-        tasks_dir.mkdir(parents=True, exist_ok=True)
         task_id = f"task-0001-{role}-track-comment"
-        (tasks_dir / f"{task_id}.json").write_text(
-            json.dumps(
-                {
-                    "id": task_id,
-                    "owner_actor": {"actor_id": actor_id, "role_id": role},
-                    "title": "Active task",
-                    "summary": "Active task seeded for track comment tests.",
-                    "body": "Active task seeded for track comment tests.",
-                    "status": "active",
-                    "priority": "normal",
-                    "origin": {"type": "manual"},
-                    "track_id": None,
-                    "refs": [],
-                    "progress_summary": "Active task seeded for track comment tests.",
-                    "created_at": "2026-06-10T00:00:00Z",
-                    "updated_at": "2026-06-10T00:00:00Z",
-                    "closed_at": None,
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        (taskbox / "history.md").write_text(
-            f"- 2026-06-10T00:00:00Z task.selected {task_id} reason=\"seed active task fixture\"\n",
-            encoding="utf-8",
+        task_sys.ingest(
+            {
+                "source": {"type": "test.track_comment", "ref": {"id": task_id}},
+                "actor_target": {"actor_id": actor_id, "role_id": role},
+                "context": {"fixture": "track comment"},
+                "initial_processor": "checkpoint",
+            }
         )
 
     def _dispatch(self, *, actor_id: str, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:

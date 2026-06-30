@@ -94,9 +94,6 @@ class CleanupSystemTests(unittest.TestCase):
                 "target_role": "dev",
             },
         )
-        self._write_taskbox_task(actor_id="act-pm-clean", role="pm", task_id="task-pm")
-        self._write_taskbox_task(actor_id="act-dev-clean", role="dev", task_id="task-dev")
-
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
@@ -130,27 +127,6 @@ class CleanupSystemTests(unittest.TestCase):
             encoding="utf-8",
         )
         return workspace
-
-    def _write_taskbox_task(self, *, actor_id: str, role: str, task_id: str) -> None:
-        taskbox_root = self.shared_root / "instances" / actor_id / "taskbox" / role
-        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
-        (taskbox_root / "history.md").write_text("", encoding="utf-8")
-        self._write_json(
-            f"../instances/{actor_id}/taskbox/{role}/tasks/{task_id}.json",
-            {
-                "id": task_id,
-                "owner_actor": {"actor_id": actor_id, "role_id": role},
-                "title": f"{role} task",
-                "summary": "",
-                "status": "active",
-                "priority": "normal",
-                "track_id": "track-demo",
-                "refs": [],
-                "created_at": "2026-05-15T00:00:00+00:00",
-                "updated_at": "2026-05-15T00:00:00+00:00",
-                "closed_at": None,
-            },
-        )
 
     def test_cleanup_plan_excludes_handoff_indexing(self) -> None:
         plan = env_cleanup.build_cleanup_plan(

@@ -19,6 +19,7 @@ from env.tool_runtime import results as tool_results
 
 _DEFINITION_CACHE: dict[str, ToolDefinition] = {}
 _LOAD_ERRORS: dict[str, dict[str, str]] = {}
+_RETIRED_TOOL_IDS = frozenset({"task"})
 
 
 def clear_cache() -> None:
@@ -33,6 +34,8 @@ def discover_tool_ids() -> list[str]:
             continue
         name = info.name
         if name.startswith("_"):
+            continue
+        if name in _RETIRED_TOOL_IDS:
             continue
         discovered.append(name)
     return sorted(set(discovered))
@@ -368,46 +371,44 @@ def _active_task_required_rejection(
         action=semantic_action,
         active_actor=active_actor,
         active_role=active_role,
-        code="E_ACTIVE_TASK_REQUIRED",
-        message="active task is required for this env tool action",
-        permission_boundary="task.active_anchor",
-        human_summary="Active task is required for this action.",
+        code="E_TASK_SYS_ACTIVE_TASK_REQUIRED",
+        message="Task Sys active task is required for this env tool action",
+        permission_boundary="task_sys.active_task",
+        human_summary="A Task Sys task is required for this action.",
         why_blocked=(
             f"Action {tool}.{action} performs task-owned work, "
-            "but TaskViewModel.current_anchor is empty."
+            "but Task Sys has no active task for this actor."
         ),
         impact="No env action ran and runtime state was unchanged.",
         state_changed=False,
         durability="none",
         retryable=True,
         retry_guidance=(
-            "Use task.current to inspect task state. If this is new work, use "
-            "task.capture and then task.select. If a captured or blocked task already "
-            "matches the work, use task.select. Retry the blocked action after an "
-            "active task exists."
+            "Run this action from a task_sys side, parent, or checkpoint frame. "
+            "If the work is new actor-driving input, route it through Task Sys ingress first."
         ),
         allowed_next_actions=[
-            "Use task.current to inspect TaskViewModel.current_anchor.",
-            "Use task.capture to capture this work if it has no existing task.",
-            "Use task.select to make a captured or blocked task active, then retry the blocked action.",
+            "Continue from the current task_sys.side_frame, task_sys.parent_frame, or task_sys.checkpoint.",
+            "Use task_sys.close, task_sys.need_parent, or task_sys.checkpoint_update when handling a Task Sys frame.",
+            "Route new actor-driving input through Task Sys ingress before retrying task-bound tool work.",
         ],
         alternative_capabilities=[
             tool_results.alternative_capability(
-                tool="task",
-                action="current",
-                condition="Inspect current task state before choosing a task action.",
+                tool="task_sys",
+                action="close",
+                condition="Close the active Task Sys task when the frame work is complete.",
                 mutates_product_state=False,
             ),
             tool_results.alternative_capability(
-                tool="task",
-                action="capture",
-                condition="Capture this work when no existing task represents it.",
+                tool="task_sys",
+                action="need_parent",
+                condition="Ask Task Sys to submit the parent when side processing needs parent work.",
                 mutates_product_state=False,
             ),
             tool_results.alternative_capability(
-                tool="task",
-                action="select",
-                condition="Make a captured or blocked task active before retrying task-owned work.",
+                tool="task_sys",
+                action="checkpoint_update",
+                condition="Update the active Task Sys checkpoint frame.",
                 mutates_product_state=False,
             ),
         ],
@@ -421,22 +422,20 @@ def _active_task_required_rejection(
     )
 
 
-def _has_active_task_anchor(
+def _has_active_task_binding(
     *,
     active_role: str,
     active_actor: Mapping[str, Any],
     instance_json: Path,
     instance_payload: Mapping[str, object],
 ) -> bool:
-    from env.domain import task_management
+    del instance_json, instance_payload
+    from env.domain import task_sys
 
-    view = task_management.current_view(
-        active_role=active_role,
-        active_actor=active_actor,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    )
-    return isinstance(view.get("current_anchor"), Mapping)
+    actor_id = active_actor.get("actor_id")
+    if not isinstance(actor_id, str) or not actor_id.strip():
+        return False
+    return task_sys.has_active_task_for_actor({"actor_id": actor_id, "role_id": active_role})
 
 
 def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -623,7 +622,7 @@ def dispatch_env_tool_request(
         manifest=dict(manifest),
         manifest_path=manifest_path,
     )
-    if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED and not _has_active_task_anchor(
+    if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED and not _has_active_task_binding(
         active_role=active_role,
         active_actor=active_actor,
         instance_json=instance_json,

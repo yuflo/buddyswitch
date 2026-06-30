@@ -100,6 +100,10 @@ class _FakeExternalImSession:
         self.calls.append(("get_message", {"connection": connection, "message_id": message_id}))
         return {"ok": True, "message": {"id": message_id, "content": "pong"}}
 
+    def ack_event(self, *, connection: dict[str, Any], event_id: str) -> dict[str, Any]:
+        self.calls.append(("ack_event", {"connection": connection, "event_id": event_id}))
+        return {"ok": True, "event_id": event_id}
+
     def list_replies(self, *, connection: dict[str, Any], message_id: str) -> dict[str, Any]:
         self.calls.append(("list_replies", {"connection": connection, "message_id": message_id}))
         return {"ok": True, "message_id": message_id, "replies": [], "count": 0}
@@ -271,6 +275,7 @@ class ExternalImProjectionContractTests(unittest.TestCase):
             [
                 ("read_events", {"connection": session.connection, "limit": 10, "wait_ms": 0}),
                 ("get_message", {"connection": session.connection, "message_id": "msg-reply"}),
+                ("ack_event", {"connection": session.connection, "event_id": "imev-reply"}),
                 (
                     "get_direct_conversation",
                     {"connection": session.connection, "identity_id": "act-market-demo", "limit": 20},

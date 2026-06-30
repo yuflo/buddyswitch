@@ -20,7 +20,7 @@ import env_manifest  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message"}
+_EXPECTED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "search", "message"}
 _FORBIDDEN_RUNTIME_SURFACES = {
     "artifact_index",
     "artifact_search",
@@ -88,6 +88,8 @@ class RepoConsistencyTests(unittest.TestCase):
         if not path_text.startswith("docs/spec/"):
             return False
         if path_text.startswith("docs/spec/identity-redesign/"):
+            return True
+        if path_text.startswith("docs/spec/task-sys-proactive-rebuild/"):
             return True
         name = Path(path_text).name
         return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
@@ -291,7 +293,7 @@ print(json.dumps({{
         live_paths = [
             ROOT / "scripts/env/tools/message/tool.py",
             ROOT / "scripts/env/tools/track/tool.py",
-            ROOT / "scripts/env/tools/task/tool.py",
+            ROOT / "scripts/env/tools/task_sys/tool.py",
             ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
             ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             ROOT / "buddyswitch/skills/pm/define-scope/SKILL.md",

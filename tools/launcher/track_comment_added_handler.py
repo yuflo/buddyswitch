@@ -15,6 +15,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
+import task_sys_ingress  # noqa: E402
+import task_sys_runtime  # noqa: E402
 from env.domain import track_comments as track_comment_rules  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as track_comment_repo  # noqa: E402
@@ -112,32 +114,17 @@ class TrackCommentAddedHandler:
                 raise PermissionError("target actor is not an intended recipient for this Track comment")
             self._ensure_track_readable(payload["track_id"])
 
-            activity = runtime.parent_activity()
-            status = activity.get("status") if isinstance(activity, dict) else None
-            prompt_args = {
-                "track_id": payload["track_id"],
-                "comment_id": payload["comment_id"],
-                "thread_id": payload["thread_id"],
-                "source_actor_address": source_actor,
-                "target_actor_address": target_actor,
-            }
-            if status == "idle":
-                runtime.submit_parent_prompt(
-                    track_comment_rules.render_parent_track_comment_prompt(**prompt_args),
-                    handler_name=self.name,
-                    origin_id=payload["comment_id"],
-                    interrupt_policy="none",
-                )
-                return daemon_core.HandlerResult.handled()
-            if status == "running":
-                runtime.submit_side_triage_prompt(
-                    track_comment_rules.render_side_track_comment_prompt(**prompt_args),
-                    handler_name=self.name,
-                    origin_id=payload["comment_id"],
-                )
-                return daemon_core.HandlerResult.handled()
-            error = activity.get("error") if isinstance(activity, dict) else None
-            return daemon_core.HandlerResult.failed(str(error or "parent thread activity is unavailable"))
+            del runtime
+            result = task_sys_ingress.ingest_track_comment(
+                actor_id=target_actor.actor_id,
+                role_id=target_actor.role_id,
+                track_id=payload["track_id"],
+                comment_id=payload["comment_id"],
+                thread_id=payload["thread_id"],
+                source_actor_address=source_actor.to_payload(),
+            )
+            task_sys_runtime.execute_instruction(context, result["instruction"])
+            return daemon_core.HandlerResult.handled()
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))
 

@@ -59,7 +59,7 @@ class FakeDaemonRuntime:
 
     def parent_activity(self) -> dict[str, object]:
         self.calls.append({"method": "parent_activity"})
-        return self.activity
+        raise AssertionError("Track comment handler must not inspect parent activity")
 
     def submit_parent_prompt(
         self,
@@ -78,7 +78,7 @@ class FakeDaemonRuntime:
                 "interrupt_policy": interrupt_policy,
             }
         )
-        return {"turn_id": "turn-parent-track-comment"}
+        raise AssertionError("Track comment handler must not submit parent prompts")
 
     def submit_side_triage_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, object]:
         self.calls.append(
@@ -89,7 +89,7 @@ class FakeDaemonRuntime:
                 "origin_id": origin_id,
             }
         )
-        return {"action": "start", "side_thread_id": "thr-side-track", "turn_id": "turn-side-track"}
+        raise AssertionError("Track comment handler must not submit side prompts")
 
 
 class TrackCommentAddedHandlerTests(unittest.TestCase):
@@ -104,6 +104,15 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.daemon_core = load_module(DAEMON_CORE_PATH)
         self.handler_module = load_module(HANDLER_PATH)
         self.handler = self.handler_module.TrackCommentAddedHandler()
+        self.executed_instructions: list[dict[str, Any]] = []
+        original_execute = self.handler_module.task_sys_runtime.execute_instruction
+
+        def fake_execute(_context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
+            self.executed_instructions.append(instruction)
+            return {"action": instruction["type"], "task_id": instruction["task_id"]}
+
+        self.addCleanup(setattr, self.handler_module.task_sys_runtime, "execute_instruction", original_execute)
+        self.handler_module.task_sys_runtime.execute_instruction = fake_execute
 
     def tearDown(self) -> None:
         runtime_files.reset_runtime_root_override()
@@ -214,6 +223,38 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
             "comment_id": str(comment["id"]),
             "thread_id": thread_id or str(comment["thread_id"]),
         }
+
+    def _task_records(self) -> list[dict[str, Any]]:
+        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        return [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(tasks_dir.glob("*.json"))
+        ]
+
+    def _assert_track_comment_task(self, comment: dict[str, Any]) -> dict[str, Any]:
+        records = self._task_records()
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["source_type"], "track.comment.added")
+        self.assertEqual(
+            record["source_ref"],
+            {
+                "track_id": str(comment["track_id"]),
+                "comment_id": str(comment["id"]),
+                "thread_id": str(comment["thread_id"]),
+            },
+        )
+        self.assertEqual(record["actor_target"], {"actor_id": "act-dev-track-handler", "role_id": "dev"})
+        self.assertEqual(record["inbound_context"]["track_id"], str(comment["track_id"]))
+        self.assertEqual(record["inbound_context"]["comment_id"], str(comment["id"]))
+        self.assertEqual(record["inbound_context"]["thread_id"], str(comment["thread_id"]))
+        self.assertEqual(record["inbound_context"]["source_actor_address"], {"actor_id": "act-pm-track-source", "role_id": "pm"})
+        self.assertEqual(record["status"], "side_processing")
+        self.assertEqual(record["active_processor"], "side")
+        self.assertEqual(len(self.executed_instructions), 1)
+        self.assertEqual(self.executed_instructions[0]["type"], "start_side")
+        self.assertEqual(self.executed_instructions[0]["task_id"], record["id"])
+        return record
 
     def test_track_comment_handler_ignores_unknown_trigger_types(self) -> None:
         instance = self._instance()
@@ -390,9 +431,10 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
             )
 
             self.assertEqual(result.status, "handled")
-            self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity", "submit_parent_prompt"])
+            self.assertEqual(runtime.calls, [])
+            self._assert_track_comment_task(comment)
 
-    def test_track_comment_handler_routes_idle_parent_to_parent_prompt(self) -> None:
+    def test_track_comment_handler_ingests_task_without_parent_prompt(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "idle", "active_turn_id": None})
         comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
@@ -406,51 +448,10 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity", "submit_parent_prompt"])
-        call = runtime.calls[1]
-        self.assertEqual(call["handler_name"], "track_comment_added")
-        self.assertEqual(call["origin_id"], comment["id"])
-        self.assertEqual(call["interrupt_policy"], "none")
-        prompt = call["text"]
-        self.assertIsInstance(prompt, str)
-        assert_contains_all(
-            self,
-            prompt,
-            (
-                "[TRACK COMMENT ATTENTION]",
-                str(comment["id"]),
-                str(comment["track_id"]),
-                "Track tools remain the source of truth",
-                "Task tools are only for this actor's private work tracking",
-                "Work-demand guidance:",
-                "acknowledgement alone is usually not completion",
-                "task.current",
-                "task.capture/task.select",
-                "track.open",
-                "track.list_comments",
-                "track.add_comment",
-                "track.resolve_comment_thread",
-            ),
-        )
-        assert_contains_none(
-            self,
-            prompt,
-            (
-                "notification.",
-                "nc.notification",
-                "daemon",
-                "mailbox",
-                "example.ready",
-                "absorbed",
-                "replied",
-                "needs_parent",
-                "parent_thread_id",
-                "side_thread_id",
-                "message__mark",
-            ),
-        )
+        self.assertEqual(runtime.calls, [])
+        self._assert_track_comment_task(comment)
 
-    def test_track_comment_handler_routes_running_parent_to_side_triage(self) -> None:
+    def test_track_comment_handler_ignores_parent_activity_when_ingesting_task(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "running", "active_turn_id": "turn-main-1"})
         comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
@@ -463,45 +464,8 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity", "submit_side_triage_prompt"])
-        call = runtime.calls[1]
-        self.assertEqual(call["handler_name"], "track_comment_added")
-        self.assertEqual(call["origin_id"], comment["id"])
-        prompt = call["text"]
-        self.assertIsInstance(prompt, str)
-        assert_contains_all(
-            self,
-            prompt,
-            (
-                "[TRACK COMMENT TRIAGE]",
-                "Side triage is for quick Track-thread handling only.",
-                "Work-demand guidance:",
-                "do not present it as done",
-                "Leave substantive work for the parent/main path",
-                "track.open",
-                "track.list_comments",
-                "track.add_comment",
-                "track.resolve_comment_thread",
-                "Use only Track tools for this comment.",
-            ),
-        )
-        assert_contains_none(
-            self,
-            prompt,
-            (
-                "notification.",
-                "nc.notification",
-                "daemon",
-                "mailbox",
-                "example.ready",
-                "absorbed",
-                "replied",
-                "needs_parent",
-                "parent_thread_id",
-                "side_thread_id",
-                "message__mark",
-            ),
-        )
+        self.assertEqual(runtime.calls, [])
+        self._assert_track_comment_task(comment)
 
     def test_track_comment_handler_routes_reply_attention_to_parent_comment_author(self) -> None:
         instance = self._instance()
@@ -522,9 +486,10 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity", "submit_parent_prompt"])
+        self.assertEqual(runtime.calls, [])
+        self._assert_track_comment_task(reply)
 
-    def test_track_comment_handler_fails_when_parent_activity_is_unavailable(self) -> None:
+    def test_track_comment_handler_ingests_task_when_parent_activity_is_unavailable(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "unavailable", "error": "app-server down"})
         comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
@@ -536,11 +501,11 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
             self._trigger(payload=self._payload_for(comment)),
         )
 
-        self.assertEqual(result.status, "failed")
-        self.assertIn("app-server down", result.message)
-        self.assertEqual([call["method"] for call in runtime.calls], ["parent_activity"])
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(runtime.calls, [])
+        self._assert_track_comment_task(comment)
 
-    def test_track_comment_prompt_renderers_are_sectioned_domain_helpers(self) -> None:
+    def test_track_comment_prompt_renderers_are_removed_from_domain_helpers(self) -> None:
         source = TRACK_COMMENT_DOMAIN_PATH.read_text(encoding="utf-8")
 
         for helper in (
@@ -553,9 +518,9 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
             "_track_comment_finish",
         ):
             with self.subTest(helper=helper):
-                self.assertIn(f"def {helper}(", source)
-        self.assertIn("def render_parent_track_comment_prompt(", source)
-        self.assertIn("def render_side_track_comment_prompt(", source)
+                self.assertNotIn(f"def {helper}(", source)
+        self.assertNotIn("def render_parent_track_comment_prompt(", source)
+        self.assertNotIn("def render_side_track_comment_prompt(", source)
 
 
 if __name__ == "__main__":

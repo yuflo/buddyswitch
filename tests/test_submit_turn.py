@@ -117,13 +117,14 @@ class SubmitTurnTests(unittest.TestCase):
         self.assertNotIn("[TASK CHECKPOINT]", source)
         self.assertNotIn("task_checkout", source)
 
-    def test_instance_input_source_routes_through_submit_turn_helper(self) -> None:
+    def test_instance_input_source_routes_through_task_sys_ingress(self) -> None:
         source = LAUNCHER_PATH.read_text(encoding="utf-8")
         start = source.index("instance_input() {")
         end = source.index("\ninstance_side()", start)
         instance_input_source = source[start:end]
-        self.assertIn('SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"', source)
-        self.assertIn('python3 "${SUBMIT_TURN_HELPER}"', instance_input_source)
+        self.assertIn('TASK_SYS_INGRESS_HELPER="${REPO_ROOT}/tools/launcher/task_sys_ingress.py"', source)
+        self.assertIn('python3 "${TASK_SYS_INGRESS_HELPER}"', instance_input_source)
+        self.assertNotIn('python3 "${SUBMIT_TURN_HELPER}"', instance_input_source)
         self.assertNotIn('buddyswitch_app_server_input "${thread_id}" "${final_text}"', instance_input_source)
 
 

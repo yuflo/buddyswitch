@@ -21,7 +21,7 @@ if str(SCRIPTS) not in sys.path:
 from env.tool_runtime import registry as tool_registry  # noqa: E402
 
 SHIPPED_TOOLS = {
-    "task",
+    "task_sys",
     "track",
     "artifact",
     "context",
