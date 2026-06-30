@@ -15,8 +15,11 @@
 
   function computeInstanceActionState(instance, options) {
     const draftText = options && typeof options.draftText === 'string' ? options.draftText.trim() : '';
-    const isMutating = Boolean(options && options.isMutating);
-    if (!instance || isMutating) {
+    const sendPending = Boolean(options && options.sendPending);
+    const lifecyclePendingAction = options && typeof options.lifecyclePendingAction === 'string'
+      ? options.lifecyclePendingAction
+      : '';
+    if (!instance) {
       return {
         canSend: false,
         canInterrupt: false,
@@ -36,20 +39,23 @@
     const isActive = status === 'active';
     const isInactive = status === 'inactive';
     const threadBusy = threadStatus === 'active' || threadStatus === 'in_progress';
+    const lifecyclePending = Boolean(lifecyclePendingAction);
 
     return {
-      canSend: isActive && appServerHealthy && draftText.length > 0,
-      canInterrupt: isActive && appServerHealthy && threadBusy,
-      canStop: isActive,
-      canDelete: isInactive,
-      canClear: isActive && appServerHealthy && !threadBusy,
-      canResume: isInactive,
+      canSend: isActive && appServerHealthy && draftText.length > 0 && !sendPending,
+      canInterrupt: isActive && appServerHealthy && threadBusy && !lifecyclePending,
+      canStop: isActive && !lifecyclePending,
+      canDelete: isInactive && !lifecyclePending,
+      canClear: isActive && appServerHealthy && !threadBusy && !lifecyclePending,
+      canResume: isInactive && !lifecyclePending,
     };
   }
 
   function describeInstanceActionState(instance, options) {
     const state = computeInstanceActionState(instance, options);
-    const isMutating = Boolean(options && options.isMutating);
+    const lifecyclePendingAction = options && typeof options.lifecyclePendingAction === 'string'
+      ? options.lifecyclePendingAction
+      : '';
     const status = instance && instance.status ? instance.status : '';
     const threadStatus = instance && instance.thread && typeof instance.thread.status === 'string'
       ? instance.thread.status
@@ -62,8 +68,8 @@
     let clearReason = '';
     if (!instance) {
       clearReason = 'Select an actor.';
-    } else if (isMutating) {
-      clearReason = 'Action running.';
+    } else if (lifecyclePendingAction) {
+      clearReason = lifecyclePendingAction + ' running.';
     } else if (status !== 'active') {
       clearReason = 'Resume actor first.';
     } else if (!appServerHealthy) {
@@ -78,11 +84,17 @@
   }
 
   function computeOpenTuiState(instance, options) {
-    const isMutating = Boolean(options && options.isMutating);
-    if (!instance || isMutating) {
+    const openTuiPending = Boolean(options && options.openTuiPending);
+    if (!instance) {
       return {
         canOpenTui: false,
         message: '',
+      };
+    }
+    if (openTuiPending) {
+      return {
+        canOpenTui: false,
+        message: 'Opening...',
       };
     }
 
@@ -132,7 +144,12 @@
       healthOk: false,
       message: '',
       createPending: false,
-      mutationKey: '',
+      sendPending: false,
+      refreshPending: false,
+      lifecyclePendingAction: '',
+      openTuiPending: false,
+      actorSelectionPendingId: '',
+      trackSelectionPendingId: '',
       openTuiMessage: '',
       openTuiCommand: '',
       imSessionReady: false,
@@ -347,6 +364,65 @@
     return true;
   }
 
+  function createPendingMessageId() {
+    return 'pending-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function recordImPendingSend(state, content) {
+    const pendingId = createPendingMessageId();
+    rememberImEntry(state, {
+      id: pendingId,
+      direction: 'sent',
+      sender: 'you',
+      content: typeof content === 'string' ? content : '',
+      deliveryStatus: 'sending',
+      wakeStatus: '',
+      replyTo: '',
+    });
+    return pendingId;
+  }
+
+  function removeImEntry(state, messageId) {
+    if (!messageId) {
+      return false;
+    }
+    const beforeLength = state.imConversation.length;
+    state.imConversation = state.imConversation.filter(function (entry) {
+      return entry.id !== messageId;
+    });
+    delete state.imSeenMessageIds[messageId];
+    return state.imConversation.length !== beforeLength;
+  }
+
+  function replaceImPendingSend(state, pendingId, payload, content) {
+    const messageId = payload && payload.message && payload.message.id ? payload.message.id : '';
+    const replacement = {
+      id: messageId,
+      direction: 'sent',
+      sender: 'you',
+      content: typeof content === 'string' ? content : '',
+      deliveryStatus: payload && payload.delivery_status ? payload.delivery_status : '',
+      wakeStatus: payload && payload.wake_status ? payload.wake_status : '',
+      replyTo: '',
+    };
+    let replaced = false;
+    state.imConversation = state.imConversation.map(function (entry) {
+      if (entry.id !== pendingId) {
+        return entry;
+      }
+      replaced = true;
+      return replacement;
+    });
+    delete state.imSeenMessageIds[pendingId];
+    if (messageId) {
+      state.imSeenMessageIds[messageId] = true;
+    }
+    if (!replaced) {
+      rememberImEntry(state, replacement);
+    }
+    return replaced;
+  }
+
   function recordImSent(state, payload, content) {
     const messageId = payload && payload.message && payload.message.id ? payload.message.id : '';
     return rememberImEntry(state, {
@@ -433,9 +509,10 @@
     }
     return state.actors.map(function (actor) {
       const selected = actor.actor_id === state.selectedActorId;
+      const loading = actor.actor_id === state.actorSelectionPendingId;
       const runtime = actor.runtime || actor;
       return [
-        '<button class="selectable-row actor-row' + (selected ? ' is-selected' : '') + '" type="button" data-actor-id="' + escapeHtml(actor.actor_id) + '">',
+        '<button class="selectable-row actor-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + '" type="button" data-actor-id="' + escapeHtml(actor.actor_id) + '">',
         '<span class="row-main">',
         '<span class="row-title mono-value">' + escapeHtml(formatValue(actor.actor_id)) + '</span>',
         '<span class="row-subtitle">' + escapeHtml(formatValue(actor.role)) + '</span>',
@@ -455,9 +532,10 @@
     }
     return state.tracks.map(function (track) {
       const selected = track.id === state.selectedTrackId;
+      const loading = track.id === state.trackSelectionPendingId;
       const summary = track.comment_summary || {};
       return [
-        '<button class="selectable-row track-row' + (selected ? ' is-selected' : '') + '" type="button" data-track-id="' + escapeHtml(track.id) + '">',
+        '<button class="selectable-row track-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + '" type="button" data-track-id="' + escapeHtml(track.id) + '">',
         '<span class="row-main">',
         '<span class="row-title">' + escapeHtml(formatValue(track.title)) + '</span>',
         '<span class="row-subtitle mono-value">' + escapeHtml(formatValue(track.id)) + '</span>',
@@ -479,6 +557,12 @@
   }
 
   function renderRuntimeDetailHtml(state) {
+    if (state.actorSelectionPendingId && state.actorSelectionPendingId === state.selectedActorId && !state.actorConsole) {
+      return detailRowsHtml([
+        ['Actor', state.selectedActorId, 'mono-value long-value'],
+        ['Status', 'Loading...', 'inline-loading'],
+      ]);
+    }
     const runtime = selectedActorRuntime(state);
     const rows = [
       ['Actor', state.selectedActorId, 'mono-value long-value'],
@@ -495,6 +579,9 @@
   }
 
   function renderTaskSummaryHtml(state) {
+    if (state.actorSelectionPendingId && state.actorSelectionPendingId === state.selectedActorId && !state.actorConsole) {
+      return '<div class="inline-loading">Loading actor task state...</div>';
+    }
     const taskSys = state.actorConsole && state.actorConsole.task_sys ? state.actorConsole.task_sys : null;
     if (!taskSys) {
       return renderEmpty('No Task Sys state loaded.');
@@ -509,6 +596,9 @@
   }
 
   function renderActorTrackSummaryHtml(state) {
+    if (state.actorSelectionPendingId && state.actorSelectionPendingId === state.selectedActorId && !state.actorConsole) {
+      return '<div class="inline-loading">Loading actor Track summaries...</div>';
+    }
     const tracks = state.actorConsole && state.actorConsole.tracks && Array.isArray(state.actorConsole.tracks.items)
       ? state.actorConsole.tracks.items
       : [];
@@ -621,6 +711,11 @@
     }
     elements.imConversation.innerHTML = state.imConversation.map(function (entry) {
       const status = [entry.deliveryStatus, entry.wakeStatus].filter(Boolean).join(' / ');
+      const stateClass = entry.deliveryStatus === 'sending'
+        ? ' pending'
+        : entry.deliveryStatus === 'failed'
+        ? ' failed'
+        : '';
       const meta = [
         entry.direction === 'sent' ? 'sent' : 'reply',
         entry.sender,
@@ -628,7 +723,7 @@
         entry.replyTo ? 'reply_to ' + entry.replyTo : '',
       ].filter(Boolean).join(' · ');
       return [
-        '<div class="im-row ' + escapeHtml(entry.direction) + '">',
+        '<div class="im-row ' + escapeHtml(entry.direction) + stateClass + '">',
         '<div class="im-meta">' + escapeHtml(meta) + '</div>',
         '<div class="im-content">' + escapeHtml(entry.content) + '</div>',
         '</div>',
@@ -636,10 +731,29 @@
     }).join('');
   }
 
-  function render(state, elements) {
+  function sectionCopy(section) {
+    if (section === 'tracks') {
+      return {
+        title: 'Track workspace',
+        summary: 'Review shared Tracks, materials, proofs, updates, and comments.',
+      };
+    }
+    return {
+      title: 'Actor Console',
+      summary: 'Select an actor, inspect runtime and task state, message directly, and use lifecycle controls in one place.',
+    };
+  }
+
+  function renderShell(state, elements) {
+    const copy = sectionCopy(state.selectedSection);
     elements.serverStatus.textContent = state.healthOk ? 'API Ready' : 'API Unavailable';
+    elements.serverStatus.classList.toggle('is-loading', state.refreshPending);
+    elements.refreshButton.textContent = state.refreshPending ? 'Refreshing...' : 'Refresh';
+    elements.refreshButton.disabled = state.refreshPending;
+    elements.refreshButton.classList.toggle('is-pending', state.refreshPending);
     elements.messageBanner.textContent = state.message;
-    elements.instructionInput.value = state.draftText;
+    elements.pageTitle.textContent = copy.title;
+    elements.pageSummary.textContent = copy.summary;
     elements.actorView.hidden = state.selectedSection !== 'actors';
     elements.trackView.hidden = state.selectedSection !== 'tracks';
     elements.actorNavButton.classList.toggle('is-active', state.selectedSection === 'actors');
@@ -648,7 +762,9 @@
       selectedRole: state.selectedRole,
       isCreating: state.createPending,
     });
+  }
 
+  function renderRoleSelect(state, elements) {
     if (elements.roleSelect.options.length === 0) {
       const placeholder = document.createElement('option');
       placeholder.value = '';
@@ -662,21 +778,39 @@
       });
     }
     elements.roleSelect.value = state.selectedRole;
+  }
 
+  function renderActorList(state, elements) {
     elements.actorsList.innerHTML = renderActorRowsHtml(state);
+  }
+
+  function renderActorDetail(state, elements) {
     elements.actorRuntimeDetail.innerHTML = renderRuntimeDetailHtml(state);
     elements.actorTaskSummary.innerHTML = renderTaskSummaryHtml(state);
     elements.actorTrackSummary.innerHTML = renderActorTrackSummaryHtml(state);
-    elements.tracksList.innerHTML = renderTrackRowsHtml(state);
-    elements.trackDetail.innerHTML = renderTrackDetailHtml(state.selectedTrackDetail);
-    renderImConversation(state, elements);
+  }
 
+  function renderTrackList(state, elements) {
+    elements.tracksList.innerHTML = renderTrackRowsHtml(state);
+  }
+
+  function renderTrackDetail(state, elements) {
+    elements.trackDetail.innerHTML = state.trackSelectionPendingId && state.trackSelectionPendingId === state.selectedTrackId
+      ? '<div class="empty-state inline-loading">Loading Track...</div>'
+      : renderTrackDetailHtml(state.selectedTrackDetail);
+  }
+
+  function renderComposer(state, elements) {
+    elements.instructionInput.value = state.draftText;
     const runtime = selectedActorRuntime(state);
     const actionState = describeInstanceActionState(runtime, {
       draftText: state.draftText,
-      isMutating: Boolean(state.mutationKey),
+      sendPending: state.sendPending,
+      lifecyclePendingAction: state.lifecyclePendingAction,
     });
     elements.sendButton.disabled = !actionState.canSend;
+    elements.sendButton.textContent = state.sendPending ? 'Sending...' : 'Send';
+    elements.sendButton.classList.toggle('is-pending', state.sendPending);
     elements.interruptButton.disabled = !actionState.canInterrupt;
     elements.stopButton.disabled = !actionState.canStop;
     elements.deleteButton.disabled = !actionState.canDelete;
@@ -685,36 +819,34 @@
     elements.actionAvailabilityStatus.textContent = !actionState.canClear && actionState.clearReason
       ? 'Clear disabled: ' + actionState.clearReason
       : '';
+  }
 
+  function renderOpenTui(state, elements) {
+    const runtime = selectedActorRuntime(state);
     const openTuiState = computeOpenTuiState(runtime, {
-      isMutating: Boolean(state.mutationKey),
+      openTuiPending: state.openTuiPending,
     });
-    const openingTui = state.mutationKey === 'open-tui';
     elements.openTuiButton.disabled = !openTuiState.canOpenTui;
-    elements.openTuiButton.textContent = openingTui ? 'Opening...' : 'Open TUI';
-    elements.openTuiStatus.textContent = openingTui
+    elements.openTuiButton.textContent = state.openTuiPending ? 'Opening...' : 'Open TUI';
+    elements.openTuiButton.classList.toggle('is-pending', state.openTuiPending);
+    elements.openTuiStatus.textContent = state.openTuiPending
       ? 'Opening...'
       : (openTuiState.canOpenTui ? state.openTuiMessage : openTuiState.message);
     elements.openTuiCommand.textContent = state.openTuiCommand;
     elements.openTuiFallback.hidden = !state.openTuiCommand || !openTuiState.canOpenTui;
     elements.copyTuiCommandButton.disabled = !state.openTuiCommand || !openTuiState.canOpenTui;
+  }
 
-    elements.actorsList.querySelectorAll('[data-actor-id]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        selectActor(state, elements, button.getAttribute('data-actor-id') || '').catch(function (error) {
-          state.message = error.message;
-          render(state, elements);
-        });
-      });
-    });
-    elements.tracksList.querySelectorAll('[data-track-id]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        selectTrack(state, elements, button.getAttribute('data-track-id') || '').catch(function (error) {
-          state.message = error.message;
-          render(state, elements);
-        });
-      });
-    });
+  function renderAll(state, elements) {
+    renderShell(state, elements);
+    renderRoleSelect(state, elements);
+    renderActorList(state, elements);
+    renderActorDetail(state, elements);
+    renderTrackList(state, elements);
+    renderTrackDetail(state, elements);
+    renderComposer(state, elements);
+    renderOpenTui(state, elements);
+    renderImConversation(state, elements);
   }
 
   async function refreshAll(state, elements) {
@@ -737,7 +869,7 @@
     ]);
     await ensureImSession(state, elements);
     await refreshSelectedActorConversation(state);
-    render(state, elements);
+    renderAll(state, elements);
     scheduleActorConsoleRefresh(state, elements);
   }
 
@@ -787,7 +919,7 @@
       && state.selectedSection === 'actors'
       && state.selectedActorId
       && !documentHidden
-      && !state.mutationKey
+      && !state.actorSelectionPendingId
       && !state.actorRefreshInFlight
     );
   }
@@ -799,10 +931,12 @@
     state.actorRefreshInFlight = true;
     try {
       await refreshSelectedActorConsole(state);
-      render(state, elements);
+      renderActorDetail(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
     } catch (error) {
       state.message = error.message;
-      render(state, elements);
+      renderShell(state, elements);
     } finally {
       state.actorRefreshInFlight = false;
     }
@@ -844,54 +978,110 @@
   }
 
   async function selectActor(state, elements, actorId) {
-    if (!actorId || actorId === state.selectedActorId) {
+    if (!actorId || actorId === state.selectedActorId || state.actorSelectionPendingId) {
       return;
     }
     state.selectedActorId = actorId;
     state.actorConsole = null;
+    state.actorSelectionPendingId = actorId;
+    state.message = '';
     clearImConversation(state, actorId);
     clearOpenTuiFeedback(state);
-    await refreshSelectedActorConsole(state);
-    await refreshSelectedActorConversation(state);
-    render(state, elements);
-    scheduleActorConsoleRefresh(state, elements);
+    renderShell(state, elements);
+    renderActorList(state, elements);
+    renderActorDetail(state, elements);
+    renderComposer(state, elements);
+    renderOpenTui(state, elements);
+    renderImConversation(state, elements);
+    try {
+      await refreshSelectedActorConsole(state);
+      await refreshSelectedActorConversation(state);
+    } finally {
+      state.actorSelectionPendingId = '';
+      renderActorList(state, elements);
+      renderActorDetail(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
+      renderImConversation(state, elements);
+      scheduleActorConsoleRefresh(state, elements);
+    }
   }
 
   async function selectTrack(state, elements, trackId) {
-    if (!trackId || trackId === state.selectedTrackId) {
+    if (!trackId || trackId === state.selectedTrackId || state.trackSelectionPendingId) {
       return;
     }
     state.selectedTrackId = trackId;
     state.selectedTrackDetail = null;
-    await refreshSelectedTrackDetail(state);
-    render(state, elements);
+    state.trackSelectionPendingId = trackId;
+    renderTrackList(state, elements);
+    renderTrackDetail(state, elements);
+    try {
+      await refreshSelectedTrackDetail(state);
+    } finally {
+      state.trackSelectionPendingId = '';
+      renderTrackList(state, elements);
+      renderTrackDetail(state, elements);
+    }
   }
 
-  async function runMutation(state, elements, key, requestFactory) {
-    state.mutationKey = key;
-    render(state, elements);
+  async function runLifecycleAction(state, elements, action) {
+    if (!action || state.lifecyclePendingAction) {
+      return;
+    }
+    state.lifecyclePendingAction = action;
+    state.message = '';
+    renderComposer(state, elements);
     try {
-      const payload = await requestFactory();
-      const imMessageId = payload && payload.message && payload.message.id ? payload.message.id : payload && payload.message_id;
-      state.message = imMessageId
-        ? 'Sent message ' + imMessageId + (payload.delivery_status ? ' (' + payload.delivery_status + ').' : '.')
-        : payload && payload.turn_id
+      const payload = await fetchJson(actorActionUrl(state, action), {
+        method: 'POST',
+      });
+      state.message = payload && payload.turn_id
         ? 'Action completed for ' + state.selectedActorId + ' (' + payload.turn_id + ').'
         : 'Action completed.';
+      clearOpenTuiFeedback(state);
+      await refreshSelectedActorConsole(state);
+      renderActorDetail(state, elements);
+    } catch (error) {
+      state.message = error.message;
+    } finally {
+      state.lifecyclePendingAction = '';
+      renderShell(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
+    }
+  }
+
+  async function deleteSelectedActor(state, elements) {
+    if (!state.selectedActorId || state.lifecyclePendingAction) {
+      return;
+    }
+    const actorId = state.selectedActorId;
+    state.lifecyclePendingAction = 'delete';
+    state.message = '';
+    renderComposer(state, elements);
+    try {
+      const payload = await fetchJson('/api/instances/' + encodeURIComponent(actorId), {
+        method: 'DELETE',
+      });
+      state.message = payload && payload.ok ? 'Deleted ' + actorId + '.' : 'Deleted actor.';
+      state.selectedActorId = '';
+      state.actorConsole = null;
+      clearImConversation(state, '');
       clearOpenTuiFeedback(state);
       await refreshAll(state, elements);
     } catch (error) {
       state.message = error.message;
-      render(state, elements);
+      renderShell(state, elements);
     } finally {
-      state.mutationKey = '';
-      render(state, elements);
+      state.lifecyclePendingAction = '';
+      renderAll(state, elements);
     }
   }
 
   async function createInstance(state, elements) {
     state.createPending = true;
-    render(state, elements);
+    renderShell(state, elements);
     try {
       const payload = await fetchJson('/api/instances', {
         method: 'POST',
@@ -906,10 +1096,10 @@
       await refreshAll(state, elements);
     } catch (error) {
       state.message = error.message;
-      render(state, elements);
+      renderShell(state, elements);
     } finally {
       state.createPending = false;
-      render(state, elements);
+      renderAll(state, elements);
     }
   }
 
@@ -923,13 +1113,12 @@
     startImPolling(state, elements);
   }
 
-  async function sendImDraft(state, elements) {
+  async function sendImDraft(state, elements, content) {
     await ensureImSession(state, elements);
     const target = selectedActorImTarget(state);
     if (!target) {
       throw new Error('Select an actor first.');
     }
-    const content = state.draftText;
     const payload = await fetchJson('/api/im/messages', {
       method: 'POST',
       headers: {
@@ -937,12 +1126,44 @@
       },
       body: JSON.stringify({
         target_identity_id: target.identity_id,
-        content: state.draftText,
+        content: content,
         reply_to: null,
       }),
     });
-    recordImSent(state, payload, content);
     return payload;
+  }
+
+  async function sendCurrentDraft(state, elements) {
+    const content = typeof state.draftText === 'string' ? state.draftText.trim() : '';
+    if (!content || state.sendPending) {
+      return;
+    }
+    const previousDraft = state.draftText;
+    const pendingId = recordImPendingSend(state, content);
+    state.draftText = '';
+    state.sendPending = true;
+    state.message = '';
+    renderComposer(state, elements);
+    renderImConversation(state, elements);
+    try {
+      const payload = await sendImDraft(state, elements, content);
+      replaceImPendingSend(state, pendingId, payload, content);
+      const imMessageId = payload && payload.message && payload.message.id ? payload.message.id : '';
+      state.message = imMessageId
+        ? 'Sent message ' + imMessageId + (payload.delivery_status ? ' (' + payload.delivery_status + ').' : '.')
+        : 'Message sent.';
+      await refreshSelectedActorConsole(state);
+      renderActorDetail(state, elements);
+    } catch (error) {
+      removeImEntry(state, pendingId);
+      state.draftText = previousDraft;
+      state.message = error.message;
+    } finally {
+      state.sendPending = false;
+      renderShell(state, elements);
+      renderComposer(state, elements);
+      renderImConversation(state, elements);
+    }
   }
 
   async function pollImEventsOnce(state, elements) {
@@ -981,7 +1202,12 @@
       await refreshSelectedActorConsole(state);
       await refreshSelectedActorConversation(state);
     }
-    render(state, elements);
+    if (selectedActorMessageProcessed && state.selectedSection === 'actors') {
+      renderActorDetail(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
+      renderImConversation(state, elements);
+    }
   }
 
   function startImPolling(state, elements) {
@@ -993,7 +1219,7 @@
       state.imPolling = true;
       pollImEventsOnce(state, elements).catch(function (error) {
         state.message = error.message;
-        render(state, elements);
+        renderShell(state, elements);
       }).finally(function () {
         state.imPolling = false;
         if (state.imSessionReady) {
@@ -1015,18 +1241,19 @@
   async function openTui(state, elements) {
     const runtime = selectedActorRuntime(state);
     const openTuiState = computeOpenTuiState(runtime, {
-      isMutating: Boolean(state.mutationKey),
+      openTuiPending: state.openTuiPending,
     });
     if (!openTuiState.canOpenTui) {
       state.openTuiMessage = openTuiState.message;
-      render(state, elements);
+      renderOpenTui(state, elements);
       return;
     }
 
-    state.mutationKey = 'open-tui';
+    state.openTuiPending = true;
     state.openTuiMessage = 'Opening...';
     state.openTuiCommand = '';
-    render(state, elements);
+    renderOpenTui(state, elements);
+    renderComposer(state, elements);
     try {
       const payload = await fetchJson('/api/instances/' + encodeURIComponent(state.selectedActorId) + '/open-tui', {
         method: 'POST',
@@ -1042,8 +1269,9 @@
       state.openTuiCommand = commandFromError(error);
       state.openTuiMessage = 'Could not open Terminal.';
     } finally {
-      state.mutationKey = '';
-      render(state, elements);
+      state.openTuiPending = false;
+      renderOpenTui(state, elements);
+      renderComposer(state, elements);
     }
   }
 
@@ -1076,11 +1304,29 @@
     } catch (_error) {
       state.openTuiMessage = 'Copy failed.';
     }
-    render(state, elements);
+    renderOpenTui(state, elements);
   }
 
   function actorActionUrl(state, action) {
     return '/api/instances/' + encodeURIComponent(state.selectedActorId) + '/' + action;
+  }
+
+  async function refreshAllWithFeedback(state, elements) {
+    if (state.refreshPending) {
+      return;
+    }
+    state.refreshPending = true;
+    state.message = '';
+    renderShell(state, elements);
+    try {
+      await refreshAll(state, elements);
+      state.message = 'Refreshed.';
+    } catch (error) {
+      state.message = error.message;
+    } finally {
+      state.refreshPending = false;
+      renderAll(state, elements);
+    }
   }
 
   async function bootstrap() {
@@ -1096,6 +1342,8 @@
       createButton: document.getElementById('create-button'),
       refreshButton: document.getElementById('refresh-button'),
       serverStatus: document.getElementById('server-status'),
+      pageTitle: document.getElementById('page-title'),
+      pageSummary: document.getElementById('page-summary'),
       actorsList: document.getElementById('actors-list'),
       actorRuntimeDetail: document.getElementById('actor-runtime-detail'),
       actorTaskSummary: document.getElementById('actor-task-summary'),
@@ -1124,91 +1372,118 @@
 
     elements.actorNavButton.addEventListener('click', function () {
       selectSection(state, 'actors');
-      render(state, elements);
+      renderShell(state, elements);
       scheduleActorConsoleRefresh(state, elements);
     });
     elements.tracksNavButton.addEventListener('click', function () {
       selectSection(state, 'tracks');
-      render(state, elements);
+      renderShell(state, elements);
+    });
+    elements.actorsList.addEventListener('click', function (event) {
+      const row = event.target && event.target.closest
+        ? event.target.closest('[data-actor-id]')
+        : null;
+      if (!row) {
+        return;
+      }
+      selectActor(state, elements, row.getAttribute('data-actor-id') || '').catch(function (error) {
+        state.message = error.message;
+        renderShell(state, elements);
+      });
+    });
+    elements.tracksList.addEventListener('click', function (event) {
+      const row = event.target && event.target.closest
+        ? event.target.closest('[data-track-id]')
+        : null;
+      if (!row) {
+        return;
+      }
+      selectTrack(state, elements, row.getAttribute('data-track-id') || '').catch(function (error) {
+        state.message = error.message;
+        renderShell(state, elements);
+      });
     });
     elements.roleSelect.addEventListener('change', function (event) {
       state.selectedRole = event.target.value;
-      render(state, elements);
+      renderShell(state, elements);
     });
     elements.instructionInput.addEventListener('input', function (event) {
       state.draftText = event.target.value;
-      render(state, elements);
+      renderComposer(state, elements);
     });
     elements.refreshButton.addEventListener('click', function () {
-      refreshAll(state, elements).catch(function (error) {
+      refreshAllWithFeedback(state, elements).catch(function (error) {
         state.message = error.message;
-        render(state, elements);
+        state.refreshPending = false;
+        renderAll(state, elements);
       });
     });
     elements.createButton.addEventListener('click', function () {
       createInstance(state, elements).catch(function (error) {
         state.message = error.message;
-        render(state, elements);
+        state.createPending = false;
+        renderAll(state, elements);
       });
     });
     elements.sendButton.addEventListener('click', function () {
-      runMutation(state, elements, 'messages', function () {
-        return sendImDraft(state, elements);
-      }).then(function () {
-        state.draftText = '';
+      sendCurrentDraft(state, elements).catch(function (error) {
+        state.message = error.message;
+        state.sendPending = false;
+        renderShell(state, elements);
+        renderComposer(state, elements);
       });
     });
     elements.interruptButton.addEventListener('click', function () {
-      runMutation(state, elements, 'interrupt', function () {
-        return fetchJson(actorActionUrl(state, 'interrupt'), {
-          method: 'POST',
-        });
+      runLifecycleAction(state, elements, 'interrupt').catch(function (error) {
+        state.message = error.message;
+        state.lifecyclePendingAction = '';
+        renderShell(state, elements);
+        renderComposer(state, elements);
       });
     });
     elements.stopButton.addEventListener('click', function () {
-      runMutation(state, elements, 'stop', function () {
-        return fetchJson(actorActionUrl(state, 'stop'), {
-          method: 'POST',
-        });
+      runLifecycleAction(state, elements, 'stop').catch(function (error) {
+        state.message = error.message;
+        state.lifecyclePendingAction = '';
+        renderShell(state, elements);
+        renderComposer(state, elements);
       });
     });
     elements.clearButton.addEventListener('click', function () {
-      runMutation(state, elements, 'clear', function () {
-        return fetchJson(actorActionUrl(state, 'clear'), {
-          method: 'POST',
-        });
+      runLifecycleAction(state, elements, 'clear').catch(function (error) {
+        state.message = error.message;
+        state.lifecyclePendingAction = '';
+        renderShell(state, elements);
+        renderComposer(state, elements);
       });
     });
     elements.resumeButton.addEventListener('click', function () {
-      runMutation(state, elements, 'resume', function () {
-        return fetchJson(actorActionUrl(state, 'resume'), {
-          method: 'POST',
-        });
+      runLifecycleAction(state, elements, 'resume').catch(function (error) {
+        state.message = error.message;
+        state.lifecyclePendingAction = '';
+        renderShell(state, elements);
+        renderComposer(state, elements);
       });
     });
     elements.openTuiButton.addEventListener('click', function () {
       openTui(state, elements).catch(function (error) {
         state.openTuiMessage = error.message;
-        render(state, elements);
+        state.openTuiPending = false;
+        renderOpenTui(state, elements);
+        renderComposer(state, elements);
       });
     });
     elements.copyTuiCommandButton.addEventListener('click', function () {
       copyOpenTuiCommand(state, elements).catch(function (error) {
         state.openTuiMessage = error.message;
-        render(state, elements);
+        renderOpenTui(state, elements);
       });
     });
     elements.deleteButton.addEventListener('click', function () {
-      runMutation(state, elements, 'delete', function () {
-        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedActorId), {
-          method: 'DELETE',
-        }).then(function (payload) {
-          state.selectedActorId = '';
-          state.actorConsole = null;
-          clearImConversation(state, '');
-          clearOpenTuiFeedback(state);
-          return payload;
-        });
+      deleteSelectedActor(state, elements).catch(function (error) {
+        state.message = error.message;
+        state.lifecyclePendingAction = '';
+        renderAll(state, elements);
       });
     });
 
@@ -1216,7 +1491,7 @@
       await refreshAll(state, elements);
     } catch (error) {
       state.message = error.message;
-      render(state, elements);
+      renderAll(state, elements);
     }
   }
 
@@ -1249,11 +1524,17 @@
     clearImConversation,
     describeInstanceActionState,
     recordImProjectedMessage,
+    recordImPendingSend,
     recordImSent,
     recordSelectedActorEventMessage,
+    removeImEntry,
+    replaceImPendingSend,
     refreshSelectedActorConversation,
     pollImEventsOnce,
     renderTrackDetailHtml,
+    renderComposer,
+    sectionCopy,
+    selectActor,
     selectedActorRuntime,
     selectSection,
     shouldRefreshSelectedActorConsole,
