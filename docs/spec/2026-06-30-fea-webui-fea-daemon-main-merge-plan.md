@@ -89,11 +89,11 @@ Expected: only this plan file is modified before the planning commit, and `git d
 
 ### Task 2: Merge `fea-webui`
 
-- [ ] Run `git merge --no-ff --no-commit fea-webui`.
-- [ ] Keep the actor-identity-bound Web IM cache behavior.
-- [ ] Remove or resolve any unexpected residue by direct replacement, not aliases or dual read/write paths.
-- [ ] Run focused Web UI verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-webui`.
+- [x] Keep the actor-identity-bound Web IM cache behavior.
+- [x] Remove or resolve any unexpected residue by direct replacement, not aliases or dual read/write paths.
+- [x] Run focused Web UI verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -107,11 +107,11 @@ Expected: JavaScript syntax passes, Node UI contract/state tests pass, and white
 
 ### Task 3: Merge `fea-daemon`
 
-- [ ] Run `git merge --no-ff --no-commit fea-daemon`.
-- [ ] Keep explicit recoverable side runtime failure states and side lease cleanup feedback.
-- [ ] Keep daemon/status observability read-only; do not infer external iMessage delivery from daemon health.
-- [ ] Run focused daemon/status/runtime verification.
-- [ ] Commit the merge.
+- [x] Run `git merge --no-ff --no-commit fea-daemon`.
+- [x] Keep explicit recoverable side runtime failure states and side lease cleanup feedback.
+- [x] Keep daemon/status observability read-only; do not infer external iMessage delivery from daemon health.
+- [x] Run focused daemon/status/runtime verification.
+- [x] Commit the merge.
 
 Focused verification:
 
@@ -119,7 +119,7 @@ Focused verification:
 python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/tool_runtime/context.py scripts/env/tools/task_sys/_impl.py scripts/env/tools/task_sys/tool.py tools/launcher/task_sys_runtime.py tools/launcher/side_thread_registry.py tools/launcher/daemon_core.py tools/launcher/web_management.py
 bash -n buddyswitch-codex
 bash -n tools/launcher/runtime_broker.sh
-python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
+python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_env_tool_schema_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
 git diff --check
 ```
 
@@ -127,10 +127,10 @@ Expected: compile and shell syntax pass, focused Python tests pass, and whitespa
 
 ### Task 4: Final Integration Verification
 
-- [ ] Prove both feature branches are ancestors of `main`.
-- [ ] Run combined focused verification that covers both branches and the Web Management association point.
-- [ ] Run residue scans for retired taskbox/task tool paths, browser-side IM compatibility residue, and daemon-side sensitive logging/platform residue.
-- [ ] Inspect final git status and recent history.
+- [x] Prove both feature branches are ancestors of `main`.
+- [x] Run combined focused verification that covers both branches and the Web Management association point.
+- [x] Run residue scans for retired taskbox/task tool paths, browser-side IM compatibility residue, and daemon-side sensitive logging/platform residue.
+- [x] Inspect final git status and recent history.
 
 Final verification:
 
@@ -140,7 +140,7 @@ git merge-base --is-ancestor fea-daemon main
 node --check tools/launcher/assets/web-management/app.js
 node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
 python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/tool_runtime/context.py scripts/env/tools/task_sys/_impl.py scripts/env/tools/task_sys/tool.py tools/launcher/task_sys_runtime.py tools/launcher/side_thread_registry.py tools/launcher/daemon_core.py tools/launcher/web_management.py
-python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
+python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_env_tool_schema_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
 git diff --check
 git status --short --branch
 ```
@@ -176,4 +176,92 @@ Expected:
 
 ## Execution Log
 
-This section is updated after each merge or verification block with exact command evidence.
+Merge commits:
+
+```text
+a0d770b docs: plan current webui daemon merge
+c79fda8 Merge branch 'fea-webui'
+2e209c1 Merge branch 'fea-daemon'
+```
+
+Branch ancestry:
+
+```text
+git merge-base --is-ancestor fea-webui main
+exit 0
+
+git merge-base --is-ancestor fea-daemon main
+exit 0
+```
+
+Focused `fea-webui` verification:
+
+```text
+node --check tools/launcher/assets/web-management/app.js
+exit 0
+
+node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
+tests 2, pass 2, fail 0
+
+git diff --check
+no output
+```
+
+Focused `fea-daemon` verification:
+
+```text
+python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/tool_runtime/context.py scripts/env/tools/task_sys/_impl.py scripts/env/tools/task_sys/tool.py tools/launcher/task_sys_runtime.py tools/launcher/side_thread_registry.py tools/launcher/daemon_core.py tools/launcher/web_management.py
+exit 0
+
+bash -n buddyswitch-codex
+exit 0
+
+bash -n tools/launcher/runtime_broker.sh
+exit 0
+
+python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_env_tool_schema_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
+383 passed, 523 subtests passed in 572.32s
+
+git diff --check
+no output
+```
+
+Final integration verification:
+
+```text
+node --check tools/launcher/assets/web-management/app.js
+exit 0
+
+node --test tests/web_management_ui_contract.test.js tests/web_management_ui_state.test.js
+tests 2, pass 2, fail 0
+
+python3 -m py_compile scripts/env/domain/task_sys.py scripts/env/tool_runtime/context.py scripts/env/tools/task_sys/_impl.py scripts/env/tools/task_sys/tool.py tools/launcher/task_sys_runtime.py tools/launcher/side_thread_registry.py tools/launcher/daemon_core.py tools/launcher/web_management.py
+exit 0
+
+bash -n buddyswitch-codex
+exit 0
+
+bash -n tools/launcher/runtime_broker.sh
+exit 0
+
+python3 -m pytest -q tests/test_task_sys_substrate.py tests/test_task_sys_side_processing.py tests/test_task_sys_runtime_executor.py tests/test_side_thread_registry.py tests/test_env_tool_response_contract.py tests/test_env_tool_semantic_contract.py tests/test_env_tool_schema_contract.py tests/test_buddyswitch_launcher.py tests/test_daemon_service_contract.py tests/test_web_management.py
+383 passed, 523 subtests passed in 569.45s
+
+git diff --check
+no output
+
+git status --short --branch
+## main...origin/main [ahead 5]
+```
+
+Residue interpretation:
+
+- Old taskbox/task tool scan over `scripts tools buddyswitch docs/arch` had no matches.
+- Sensitive status/logging implementation scan had no matches.
+- Browser IM compatibility scan matched only negative assertions in `tests/web_management_ui_contract.test.js` and `tests/web_management_ui_state.test.js`; live `app.js` had no matches.
+- Final file list from `1929e32..HEAD` is attributable to the plan update, the `fea-webui` history-cache commit, and the `fea-daemon` side-frame lifecycle commit.
+
+Remaining risk:
+
+- Live macOS/iMessage delivery was not manually smoke-tested in this merge pass. Automated Web IM event projection tests cover the selected-actor cache and ack behavior.
+- Runtime service tests exercise fake launcher/service paths; external daemon behavior still depends on host process state outside the unit test environment.
