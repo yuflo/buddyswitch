@@ -146,6 +146,10 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tracks'");
   assertExcludes(appJs, "/api/tracks/' + encodeURIComponent(state.selectedTrackId) + '/comments'");
   assertExcludes(appJs, '/api/web/' + 'im');
+  assertExcludes(appJs, 'buildWeb' + 'ImConversationUrl');
+  assertExcludes(appJs, 'ensureWeb' + 'ImSession');
+  assertExcludes(appJs, 'apply' + 'ImEventsPayload');
+  assertExcludes(appJs, 'messageTouches' + 'KnownOrSelectedActor');
   assertExcludes(appJs, 'external-participants');
   assertExcludes(appJs, 'connection_key');
   assertExcludes(appJs, 'imParticipantToken');

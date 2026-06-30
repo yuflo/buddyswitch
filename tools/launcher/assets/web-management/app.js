@@ -136,6 +136,7 @@
       openTuiMessage: '',
       openTuiCommand: '',
       imSessionReady: false,
+      imConversationIdentityId: '',
       imConversation: [],
       imSeenMessageIds: {},
       imPolling: false,
@@ -159,6 +160,12 @@
       throw error;
     }
     return payload;
+  }
+
+  function isImConversationNotFoundError(error) {
+    const payload = error && error.payload && typeof error.payload === 'object' ? error.payload : null;
+    const detail = payload && payload.error && typeof payload.error === 'object' ? payload.error : null;
+    return Boolean(detail && detail.code === 'E_IM_NOT_FOUND');
   }
 
   function formatValue(value) {
@@ -225,6 +232,7 @@
     }
     if (state.selectedActorId !== previousActorId) {
       clearOpenTuiFeedback(state);
+      clearImConversation(state, state.selectedActorId);
     }
   }
 
@@ -321,6 +329,12 @@
     return identityId;
   }
 
+  function clearImConversation(state, identityId) {
+    state.imConversationIdentityId = typeof identityId === 'string' ? identityId : '';
+    state.imConversation = [];
+    state.imSeenMessageIds = {};
+  }
+
   function rememberImEntry(state, entry) {
     if (!entry.id || state.imSeenMessageIds[entry.id]) {
       return false;
@@ -373,23 +387,22 @@
     return message.from_identity_id === identityId || message.to_identity_id === identityId;
   }
 
-  function messageTouchesKnownOrSelectedActor(state, message) {
-    const target = selectedActorImTarget(state);
-    if (target && messageTouchesActor(message, target.identity_id)) {
-      return true;
-    }
-    return state.actors.some(function (actor) {
-      return actor && typeof actor.actor_id === 'string' && messageTouchesActor(message, actor.actor_id);
-    });
-  }
-
-  function applyImConversationPayload(state, payload) {
-    state.imConversation = [];
-    state.imSeenMessageIds = {};
+  function applyImConversationPayload(state, payload, identityId) {
+    clearImConversation(state, identityId);
     const messages = payload && Array.isArray(payload.messages) ? payload.messages : [];
     messages.forEach(function (message) {
       recordImProjectedMessage(state, message);
     });
+  }
+
+  function recordSelectedActorEventMessage(state, message, selectedIdentityId) {
+    if (!messageTouchesActor(message, selectedIdentityId)) {
+      return false;
+    }
+    if (state.imConversationIdentityId !== selectedIdentityId) {
+      clearImConversation(state, selectedIdentityId);
+    }
+    return recordImProjectedMessage(state, message);
   }
 
   function resolveStatusTone(value) {
@@ -731,6 +744,7 @@
   async function refreshSelectedActorConsole(state) {
     if (!state.selectedActorId) {
       state.actorConsole = null;
+      clearImConversation(state, '');
       return;
     }
     const payload = await fetchJson(buildActorConsoleUrl(state.selectedActorId));
@@ -739,14 +753,25 @@
 
   async function refreshSelectedActorConversation(state) {
     const target = selectedActorImTarget(state);
-    if (!target || !target.identity_id) {
-      applyImConversationPayload(state, { messages: [] });
+    const identityId = target && target.identity_id ? target.identity_id : '';
+    clearImConversation(state, identityId);
+    if (!identityId) {
       return;
     }
-    const payload = await fetchJson(
-      buildImConversationUrl(target.identity_id, 50)
-    );
-    applyImConversationPayload(state, payload);
+    try {
+      const payload = await fetchJson(
+        buildImConversationUrl(identityId, 50)
+      );
+      applyImConversationPayload(state, payload, identityId);
+    } catch (error) {
+      if (isImConversationNotFoundError(error)) {
+        if (state.message === error.message) {
+          state.message = '';
+        }
+        return;
+      }
+      throw error;
+    }
   }
 
   function currentDocumentHidden() {
@@ -824,6 +849,7 @@
     }
     state.selectedActorId = actorId;
     state.actorConsole = null;
+    clearImConversation(state, actorId);
     clearOpenTuiFeedback(state);
     await refreshSelectedActorConsole(state);
     await refreshSelectedActorConversation(state);
@@ -875,6 +901,7 @@
       state.selectedActorId = payload.actor_id;
       state.selectedSection = 'actors';
       state.message = 'Created ' + payload.actor_id + '.';
+      clearImConversation(state, payload.actor_id);
       clearOpenTuiFeedback(state);
       await refreshAll(state, elements);
     } catch (error) {
@@ -939,9 +966,8 @@
       }
       const fetched = await fetchJson(buildImMessageUrl(event.message_id));
       const message = fetched && fetched.message && typeof fetched.message === 'object' ? fetched.message : null;
-      if (message && messageTouchesKnownOrSelectedActor(state, message)) {
-        recordImProjectedMessage(state, message);
-        selectedActorMessageProcessed = selectedActorMessageProcessed || messageTouchesActor(message, selectedIdentityId);
+      if (message && recordSelectedActorEventMessage(state, message, selectedIdentityId)) {
+        selectedActorMessageProcessed = true;
       }
       await fetchJson('/api/im/events/ack', {
         method: 'POST',
@@ -1179,6 +1205,7 @@
         }).then(function (payload) {
           state.selectedActorId = '';
           state.actorConsole = null;
+          clearImConversation(state, '');
           clearOpenTuiFeedback(state);
           return payload;
         });
@@ -1219,9 +1246,13 @@
     computeInstanceActionState,
     computeOpenTuiState,
     createState,
+    clearImConversation,
     describeInstanceActionState,
     recordImProjectedMessage,
     recordImSent,
+    recordSelectedActorEventMessage,
+    refreshSelectedActorConversation,
+    pollImEventsOnce,
     renderTrackDetailHtml,
     selectedActorRuntime,
     selectSection,
