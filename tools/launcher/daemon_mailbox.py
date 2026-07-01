@@ -109,6 +109,7 @@ class DaemonMailboxServer:
         context: Any | None = None,
         state: Any | None = None,
         trigger_dispatcher: Any | None = None,
+        task_sys_dispatcher: Any | None = None,
         now: Any | None = None,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve(strict=False)
@@ -119,6 +120,7 @@ class DaemonMailboxServer:
         self.context = context
         self.state = state
         self.trigger_dispatcher = trigger_dispatcher
+        self.task_sys_dispatcher = task_sys_dispatcher
         self.now = now
         self._stop_event = threading.Event()
         self._server: socket.socket | None = None
@@ -213,6 +215,16 @@ class DaemonMailboxServer:
             if not isinstance(params, dict):
                 return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
             return self._dispatch_schedule_trigger(request_id, params)
+        if method == "mailbox.task_sys.execute_instruction":
+            params = request.get("params")
+            if not isinstance(params, dict):
+                return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
+            return self._dispatch_task_sys_execute_instruction(request_id, params)
+        if method == "mailbox.task_sys.cleanup_side_lease":
+            params = request.get("params")
+            if not isinstance(params, dict):
+                return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
+            return self._dispatch_task_sys_cleanup_side_lease(request_id, params)
         if method != "mailbox.deliver":
             return self._response(request_id, code="mailbox_unknown_method", message="unsupported mailbox method")
         params = request.get("params")
@@ -247,6 +259,38 @@ class DaemonMailboxServer:
             }
         payload.setdefault("trigger", trigger.to_payload())
         return self._response(request_id, payload)
+
+    def _dispatch_task_sys(self, request_id: str | None, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        if not callable(self.task_sys_dispatcher):
+            return self._response(
+                request_id,
+                code="task_sys_unavailable",
+                message="daemon mailbox does not support Task Sys commands",
+            )
+        try:
+            result = self.task_sys_dispatcher(action, params)
+        except Exception as exc:
+            return self._response(request_id, code="task_sys_dispatch_error", message=str(exc))
+        if not isinstance(result, dict):
+            return self._response(
+                request_id,
+                code="task_sys_dispatch_error",
+                message=f"Task Sys dispatcher returned invalid result: {type(result).__name__}",
+            )
+        return self._response(request_id, dict(result))
+
+    def _dispatch_task_sys_execute_instruction(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
+        instruction = params.get("instruction")
+        if not isinstance(instruction, dict):
+            return self._response(request_id, code="invalid_task_sys_instruction", message="instruction must be an object")
+        return self._dispatch_task_sys(request_id, "execute_instruction", {"instruction": dict(instruction)})
+
+    def _dispatch_task_sys_cleanup_side_lease(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            task_id = runtime_files.require_id(params.get("task_id"), "task_id")
+        except Exception as exc:
+            return self._response(request_id, code="invalid_task_sys_cleanup", message=str(exc))
+        return self._dispatch_task_sys(request_id, "cleanup_side_lease", {"task_id": task_id})
 
     def _normalize_local_trigger_request(self, params: dict[str, Any]) -> daemon_triggers.DaemonTrigger:
         actor_payload = _actor_address_payload(params.get("actor_address"), "actor_address")

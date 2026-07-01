@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
 import errno
 import hashlib
+import json
 import os
 from pathlib import Path
 import socket
@@ -233,6 +235,109 @@ def schedule_trigger(
     return result
 
 
+def _mailbox_success_result(envelope: dict[str, Any], *, error_code: str, protocol_code: str) -> dict[str, Any]:
+    if envelope.get("ok") is not True:
+        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+        code = error.get("code") if isinstance(error.get("code"), str) else error_code
+        message = error.get("message") if isinstance(error.get("message"), str) else "daemon mailbox request failed"
+        raise DaemonClientError(code, message, response=envelope)
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        raise DaemonClientError(protocol_code, "daemon mailbox success missing result", response=envelope)
+    return result
+
+
+def execute_task_sys_instruction(
+    *,
+    instance_root: Path,
+    instruction: dict[str, Any],
+    socket_path: Path | None = None,
+) -> dict[str, Any]:
+    envelope = request_mailbox(
+        "mailbox.task_sys.execute_instruction",
+        {"instruction": dict(instruction)},
+        socket_path=Path(socket_path) if socket_path is not None else mailbox_socket_path_for_instance_root(instance_root),
+    )
+    return _mailbox_success_result(
+        envelope,
+        error_code="daemon_task_sys_execute_error",
+        protocol_code="daemon_task_sys_execute_protocol_error",
+    )
+
+
+def cleanup_task_sys_side_lease(
+    *,
+    instance_root: Path,
+    task_id: str,
+    socket_path: Path | None = None,
+) -> dict[str, Any]:
+    envelope = request_mailbox(
+        "mailbox.task_sys.cleanup_side_lease",
+        {"task_id": task_id},
+        socket_path=Path(socket_path) if socket_path is not None else mailbox_socket_path_for_instance_root(instance_root),
+    )
+    return _mailbox_success_result(
+        envelope,
+        error_code="daemon_task_sys_cleanup_error",
+        protocol_code="daemon_task_sys_cleanup_protocol_error",
+    )
+
+
+def _command_task_sys_execute(args: argparse.Namespace) -> int:
+    instruction = json.loads(args.instruction_json)
+    if not isinstance(instruction, dict):
+        raise ValueError("--instruction-json must decode to an object")
+    payload = execute_task_sys_instruction(
+        instance_root=Path(args.instance_root),
+        instruction=instruction,
+        socket_path=Path(args.socket) if args.socket else None,
+    )
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
+def _command_task_sys_cleanup(args: argparse.Namespace) -> int:
+    payload = cleanup_task_sys_side_lease(
+        instance_root=Path(args.instance_root),
+        task_id=args.task_id,
+        socket_path=Path(args.socket) if args.socket else None,
+    )
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    execute = subparsers.add_parser("task-sys-execute")
+    execute.add_argument("--instance-root", required=True)
+    execute.add_argument("--instruction-json", required=True)
+    execute.add_argument("--socket")
+    execute.set_defaults(func=_command_task_sys_execute)
+
+    cleanup = subparsers.add_parser("task-sys-cleanup")
+    cleanup.add_argument("--instance-root", required=True)
+    cleanup.add_argument("--task-id", required=True)
+    cleanup.add_argument("--socket")
+    cleanup.set_defaults(func=_command_task_sys_cleanup)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args))
+    except DaemonClientError as exc:
+        print(exc.message, file=sys.stderr)
+        return 1
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
 def register_actor(
     *,
     actor_address: dict[str, Any],
@@ -368,3 +473,7 @@ def wake_im_actor(
 
 def deliver_signal(*, signal: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
     return request_central_daemon("signal.deliver", {"signal": signal}, socket_path=socket_path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

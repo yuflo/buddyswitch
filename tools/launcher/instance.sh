@@ -393,7 +393,7 @@ buddyswitch_instance_main() {
           buddyswitch_instance_usage >&2
           return 2
         fi
-        instance_side_close "$@"
+        instance_side_cleanup "$@"
         return $?
       fi
       if [[ $# -lt 1 ]]; then

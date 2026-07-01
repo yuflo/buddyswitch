@@ -15,7 +15,7 @@ class TaskSysRebuildResidueTests(unittest.TestCase):
             ROOT / "scripts" / "env" / "domain" / "task_sys.py",
             ROOT / "tools" / "launcher" / "task_sys_ingress.py",
             ROOT / "tools" / "launcher" / "task_checkout_handler.py",
-            ROOT / "tools" / "launcher" / "task_sys_runtime.py",
+            ROOT / "tools" / "launcher" / ("task_sys_" + "runtime.py"),
             ROOT / "scripts" / "env" / "tools" / "task_sys" / "tool.py",
             ROOT / "scripts" / "env" / "tools" / "task_sys" / "_impl.py",
             ROOT / "scripts" / "env" / "tool_runtime" / "context.py",

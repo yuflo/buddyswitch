@@ -3438,7 +3438,14 @@ exec "$real_git" "$@"
             main_thread_id = str(ctx["instance_payload"]["thread_id"])
             self._set_instance_side_threads(
                 ctx["instance_root"],
-                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
+                [
+                    {
+                        "thread_id": "thread-side-1",
+                        "parent_thread_id": main_thread_id,
+                        "status": "open",
+                        "turn_id": "turn-side-1",
+                    }
+                ],
             )
             self._set_fake_side_thread_state(
                 Path(str(ctx["state_file"])),
@@ -3506,7 +3513,14 @@ exec "$real_git" "$@"
             main_thread_id = str(ctx["instance_payload"]["thread_id"])
             self._set_instance_side_threads(
                 ctx["instance_root"],
-                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
+                [
+                    {
+                        "thread_id": "thread-side-1",
+                        "parent_thread_id": main_thread_id,
+                        "status": "open",
+                        "turn_id": "turn-side-1",
+                    }
+                ],
             )
             self._set_fake_side_thread_state(
                 Path(str(ctx["state_file"])),
@@ -3668,7 +3682,7 @@ exec "$real_git" "$@"
             }
             self._set_instance_side_threads(
                 ctx["instance_root"],
-                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
+                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open", "turn_id": "turn-side-1"}],
             )
             self._set_fake_side_thread_state(
                 Path(str(ctx["state_file"])),
@@ -3716,6 +3730,9 @@ exec "$real_git" "$@"
             self.assertEqual(payload["side_thread_id"], "thread-side-1")
             self.assertEqual(payload["parent_thread_id"], main_thread_id)
             self.assertEqual(payload["turn_id"], "turn-side-1")
+            self.assertTrue(payload["turn_interrupt_attempted"])
+            self.assertTrue(payload["turn_interrupt_ok"])
+            self.assertTrue(payload["lease_unregistered"])
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             interrupt = next(row for row in rpc_rows if row["rpc_method"] == "turn/interrupt")
@@ -3729,7 +3746,7 @@ exec "$real_git" "$@"
             main_state = state_payload["threads"][main_thread_id]
             self.assertEqual(main_state["turns"][0]["status"], "inProgress")
 
-    def test_side_close_idle_registered_child_uses_startup_interrupt(self) -> None:
+    def test_side_close_idle_registered_child_skips_turn_interrupt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -3770,14 +3787,11 @@ exec "$real_git" "$@"
 
             self.assertEqual(close_result.returncode, 0, msg=close_result.stderr)
             payload = json.loads(close_result.stdout)
-            interrupt = next(
-                row
-                for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))
-                if row["rpc_method"] == "turn/interrupt"
-            )
-            self.assertEqual(interrupt["params"]["threadId"], "thread-side-1")
-            self.assertEqual(interrupt["params"]["turnId"], "")
-            self.assertTrue(payload["startup_interrupt"])
+            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
+            self.assertNotIn("turn/interrupt", methods)
+            self.assertNotIn("startup_" + "interrupt", payload)
+            self.assertFalse(payload["turn_interrupt_attempted"])
+            self.assertTrue(payload["lease_unregistered"])
 
     def test_side_create_requires_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

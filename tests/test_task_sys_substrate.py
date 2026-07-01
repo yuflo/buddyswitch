@@ -233,8 +233,8 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {
                 "side_thread_id": "thr-side-parent",
                 "cleanup": {
-                    "registry_unregistered": True,
-                    "physical_close_ok": True,
+                    "lease_unregistered": True,
+                    "turn_interrupt_ok": True,
                 },
             },
         )
@@ -244,8 +244,8 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["status"], "needs_parent")
         self.assertEqual(record["side_result"]["outcome"], "need_parent")
         self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-parent")
-        self.assertEqual(record["side_result"]["cleanup"]["registry_unregistered"], True)
-        self.assertEqual(record["side_result"]["cleanup"]["physical_close_ok"], True)
+        self.assertEqual(record["side_result"]["cleanup"]["lease_unregistered"], True)
+        self.assertEqual(record["side_result"]["cleanup"]["turn_interrupt_ok"], True)
         self.assertIn("side_cleanup_recorded", self._event_types(task_id))
 
     def test_record_task_close_closes_side_processing_task(self) -> None:
@@ -277,9 +277,9 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {
                 "side_thread_id": "thr-side-clean",
                 "cleanup": {
-                    "registry_unregistered": True,
-                    "physical_close_ok": False,
-                    "physical_close_error": "thread already gone",
+                    "lease_unregistered": True,
+                    "turn_interrupt_ok": False,
+                    "turn_interrupt_error": "thread already gone",
                 },
             },
         )
@@ -288,9 +288,9 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         record = self._task_record(task_id)
         self.assertEqual(record["close_result"]["processor"], "side")
         self.assertEqual(record["close_result"]["side_thread_id"], "thr-side-clean")
-        self.assertEqual(record["close_result"]["cleanup"]["registry_unregistered"], True)
-        self.assertEqual(record["close_result"]["cleanup"]["physical_close_ok"], False)
-        self.assertEqual(record["close_result"]["cleanup"]["physical_close_error"], "thread already gone")
+        self.assertEqual(record["close_result"]["cleanup"]["lease_unregistered"], True)
+        self.assertEqual(record["close_result"]["cleanup"]["turn_interrupt_ok"], False)
+        self.assertEqual(record["close_result"]["cleanup"]["turn_interrupt_error"], "thread already gone")
         self.assertIn("side_cleanup_recorded", self._event_types(task_id))
 
     def test_record_task_close_closes_parent_processing_task(self) -> None:
@@ -350,9 +350,9 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "attempts": 2,
                 "last_side_thread_id": "thr-side-stale",
                 "cleanup": {
-                    "registry_unregistered": True,
-                    "physical_close_ok": False,
-                    "physical_close_error": "thread not loaded",
+                    "lease_unregistered": True,
+                    "turn_interrupt_ok": False,
+                    "turn_interrupt_error": "thread not loaded",
                 },
             },
         )
@@ -369,7 +369,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIs(record["failure_result"]["retryable"], True)
         self.assertEqual(record["failure_result"]["attempts"], 2)
         self.assertEqual(record["failure_result"]["last_side_thread_id"], "thr-side-stale")
-        self.assertEqual(record["failure_result"]["cleanup"]["registry_unregistered"], True)
+        self.assertEqual(record["failure_result"]["cleanup"]["lease_unregistered"], True)
         self.assertIsInstance(record["failure_result"]["updated_at"], str)
         for field in ("source_type", "source_ref", "actor_target", "inbound_context"):
             with self.subTest(field=field):

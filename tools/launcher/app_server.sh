@@ -209,30 +209,11 @@ buddyswitch_app_server_input() {
     --permissions "buddyswitch-runtime"
 }
 
-buddyswitch_app_server_side_start() {
-  local parent_thread_id="$1"
-  local text="$2"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" side-start \
-    --socket "$(buddyswitch_app_server_socket)" \
-    --parent-thread-id "${parent_thread_id}" \
-    --text "${text}" \
-    --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}" \
-    --shared-project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
-    --permissions "buddyswitch-runtime"
-}
-
 buddyswitch_app_server_interrupt() {
   local thread_id="$1"
   python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" interrupt \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}"
-}
-
-buddyswitch_app_server_side_close() {
-  local side_thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" side-close \
-    --socket "$(buddyswitch_app_server_socket)" \
-    --side-thread-id "${side_thread_id}"
 }
 
 buddyswitch_app_server_goal_get() {

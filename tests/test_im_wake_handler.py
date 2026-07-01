@@ -51,21 +51,16 @@ class _Runtime:
         self.calls.append({"method": "submit_side_triage_prompt", "prompt": prompt, **kwargs})
         raise AssertionError("IM wake handler must not submit side prompts")
 
+    def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append({"method": "execute_task_sys_instruction", "instruction": instruction})
+        return {"action": instruction["type"], "task_id": instruction["task_id"]}
+
 
 class ImWakeHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp_dir = tempfile.TemporaryDirectory()
         self.runtime_root = Path(self._tmp_dir.name)
         runtime_files.set_runtime_root_override(self.runtime_root)
-        self.executed_instructions: list[dict[str, Any]] = []
-        original_execute = im_wake_handler.task_sys_runtime.execute_instruction
-
-        def fake_execute(_context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
-            self.executed_instructions.append(instruction)
-            return {"action": instruction["type"], "task_id": instruction["task_id"]}
-
-        self.addCleanup(setattr, im_wake_handler.task_sys_runtime, "execute_instruction", original_execute)
-        im_wake_handler.task_sys_runtime.execute_instruction = fake_execute
 
     def tearDown(self) -> None:
         runtime_files.reset_runtime_root_override()
@@ -102,7 +97,6 @@ class ImWakeHandlerTests(unittest.TestCase):
         result = handler.handle(_Context(actor), None, runtime, self._trigger(actor))
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual(runtime.calls, [])
         records = self._task_records()
         self.assertEqual(len(records), 1)
         record = records[0]
@@ -112,9 +106,10 @@ class ImWakeHandlerTests(unittest.TestCase):
         self.assertEqual(record["inbound_context"]["message_id"], "msg-abc123")
         self.assertEqual(record["status"], "side_processing")
         self.assertEqual(record["active_processor"], "side")
-        self.assertEqual(len(self.executed_instructions), 1)
-        self.assertEqual(self.executed_instructions[0]["type"], "start_side")
-        self.assertEqual(self.executed_instructions[0]["task_id"], record["id"])
+        self.assertEqual(len(runtime.calls), 1)
+        self.assertEqual(runtime.calls[0]["method"], "execute_task_sys_instruction")
+        self.assertEqual(runtime.calls[0]["instruction"]["type"], "start_side")
+        self.assertEqual(runtime.calls[0]["instruction"]["task_id"], record["id"])
 
     def test_wrong_target_actor_fails(self) -> None:
         handler = im_wake_handler.ImMessageCreatedHandler()

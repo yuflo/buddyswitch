@@ -600,6 +600,58 @@ buddyswitch_instance_unregister_side_thread() {
     --side-thread-id "${side_thread_id}" >/dev/null
 }
 
+buddyswitch_side_thread_lifecycle_start() {
+  local actor_id="$1"
+  local parent_thread_id="$2"
+  local text="$3"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
+  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py" start \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --instance-json "${instance_json}" \
+    --actor-id "${actor_id}" \
+    --parent-thread-id "${parent_thread_id}" \
+    --text "${text}" \
+    --purpose "host_control.side" \
+    --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}" \
+    --shared-project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
+    --permissions "buddyswitch-runtime"
+}
+
+buddyswitch_side_thread_lifecycle_send() {
+  local actor_id="$1"
+  local parent_thread_id="$2"
+  local side_thread_id="$3"
+  local text="$4"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
+  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py" send \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --instance-json "${instance_json}" \
+    --actor-id "${actor_id}" \
+    --parent-thread-id "${parent_thread_id}" \
+    --side-thread-id "${side_thread_id}" \
+    --text "${text}" \
+    --permissions "buddyswitch-runtime"
+}
+
+buddyswitch_side_thread_lifecycle_cleanup() {
+  local actor_id="$1"
+  local parent_thread_id="$2"
+  local side_thread_id="$3"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
+  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py" cleanup \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --instance-json "${instance_json}" \
+    --actor-id "${actor_id}" \
+    --parent-thread-id "${parent_thread_id}" \
+    --side-thread-id "${side_thread_id}"
+}
+
 buddyswitch_instance_clear_app_server() {
   local actor_id="$1"
   local status="${2:-inactive}"

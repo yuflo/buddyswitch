@@ -1825,7 +1825,9 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
                             "parent_thread_id": "thread-main",
                             "side_thread_id": "thread-side-1",
                             "turn_id": "turn-side-1",
-                            "startup_interrupt": False,
+                            "turn_interrupt_attempted": True,
+                            "turn_interrupt_ok": True,
+                            "lease_unregistered": True,
                         }
                     ),
                 ),
@@ -1849,7 +1851,9 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(payload["side_thread_id"], "thread-side-1")
         self.assertEqual(payload["parent_thread_id"], "thread-main")
         self.assertEqual(payload["turn_id"], "turn-side-1")
-        self.assertFalse(payload["startup_interrupt"])
+        self.assertTrue(payload["turn_interrupt_attempted"])
+        self.assertTrue(payload["turn_interrupt_ok"])
+        self.assertTrue(payload["lease_unregistered"])
         self.assertEqual(payload["instance"]["thread_id"], "thread-main")
 
     def test_side_route_rejects_empty_text(self) -> None:

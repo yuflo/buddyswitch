@@ -823,8 +823,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             autospec=True,
             return_value={
                 "side_thread_id": "thr-side-response",
-                "registry_unregistered": True,
-                "physical_close_ok": True,
+                "lease_unregistered": True,
+                "turn_interrupt_ok": True,
             },
         ):
             response = self._dispatch(
@@ -841,8 +841,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(response["task_status"], "closed")
         self.assertEqual(response["processor"], "side")
         self.assertEqual(response["side_thread_id"], "thr-side-response")
-        self.assertEqual(response["side_cleanup"]["registry_unregistered"], True)
-        self.assertEqual(response["side_cleanup"]["physical_close_ok"], True)
+        self.assertEqual(response["side_cleanup"]["lease_unregistered"], True)
+        self.assertEqual(response["side_cleanup"]["turn_interrupt_ok"], True)
         self.assertEqual(response["close_result"]["processor"], "side")
         self.assertEqual(response["close_result"]["side_thread_id"], "thr-side-response")
 

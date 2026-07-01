@@ -83,6 +83,17 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         return [line for line in completed.stdout.splitlines() if line.strip()]
 
+    def _scan_targets(self, pattern: str, targets: list[str]) -> list[str]:
+        completed = subprocess.run(
+            ["rg", "-n", pattern, *targets, "-g", "!**/__pycache__/**", "-g", "!**/*.pyc"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        return [line for line in completed.stdout.splitlines() if line.strip()]
+
     @staticmethod
     def _is_docs_spec_context_hit(line: str) -> bool:
         path_text, _sep, _rest = line.partition(":")
@@ -99,6 +110,10 @@ class RepoConsistencyTests(unittest.TestCase):
         if path_text.startswith("docs/spec/task-sys-proactive-rebuild/"):
             return True
         if path_text.startswith("docs/spec/task-sys-side-frame-lifecycle/"):
+            return True
+        if path_text.startswith("docs/spec/2026-07-01-task-sys-rebuild-"):
+            return True
+        if path_text.startswith("docs/spec/2026-07-02-side-thread-lifecycle-"):
             return True
         if path_text.startswith("docs/spec/browser-cockpit-lazy-release/"):
             return True
@@ -219,6 +234,39 @@ print(json.dumps({{
             )
             self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
             self.assertEqual(completed.stdout.strip(), "", msg=f"{token}\n{completed.stdout}")
+
+    def test_side_thread_lifecycle_boundary_has_no_direct_call_residue(self) -> None:
+        targets = ["tools/launcher", "scripts/env", "buddyswitch-codex", "tests"]
+        direct_pattern = (
+            r"app_server\." + r"(side_start|side_close|thread_fork|thread_inject_items|input_turn)"
+            + r"|side_thread_registry\."
+            + r"(register_side_thread|require_side_thread|find_open_side_thread|find_task_side_thread|unregister_side_thread)"
+            + r"|import task_sys_" + r"runtime|task_sys_" + r"runtime\."
+        )
+        allowed_direct_prefixes = (
+            "tools/launcher/side_thread_lifecycle.py:",
+            "tools/launcher/app_server.py:",
+            "tools/launcher/side_thread_registry.py:",
+            "tests/test_side_thread_lifecycle.py:",
+            "tests/test_side_thread_registry.py:",
+        )
+        direct_hits = [
+            line
+            for line in self._scan_targets(direct_pattern, targets)
+            if not line.startswith(allowed_direct_prefixes)
+        ]
+        self.assertEqual(direct_hits, [], msg="\n".join(direct_hits))
+
+        terminology_pattern = "|".join(
+            (
+                "physical_" + "close",
+                "startup_" + "interrupt",
+                "side_" + r"start\(",
+                "side_" + r"close\(",
+            )
+        )
+        terminology_hits = self._scan_targets(terminology_pattern, targets)
+        self.assertEqual(terminology_hits, [], msg="\n".join(terminology_hits))
 
     def test_env_store_module_is_runtime_root_compat_only(self) -> None:
         retired_api = (

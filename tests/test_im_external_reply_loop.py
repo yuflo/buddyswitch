@@ -63,8 +63,10 @@ class _RecordingTriggerDispatcher:
 
 
 class _Runtime:
-    def __init__(self) -> None:
+    def __init__(self, actor_address: ActorAddress) -> None:
+        self.actor_address = actor_address
         self.parent_prompts: list[dict[str, Any]] = []
+        self.task_sys_instructions: list[dict[str, Any]] = []
 
     def parent_activity(self) -> dict[str, str]:
         return {"status": "idle"}
@@ -72,42 +74,30 @@ class _Runtime:
     def submit_parent_prompt(self, prompt: str, **kwargs: Any) -> None:
         self.parent_prompts.append({"prompt": prompt, **kwargs})
 
+    def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
+        if instruction.get("actor_target") != self.actor_address.to_payload():
+            raise AssertionError(f"wrong task sys target: {instruction.get('actor_target')!r}")
+        self.task_sys_instructions.append(instruction)
+        return {"action": instruction["type"], "task_id": instruction["task_id"]}
+
 
 class _WakeHandlerDispatcher:
     def __init__(self, actor_address: ActorAddress) -> None:
         self.context = type("Context", (), {"actor_address": actor_address})()
-        self.runtime = _Runtime()
+        self.runtime = _Runtime(actor_address)
         self.handler = im_wake_handler.ImMessageCreatedHandler()
         self.triggers: list[Any] = []
-        self.task_sys_instructions: list[dict[str, Any]] = []
+        self.task_sys_instructions = self.runtime.task_sys_instructions
 
     def __call__(self, trigger: Any) -> dict[str, Any]:
         self.triggers.append(trigger)
-        original_execute = im_wake_handler.task_sys_runtime.execute_instruction
-
-        def fake_execute(context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
-            actor_address = getattr(context, "actor_address")
-            self.assert_actor_target(actor_address, instruction)
-            self.task_sys_instructions.append(instruction)
-            return {"action": instruction["type"], "task_id": instruction["task_id"]}
-
-        try:
-            im_wake_handler.task_sys_runtime.execute_instruction = fake_execute
-            result = self.handler.handle(self.context, None, self.runtime, trigger)
-        finally:
-            im_wake_handler.task_sys_runtime.execute_instruction = original_execute
+        result = self.handler.handle(self.context, None, self.runtime, trigger)
         return {
             "accepted": True,
             "handled_count": 1 if result.status == "handled" else 0,
             "matched_count": 1,
             "handling_status": result.status,
         }
-
-    @staticmethod
-    def assert_actor_target(actor_address: ActorAddress, instruction: dict[str, Any]) -> None:
-        if instruction.get("actor_target") != actor_address.to_payload():
-            raise AssertionError(f"wrong task sys target: {instruction.get('actor_target')!r}")
-
 
 class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _create_connection(self, router: im_http_router.ImHttpRouter) -> str:

@@ -358,6 +358,91 @@ class DaemonMailboxTests(unittest.TestCase):
         self.assertEqual(trigger.payload, {"note": "generic local trigger"})
         self.assertEqual(trigger.source_context, {})
 
+    def test_task_sys_mailbox_methods_dispatch_to_concrete_task_sys_handler(self) -> None:
+        calls: list[dict[str, Any]] = []
+
+        def task_sys_dispatcher(action: str, params: dict[str, Any]) -> dict[str, Any]:
+            calls.append({"action": action, "params": params})
+            if action == "execute_instruction":
+                instruction = params["instruction"]
+                return {"action": instruction["type"], "task_id": instruction["task_id"]}
+            if action == "cleanup_side_lease":
+                return {"action": "cleanup", "task_id": params["task_id"], "lease_unregistered": True}
+            raise AssertionError(action)
+
+        server = self.mailbox.DaemonMailboxServer(
+            socket_path=Path("/tmp/not-used.sock"),
+            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            handlers=[],
+            task_sys_dispatcher=task_sys_dispatcher,
+        )
+        instruction = {
+            "type": "start_side",
+            "task_id": "task-user-input-mailbox123",
+            "actor_target": {"actor_id": "act-dev-daemon", "role_id": "dev"},
+        }
+
+        executed = server.dispatch(
+            {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-task-sys-execute",
+                "method": "mailbox.task_sys.execute_instruction",
+                "params": {"instruction": instruction},
+            }
+        )
+        cleaned = server.dispatch(
+            {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-task-sys-cleanup",
+                "method": "mailbox.task_sys.cleanup_side_lease",
+                "params": {"task_id": "task-user-input-mailbox123"},
+            }
+        )
+
+        self.assertTrue(executed["ok"], msg=executed)
+        self.assertEqual(executed["result"], {"action": "start_side", "task_id": "task-user-input-mailbox123"})
+        self.assertTrue(cleaned["ok"], msg=cleaned)
+        self.assertEqual(cleaned["result"]["lease_unregistered"], True)
+        self.assertEqual([call["action"] for call in calls], ["execute_instruction", "cleanup_side_lease"])
+        self.assertEqual(calls[0]["params"], {"instruction": instruction})
+        self.assertEqual(calls[1]["params"], {"task_id": "task-user-input-mailbox123"})
+
+    def test_daemon_client_task_sys_helpers_call_mailbox_methods(self) -> None:
+        calls: list[dict[str, Any]] = []
+        original_request_mailbox = self.client.request_mailbox
+
+        def fake_request_mailbox(method: str, params: dict[str, Any], *, socket_path: Path) -> dict[str, Any]:
+            calls.append({"method": method, "params": params, "socket_path": socket_path})
+            return {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-test",
+                "ok": True,
+                "result": {"ok": True, **params},
+            }
+
+        self.addCleanup(setattr, self.client, "request_mailbox", original_request_mailbox)
+        self.client.request_mailbox = fake_request_mailbox
+        instance_root = Path("/tmp/instance-task-sys-mailbox")
+        instruction = {
+            "type": "start_side",
+            "task_id": "task-user-input-mailbox123",
+            "actor_target": {"actor_id": "act-dev-daemon", "role_id": "dev"},
+        }
+
+        executed = self.client.execute_task_sys_instruction(instance_root=instance_root, instruction=instruction)
+        cleaned = self.client.cleanup_task_sys_side_lease(instance_root=instance_root, task_id="task-user-input-mailbox123")
+
+        self.assertEqual(executed["instruction"], instruction)
+        self.assertEqual(cleaned["task_id"], "task-user-input-mailbox123")
+        self.assertEqual(
+            [call["method"] for call in calls],
+            ["mailbox.task_sys.execute_instruction", "mailbox.task_sys.cleanup_side_lease"],
+        )
+        self.assertEqual(
+            [call["socket_path"] for call in calls],
+            [self.client.mailbox_socket_path_for_instance_root(instance_root)] * 2,
+        )
+
     def test_local_trigger_rejects_wrong_actor_and_invalid_generic_shape_before_dispatch(self) -> None:
         dispatcher = RecordingTriggerDispatcher()
         server = self.mailbox.DaemonMailboxServer(

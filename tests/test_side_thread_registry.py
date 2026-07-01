@@ -87,12 +87,14 @@ class SideThreadRegistryTests(unittest.TestCase):
                 side_thread_id="thr-side-task",
                 task_id="task-user-input-abcdef123456",
                 purpose="task_sys.side_frame",
+                turn_id="turn-side-1",
                 now=lambda: "2026-06-30T00:00:00Z",
             )
 
             self.assertEqual(row["thread_id"], "thr-side-task")
             self.assertEqual(row["task_id"], "task-user-input-abcdef123456")
             self.assertEqual(row["purpose"], "task_sys.side_frame")
+            self.assertEqual(row["turn_id"], "turn-side-1")
             payload = self._payload(instance_json)
             self.assertEqual(payload["side_threads"], [row])
 
@@ -119,6 +121,35 @@ class SideThreadRegistryTests(unittest.TestCase):
             self.assertEqual(len(payload["side_threads"]), 1)
             self.assertEqual(payload["side_threads"][0], row)
             self.assertEqual(row["created_at"], "2026-06-02T00:01:00Z")
+
+    def test_update_side_thread_rewrites_turn_metadata_without_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            self.registry.register_side_thread(
+                instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                side_thread_id="thr-side-1",
+                turn_id="turn-old",
+                now=lambda: "2026-06-02T00:00:00Z",
+            )
+
+            row = self.registry.update_side_thread(
+                instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                side_thread_id="thr-side-1",
+                turn_id="turn-new",
+                now=lambda: "2026-06-02T00:01:00Z",
+            )
+
+            self.assertEqual(row["thread_id"], "thr-side-1")
+            self.assertEqual(row["turn_id"], "turn-new")
+            self.assertEqual(row["created_at"], "2026-06-02T00:00:00Z")
+            self.assertEqual(row["updated_at"], "2026-06-02T00:01:00Z")
+            payload = self._payload(instance_json)
+            self.assertEqual(payload["side_threads"], [row])
+            self.assertEqual(payload["updated_at"], "2026-06-02T00:01:00Z")
 
     def test_require_accepts_open_side_thread_for_actor_and_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

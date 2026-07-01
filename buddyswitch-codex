@@ -9,14 +9,14 @@ BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
 SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"
 TASK_SYS_INGRESS_HELPER="${REPO_ROOT}/tools/launcher/task_sys_ingress.py"
-TASK_SYS_RUNTIME_HELPER="${REPO_ROOT}/tools/launcher/task_sys_runtime.py"
+DAEMON_CLIENT_HELPER="${REPO_ROOT}/scripts/env/tool_runtime/daemon_client.py"
 DAEMON_HELPER="${REPO_ROOT}/tools/launcher/daemon.sh"
 INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${TASK_SYS_RUNTIME_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${DAEMON_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -460,8 +460,8 @@ print(json.dumps(instruction, ensure_ascii=True))
 PY
   )" || return 1
   runtime_output="$(
-    python3 "${TASK_SYS_RUNTIME_HELPER}" execute \
-      --instance-json "${BUDDYSWITCH_INSTANCE_JSON}" \
+    python3 "${DAEMON_CLIENT_HELPER}" task-sys-execute \
+      --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}" \
       --instruction-json "${instruction_json}" 2>&1
   )" || {
     [[ -n "${runtime_output}" ]] && echo "${runtime_output}" >&2
@@ -532,7 +532,7 @@ payload = {
     "parent_thread_id": sys.argv[3],
     "side_thread_id": sys.argv[4],
     "action": "send",
-    "thread_action": source.get("action"),
+    "thread_action": source.get("thread_action"),
 }
 for key in ("turn_id", "expected_turn_id"):
     value = source.get(key)
@@ -592,8 +592,7 @@ instance_side() {
   parent_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
 
   if [[ -n "${side_thread_id}" ]]; then
-    buddyswitch_instance_require_side_thread "${actor_id}" "${parent_thread_id}" "${side_thread_id}" >/dev/null || return $?
-    output="$(buddyswitch_app_server_input "${side_thread_id}" "${text}" 2>&1)" || {
+    output="$(buddyswitch_side_thread_lifecycle_send "${actor_id}" "${parent_thread_id}" "${side_thread_id}" "${text}" 2>&1)" || {
       if [[ "${output}" == *"turn/steer failed"* ]]; then
         echo "Instance side blocked: active turn is not steerable; retry later or close it." >&2
         echo "${output}" >&2
@@ -606,7 +605,7 @@ instance_side() {
     return $?
   fi
 
-  output="$(buddyswitch_app_server_side_start "${parent_thread_id}" "${text}" 2>&1)" || {
+  output="$(buddyswitch_side_thread_lifecycle_start "${actor_id}" "${parent_thread_id}" "${text}" 2>&1)" || {
     [[ -n "${output}" ]] && echo "${output}" >&2
     return 1
   }
@@ -625,7 +624,6 @@ PY
     echo "Side start returned no side_thread_id." >&2
     return 1
   fi
-  buddyswitch_instance_register_side_thread "${actor_id}" "${parent_thread_id}" "${side_thread_id}" || return $?
   instance_side_print_start_result "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" "${json}"
 }
 
@@ -649,7 +647,7 @@ instance_require_active_service_thread() {
   INSTANCE_ACTIVE_THREAD_ID="${thread_id}"
 }
 
-instance_side_close() {
+instance_side_cleanup() {
   local actor_id="${1:-}" side_thread_id="" parent_thread_id="" arg output json=0
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
@@ -686,13 +684,11 @@ instance_side_close() {
 
   instance_require_active_service_thread "${actor_id}" "side close" || return $?
   parent_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
-  buddyswitch_instance_require_side_thread "${actor_id}" "${parent_thread_id}" "${side_thread_id}" >/dev/null || return $?
 
-  output="$(buddyswitch_app_server_side_close "${side_thread_id}" 2>&1)" || {
+  output="$(buddyswitch_side_thread_lifecycle_cleanup "${actor_id}" "${parent_thread_id}" "${side_thread_id}" 2>&1)" || {
     [[ -n "${output}" ]] && echo "${output}" >&2
     return 1
   }
-  buddyswitch_instance_unregister_side_thread "${actor_id}" "${parent_thread_id}" "${side_thread_id}" || return $?
 
   if [[ "${json}" -eq 1 ]]; then
     python3 - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
@@ -705,11 +701,18 @@ payload = {
     "parent_thread_id": sys.argv[3],
     "side_thread_id": sys.argv[4],
     "action": "close",
-    "startup_interrupt": bool(source.get("startup_interrupt")),
 }
-turn_id = source.get("turn_id")
-if isinstance(turn_id, str) and turn_id:
-    payload["turn_id"] = turn_id
+for key in (
+    "turn_id",
+    "turn_interrupt_attempted",
+    "turn_interrupt_ok",
+    "turn_interrupt_error",
+    "lease_unregistered",
+    "lease_unregister_error",
+):
+    value = source.get(key)
+    if value is not None:
+        payload[key] = value
 print(json.dumps(payload, ensure_ascii=True))
 PY
     return 0

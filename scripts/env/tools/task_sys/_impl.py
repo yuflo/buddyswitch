@@ -225,17 +225,19 @@ def _cleanup_task_sys_side_lease(context: Any, task_id: str) -> dict[str, Any]:
     if not callable(cleanup):
         return {
             "side_thread_id": None,
-            "registry_unregistered": False,
-            "physical_close_ok": False,
-            "physical_close_error": "Task Sys side cleanup is unavailable",
+            "turn_interrupt_attempted": False,
+            "turn_interrupt_ok": False,
+            "turn_interrupt_error": "Task Sys side cleanup is unavailable",
+            "lease_unregistered": False,
         }
     result = cleanup(task_id)
     if not isinstance(result, dict):
         return {
             "side_thread_id": None,
-            "registry_unregistered": False,
-            "physical_close_ok": False,
-            "physical_close_error": "Task Sys side cleanup returned a non-object result",
+            "turn_interrupt_attempted": False,
+            "turn_interrupt_ok": False,
+            "turn_interrupt_error": "Task Sys side cleanup returned a non-object result",
+            "lease_unregistered": False,
         }
     return result
 

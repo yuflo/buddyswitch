@@ -35,13 +35,19 @@ class SubmitTurnTests(unittest.TestCase):
     def setUp(self) -> None:
         self.submit_turn = load_module(SUBMIT_TURN_PATH)
 
-    def test_submit_turn_delegates_to_app_server_input_turn(self) -> None:
+    def test_submit_turn_starts_idle_thread_with_app_server_primitives(self) -> None:
         calls: list[dict[str, object]] = []
-        original = self.submit_turn.app_server.input_turn
+        original_read = self.submit_turn.app_server.thread_read
+        original_start = self.submit_turn.app_server.turn_start
 
-        def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+        def fake_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+            calls.append({"helper": "thread_read", "socket_path": socket_path, "thread_id": thread_id, "include_turns": include_turns})
+            return {"thread": {"id": thread_id, "status": {"type": "idle"}}}
+
+        def fake_turn_start(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
             calls.append(
                 {
+                    "helper": "turn_start",
                     "socket_path": socket_path,
                     "thread_id": thread_id,
                     "text": text,
@@ -50,8 +56,10 @@ class SubmitTurnTests(unittest.TestCase):
             )
             return {"action": "start", "turn_id": "turn-daemon-1"}
 
-        self.addCleanup(setattr, self.submit_turn.app_server, "input_turn", original)
-        self.submit_turn.app_server.input_turn = fake_input_turn
+        self.addCleanup(setattr, self.submit_turn.app_server, "thread_read", original_read)
+        self.addCleanup(setattr, self.submit_turn.app_server, "turn_start", original_start)
+        self.submit_turn.app_server.thread_read = fake_thread_read
+        self.submit_turn.app_server.turn_start = fake_turn_start
 
         result = self.submit_turn.submit_turn(
             socket_path=Path("/tmp/app-server.sock"),
@@ -65,6 +73,13 @@ class SubmitTurnTests(unittest.TestCase):
             calls,
             [
                 {
+                    "helper": "thread_read",
+                    "socket_path": Path("/tmp/app-server.sock"),
+                    "thread_id": "thr-main",
+                    "include_turns": False,
+                },
+                {
+                    "helper": "turn_start",
                     "socket_path": Path("/tmp/app-server.sock"),
                     "thread_id": "thr-main",
                     "text": "daemon prompt",
@@ -74,13 +89,25 @@ class SubmitTurnTests(unittest.TestCase):
         )
 
     def test_submit_turn_cli_emits_json_payload(self) -> None:
-        original = self.submit_turn.app_server.input_turn
+        original_read = self.submit_turn.app_server.thread_read
+        original_active = self.submit_turn.app_server.active_turn_id
+        original_steer = self.submit_turn.app_server.turn_steer
 
-        def fake_input_turn(_socket_path: Path, _thread_id: str, _text: str, _permissions: str) -> dict[str, object]:
+        def fake_thread_read(_socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
+            return {"thread": {"id": thread_id, "status": {"type": "active", "activeFlags": []}}}
+
+        def fake_active_turn_id(_socket_path: Path, _thread_id: str) -> str:
+            return "turn-active-1"
+
+        def fake_turn_steer(_socket_path: Path, _thread_id: str, _turn_id: str, _text: str) -> dict[str, object]:
             return {"action": "steer", "turn_id": "turn-steer-1", "expected_turn_id": "turn-active-1"}
 
-        self.addCleanup(setattr, self.submit_turn.app_server, "input_turn", original)
-        self.submit_turn.app_server.input_turn = fake_input_turn
+        self.addCleanup(setattr, self.submit_turn.app_server, "thread_read", original_read)
+        self.addCleanup(setattr, self.submit_turn.app_server, "active_turn_id", original_active)
+        self.addCleanup(setattr, self.submit_turn.app_server, "turn_steer", original_steer)
+        self.submit_turn.app_server.thread_read = fake_thread_read
+        self.submit_turn.app_server.active_turn_id = fake_active_turn_id
+        self.submit_turn.app_server.turn_steer = fake_turn_steer
 
         stdout = io.StringIO()
         stderr = io.StringIO()

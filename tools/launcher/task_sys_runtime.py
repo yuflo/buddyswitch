@@ -19,7 +19,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import app_server  # noqa: E402
-import side_thread_registry  # noqa: E402
+import side_thread_lifecycle  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 
@@ -306,76 +306,14 @@ def _project_workspace_dir(context: Any) -> Path:
     return _context_path(context, "project_workspace_dir")
 
 
-def _side_thread_id_from_fork_result(result: Mapping[str, Any]) -> str:
-    thread = result.get("thread")
-    if not isinstance(thread, Mapping):
-        raise ValueError("thread/fork did not return a thread object")
-    return _require_text(thread.get("id"), "thread.id")
-
-
-def _turn_id_from_side_input_result(result: Mapping[str, Any]) -> str:
-    value = result.get("turn_id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    turn = result.get("turn")
-    if isinstance(turn, Mapping):
-        turn_id = turn.get("id")
-        if isinstance(turn_id, str) and turn_id.strip():
-            return turn_id.strip()
-    value = result.get("turnId")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    raise ValueError("side input did not return a turn id")
-
-
-def _cleanup_side_attempt(context: Any, *, parent_thread_id: str, side_thread_id: str) -> dict[str, Any]:
-    cleanup: dict[str, Any] = {
-        "physical_close_ok": False,
-        "registry_unregistered": False,
-    }
-    try:
-        app_server.side_close(_socket_path(context), side_thread_id)
-    except Exception as exc:  # best-effort cleanup must continue to registry unregister
-        cleanup["physical_close_error"] = str(exc)
-    else:
-        cleanup["physical_close_ok"] = True
-    try:
-        cleanup["registry_unregistered"] = side_thread_registry.unregister_side_thread(
-            _instance_json(context),
-            actor_id=_context_actor_id(context),
-            parent_thread_id=parent_thread_id,
-            side_thread_id=side_thread_id,
-        )
-    except Exception as exc:
-        cleanup["registry_unregistered"] = False
-        cleanup["registry_unregister_error"] = str(exc)
-    return cleanup
-
-
 def cleanup_task_sys_side_lease(context: Any, task_id: str) -> dict[str, Any]:
-    normalized_task_id = _require_text(task_id, "task_id")
-    parent_thread_id = _main_thread_id(context)
-    row = side_thread_registry.find_task_side_thread(
-        _instance_json(context),
+    return side_thread_lifecycle.cleanup_task_side_lease(
+        socket_path=_socket_path(context),
+        instance_json=_instance_json(context),
         actor_id=_context_actor_id(context),
-        parent_thread_id=parent_thread_id,
-        task_id=normalized_task_id,
+        parent_thread_id=_main_thread_id(context),
+        task_id=_require_text(task_id, "task_id"),
     )
-    side_thread_id = row.get("thread_id") if isinstance(row, Mapping) else None
-    if not isinstance(side_thread_id, str) or not side_thread_id.strip():
-        return {
-            "side_thread_id": None,
-            "physical_close_ok": False,
-            "physical_close_error": "task side lease not found",
-            "registry_unregistered": False,
-        }
-    cleanup = _cleanup_side_attempt(
-        context,
-        parent_thread_id=parent_thread_id,
-        side_thread_id=side_thread_id,
-    )
-    cleanup["side_thread_id"] = side_thread_id
-    return cleanup
 
 
 def _start_side_attempt(
@@ -386,55 +324,31 @@ def _start_side_attempt(
     parent_thread_id: str,
     attempt_number: int,
 ) -> dict[str, Any]:
-    stage = "side_fork"
-    side_thread_id: str | None = None
     try:
-        forked = app_server.thread_fork(
-            _socket_path(context),
-            parent_thread_id,
+        started = side_thread_lifecycle.start_side_thread(
+            socket_path=_socket_path(context),
+            instance_json=_instance_json(context),
+            actor_id=_context_actor_id(context),
+            parent_thread_id=parent_thread_id,
+            text=frame_text,
+            purpose="task_sys.side_frame",
             workspace_dir=_workspace_dir(context),
             shared_project_workspace_dir=_project_workspace_dir(context),
             permissions=_permissions(context),
-        )
-        side_thread_id = _side_thread_id_from_fork_result(_require_mapping(forked, "thread/fork result"))
-        side_thread_registry.register_side_thread(
-            _instance_json(context),
-            actor_id=_context_actor_id(context),
-            parent_thread_id=parent_thread_id,
-            side_thread_id=side_thread_id,
             task_id=task_id,
-            purpose="task_sys.side_frame",
         )
-        stage = "side_inject"
-        app_server.thread_inject_items(
-            _socket_path(context),
-            side_thread_id,
-            [app_server.side_boundary_prompt_item()],
-        )
-        stage = "side_input"
-        sent = app_server.input_turn(
-            _socket_path(context),
-            side_thread_id,
-            frame_text,
-            _permissions(context),
-        )
-        turn_id = _turn_id_from_side_input_result(_require_mapping(sent, "side input result"))
     except Exception as exc:
         attempt: dict[str, Any] = {
             "attempt": attempt_number,
-            "stage": stage,
+            "stage": "side_lifecycle",
             "error": str(exc),
             "retryable": True,
         }
-        if side_thread_id is not None:
-            attempt["side_thread_id"] = side_thread_id
-            attempt["cleanup"] = _cleanup_side_attempt(
-                context,
-                parent_thread_id=parent_thread_id,
-                side_thread_id=side_thread_id,
-            )
         return {"ok": False, "attempt": attempt}
 
+    payload = _require_mapping(started, "side lifecycle result")
+    side_thread_id = _require_text(payload.get("side_thread_id"), "side_thread_id")
+    turn_id = _require_text(payload.get("turn_id"), "turn_id")
     attempt = {
         "attempt": attempt_number,
         "stage": "side_turn_started",
@@ -442,8 +356,8 @@ def _start_side_attempt(
         "turn_id": turn_id,
         "retryable": False,
     }
-    payload = dict(sent)
-    payload.update(
+    result = dict(payload)
+    result.update(
         {
             "ok": True,
             "action": "start_side",
@@ -451,11 +365,11 @@ def _start_side_attempt(
             "task_id": task_id,
             "side_thread_id": side_thread_id,
             "turn_id": turn_id,
-            "thread_action": sent.get("action"),
+            "thread_action": payload.get("thread_action"),
             "attempt": attempt,
         }
     )
-    return payload
+    return result
 
 
 def _execute_start_side(context: Any, instruction: Mapping[str, Any]) -> dict[str, Any]:

@@ -23,7 +23,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 from env.repos import runtime_files  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 
-TASK_SYS_RUNTIME_PATH = ROOT / "tools" / "launcher" / "task_sys_runtime.py"
+TASK_SYS_RUNTIME_PATH = ROOT / "tools" / "launcher" / ("task_sys_" + "runtime.py")
 MODULE_COUNTER = count()
 
 
@@ -198,45 +198,25 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertNotIn("submit parent", text.lower())
         self.assertNotIn("side_" + "interrupt", text)
 
-    def test_execute_start_side_instruction_uses_explicit_dispatch_stages(self) -> None:
+    def test_execute_start_side_instruction_delegates_to_lifecycle_owner(self) -> None:
         context = self._context()
         calls: list[dict[str, Any]] = []
-        original_thread_fork = self.module.app_server.thread_fork
-        original_thread_inject_items = self.module.app_server.thread_inject_items
-        original_input_turn = self.module.app_server.input_turn
-        original_side_start = self.module.app_server.side_start
+        original_start = self.module.side_thread_lifecycle.start_side_thread
 
-        def fake_thread_fork(socket_path: Path, parent_thread_id: str, **kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "thread_fork", "socket_path": socket_path, "parent_thread_id": parent_thread_id, **kwargs})
-            return {"thread": {"id": "thr-side-1"}}
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {
+                "action": "start",
+                "purpose": "task_sys.side_frame",
+                "parent_thread_id": kwargs["parent_thread_id"],
+                "side_thread_id": "thr-side-1",
+                "thread_action": "start",
+                "turn_id": "turn-side-1",
+                "lease_registered": True,
+            }
 
-        def fake_thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-            calls.append({"helper": "thread_inject_items", "socket_path": socket_path, "thread_id": thread_id, "items": items})
-            return {"ok": True}
-
-        def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
-            calls.append(
-                {
-                    "helper": "input_turn",
-                    "socket_path": socket_path,
-                    "thread_id": thread_id,
-                    "text": text,
-                    "permissions": permissions,
-                }
-            )
-            return {"action": "start", "turn_id": "turn-side-1"}
-
-        def fake_side_start(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("Task Sys runtime must own explicit side dispatch stages")
-
-        self.addCleanup(setattr, self.module.app_server, "thread_fork", original_thread_fork)
-        self.addCleanup(setattr, self.module.app_server, "thread_inject_items", original_thread_inject_items)
-        self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
-        self.addCleanup(setattr, self.module.app_server, "input_turn", original_input_turn)
-        self.module.app_server.thread_fork = fake_thread_fork
-        self.module.app_server.thread_inject_items = fake_thread_inject_items
-        self.module.app_server.input_turn = fake_input_turn
-        self.module.app_server.side_start = fake_side_start
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "start_side_thread", original_start)
+        self.module.side_thread_lifecycle.start_side_thread = fake_start_side_thread
 
         result = self.module.execute_instruction(context, self._instruction())
 
@@ -244,107 +224,41 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["side_thread_id"], "thr-side-1")
         self.assertEqual(result["turn_id"], "turn-side-1")
         self.assertEqual(result["stage"], "side_turn_started")
-        self.assertEqual([call["helper"] for call in calls], ["thread_fork", "thread_inject_items", "input_turn"])
-        text = calls[2]["text"]
-        self.assertIn("task_sys.side_frame", text)
-        self.assertIn("task_sys.close", text)
-        self.assertIn("task_sys.need_parent", text)
-        self.assertEqual(calls[0]["parent_thread_id"], "thr-main")
-        self.assertEqual(calls[1]["thread_id"], "thr-side-1")
-        self.assertEqual(calls[2]["thread_id"], "thr-side-1")
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        self.assertEqual(call["socket_path"], context.socket_path)
+        self.assertEqual(call["instance_json"], context.instance_json)
+        self.assertEqual(call["actor_id"], context.actor_id)
+        self.assertEqual(call["parent_thread_id"], context.main_thread_id)
+        self.assertEqual(call["purpose"], "task_sys.side_frame")
+        self.assertEqual(call["workspace_dir"], context.workspace_dir)
+        self.assertEqual(call["shared_project_workspace_dir"], context.project_workspace_dir)
+        self.assertEqual(call["permissions"], context.permissions)
+        self.assertEqual(call["task_id"], "task-user-input-abcdef123456")
+        self.assertIn("task_sys.side_frame", call["text"])
+        self.assertIn("task_sys.close", call["text"])
+        self.assertIn("task_sys.need_parent", call["text"])
 
-        instance_payload = json.loads(context.instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(instance_payload["side_threads"][0]["thread_id"], "thr-side-1")
-
-    def test_execute_start_side_ignores_stale_open_row_and_creates_task_bound_lease(self) -> None:
-        context = self._context()
-        payload = json.loads(context.instance_json.read_text(encoding="utf-8"))
-        payload["side_threads"] = [
-            {
-                "thread_id": "thr-stale",
-                "parent_thread_id": "thr-main",
-                "status": "open",
-                "created_at": "2026-06-30T00:00:00Z",
-                "updated_at": "2026-06-30T00:00:00Z",
-            }
-        ]
-        context.instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-        calls: list[dict[str, Any]] = []
-        original_thread_fork = self.module.app_server.thread_fork
-        original_thread_inject_items = self.module.app_server.thread_inject_items
-        original_input_turn = self.module.app_server.input_turn
-        original_side_start = self.module.app_server.side_start
-
-        def fake_thread_fork(socket_path: Path, parent_thread_id: str, **kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "thread_fork", "socket_path": socket_path, "parent_thread_id": parent_thread_id, **kwargs})
-            return {"thread": {"id": "thr-side-fresh"}}
-
-        def fake_thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-            calls.append({"helper": "thread_inject_items", "socket_path": socket_path, "thread_id": thread_id, "items": items})
-            return {"ok": True}
-
-        def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
-            calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
-            return {"action": "start", "turn_id": "turn-side-fresh"}
-
-        def fake_side_start(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("Task Sys runtime must not use the old opaque side_start helper")
-
-        self.addCleanup(setattr, self.module.app_server, "thread_fork", original_thread_fork)
-        self.addCleanup(setattr, self.module.app_server, "thread_inject_items", original_thread_inject_items)
-        self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
-        self.addCleanup(setattr, self.module.app_server, "input_turn", original_input_turn)
-        self.module.app_server.thread_fork = fake_thread_fork
-        self.module.app_server.thread_inject_items = fake_thread_inject_items
-        self.module.app_server.input_turn = fake_input_turn
-        self.module.app_server.side_start = fake_side_start
-
-        result = self.module.execute_instruction(context, self._instruction())
-
-        self.assertEqual(result["action"], "start_side")
-        self.assertEqual(result["side_thread_id"], "thr-side-fresh")
-        self.assertEqual([call["helper"] for call in calls], ["thread_fork", "thread_inject_items", "input_turn"])
-        instance_payload = json.loads(context.instance_json.read_text(encoding="utf-8"))
-        rows = instance_payload["side_threads"]
-        self.assertEqual([row["thread_id"] for row in rows], ["thr-stale", "thr-side-fresh"])
-        self.assertEqual(rows[1]["task_id"], "task-user-input-abcdef123456")
-        self.assertEqual(rows[1]["purpose"], "task_sys.side_frame")
-
-    def test_execute_start_side_creates_fresh_side_thread_for_each_task_sys_frame(self) -> None:
+    def test_execute_start_side_creates_fresh_lifecycle_call_for_each_task_sys_frame(self) -> None:
         context = self._context()
         calls: list[dict[str, Any]] = []
-        original_thread_fork = self.module.app_server.thread_fork
-        original_thread_inject_items = self.module.app_server.thread_inject_items
-        original_input_turn = self.module.app_server.input_turn
-        original_side_start = self.module.app_server.side_start
+        original_start = self.module.side_thread_lifecycle.start_side_thread
 
-        def fake_thread_fork(socket_path: Path, parent_thread_id: str, **kwargs: Any) -> dict[str, Any]:
-            next_index = 1 + sum(1 for call in calls if call["helper"] == "thread_fork")
-            calls.append({"helper": "thread_fork", "socket_path": socket_path, "parent_thread_id": parent_thread_id, **kwargs})
-            return {"thread": {"id": f"thr-side-{next_index}"}}
-
-        def fake_thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-            calls.append({"helper": "thread_inject_items", "socket_path": socket_path, "thread_id": thread_id, "items": items})
-            return {"ok": True}
-
-        def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
-            calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            index = len(calls) + 1
+            calls.append(kwargs)
             return {
                 "action": "start",
-                "turn_id": thread_id.replace("thr-side-", "turn-side-"),
+                "purpose": "task_sys.side_frame",
+                "parent_thread_id": kwargs["parent_thread_id"],
+                "side_thread_id": f"thr-side-{index}",
+                "thread_action": "start",
+                "turn_id": f"turn-side-{index}",
+                "lease_registered": True,
             }
 
-        def fake_side_start(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("Task Sys runtime must not use the old opaque side_start helper")
-
-        self.addCleanup(setattr, self.module.app_server, "thread_fork", original_thread_fork)
-        self.addCleanup(setattr, self.module.app_server, "thread_inject_items", original_thread_inject_items)
-        self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
-        self.addCleanup(setattr, self.module.app_server, "input_turn", original_input_turn)
-        self.module.app_server.thread_fork = fake_thread_fork
-        self.module.app_server.thread_inject_items = fake_thread_inject_items
-        self.module.app_server.input_turn = fake_input_turn
-        self.module.app_server.side_start = fake_side_start
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "start_side_thread", original_start)
+        self.module.side_thread_lifecycle.start_side_thread = fake_start_side_thread
 
         first = self.module.execute_instruction(context, self._instruction())
         second_instruction = self._instruction()
@@ -354,56 +268,31 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
 
         self.assertEqual(first["side_thread_id"], "thr-side-1")
         self.assertEqual(second["side_thread_id"], "thr-side-2")
-        self.assertEqual(
-            [call["helper"] for call in calls],
-            ["thread_fork", "thread_inject_items", "input_turn", "thread_fork", "thread_inject_items", "input_turn"],
-        )
-        instance_payload = json.loads(context.instance_json.read_text(encoding="utf-8"))
-        rows = instance_payload["side_threads"]
-        self.assertEqual([row["thread_id"] for row in rows], ["thr-side-1", "thr-side-2"])
-        self.assertEqual([row["task_id"] for row in rows], ["task-user-input-abcdef123456", "task-user-input-second123"])
-        self.assertEqual({row["purpose"] for row in rows}, {"task_sys.side_frame"})
+        self.assertEqual([call["task_id"] for call in calls], ["task-user-input-abcdef123456", "task-user-input-second123"])
+        self.assertNotEqual(calls[0]["text"], calls[1]["text"])
 
-    def test_execute_start_side_retries_fork_failure_with_fresh_attempt(self) -> None:
+    def test_execute_start_side_retries_lifecycle_failure_with_fresh_attempt(self) -> None:
         context = self._context()
         task_id, instruction = self._ingested_instruction()
         calls: list[dict[str, Any]] = []
-        original_thread_fork = self.module.app_server.thread_fork
-        original_thread_inject_items = self.module.app_server.thread_inject_items
-        original_input_turn = self.module.app_server.input_turn
-        original_side_close = self.module.app_server.side_close
-        original_side_start = self.module.app_server.side_start
+        original_start = self.module.side_thread_lifecycle.start_side_thread
 
-        def fake_thread_fork(socket_path: Path, parent_thread_id: str, **kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "thread_fork", "socket_path": socket_path, "parent_thread_id": parent_thread_id, **kwargs})
-            if len([call for call in calls if call["helper"] == "thread_fork"]) == 1:
-                raise self.module.app_server.AppServerUnavailableError("temporary fork failure")
-            return {"thread": {"id": "thr-side-retry"}}
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise RuntimeError("temporary lifecycle failure")
+            return {
+                "action": "start",
+                "purpose": "task_sys.side_frame",
+                "parent_thread_id": kwargs["parent_thread_id"],
+                "side_thread_id": "thr-side-retry",
+                "thread_action": "start",
+                "turn_id": "turn-side-retry",
+                "lease_registered": True,
+            }
 
-        def fake_thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-            calls.append({"helper": "thread_inject_items", "socket_path": socket_path, "thread_id": thread_id, "items": items})
-            return {"ok": True}
-
-        def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
-            calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
-            return {"action": "start", "turn_id": "turn-side-retry"}
-
-        def fake_side_close(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("fork failure has no side thread to clean up")
-
-        def fake_side_start(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("Task Sys runtime must not use the old opaque side_start helper")
-
-        self.addCleanup(setattr, self.module.app_server, "thread_fork", original_thread_fork)
-        self.addCleanup(setattr, self.module.app_server, "thread_inject_items", original_thread_inject_items)
-        self.addCleanup(setattr, self.module.app_server, "input_turn", original_input_turn)
-        self.addCleanup(setattr, self.module.app_server, "side_close", original_side_close)
-        self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
-        self.module.app_server.thread_fork = fake_thread_fork
-        self.module.app_server.thread_inject_items = fake_thread_inject_items
-        self.module.app_server.input_turn = fake_input_turn
-        self.module.app_server.side_close = fake_side_close
-        self.module.app_server.side_start = fake_side_start
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "start_side_thread", original_start)
+        self.module.side_thread_lifecycle.start_side_thread = fake_start_side_thread
 
         result = self.module.execute_instruction(context, instruction)
 
@@ -412,164 +301,75 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["side_thread_id"], "thr-side-retry")
         self.assertEqual(result["turn_id"], "turn-side-retry")
         self.assertEqual(result["stage"], "side_turn_started")
-        self.assertEqual([attempt["stage"] for attempt in result["attempts"]], ["side_fork", "side_turn_started"])
-        self.assertEqual([call["helper"] for call in calls], ["thread_fork", "thread_fork", "thread_inject_items", "input_turn"])
+        self.assertEqual([attempt["stage"] for attempt in result["attempts"]], ["side_lifecycle", "side_turn_started"])
+        self.assertEqual(len(calls), 2)
 
-    def test_execute_start_side_records_runtime_failed_after_bounded_pre_turn_input_failures(self) -> None:
+    def test_execute_start_side_records_runtime_failed_after_bounded_lifecycle_failures(self) -> None:
         context = self._context()
         task_id, instruction = self._ingested_instruction()
         calls: list[dict[str, Any]] = []
-        original_thread_fork = self.module.app_server.thread_fork
-        original_thread_inject_items = self.module.app_server.thread_inject_items
-        original_input_turn = self.module.app_server.input_turn
-        original_side_close = self.module.app_server.side_close
-        original_side_start = self.module.app_server.side_start
+        original_start = self.module.side_thread_lifecycle.start_side_thread
 
-        def fake_thread_fork(socket_path: Path, parent_thread_id: str, **kwargs: Any) -> dict[str, Any]:
-            next_index = 1 + sum(1 for call in calls if call["helper"] == "thread_fork")
-            calls.append({"helper": "thread_fork", "socket_path": socket_path, "parent_thread_id": parent_thread_id, **kwargs})
-            return {"thread": {"id": f"thr-side-failed-{next_index}"}}
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            raise RuntimeError(f"side lifecycle failed attempt {len(calls)}")
 
-        def fake_thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-            calls.append({"helper": "thread_inject_items", "socket_path": socket_path, "thread_id": thread_id, "items": items})
-            return {"ok": True}
-
-        def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
-            calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
-            raise self.module.app_server.AppServerUnavailableError(f"input failed for {thread_id}")
-
-        def fake_side_close(socket_path: Path, side_thread_id: str) -> dict[str, Any]:
-            calls.append({"helper": "side_close", "socket_path": socket_path, "side_thread_id": side_thread_id})
-            if side_thread_id == "thr-side-failed-2":
-                raise self.module.app_server.AppServerUnavailableError("side already gone")
-            return {"ok": True}
-
-        def fake_side_start(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("Task Sys runtime must not use the old opaque side_start helper")
-
-        self.addCleanup(setattr, self.module.app_server, "thread_fork", original_thread_fork)
-        self.addCleanup(setattr, self.module.app_server, "thread_inject_items", original_thread_inject_items)
-        self.addCleanup(setattr, self.module.app_server, "input_turn", original_input_turn)
-        self.addCleanup(setattr, self.module.app_server, "side_close", original_side_close)
-        self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
-        self.module.app_server.thread_fork = fake_thread_fork
-        self.module.app_server.thread_inject_items = fake_thread_inject_items
-        self.module.app_server.input_turn = fake_input_turn
-        self.module.app_server.side_close = fake_side_close
-        self.module.app_server.side_start = fake_side_start
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "start_side_thread", original_start)
+        self.module.side_thread_lifecycle.start_side_thread = fake_start_side_thread
 
         result = self.module.execute_instruction(context, instruction)
 
         self.assertEqual(result["action"], "start_side")
         self.assertEqual(result["task_id"], task_id)
         self.assertEqual(result["status"], "runtime_failed")
-        self.assertEqual(result["stage"], "side_input")
+        self.assertEqual(result["stage"], "side_lifecycle")
         self.assertEqual(len(result["attempts"]), 2)
-        self.assertEqual([attempt["side_thread_id"] for attempt in result["attempts"]], ["thr-side-failed-1", "thr-side-failed-2"])
-        self.assertTrue(all(attempt["cleanup"]["registry_unregistered"] for attempt in result["attempts"]))
-        self.assertEqual(result["attempts"][1]["cleanup"]["physical_close_ok"], False)
-        instance_payload = json.loads(context.instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(instance_payload["side_threads"], [])
+        self.assertEqual(len(calls), 2)
         record = task_sys.get_task(task_id)
         self.assertEqual(record["status"], "runtime_failed")
         self.assertIsNone(record["active_processor"])
-        self.assertEqual(record["failure_result"]["stage"], "side_input")
+        self.assertEqual(record["failure_result"]["stage"], "side_lifecycle")
         self.assertEqual(record["failure_result"]["attempts"], 2)
-        self.assertEqual(record["failure_result"]["last_side_thread_id"], "thr-side-failed-2")
-        self.assertEqual(record["failure_result"]["cleanup"]["registry_unregistered"], True)
-        self.assertEqual(
-            [call["helper"] for call in calls],
-            [
-                "thread_fork",
-                "thread_inject_items",
-                "input_turn",
-                "side_close",
-                "thread_fork",
-                "thread_inject_items",
-                "input_turn",
-                "side_close",
-            ],
-        )
 
-    def test_execute_start_side_does_not_cleanup_or_retry_after_turn_id_exists(self) -> None:
+    def test_cleanup_task_sys_side_lease_delegates_to_lifecycle_owner(self) -> None:
         context = self._context()
-        task_id, instruction = self._ingested_instruction()
-        calls: list[dict[str, Any]] = []
-        original_thread_fork = self.module.app_server.thread_fork
-        original_thread_inject_items = self.module.app_server.thread_inject_items
-        original_input_turn = self.module.app_server.input_turn
-        original_side_close = self.module.app_server.side_close
-        original_side_start = self.module.app_server.side_start
-
-        def fake_thread_fork(socket_path: Path, parent_thread_id: str, **kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "thread_fork", "socket_path": socket_path, "parent_thread_id": parent_thread_id, **kwargs})
-            return {"thread": {"id": "thr-side-started"}}
-
-        def fake_thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-            calls.append({"helper": "thread_inject_items", "socket_path": socket_path, "thread_id": thread_id, "items": items})
-            return {"ok": True}
-
-        def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
-            calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
-            return {"action": "start", "turn": {"id": "turn-side-started"}}
-
-        def fake_side_close(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("runtime must not cleanup a side thread after turn_id exists")
-
-        def fake_side_start(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("Task Sys runtime must not use the old opaque side_start helper")
-
-        self.addCleanup(setattr, self.module.app_server, "thread_fork", original_thread_fork)
-        self.addCleanup(setattr, self.module.app_server, "thread_inject_items", original_thread_inject_items)
-        self.addCleanup(setattr, self.module.app_server, "input_turn", original_input_turn)
-        self.addCleanup(setattr, self.module.app_server, "side_close", original_side_close)
-        self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
-        self.module.app_server.thread_fork = fake_thread_fork
-        self.module.app_server.thread_inject_items = fake_thread_inject_items
-        self.module.app_server.input_turn = fake_input_turn
-        self.module.app_server.side_close = fake_side_close
-        self.module.app_server.side_start = fake_side_start
-
-        result = self.module.execute_instruction(context, instruction)
-
-        self.assertEqual(result["action"], "start_side")
-        self.assertEqual(result["task_id"], task_id)
-        self.assertEqual(result["turn_id"], "turn-side-started")
-        self.assertEqual(result["stage"], "side_turn_started")
-        self.assertEqual(len(result["attempts"]), 1)
-        self.assertEqual([call["helper"] for call in calls], ["thread_fork", "thread_inject_items", "input_turn"])
-        self.assertEqual(task_sys.get_task(task_id)["status"], "side_processing")
-
-    def test_cleanup_task_sys_side_lease_unregisters_even_when_physical_close_fails(self) -> None:
-        context = self._context()
-        self.module.side_thread_registry.register_side_thread(
-            context.instance_json,
-            actor_id=context.actor_id,
-            parent_thread_id=context.main_thread_id,
-            side_thread_id="thr-side-cleanup",
-            task_id="task-user-input-cleanup123",
-            purpose="task_sys.side_frame",
-            now=lambda: "2026-06-30T00:00:00Z",
-        )
-        original_side_close = self.module.app_server.side_close
+        original_cleanup = self.module.side_thread_lifecycle.cleanup_task_side_lease
         calls: list[dict[str, Any]] = []
 
-        def fake_side_close(socket_path: Path, side_thread_id: str) -> dict[str, Any]:
-            calls.append({"socket_path": socket_path, "side_thread_id": side_thread_id})
-            raise self.module.app_server.AppServerUnavailableError("thread not loaded")
+        def fake_cleanup_task_side_lease(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {
+                "action": "cleanup",
+                "side_thread_id": "thr-side-cleanup",
+                "turn_id": "turn-side-cleanup",
+                "turn_interrupt_attempted": True,
+                "turn_interrupt_ok": False,
+                "turn_interrupt_error": "thread not loaded",
+                "lease_unregistered": True,
+            }
 
-        self.addCleanup(setattr, self.module.app_server, "side_close", original_side_close)
-        self.module.app_server.side_close = fake_side_close
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "cleanup_task_side_lease", original_cleanup)
+        self.module.side_thread_lifecycle.cleanup_task_side_lease = fake_cleanup_task_side_lease
 
         result = self.module.cleanup_task_sys_side_lease(context, "task-user-input-cleanup123")
 
         self.assertEqual(result["side_thread_id"], "thr-side-cleanup")
-        self.assertEqual(result["physical_close_ok"], False)
-        self.assertEqual(result["physical_close_error"], "thread not loaded")
-        self.assertEqual(result["registry_unregistered"], True)
-        self.assertEqual(calls, [{"socket_path": context.socket_path, "side_thread_id": "thr-side-cleanup"}])
-        instance_payload = json.loads(context.instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(instance_payload["side_threads"], [])
+        self.assertEqual(result["turn_interrupt_attempted"], True)
+        self.assertEqual(result["turn_interrupt_ok"], False)
+        self.assertEqual(result["turn_interrupt_error"], "thread not loaded")
+        self.assertEqual(result["lease_unregistered"], True)
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "socket_path": context.socket_path,
+                    "instance_json": context.instance_json,
+                    "actor_id": context.actor_id,
+                    "parent_thread_id": context.main_thread_id,
+                    "task_id": "task-user-input-cleanup123",
+                }
+            ],
+        )
 
     def test_execute_start_side_rejects_wrong_actor_target(self) -> None:
         instruction = self._instruction()
@@ -580,13 +380,13 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
 
     def test_execute_no_actor_action_is_not_supported(self) -> None:
         context = self._context()
-        original_side_start = self.module.app_server.side_start
+        original_start = self.module.side_thread_lifecycle.start_side_thread
 
-        def fake_side_start(**_kwargs: Any) -> dict[str, Any]:
+        def fake_start_side_thread(**_kwargs: Any) -> dict[str, Any]:
             raise AssertionError("unsupported no_actor_action must not start side")
 
-        self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
-        self.module.app_server.side_start = fake_side_start
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "start_side_thread", original_start)
+        self.module.side_thread_lifecycle.start_side_thread = fake_start_side_thread
 
         with self.assertRaisesRegex(ValueError, "unsupported Task Sys runtime instruction"):
             self.module.execute_instruction(

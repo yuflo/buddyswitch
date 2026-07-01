@@ -354,7 +354,7 @@ class WebManagementService:
         if method == "POST" and action == "side":
             return 200, self._side(actor_id, body)
         if method == "POST" and action == "side-close":
-            return 200, self._side_close(actor_id, body)
+            return 200, self._side_cleanup(actor_id, body)
         if method == "POST" and action == "interrupt":
             return 200, self._interrupt(actor_id)
         if method == "POST" and action == "resume":
@@ -478,7 +478,7 @@ class WebManagementService:
             message=f"Invalid JSON from instance side for {actor_id}.",
         )
 
-    def _run_side_close_command(self, actor_id: str, side_thread_id: str, *, timeout_seconds: float) -> dict[str, Any]:
+    def _run_side_cleanup_command(self, actor_id: str, side_thread_id: str, *, timeout_seconds: float) -> dict[str, Any]:
         result = self._run_command(
             ["instance", "side", "close", actor_id, "--side-thread-id", side_thread_id, "--json"],
             timeout_seconds=timeout_seconds,
@@ -515,26 +515,31 @@ class WebManagementService:
                 payload[key] = value
         return payload
 
-    def _side_close(self, actor_id: str, body: bytes) -> dict[str, Any]:
+    def _side_cleanup(self, actor_id: str, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
         side_thread_id = payload.get("side_thread_id")
         if not isinstance(side_thread_id, str) or not side_thread_id.strip():
             raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
         return self._run_busy(
             f"instance:{actor_id}",
-            lambda: self._side_close_under_lock(actor_id, side_thread_id),
+            lambda: self._side_cleanup_under_lock(actor_id, side_thread_id),
         )
 
-    def _side_close_under_lock(self, actor_id: str, side_thread_id: str) -> dict[str, Any]:
-        parsed = self._run_side_close_command(actor_id, side_thread_id, timeout_seconds=30)
+    def _side_cleanup_under_lock(self, actor_id: str, side_thread_id: str) -> dict[str, Any]:
+        parsed = self._run_side_cleanup_command(actor_id, side_thread_id, timeout_seconds=30)
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         for key in ("action", "parent_thread_id", "side_thread_id", "turn_id"):
             value = parsed.get(key)
             if isinstance(value, str):
                 payload[key] = value
-        startup_interrupt = parsed.get("startup_interrupt")
-        if isinstance(startup_interrupt, bool):
-            payload["startup_interrupt"] = startup_interrupt
+        for key in ("turn_interrupt_attempted", "turn_interrupt_ok", "lease_unregistered"):
+            value = parsed.get(key)
+            if isinstance(value, bool):
+                payload[key] = value
+        for key in ("turn_interrupt_error", "lease_unregister_error"):
+            value = parsed.get(key)
+            if isinstance(value, str):
+                payload[key] = value
         return payload
 
     def _interrupt(self, actor_id: str) -> dict[str, Any]:
