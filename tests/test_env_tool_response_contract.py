@@ -237,7 +237,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "source": {"type": "test.response_contract", "ref": {"id": task_id}},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "response contract"},
-                "initial_processor": "checkpoint",
             }
         )
 

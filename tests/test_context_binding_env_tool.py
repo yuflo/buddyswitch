@@ -50,7 +50,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source": {"type": source_type, "ref": source_ref},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "context binding"},
-                "initial_processor": "checkpoint",
             },
         )
         return str(result["task_id"])
@@ -418,8 +417,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         candidate_task = next(row for row in candidate_tasks if isinstance(row, dict) and row.get("task_id") == self.context_task_id)
         self.assertEqual(candidate_task.get("source_type"), "test.context.active")
-        self.assertEqual(candidate_task.get("status"), "checkpoint")
-        self.assertEqual(candidate_task.get("active_processor"), "checkpoint")
+        self.assertEqual(candidate_task.get("status"), "side_processing")
+        self.assertEqual(candidate_task.get("active_processor"), "side")
 
     def test_context_artifact_summaries_are_current_only(self) -> None:
         self._seed_context_state()
@@ -617,6 +616,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("handoffs", sources)
         self.assertIn("tracks", sources)
         self.assertIn("artifacts", sources)
+        self.assertIn("tasks", sources)
+        task_source = sources["tasks"]
+        task_source_text = json.dumps(task_source, ensure_ascii=True, sort_keys=True)
+        self.assertIn("task_sys.list", task_source_text)
+        self.assertIn("task_sys.get", task_source_text)
+        self.assertIn("task_sys.close", task_source_text)
+        self.assertIn("task_sys.need_parent", task_source_text)
+        self.assertNotIn("checkpoint_update", task_source_text)
 
     def test_context_outputs_writable_surfaces_without_actor_private_tool_methods(self) -> None:
         instance_json = self._instance_json(role="pm")

@@ -253,7 +253,6 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source": {"type": "test.fixture", "ref": {"title": "Task hint", "track_id": "track-task-hint"}},
                 "actor_target": {"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
                 "context": {"instance_root": str(instance_root)},
-                "initial_processor": "side",
             }
         )
         task = result["task"]

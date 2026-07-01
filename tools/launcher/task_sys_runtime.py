@@ -175,7 +175,6 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     "- browser session, web search, webpage reading, evidence gathering, or research loops,",
                     "- Track shared state, including comments, status, requirements, materials, proof, resolve, archive,",
                     "- artifacts, evidence, durable deliverables,",
-                    "- checkpoint state or task_sys.checkpoint_update,",
                     "- raw runtime files or buddyswitch/objects direct writes,",
                     "- permission changes, sandbox broadening, or external credentials,",
                     "- any outbound communication that is not an exact reply/closure for the current source.",
@@ -271,36 +270,6 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             ),
             "Allowed parent frame operation:",
             "- task_sys.close(task_id=..., summary=...)",
-            "Forbidden parent frame operations:",
-            "Checkpoint updates are not legal in Task Sys parent frames.",
-            "Do not call task_sys.checkpoint_update.",
-        )
-    )
-
-
-def render_checkpoint_frame(frame: Mapping[str, Any]) -> str:
-    payload = _require_mapping(frame, "frame")
-    task_id = _require_text(payload.get("task_id"), "frame.task_id")
-    legal_operations = payload.get("legal_operations")
-    if not isinstance(legal_operations, list):
-        raise ValueError("frame.legal_operations must be a list")
-    constraints = payload.get("constraints")
-    if not isinstance(constraints, list):
-        raise ValueError("frame.constraints must be a list")
-    return "\n\n".join(
-        (
-            "task_sys.checkpoint",
-            f"Task id: {task_id}",
-            "Completed turn:",
-            _json_block(_require_mapping(payload.get("completed_turn"), "frame.completed_turn")),
-            "Current task context:",
-            _json_block(_require_mapping(payload.get("current_task_context"), "frame.current_task_context")),
-            "Pending task context:",
-            json.dumps(list(payload.get("pending_task_context") or []), ensure_ascii=True, indent=2, sort_keys=True),
-            "Legal operations:",
-            json.dumps(legal_operations, ensure_ascii=True, indent=2, sort_keys=True),
-            "Constraints:",
-            json.dumps(constraints, ensure_ascii=True, indent=2, sort_keys=True),
         )
     )
 
@@ -310,8 +279,6 @@ def render_submit_parent_frame(frame: Mapping[str, Any]) -> str:
     kind = _require_text(payload.get("kind"), "frame.kind")
     if kind == "task_sys.parent_frame":
         return render_parent_frame(payload)
-    if kind == "task_sys.checkpoint":
-        return render_checkpoint_frame(payload)
     raise ValueError(f"unsupported submit_parent frame kind: {kind}")
 
 
@@ -600,8 +567,6 @@ def execute_instruction(context: Any, instruction: Mapping[str, Any]) -> dict[st
     _validate_actor_target(context, payload)
     instruction_type = _require_text(payload.get("type"), "instruction.type")
     task_id = _require_text(payload.get("task_id"), "instruction.task_id")
-    if instruction_type == "no_actor_action":
-        return {"action": "no_actor_action", "task_id": task_id}
     if instruction_type == "start_side":
         return _execute_start_side(context, payload)
     if instruction_type == "submit_parent":

@@ -55,7 +55,6 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source": {"type": "test.payload_contract", "ref": {"id": task_id}},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "payload contract"},
-                "initial_processor": "checkpoint",
             }
         )
 

@@ -114,7 +114,6 @@ class RuntimeWorkspaceTestMixin:
                 "source": {"type": "test.fixture", "ref": source_ref},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "task sys test task"},
-                "initial_processor": "checkpoint",
             }
         )
         return str(result["task_id"])
@@ -133,7 +132,6 @@ class RuntimeWorkspaceTestMixin:
                 "source": {"type": "test.fixture", "ref": {"slug": runtime_files.slugify(task_slug)}},
                 "actor_target": actor_target,
                 "context": {"fixture": "active task"},
-                "initial_processor": "checkpoint",
             }
         )
         return str(result["task_id"])

@@ -84,7 +84,6 @@ class TrackCommentEnvToolTests(unittest.TestCase):
                 "source": {"type": "test.track_comment", "ref": {"id": task_id}},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "track comment"},
-                "initial_processor": "checkpoint",
             }
         )
 

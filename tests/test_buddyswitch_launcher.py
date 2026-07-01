@@ -1016,7 +1016,11 @@ exec "$real_git" "$@"
             "active_processor": active_processor,
             "parent_handoff_params": {"parent_frame_context": {"next": "Reply from parent."}},
             "side_result": {"outcome": "need_parent", "params": {"interrupt": False}},
-            "checkpoint_metadata": {},
+            "events": [
+                {"type": "created", "at": "2026-06-30T00:00:00+00:00"},
+                {"type": "side_frame_started", "at": "2026-06-30T00:00:00+00:00"},
+                {"type": "side_parent_requested", "at": "2026-06-30T00:00:01+00:00"},
+            ],
             "created_at": "2026-06-30T00:00:00+00:00",
             "updated_at": "2026-06-30T00:00:01+00:00",
         }
@@ -5506,7 +5510,7 @@ exec "$real_git" "$@"
             ]
             self.assertEqual(sequence[:4], ["initialize", "initialized", "thread/resume", "turn/completed"])
 
-    def test_fake_codex_real_completed_event_records_task_sys_completion(self) -> None:
+    def test_fake_codex_real_completed_event_does_not_create_task_sys_task(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -5539,28 +5543,18 @@ exec "$real_git" "$@"
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-            records = self._wait_for_task_sys_records(Path(str(ctx["shared_root"])))
-            self.assertEqual(len(records), 1)
-            self.assertEqual(records[0]["source_type"], "app_server.turn_completed")
-            self.assertEqual(records[0]["source_ref"], {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"})
-            self.assertEqual(records[0]["status"], "checkpoint")
-            self.assertEqual(records[0]["active_processor"], "checkpoint")
+            records = self._task_sys_records(Path(str(ctx["shared_root"])))
+            self.assertEqual(records, [])
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             rpc_methods = [row.get("rpc_method") for row in rpc_rows]
-            self.assertIn("turn/start", rpc_methods)
+            self.assertNotIn("turn/start", rpc_methods)
             self.assertNotIn("turn/steer", rpc_methods)
-            turn_start = next(row for row in rpc_rows if row.get("rpc_method") == "turn/start")
-            checkpoint_text = turn_start["params"]["input"][0]["text"]
-            self.assertIn("task_sys.checkpoint", checkpoint_text)
-            self.assertIn("checkpoint_update", checkpoint_text)
-            self.assertNotIn("[TASK CHECKPOINT]", checkpoint_text)
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
-            self.assertEqual(daemon_state["daemon_origin_turn_ids"], ["turn-daemon-1"])
-            self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "task_checkout")
-            self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "turn-user-1")
-            self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_origin_turn_id"], "turn-user-1")
+            self.assertEqual(daemon_state["daemon_origin_turn_ids"], [])
+            self.assertEqual(daemon_state["daemon_origin_turns"], {})
+            self.assertIsNone(daemon_state["handlers"]["task_checkout"]["last_origin_turn_id"])
             self.assertIsNone(daemon_state["handlers"]["task_checkout"]["last_runtime_turn_id"])
-            self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_result"], "handled")
+            self.assertIsNone(daemon_state["handlers"]["task_checkout"]["last_result"])
             self.assertNotIn("last_" + "action" + "_turn_id", daemon_state["handlers"]["task_checkout"])
             self.assertNotIn("last_checkout_turn_id", daemon_state["handlers"]["task_checkout"])
 
@@ -5597,12 +5591,10 @@ exec "$real_git" "$@"
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-            records = self._wait_for_task_sys_records(Path(str(ctx["shared_root"])))
-            self.assertEqual(len(records), 1)
-            self.assertEqual(records[0]["source_type"], "app_server.turn_completed")
-            self.assertEqual(records[0]["source_ref"]["turn_id"], "turn-user-1")
+            records = self._task_sys_records(Path(str(ctx["shared_root"])))
+            self.assertEqual(records, [])
             rpc_methods = [row.get("rpc_method") for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
-            self.assertEqual(rpc_methods.count("turn/start"), 1)
+            self.assertEqual(rpc_methods.count("turn/start"), 0)
 
     def test_daemon_ignores_other_thread_real_completion_in_fake_codex(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -5652,14 +5644,11 @@ exec "$real_git" "$@"
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-            records = self._wait_for_task_sys_records(Path(str(ctx["shared_root"])))
-            self.assertEqual(len(records), 1)
-            self.assertEqual(records[0]["source_ref"], {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"})
+            records = self._task_sys_records(Path(str(ctx["shared_root"])))
+            self.assertEqual(records, [])
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             rpc_methods = [row.get("rpc_method") for row in rpc_rows]
-            self.assertIn("turn/start", rpc_methods)
-            turn_start = next(row for row in rpc_rows if row.get("rpc_method") == "turn/start")
-            self.assertIn("task_sys.checkpoint", turn_start["params"]["input"][0]["text"])
+            self.assertNotIn("turn/start", rpc_methods)
 
     def test_list_includes_app_server_health_and_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

@@ -159,29 +159,15 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
             for path in sorted(tasks_dir.glob("*.json"))
         ]
 
-    def _assert_turn_completed_task(self, previous_turn_id: str = "turn-user-1") -> dict[str, Any]:
-        records = self._task_records()
-        self.assertEqual(len(records), 1)
-        record = records[0]
-        self.assertEqual(record["source_type"], "app_server.turn_completed")
-        self.assertEqual(
-            record["source_ref"],
-            {
-                "thread_id": "thr-main",
-                "turn_id": previous_turn_id,
-                "status": "completed",
-            },
-        )
-        self.assertEqual(record["actor_target"], {"actor_id": "act-dev-daed00000001", "role_id": "dev"})
-        self.assertEqual(record["inbound_context"], record["source_ref"])
-        self.assertEqual(record["status"], "checkpoint")
-        self.assertEqual(record["active_processor"], "checkpoint")
-        self.assertEqual(record["checkpoint_metadata"]["state"], "awaiting_update")
-        return record
+    def _assert_no_task_records(self) -> None:
+        self.assertEqual(self._task_records(), [])
 
     def _stub_task_sys_execution(self) -> list[dict[str, Any]]:
         calls: list[dict[str, Any]] = []
-        original_execute = self.task_checkout_handler.task_sys_runtime.execute_instruction
+        runtime_module = getattr(self.task_checkout_handler, "task_sys_runtime", None)
+        if runtime_module is None:
+            return calls
+        original_execute = runtime_module.execute_instruction
 
         def fake_execute(_context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
             calls.append(instruction)
@@ -191,8 +177,8 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
                 "turn_id": f"turn-checkpoint-{len(calls)}",
             }
 
-        self.addCleanup(setattr, self.task_checkout_handler.task_sys_runtime, "execute_instruction", original_execute)
-        self.task_checkout_handler.task_sys_runtime.execute_instruction = fake_execute
+        self.addCleanup(setattr, runtime_module, "execute_instruction", original_execute)
+        runtime_module.execute_instruction = fake_execute
         return calls
 
 
@@ -319,7 +305,7 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
 
 
 class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
-    def test_accepted_completed_turn_ingests_task_without_parent_prompt(self) -> None:
+    def test_unbound_completed_turn_does_not_create_task_or_submit_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
@@ -329,16 +315,13 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
 
             result = self.handler.handle(context, state, runtime, self._completed())
 
-            self.assertEqual(result.status, "handled")
+            self.assertEqual(result.status, "ignored")
             self.assertEqual(runtime.calls, [])
-            record = self._assert_turn_completed_task()
-            self.assertEqual(len(executed), 1)
-            self.assertEqual(executed[0]["type"], "submit_parent")
-            self.assertEqual(executed[0]["task_id"], record["id"])
-            self.assertEqual(executed[0]["frame"]["kind"], "task_sys.checkpoint")
-            self.assertTrue(state.is_daemon_origin_turn_from("turn-checkpoint-1", "task_checkout"))
+            self.assertEqual(executed, [])
+            self._assert_no_task_records()
+            self.assertFalse(state.is_daemon_origin_turn_from("turn-user-1", "task_checkout"))
 
-    def test_task_checkout_records_checkpoint_turn_as_daemon_origin(self) -> None:
+    def test_unbound_completed_turn_is_not_recorded_as_task_checkout_origin(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
@@ -348,12 +331,12 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
 
             result = self.handler.handle(context, state, runtime, self._completed())
 
-            self.assertEqual(result.status, "handled")
+            self.assertEqual(result.status, "ignored")
             self.assertFalse(state.is_daemon_origin_turn("turn-user-1"))
-            self.assertTrue(state.is_daemon_origin_turn_from("turn-checkpoint-1", "task_checkout"))
-            self._assert_turn_completed_task()
+            self.assertFalse(state.is_daemon_origin_turn_from("turn-checkpoint-1", "task_checkout"))
+            self._assert_no_task_records()
 
-    def test_second_completed_turn_records_second_task_without_prompt_retry_state(self) -> None:
+    def test_repeated_unbound_completed_turns_do_not_create_task_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
@@ -369,12 +352,11 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
                 self._completed(turn_id="turn-user-2"),
             )
 
-            self.assertEqual(result.status, "handled")
-            self.assertEqual(result_later.status, "handled")
+            self.assertEqual(result.status, "ignored")
+            self.assertEqual(result_later.status, "ignored")
             self.assertEqual(runtime.calls, [])
-            records = self._task_records()
-            self.assertCountEqual([record["source_ref"]["turn_id"] for record in records], ["turn-user-1", "turn-user-2"])
-            self.assertEqual([call["frame"]["kind"] for call in executed], ["task_sys.checkpoint", "task_sys.checkpoint"])
+            self.assertEqual(executed, [])
+            self._assert_no_task_records()
 
 
 if __name__ == "__main__":

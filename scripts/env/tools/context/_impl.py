@@ -665,9 +665,9 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "track.open / track.list via runtime env tools",
         },
         "tasks": {
-            "description": "Task Sys frames, side results, parent handoff, and checkpoint updates.",
+            "description": "Task Sys frames, lifecycle events, side results, and parent handoff state.",
             "scope": "Task Sys task state",
-            "source_of_truth": "task_sys.close / task_sys.need_parent / task_sys.checkpoint_update via runtime env tools",
+            "source_of_truth": "task_sys.list / task_sys.get / task_sys.close / task_sys.need_parent via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",

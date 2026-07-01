@@ -540,7 +540,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 "source": {"type": "test.browser_lazy_release", "ref": {"slug": "lazy-release-smoke"}},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "browser lazy release integration"},
-                "initial_processor": "checkpoint",
             }
         )
 

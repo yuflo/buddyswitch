@@ -156,36 +156,6 @@ def ingest_track_comment(
     )
 
 
-def ingest_turn_completed(
-    *,
-    actor_id: str,
-    role_id: str,
-    thread_id: str,
-    turn_id: str,
-    status: str,
-) -> dict[str, Any]:
-    source_ref = {
-        "thread_id": _require_text(thread_id, "thread_id"),
-        "turn_id": _require_text(turn_id, "turn_id"),
-        "status": _require_text(status, "status"),
-    }
-    envelope = {
-        "source": {
-            "type": "app_server.turn_completed",
-            "ref": source_ref,
-        },
-        "actor_target": _actor_target(actor_id=actor_id, role_id=role_id),
-        "context": dict(source_ref),
-        "initial_processor": "checkpoint",
-    }
-    return _result_payload(
-        task_sys.ingest(envelope),
-        actor_id=actor_id,
-        role_id=role_id,
-        thread_id=thread_id,
-    )
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)

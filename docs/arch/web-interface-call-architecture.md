@@ -35,8 +35,8 @@ and persistence keep their own boundaries.
 4. Actor runtime product API
    - Owns active actor capabilities and permission checks.
    - Runtime broker and native env MCP expose actor-bound actions such as
-     `task_sys.checkpoint_update`, `track.open`, `context.summarize`, and
-     `message.send`.
+     `task_sys.list`, `task_sys.get`, `task_sys.close`, `task_sys.need_parent`,
+     `track.open`, `context.summarize`, and `message.send`.
    - This layer is not the default Web query path because it is actor-bound and
      active-instance-gated.
 

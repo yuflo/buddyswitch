@@ -87,7 +87,6 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source": {"type": "test.active_gate", "ref": {"id": task_id}},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "active task gate"},
-                "initial_processor": "checkpoint",
             }
         )
 

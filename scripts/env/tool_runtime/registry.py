@@ -384,15 +384,28 @@ def _active_task_required_rejection(
         durability="none",
         retryable=True,
         retry_guidance=(
-            "Run this action from a task_sys side, parent, or checkpoint frame. "
+            "Run this action from a task_sys side or parent frame. "
             "If the work is new actor-driving input, route it through Task Sys ingress first."
         ),
         allowed_next_actions=[
-            "Continue from the current task_sys.side_frame, task_sys.parent_frame, or task_sys.checkpoint.",
-            "Use task_sys.close, task_sys.need_parent, or task_sys.checkpoint_update when handling a Task Sys frame.",
+            "Continue from the current task_sys.side_frame or task_sys.parent_frame.",
+            "Use task_sys.list or task_sys.get to inspect actor-owned Task Sys tasks.",
+            "Use task_sys.close or task_sys.need_parent when handling a Task Sys frame.",
             "Route new actor-driving input through Task Sys ingress before retrying task-bound tool work.",
         ],
         alternative_capabilities=[
+            tool_results.alternative_capability(
+                tool="task_sys",
+                action="list",
+                condition="List active or recoverable actor-owned Task Sys tasks.",
+                mutates_product_state=False,
+            ),
+            tool_results.alternative_capability(
+                tool="task_sys",
+                action="get",
+                condition="Read full detail for one actor-owned Task Sys task.",
+                mutates_product_state=False,
+            ),
             tool_results.alternative_capability(
                 tool="task_sys",
                 action="close",
@@ -403,12 +416,6 @@ def _active_task_required_rejection(
                 tool="task_sys",
                 action="need_parent",
                 condition="Ask Task Sys to submit the parent when side processing needs parent work.",
-                mutates_product_state=False,
-            ),
-            tool_results.alternative_capability(
-                tool="task_sys",
-                action="checkpoint_update",
-                condition="Update the active Task Sys checkpoint frame.",
                 mutates_product_state=False,
             ),
         ],

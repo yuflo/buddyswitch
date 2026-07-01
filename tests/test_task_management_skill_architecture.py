@@ -17,7 +17,7 @@ import env_manifest  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
-TASK_SYS_OPERATIONS = {"close", "need_parent", "checkpoint_update"}
+TASK_SYS_OPERATIONS = {"list", "get", "close", "need_parent"}
 
 
 class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -57,9 +57,13 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         skill_text = skill_path.read_text(encoding="utf-8")
         lowered = skill_text.lower()
         self.assertIn("task sys", lowered)
+        self.assertIn("task_sys.list", skill_text)
+        self.assertIn("task_sys.get", skill_text)
         self.assertIn("task_sys.close", skill_text)
         self.assertIn("task_sys.need_parent", skill_text)
-        self.assertIn("task_sys.checkpoint_update", skill_text)
+        self.assertNotIn("task_sys.checkpoint", skill_text)
+        self.assertNotIn("task_sys.checkpoint_update", skill_text)
+        self.assertNotIn("checkpoint_update", skill_text)
         self.assertIn("env.tool", lowered)
         for old_token in (
             "taskbox",
@@ -81,7 +85,8 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertIn("When a `task_sys.parent_frame` completes the source task, call `task_sys.close`.", skill_text)
         self.assertIn("If replying to an IM source, first call `message.send(reply_to=...)`.", skill_text)
         self.assertIn("If no reply is needed for an IM source, first call `message.mark(..., disposition=absorbed)`.", skill_text)
-        self.assertIn("Checkpoint updates are not legal in parent frames; do not call `task_sys.checkpoint_update` there.", skill_text)
+        self.assertIn("Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.", skill_text)
+        self.assertNotIn("checkpoint", skill_text.lower())
         stale_finish = "finish with exactly one Task Sys side " + "result"
         stale_label = "Task Sys side " + "result"
         self.assertNotIn(stale_finish, skill_text)
@@ -91,8 +96,11 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         for path in sorted((ROOT / "tools" / "launcher" / "assets" / "roles").glob("*/AGENTS.md")):
             text = path.read_text(encoding="utf-8")
             with self.subTest(role=path.parent.name):
-                self.assertIn("task_sys__checkpoint_update", text)
+                self.assertIn("task_sys__list", text)
+                self.assertIn("task_sys__get", text)
+                self.assertIn("task_sys__close", text)
                 self.assertIn("task_sys__need_parent", text)
+                self.assertNotIn("task_sys__checkpoint_update", text)
                 self.assertNotIn("task__current", text)
 
     def test_task_sys_is_the_only_actor_facing_task_tool(self) -> None:
@@ -126,7 +134,18 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             ROOT / "scripts" / "env" / "tool_runtime" / "role_auth.py",
             ROOT / "scripts" / "env" / "tools" / "context" / "_impl.py",
         ]
-        forbidden = ("task.propose", "task.confirm", "task__propose", "task__confirm", "Task Handling Cue", "TaskViewModel")
+        forbidden = (
+            "task.propose",
+            "task.confirm",
+            "task__propose",
+            "task__confirm",
+            "Task Handling Cue",
+            "TaskViewModel",
+            "task_sys.checkpoint",
+            "task_sys.checkpoint_update",
+            "task_sys__checkpoint_update",
+            "checkpoint_update",
+        )
         for path in live_paths:
             text = path.read_text(encoding="utf-8")
             for token in forbidden:

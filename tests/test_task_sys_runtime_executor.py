@@ -187,7 +187,9 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("browser session, web search, webpage reading, evidence gathering, or research loops", text)
         self.assertIn("source files, git, config, dependencies, tests, builds, app runtime, or workspace state", text)
         self.assertIn("artifacts, evidence, durable deliverables", text)
-        self.assertIn("checkpoint state or task_sys.checkpoint_update", text)
+        self.assertNotIn("checkpoint", text.lower())
+        self.assertNotIn("checkpoint_update", text)
+        self.assertNotIn("no_actor_action", text)
         self.assertIn("Allowed frame completion operations:", text)
         stale_side_result = "Task Sys side " + "result"
         self.assertNotIn(stale_side_result, text)
@@ -576,26 +578,25 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, "wrong target actor"):
             self.module.execute_instruction(self._context(), instruction)
 
-    def test_execute_no_actor_action_does_not_touch_app_server(self) -> None:
+    def test_execute_no_actor_action_is_not_supported(self) -> None:
         context = self._context()
         original_side_start = self.module.app_server.side_start
 
         def fake_side_start(**_kwargs: Any) -> dict[str, Any]:
-            raise AssertionError("no_actor_action must not start side")
+            raise AssertionError("unsupported no_actor_action must not start side")
 
         self.addCleanup(setattr, self.module.app_server, "side_start", original_side_start)
         self.module.app_server.side_start = fake_side_start
 
-        result = self.module.execute_instruction(
-            context,
-            {
-                "type": "no_actor_action",
-                "task_id": "task-turn-completed-abcdef123456",
-                "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
-            },
-        )
-
-        self.assertEqual(result, {"action": "no_actor_action", "task_id": "task-turn-completed-abcdef123456"})
+        with self.assertRaisesRegex(ValueError, "unsupported Task Sys runtime instruction"):
+            self.module.execute_instruction(
+                context,
+                {
+                    "type": "no_actor_action",
+                    "task_id": "task-turn-completed-abcdef123456",
+                    "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
+                },
+            )
 
     def test_render_parent_frame_is_task_sys_scoped(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
@@ -628,11 +629,11 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("Only after the source-bound IM action succeeds, call task_sys.close.", text)
         self.assertIn("If the IM action succeeds but task_sys.close fails, retry task_sys.close and do not send a duplicate reply.", text)
 
-    def test_render_parent_frame_forbids_checkpoint_update(self) -> None:
+    def test_render_parent_frame_does_not_mention_checkpoint_update(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
 
-        self.assertIn("Checkpoint updates are not legal in Task Sys parent frames.", text)
-        self.assertIn("Do not call task_sys.checkpoint_update.", text)
+        self.assertNotIn("checkpoint", text.lower())
+        self.assertNotIn("checkpoint_update", text)
 
     def test_render_side_frame_no_longer_calls_close_a_side_result(self) -> None:
         text = self.module.render_side_frame(self._instruction()["frame"])
@@ -643,15 +644,9 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertNotIn(stale_side_result, text)
         self.assertNotIn("side result:", text.lower())
 
-    def test_render_checkpoint_frame_is_task_sys_scoped_without_legacy_prompt(self) -> None:
-        text = self.module.render_checkpoint_frame(self._checkpoint_instruction()["frame"])
-
-        self.assertIn("task_sys.checkpoint", text)
-        self.assertIn("task-turn-completed-abcdef123456", text)
-        self.assertIn("checkpoint_update", text)
-        self.assertIn("Do not recommend", text)
-        self.assertNotIn("[TASK CHECKPOINT]", text)
-        self.assertNotIn("task.checkout finish", text)
+    def test_submit_parent_frame_rejects_checkpoint_frame(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported submit_parent frame kind"):
+            self.module.render_submit_parent_frame(self._checkpoint_instruction()["frame"])
 
     def test_execute_submit_parent_uses_instruction_frame_without_interrupt(self) -> None:
         context = self._context()
@@ -681,26 +676,19 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("task_sys.parent_frame", calls[0]["text"])
         self.assertIn("task-user-input-abcdef123456", calls[0]["text"])
 
-    def test_execute_submit_parent_renders_checkpoint_frame(self) -> None:
+    def test_execute_submit_parent_rejects_checkpoint_frame(self) -> None:
         context = self._context()
-        calls: list[dict[str, Any]] = []
         original_submit = self.module.launcher_submit_turn.submit_turn
 
         def fake_submit_turn(**kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "submit_turn", **kwargs})
+            del kwargs
             return {"turn_id": "turn-checkpoint-1"}
 
         self.addCleanup(setattr, self.module.launcher_submit_turn, "submit_turn", original_submit)
         self.module.launcher_submit_turn.submit_turn = fake_submit_turn
 
-        result = self.module.execute_instruction(context, self._checkpoint_instruction())
-
-        self.assertEqual(result["action"], "submit_parent")
-        self.assertEqual(result["turn_id"], "turn-checkpoint-1")
-        self.assertEqual(result["task_id"], "task-turn-completed-abcdef123456")
-        self.assertIn("task_sys.checkpoint", calls[0]["text"])
-        self.assertIn("checkpoint_update", calls[0]["text"])
-        self.assertNotIn("[TASK CHECKPOINT]", calls[0]["text"])
+        with self.assertRaisesRegex(ValueError, "unsupported submit_parent frame kind"):
+            self.module.execute_instruction(context, self._checkpoint_instruction())
 
     def test_execute_interrupt_submit_parent_interrupts_before_submit(self) -> None:
         context = self._context()

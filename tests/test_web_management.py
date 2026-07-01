@@ -1624,7 +1624,6 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "source": {"type": "test.console", "ref": {"id": "console"}},
                 "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
                 "context": {"fixture": "web console"},
-                "initial_processor": "checkpoint",
             }
         )
         failed_result = task_sys.ingest(

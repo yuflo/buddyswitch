@@ -173,7 +173,7 @@ class RuntimeObjectAccess:
     def runtime_sources(self) -> dict[str, Any]:
         return {
             "tracks": "track.list / track.open",
-            "tasks": "task_sys.close / task_sys.need_parent / task_sys.checkpoint_update",
+            "tasks": "task_sys.list / task_sys.get / task_sys.close / task_sys.need_parent",
             "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
             "track_comments": "track.list_comments",

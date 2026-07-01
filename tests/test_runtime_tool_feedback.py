@@ -85,7 +85,6 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source": {"type": "test.feedback", "ref": {"id": task_id}},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "runtime feedback"},
-                "initial_processor": "checkpoint",
             }
         )
 

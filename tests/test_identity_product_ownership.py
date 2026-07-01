@@ -65,7 +65,6 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase
                 "source": {"type": "test.fixture", "ref": {"title": "Identity-owned task"}},
                 "actor_target": {"actor_id": actor["actor_id"], "role_id": actor["role_id"]},
                 "context": self._task_instance_payload(actor),
-                "initial_processor": "side",
             }
         )
         task = result["task"]

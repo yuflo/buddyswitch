@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import Any, Mapping
 
 from env.tool_runtime import results as tool_results
 from .tool import DEFINITION
@@ -40,6 +40,17 @@ def _active_role(context: Any) -> str:
     return role_id if isinstance(role_id, str) else ""
 
 
+def _actor_target(context: Any) -> dict[str, str]:
+    actor = _active_actor(context)
+    actor_id = actor.get("actor_id")
+    role_id = actor.get("role_id") or _active_role(context)
+    if not isinstance(actor_id, str) or not actor_id.strip():
+        raise ValueError("active actor_id is required")
+    if not isinstance(role_id, str) or not role_id.strip():
+        raise ValueError("active role_id is required")
+    return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
+
+
 def _task_sys_domain(context: Any) -> Any:
     rules = context.get("rules") if isinstance(context, dict) else getattr(context, "rules", None)
     domain = getattr(rules, "task_sys", None)
@@ -69,9 +80,56 @@ def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context
         retryable=True,
         retry_guidance="Retry with only documented task_sys payload fields.",
         allowed_next_actions=[
-            "Use task_sys.close, task_sys.need_parent, or task_sys.checkpoint_update with documented payload fields.",
+            "Use task_sys.list, task_sys.get, task_sys.close, or task_sys.need_parent with documented payload fields.",
         ],
         correctable_fields=unknown,
+    )
+
+
+def _task_events(task: Mapping[str, Any]) -> list[dict[str, Any]]:
+    events = task.get("events")
+    if not isinstance(events, list):
+        return []
+    return [dict(row) for row in events if isinstance(row, Mapping)]
+
+
+def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
+    task_id = task.get("id")
+    row = {
+        "task_id": task_id,
+        "id": task_id,
+        "source_type": task.get("source_type"),
+        "source_ref": task.get("source_ref"),
+        "status": task.get("status"),
+        "active_processor": task.get("active_processor"),
+        "updated_at": task.get("updated_at"),
+        "event_types": [str(event.get("type")) for event in _task_events(task) if event.get("type")],
+    }
+    parent_handoff = task.get("parent_handoff_params")
+    if isinstance(parent_handoff, Mapping):
+        row["parent_handoff_params"] = dict(parent_handoff)
+    failure_result = task.get("failure_result")
+    if isinstance(failure_result, Mapping):
+        row["failure_result"] = dict(failure_result)
+    return row
+
+
+def _read_success(action: str, context: Any, *, effect_summary: str, extra: dict[str, Any]) -> dict[str, Any]:
+    return tool_results.success(
+        tool="task_sys",
+        action=f"task_sys.{action}",
+        active_actor=_active_actor(context),
+        active_role=_active_role(context),
+        effect_summary=effect_summary,
+        state_changed=False,
+        durability="none",
+        read_scope="actor-owned task sys task records",
+        allowed_next_actions=[
+            "Use task_sys.get for full task detail.",
+            "Use task_sys.close when the active frame completed the source-bound task.",
+            "Use task_sys.need_parent when side processing requires parent work.",
+        ],
+        extra=extra,
     )
 
 
@@ -118,15 +176,10 @@ def _success(
         extra["parent_instruction"] = parent_instruction
     if isinstance(parent_runtime, dict):
         extra["parent_runtime"] = parent_runtime
-    frame = result.get("frame")
-    if isinstance(frame, dict):
-        extra["frame"] = frame
     if action == "close":
         effect_summary = "Closed Task Sys task."
     elif action == "need_parent":
         effect_summary = "Recorded Task Sys parent handoff."
-    elif action == "checkpoint_update":
-        effect_summary = f"Recorded Task Sys checkpoint update: {result.get('outcome')}."
     else:
         effect_summary = f"Recorded Task Sys action: {result.get('outcome')}."
     return tool_results.success(
@@ -201,6 +254,63 @@ def _record_side_cleanup(task_sys: Any, context: Any, task_id: str) -> dict[str,
     )
 
 
+def _limit(args: dict[str, Any]) -> int:
+    raw = args.get("limit", 50)
+    if not isinstance(raw, int) or raw < 1:
+        raise ValueError("limit must be a positive integer")
+    return raw
+
+
+def list_tasks(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    task_sys = _task_sys_domain(context)
+    actor_target = _actor_target(context)
+    status = args.get("status") or "active"
+    if status not in {"active", "recoverable", "all"}:
+        raise ValueError("status must be active, recoverable, or all")
+
+    active = task_sys.active_tasks_for_actor(actor_target)
+    recoverable = task_sys.recoverable_tasks_for_actor(actor_target)
+    if status == "active":
+        rows = active
+    elif status == "recoverable":
+        rows = recoverable
+    else:
+        rows = task_sys.list_tasks(actor_target=actor_target)
+
+    limited = rows[: _limit(args)]
+    return _read_success(
+        "list",
+        context,
+        effect_summary="Listed actor-owned Task Sys tasks.",
+        extra={
+            "tasks": [_task_summary(row) for row in limited if isinstance(row, Mapping)],
+            "active_count": len(active),
+            "recoverable_count": len(recoverable),
+        },
+    )
+
+
+def get(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    task_sys = _task_sys_domain(context)
+    actor_target = _actor_target(context)
+    task_id = str(args.get("task_id") or "")
+    task = task_sys.get_task(task_id)
+    owner = task.get("actor_target")
+    if not isinstance(owner, Mapping) or owner.get("actor_id") != actor_target["actor_id"] or owner.get("role_id") != actor_target["role_id"]:
+        raise PermissionError("task does not belong to the active actor")
+    events = _task_events(task)
+    return _read_success(
+        "get",
+        context,
+        effect_summary="Read actor-owned Task Sys task detail.",
+        extra={
+            "task_id": task.get("id"),
+            "task": dict(task),
+            "events": events,
+        },
+    )
+
+
 def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
     result = task_sys.record_task_close(
@@ -241,22 +351,11 @@ def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
 
-def checkpoint_update(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
-    task_sys = _task_sys_domain(context)
-    result = task_sys.record_checkpoint_update(
-        str(args.get("task_id") or ""),
-        {
-            "outcome": args.get("outcome"),
-            "summary": args.get("summary"),
-        },
-    )
-    return _success("checkpoint_update", result, context)
-
-
 _ACTION_HANDLERS = {
+    "list": list_tasks,
+    "get": get,
     "close": close,
     "need_parent": need_parent,
-    "checkpoint_update": checkpoint_update,
 }
 
 

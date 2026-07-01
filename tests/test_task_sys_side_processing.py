@@ -163,13 +163,12 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["active_processor"], "side")
         self.assertNotIn("close_result", record)
 
-    def test_task_sys_tool_registers_close_need_parent_and_checkpoint_update(self) -> None:
+    def test_task_sys_tool_registers_list_get_close_and_need_parent(self) -> None:
         tool_registry.clear_cache()
 
         actions = tool_registry.supported_actions("task_sys")
 
-        self.assertIn("checkpoint_update", actions)
-        self.assertEqual(actions - {"checkpoint_update"}, {"close", "need_parent"})
+        self.assertEqual(actions, {"list", "get", "close", "need_parent"})
 
     def test_task_sys_close_tool_closes_parent_processing_task(self) -> None:
         task_sys = _task_sys()

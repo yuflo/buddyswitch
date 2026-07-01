@@ -24,8 +24,8 @@ def _task_sys() -> Any:
 
 
 class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _envelope(self, *, initial_processor: str | None = None) -> dict[str, Any]:
-        envelope: dict[str, Any] = {
+    def _envelope(self) -> dict[str, Any]:
+        return {
             "source": {
                 "type": "user.input",
                 "ref": {"id": "input-1", "surface": "cli"},
@@ -39,15 +39,28 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "surface": "cli",
             },
         }
-        if initial_processor is not None:
-            envelope["initial_processor"] = initial_processor
-        return envelope
 
     def _task_record_path(self, task_id: str) -> Path:
         return runtime_files.OBJECTS_ROOT / "task-sys" / "tasks" / f"{task_id}.json"
 
     def _task_record(self, task_id: str) -> dict[str, Any]:
         return json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
+
+    def _task_records(self) -> list[dict[str, Any]]:
+        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        if not tasks_dir.exists():
+            return []
+        return [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(tasks_dir.glob("*.json"))
+        ]
+
+    def _event_types(self, task_id: str) -> list[str]:
+        record = self._task_record(task_id)
+        events = record.get("events")
+        self.assertIsInstance(events, list, msg=record)
+        assert isinstance(events, list)
+        return [str(row.get("type")) for row in events if isinstance(row, dict)]
 
     def _move_to_needs_parent(self, task_id: str) -> None:
         task_sys = _task_sys()
@@ -85,7 +98,13 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(persisted["status"], "side_processing")
         self.assertEqual(persisted["active_processor"], "side")
         self.assertIsNone(persisted["parent_handoff_params"])
-        self.assertEqual(persisted["checkpoint_metadata"], {})
+        self.assertNotIn("checkpoint_metadata", persisted)
+        events = persisted.get("events")
+        self.assertIsInstance(events, list, msg=persisted)
+        assert isinstance(events, list)
+        self.assertGreaterEqual(len(events), 2, msg=events)
+        self.assertEqual(events[0].get("type"), "created")
+        self.assertIn("side_frame_started", [row.get("type") for row in events if isinstance(row, dict)])
         self.assertIsInstance(persisted.get("created_at"), str)
         self.assertIsInstance(persisted.get("updated_at"), str)
 
@@ -104,24 +123,13 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(frame["actor_target"], envelope["actor_target"])
         self.assertEqual(frame["context"], envelope["context"])
 
-    def test_ingest_can_record_without_actor_action(self) -> None:
+    def test_ingest_rejects_initial_processor_variants_without_creating_tasks(self) -> None:
         task_sys = _task_sys()
-
-        result = task_sys.ingest(self._envelope(initial_processor="none"))
-
-        self.assertTrue(result.get("ok"), msg=result)
-        task_id = result.get("task_id")
-        self.assertIsInstance(task_id, str, msg=result)
-        assert isinstance(task_id, str)
-        persisted = json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
-        self.assertEqual(persisted["status"], "closed")
-        self.assertIsNone(persisted["active_processor"])
-        instruction = result.get("instruction")
-        self.assertIsInstance(instruction, dict, msg=result)
-        assert isinstance(instruction, dict)
-        self.assertEqual(instruction["type"], "no_actor_action")
-        self.assertEqual(instruction["task_id"], task_id)
-        self.assertEqual(instruction["actor_target"], self._envelope()["actor_target"])
+        for value in ("none", "checkpoint", "side"):
+            with self.subTest(initial_processor=value):
+                with self.assertRaisesRegex(ValueError, "initial_processor"):
+                    task_sys.ingest({**self._envelope(), "initial_processor": value})
+                self.assertEqual(self._task_records(), [])
 
     def test_parent_runtime_instruction_shapes_are_task_traceable(self) -> None:
         task_sys = _task_sys()
@@ -238,6 +246,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-parent")
         self.assertEqual(record["side_result"]["cleanup"]["registry_unregistered"], True)
         self.assertEqual(record["side_result"]["cleanup"]["physical_close_ok"], True)
+        self.assertIn("side_cleanup_recorded", self._event_types(task_id))
 
     def test_record_task_close_closes_side_processing_task(self) -> None:
         task_sys = _task_sys()
@@ -254,6 +263,9 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["close_result"]["processor"], "side")
         self.assertEqual(record["close_result"]["summary"], "Handled in side.")
         self.assertIsInstance(record["close_result"]["updated_at"], str)
+        event_types = self._event_types(task_id)
+        self.assertEqual(event_types[0], "created")
+        self.assertIn("closed", event_types)
 
     def test_record_side_cleanup_updates_side_close_result(self) -> None:
         task_sys = _task_sys()
@@ -279,6 +291,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["close_result"]["cleanup"]["registry_unregistered"], True)
         self.assertEqual(record["close_result"]["cleanup"]["physical_close_ok"], False)
         self.assertEqual(record["close_result"]["cleanup"]["physical_close_error"], "thread already gone")
+        self.assertIn("side_cleanup_recorded", self._event_types(task_id))
 
     def test_record_task_close_closes_parent_processing_task(self) -> None:
         task_sys = _task_sys()
@@ -296,6 +309,10 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["close_result"]["processor"], "parent")
         self.assertEqual(record["close_result"]["summary"], "Parent completed the source task.")
         self.assertIsInstance(record["close_result"]["updated_at"], str)
+        self.assertEqual(
+            self._event_types(task_id),
+            ["created", "side_frame_started", "side_parent_requested", "parent_handoff_started", "closed"],
+        )
 
     def test_record_task_close_rejects_needs_parent_task(self) -> None:
         task_sys = _task_sys()
@@ -310,17 +327,12 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNone(record["active_processor"])
         self.assertNotIn("close_result", record)
 
-    def test_record_task_close_rejects_checkpoint_task(self) -> None:
+    def test_task_statuses_do_not_include_checkpoint_or_no_actor_action(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope(initial_processor="checkpoint"))["task_id"]
 
-        with self.assertRaisesRegex(ValueError, "checkpoint"):
-            task_sys.record_task_close(task_id, {"summary": "Closed with wrong operation."})
-
-        record = self._task_record(task_id)
-        self.assertEqual(record["status"], "checkpoint")
-        self.assertEqual(record["active_processor"], "checkpoint")
-        self.assertNotIn("close_result", record)
+        self.assertNotIn("checkpoint", task_sys.TASK_STATUSES)
+        self.assertNotIn("checkpoint", task_sys.ACTIVE_TASK_STATUSES)
+        self.assertNotIn("no_actor_action", task_sys.RUNTIME_INSTRUCTION_TYPES)
 
     def test_side_runtime_failure_is_recoverable_but_not_active(self) -> None:
         task_sys = _task_sys()
@@ -362,6 +374,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for field in ("source_type", "source_ref", "actor_target", "inbound_context"):
             with self.subTest(field=field):
                 self.assertEqual(record[field], original[field])
+        self.assertIn("side_runtime_failed", self._event_types(task_id))
 
         self.assertIn("runtime_failed", task_sys.TASK_STATUSES)
         self.assertIn("side_no_result", task_sys.TASK_STATUSES)
@@ -431,6 +444,8 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ({**valid, "actor_target": {"actor_id": valid["actor_target"]["actor_id"]}}, "actor_target.role_id"),
             ({**valid, "context": "Draft brief"}, "context"),
             ({**valid, "initial_processor": "parent"}, "initial_processor"),
+            ({**valid, "initial_processor": "side"}, "initial_processor"),
+            ({**valid, "initial_processor": "checkpoint"}, "initial_processor"),
         )
         for payload, expected in cases:
             with self.subTest(expected=expected):
