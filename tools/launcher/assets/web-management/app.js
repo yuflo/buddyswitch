@@ -150,6 +150,8 @@
       openTuiPending: false,
       actorSelectionPendingId: '',
       trackSelectionPendingId: '',
+      actorSelectionRequestId: 0,
+      trackSelectionRequestId: 0,
       openTuiMessage: '',
       openTuiCommand: '',
       imSessionReady: false,
@@ -503,6 +505,52 @@
     return '<div class="empty-state">' + escapeHtml(message) + '</div>';
   }
 
+  function roleLabelById(state, roleId) {
+    const role = state.roles.find(function (row) {
+      return row.id === roleId;
+    });
+    return role && role.label ? role.label : roleId;
+  }
+
+  function actorInitials(roleId, actorId) {
+    const normalizedRole = typeof roleId === 'string' ? roleId.trim().toLowerCase() : '';
+    const fixedRoleInitials = {
+      dev: 'DV',
+      pm: 'PM',
+      test: 'TS',
+      market: 'MK',
+      design: 'DS',
+    };
+    if (fixedRoleInitials[normalizedRole]) {
+      return fixedRoleInitials[normalizedRole];
+    }
+    if (normalizedRole) {
+      return normalizedRole.slice(0, 2).toUpperCase();
+    }
+    const normalizedActor = typeof actorId === 'string' ? actorId.replace(/^act-/, '') : '';
+    return normalizedActor ? normalizedActor.slice(0, 2).toUpperCase() : 'BS';
+  }
+
+  function actorVisualTone(runtime) {
+    if (!runtime || runtime.status === 'inactive') {
+      return 'violet';
+    }
+    if (runtime.app_server_health && runtime.app_server_health !== 'healthy') {
+      return 'green';
+    }
+    return 'teal';
+  }
+
+  function actorDotClass(runtime) {
+    if (!runtime || runtime.status === 'inactive') {
+      return 'dot off';
+    }
+    if (runtime.app_server_health && runtime.app_server_health !== 'healthy') {
+      return 'dot warn';
+    }
+    return 'dot';
+  }
+
   function renderActorRowsHtml(state) {
     if (!state.actors.length) {
       return renderEmpty('No actors available.');
@@ -511,15 +559,20 @@
       const selected = actor.actor_id === state.selectedActorId;
       const loading = actor.actor_id === state.actorSelectionPendingId;
       const runtime = actor.runtime || actor;
+      const roleLabel = formatValue(roleLabelById(state, actor.role));
+      const initials = actorInitials(actor.role, actor.actor_id);
+      const tone = actorVisualTone(runtime);
       return [
-        '<button class="selectable-row actor-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + '" type="button" data-actor-id="' + escapeHtml(actor.actor_id) + '">',
-        '<span class="row-main">',
-        '<span class="row-title mono-value">' + escapeHtml(formatValue(actor.actor_id)) + '</span>',
-        '<span class="row-subtitle">' + escapeHtml(formatValue(actor.role)) + '</span>',
+        '<button class="person-row selectable-row actor-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + '" type="button" data-actor-id="' + escapeHtml(actor.actor_id) + '">',
+        '<span class="avatar ' + escapeHtml(tone) + '" aria-hidden="true">' + escapeHtml(initials) + '</span>',
+        '<span>',
+        '<strong>' + escapeHtml(roleLabel) + '</strong>',
+        '<span class="micro mono">' + escapeHtml(formatValue(actor.actor_id)) + '</span>',
         '</span>',
-        '<span class="row-meta">',
+        '<span class="row-status">',
         badge(runtime.status),
         badge(runtime.app_server_health),
+        '<span class="' + escapeHtml(actorDotClass(runtime)) + '" aria-hidden="true"></span>',
         '</span>',
         '</button>',
       ].join('');
@@ -535,15 +588,9 @@
       const loading = track.id === state.trackSelectionPendingId;
       const summary = track.comment_summary || {};
       return [
-        '<button class="selectable-row track-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + '" type="button" data-track-id="' + escapeHtml(track.id) + '">',
-        '<span class="row-main">',
-        '<span class="row-title">' + escapeHtml(formatValue(track.title)) + '</span>',
-        '<span class="row-subtitle mono-value">' + escapeHtml(formatValue(track.id)) + '</span>',
-        '</span>',
-        '<span class="row-meta">',
-        badge(track.state),
-        '<span class="metric-chip">' + escapeHtml(formatValue(summary.open_thread_count || 0)) + ' open</span>',
-        '</span>',
+        '<button class="track-row selectable-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + '" type="button" data-track-id="' + escapeHtml(track.id) + '">',
+        '<strong>' + escapeHtml(formatValue(track.title)) + '</strong>',
+        '<span class="micro mono">' + escapeHtml(formatValue(track.id)) + ' · ' + escapeHtml(formatValue(track.state)) + ' · ' + escapeHtml(formatValue(summary.open_thread_count || 0)) + ' open threads</span>',
         '</button>',
       ].join('');
     }).join('');
@@ -558,24 +605,36 @@
 
   function renderRuntimeDetailHtml(state) {
     if (state.actorSelectionPendingId && state.actorSelectionPendingId === state.selectedActorId && !state.actorConsole) {
-      return detailRowsHtml([
-        ['Actor', state.selectedActorId, 'mono-value long-value'],
-        ['Status', 'Loading...', 'inline-loading'],
-      ]);
+      return '<div class="metric"><span class="micro">Actor</span><strong class="mono">' + escapeHtml(formatValue(state.selectedActorId)) + '</strong></div>'
+        + '<div class="metric"><span class="micro">Status</span><strong class="inline-loading">Loading...</strong></div>';
     }
     const runtime = selectedActorRuntime(state);
-    const rows = [
-      ['Actor', state.selectedActorId, 'mono-value long-value'],
-      ['Role', runtime && runtime.role, ''],
-      ['Status', runtime && runtime.status, ''],
-      ['Health', runtime && runtime.app_server_health, ''],
-      ['Thread', runtime && runtime.thread_id, 'mono-value long-value'],
-      ['Thread State', runtime && runtime.thread && runtime.thread.status, ''],
-      ['Browser Port', runtime && runtime.browser_port, 'mono-value'],
-      ['Updated', runtime && runtime.updated_at, 'long-value'],
-      ['Workspace', runtime && runtime.workspace_dir, 'mono-value long-value'],
+    const taskSys = state.actorConsole && state.actorConsole.task_sys ? state.actorConsole.task_sys : null;
+    const tracks = state.actorConsole && state.actorConsole.tracks && Array.isArray(state.actorConsole.tracks.items)
+      ? state.actorConsole.tracks.items
+      : [];
+    const metrics = [
+      ['Status', runtime && runtime.status],
+      ['Health', runtime && runtime.app_server_health],
+      ['Task Sys', String(taskSys && taskSys.active_count ? taskSys.active_count : 0) + ' active'],
+      ['Tracks', String(tracks.length) + ' owned'],
     ];
-    return detailRowsHtml(rows);
+    return metrics.map(function (entry) {
+      return '<div class="metric"><span class="micro">' + escapeHtml(entry[0]) + '</span><strong>' + escapeHtml(formatValue(entry[1])) + '</strong></div>';
+    }).join('');
+  }
+
+  function renderRuntimeSummaryHtml(state) {
+    const runtime = selectedActorRuntime(state);
+    if (!runtime) {
+      return renderEmpty('No runtime selected.');
+    }
+    return [
+      '<div class="summary-line"><span>Thread</span><strong class="mono-value long-value">' + escapeHtml(formatValue(runtime.thread_id)) + '</strong></div>',
+      '<div class="summary-line"><span>Thread state</span><strong>' + escapeHtml(formatValue(runtime.thread && runtime.thread.status)) + '</strong></div>',
+      '<div class="summary-line"><span>Browser port</span><strong class="mono-value">' + escapeHtml(formatValue(runtime.browser_port)) + '</strong></div>',
+      '<div class="summary-line"><span>Updated</span><strong class="mono-value long-value">' + escapeHtml(formatValue(runtime.updated_at)) + '</strong></div>',
+    ].join('');
   }
 
   function renderTaskSummaryHtml(state) {
@@ -590,7 +649,7 @@
     const active = activeTasks[0] || null;
     return [
       '<div class="summary-line"><span>Active</span><strong>' + escapeHtml(String(taskSys.active_count || 0)) + '</strong></div>',
-      active ? '<div class="summary-callout"><strong>' + escapeHtml(active.source_type || active.status || 'Task Sys') + '</strong><span class="mono-value">' + escapeHtml(active.task_id || '') + '</span></div>' : '',
+      active ? '<div class="task-row"><strong>' + escapeHtml(active.source_type || active.status || 'Task Sys') + '</strong><span class="micro mono">' + escapeHtml(active.task_id || '') + '</span></div>' : '',
       '<div class="summary-line"><span>Processor</span>' + badge(active && active.active_processor ? active.active_processor : 'none') + '</div>',
     ].join('');
   }
@@ -607,12 +666,9 @@
     }
     return tracks.slice(0, 6).map(function (track) {
       return [
-        '<div class="compact-row">',
-        '<span>',
+        '<div class="task-row">',
         '<strong>' + escapeHtml(formatValue(track.title)) + '</strong>',
-        '<span class="row-subtitle mono-value">' + escapeHtml(formatValue(track.id)) + '</span>',
-        '</span>',
-        badge(track.state),
+        '<span class="micro mono">' + escapeHtml(formatValue(track.id)) + ' · ' + escapeHtml(formatValue(track.state)) + '</span>',
         '</div>',
       ].join('');
     }).join('');
@@ -628,40 +684,66 @@
     const updates = Array.isArray(track.updates) ? track.updates : [];
     const threads = Array.isArray(track.comment_threads) ? track.comment_threads : [];
     return [
-      '<div class="track-header">',
-      '<div><h3>' + escapeHtml(formatValue(track.title)) + '</h3><p>' + escapeHtml(formatValue(track.outcome)) + '</p></div>',
+      '<div class="pill-row left">',
+      '<span class="tag blue">' + escapeHtml(formatValue(track.id)) + '</span>',
       badge(track.state),
+      '<span class="tag">' + escapeHtml(formatValue(track.updated_at)) + '</span>',
       '</div>',
-      '<dl class="detail-grid track-meta">' + detailRowsHtml([
-        ['Track', track.id, 'mono-value long-value'],
-        ['Next', track.now && track.now.next, ''],
-        ['Blocker', track.now && track.now.blocker, ''],
-        ['Updated', track.updated_at, 'long-value'],
-      ]) + '</dl>',
-      '<div class="track-columns">',
-      '<section><h3>Materials</h3>' + renderArtifactRefs(materials) + '</section>',
-      '<section><h3>Proofs</h3>' + renderArtifactRefs(proofs) + '</section>',
-      '</div>',
-      '<section class="track-section"><h3>Updates</h3>' + renderUpdates(updates) + '</section>',
-      '<section class="track-section"><h3>Comments</h3>',
-      '<div class="summary-line"><span>Total</span><strong>' + escapeHtml(String(commentSummary.comment_count || 0)) + '</strong></div>',
+      '<h2 class="doc-title">' + escapeHtml(formatValue(track.title)) + '</h2>',
+      '<p>' + escapeHtml(formatValue(track.outcome)) + '</p>',
+      '<section class="doc-section"><h3>Current state</h3>',
+      '<div class="doc-block"><span class="tag blue">Next</span><span>' + escapeHtml(formatValue(track.now && track.now.next)) + '</span><span class="mini-button">Read only</span></div>',
+      '<div class="doc-block"><span class="tag">Blocker</span><span>' + escapeHtml(formatValue(track.now && track.now.blocker)) + '</span><span class="mini-button">Read only</span></div>',
+      '</section>',
+      '<section class="doc-section"><h3>Materials and proofs</h3><div class="list">',
+      renderArtifactRefs(materials, 'Material', 'blue'),
+      renderArtifactRefs(proofs, 'Proof', 'green'),
+      '</div></section>',
+      '<section class="doc-section"><h3>Updates</h3>' + renderUpdates(updates) + '</section>',
+      '<section class="doc-section"><h3>Comments</h3>',
+      '<div class="summary-line"><span>Total comments</span><strong>' + escapeHtml(String(commentSummary.comment_count || 0)) + '</strong></div>',
+      '<div class="summary-line"><span>Open threads</span><strong>' + escapeHtml(String(commentSummary.open_thread_count || 0)) + '</strong></div>',
       renderComments(threads),
       '</section>',
     ].join('');
   }
 
-  function renderArtifactRefs(rows) {
+  function renderTrackStudioRailHtml(track) {
+    if (!track) {
+      return renderEmpty('Select a Track to inspect comments and context.');
+    }
+    const commentSummary = track.comment_summary || {};
+    const threads = Array.isArray(track.comment_threads) ? track.comment_threads : [];
+    return [
+      '<section class="studio-card">',
+      '<h3>Context</h3>',
+      '<div class="summary-line"><span>State</span>' + badge(track.state) + '</div>',
+      '<div class="summary-line"><span>Next</span><strong>' + escapeHtml(formatValue(track.now && track.now.next)) + '</strong></div>',
+      '<div class="summary-line"><span>Blocker</span><strong>' + escapeHtml(formatValue(track.now && track.now.blocker)) + '</strong></div>',
+      '</section>',
+      '<section class="studio-card">',
+      '<h3>Comments</h3>',
+      '<div class="summary-line"><span>Total</span><strong>' + escapeHtml(String(commentSummary.comment_count || 0)) + '</strong></div>',
+      '<div class="summary-line"><span>Open</span><strong>' + escapeHtml(String(commentSummary.open_thread_count || 0)) + '</strong></div>',
+      '<div class="summary-line"><span>Resolved</span><strong>' + escapeHtml(String(commentSummary.resolved_thread_count || 0)) + '</strong></div>',
+      renderComments(threads),
+      '</section>',
+    ].join('');
+  }
+
+  function renderArtifactRefs(rows, label, tone) {
     if (!rows.length) {
-      return renderEmpty('None.');
+      return '';
     }
     return rows.map(function (row) {
       return [
-        '<div class="compact-row">',
+        '<div class="doc-block">',
+        '<span class="tag ' + escapeHtml(tone || '') + '">' + escapeHtml(label || formatValue(row.role || 'Artifact')) + '</span>',
         '<span>',
         '<strong>' + escapeHtml(formatValue(row.label)) + '</strong>',
-        '<span class="row-subtitle mono-value">' + escapeHtml(formatValue(row.artifact_id)) + '</span>',
+        '<span class="micro mono">' + escapeHtml(formatValue(row.artifact_id)) + ' · ' + escapeHtml(formatValue(row.template)) + '</span>',
         '</span>',
-        '<span class="row-subtitle">' + escapeHtml(formatValue(row.template)) + '</span>',
+        '<span class="mini-button">Inspect</span>',
         '</div>',
       ].join('');
     }).join('');
@@ -673,12 +755,9 @@
     }
     return rows.map(function (row) {
       return [
-        '<div class="compact-row">',
-        '<span>',
+        '<div class="task-row">',
         '<strong>' + escapeHtml(formatValue(row.summary)) + '</strong>',
-        '<span class="row-subtitle mono-value">' + escapeHtml(formatValue(row.id)) + '</span>',
-        '</span>',
-        badge(row.kind),
+        '<span class="micro mono">' + escapeHtml(formatValue(row.id)) + ' · ' + escapeHtml(formatValue(row.kind)) + '</span>',
         '</div>',
       ].join('');
     }).join('');
@@ -691,11 +770,10 @@
     return rows.map(function (thread) {
       return [
         '<div class="comment-thread">',
-        '<div class="compact-row">',
-        '<span><strong class="mono-value">' + escapeHtml(formatValue(thread.thread_id)) + '</strong><span class="row-subtitle">' + escapeHtml(formatValue(thread.latest_comment_preview)) + '</span></span>',
+        '<strong class="mono-value">' + escapeHtml(formatValue(thread.thread_id)) + '</strong>',
+        '<span class="micro">' + escapeHtml(formatValue(thread.latest_comment_preview)) + '</span>',
         badge(thread.status),
-        '</div>',
-        '<div class="row-subtitle">' + escapeHtml(String(thread.comment_count || 0)) + ' comments</div>',
+        '<span class="micro">' + escapeHtml(String(thread.comment_count || 0)) + ' comments</span>',
         '</div>',
       ].join('');
     }).join('');
@@ -723,9 +801,9 @@
         entry.replyTo ? 'reply_to ' + entry.replyTo : '',
       ].filter(Boolean).join(' · ');
       return [
-        '<div class="im-row ' + escapeHtml(entry.direction) + stateClass + '">',
-        '<div class="im-meta">' + escapeHtml(meta) + '</div>',
-        '<div class="im-content">' + escapeHtml(entry.content) + '</div>',
+        '<div class="message ' + (entry.direction === 'sent' ? 'you' : 'reply') + stateClass + '">',
+        '<span class="meta">' + escapeHtml(meta) + '</span>',
+        '<p>' + escapeHtml(entry.content) + '</p>',
         '</div>',
       ].join('');
     }).join('');
@@ -734,26 +812,23 @@
   function sectionCopy(section) {
     if (section === 'tracks') {
       return {
-        title: 'Track workspace',
-        summary: 'Review shared Tracks, materials, proofs, updates, and comments.',
+        title: 'Tracks',
+        summary: 'Review Track outcomes, current state, materials, proofs, updates, and comments.',
       };
     }
     return {
-      title: 'Actor Console',
-      summary: 'Select an actor, inspect runtime and task state, message directly, and use lifecycle controls in one place.',
+      title: 'Team room',
+      summary: 'Message teammates, inspect current runtime facts, and keep coordination in one room.',
     };
   }
 
   function renderShell(state, elements) {
-    const copy = sectionCopy(state.selectedSection);
     elements.serverStatus.textContent = state.healthOk ? 'API Ready' : 'API Unavailable';
     elements.serverStatus.classList.toggle('is-loading', state.refreshPending);
     elements.refreshButton.textContent = state.refreshPending ? 'Refreshing...' : 'Refresh';
     elements.refreshButton.disabled = state.refreshPending;
     elements.refreshButton.classList.toggle('is-pending', state.refreshPending);
     elements.messageBanner.textContent = state.message;
-    elements.pageTitle.textContent = copy.title;
-    elements.pageSummary.textContent = copy.summary;
     elements.actorView.hidden = state.selectedSection !== 'actors';
     elements.trackView.hidden = state.selectedSection !== 'tracks';
     elements.actorNavButton.classList.toggle('is-active', state.selectedSection === 'actors');
@@ -785,7 +860,20 @@
   }
 
   function renderActorDetail(state, elements) {
+    const runtime = selectedActorRuntime(state);
+    if (elements.selectedActorAvatar) {
+      elements.selectedActorAvatar.textContent = actorInitials(runtime && runtime.role, state.selectedActorId);
+      elements.selectedActorAvatar.className = 'avatar ' + actorVisualTone(runtime);
+    }
+    if (elements.selectedActorSubtitle) {
+      elements.selectedActorSubtitle.textContent = state.selectedActorId
+        ? formatValue(state.selectedActorId) + ' · role ' + formatValue(runtime && runtime.role)
+        : 'No teammate selected';
+    }
     elements.actorRuntimeDetail.innerHTML = renderRuntimeDetailHtml(state);
+    if (elements.actorRuntimeSummary) {
+      elements.actorRuntimeSummary.innerHTML = renderRuntimeSummaryHtml(state);
+    }
     elements.actorTaskSummary.innerHTML = renderTaskSummaryHtml(state);
     elements.actorTrackSummary.innerHTML = renderActorTrackSummaryHtml(state);
   }
@@ -798,6 +886,15 @@
     elements.trackDetail.innerHTML = state.trackSelectionPendingId && state.trackSelectionPendingId === state.selectedTrackId
       ? '<div class="empty-state inline-loading">Loading Track...</div>'
       : renderTrackDetailHtml(state.selectedTrackDetail);
+  }
+
+  function renderTrackStudioRail(state, elements) {
+    if (!elements.trackStudioRail) {
+      return;
+    }
+    elements.trackStudioRail.innerHTML = state.trackSelectionPendingId && state.trackSelectionPendingId === state.selectedTrackId
+      ? '<div class="empty-state inline-loading">Loading Track context...</div>'
+      : renderTrackStudioRailHtml(state.selectedTrackDetail);
   }
 
   function renderComposer(state, elements) {
@@ -844,6 +941,7 @@
     renderActorDetail(state, elements);
     renderTrackList(state, elements);
     renderTrackDetail(state, elements);
+    renderTrackStudioRail(state, elements);
     renderComposer(state, elements);
     renderOpenTui(state, elements);
     renderImConversation(state, elements);
@@ -978,9 +1076,11 @@
   }
 
   async function selectActor(state, elements, actorId) {
-    if (!actorId || actorId === state.selectedActorId || state.actorSelectionPendingId) {
+    if (!actorId || actorId === state.selectedActorId) {
       return;
     }
+    const requestId = state.actorSelectionRequestId + 1;
+    state.actorSelectionRequestId = requestId;
     state.selectedActorId = actorId;
     state.actorConsole = null;
     state.actorSelectionPendingId = actorId;
@@ -994,16 +1094,58 @@
     renderOpenTui(state, elements);
     renderImConversation(state, elements);
     try {
-      await refreshSelectedActorConsole(state);
-      await refreshSelectedActorConversation(state);
+      const payload = await fetchJson(buildActorConsoleUrl(actorId));
+      const consoleActorId = payload
+        && payload.console
+        && payload.console.actor
+        && typeof payload.console.actor.actor_id === 'string'
+        ? payload.console.actor.actor_id
+        : '';
+      if (
+        state.actorSelectionRequestId !== requestId
+        || state.selectedActorId !== actorId
+        || (consoleActorId && consoleActorId !== actorId)
+      ) {
+        return;
+      }
+      applyActorConsolePayload(state, payload);
+      if (state.actorSelectionRequestId !== requestId || state.selectedActorId !== actorId) {
+        return;
+      }
+
+      const target = selectedActorImTarget(state);
+      const identityId = target && target.identity_id ? target.identity_id : '';
+      clearImConversation(state, identityId);
+      if (identityId) {
+        try {
+          const conversationPayload = await fetchJson(buildImConversationUrl(identityId, 50));
+          if (state.actorSelectionRequestId !== requestId || state.selectedActorId !== actorId) {
+            return;
+          }
+          applyImConversationPayload(state, conversationPayload, identityId);
+        } catch (error) {
+          if (state.actorSelectionRequestId !== requestId || state.selectedActorId !== actorId) {
+            return;
+          }
+          if (isImConversationNotFoundError(error)) {
+            if (state.message === error.message) {
+              state.message = '';
+            }
+            return;
+          }
+          throw error;
+        }
+      }
     } finally {
-      state.actorSelectionPendingId = '';
-      renderActorList(state, elements);
-      renderActorDetail(state, elements);
-      renderComposer(state, elements);
-      renderOpenTui(state, elements);
-      renderImConversation(state, elements);
-      scheduleActorConsoleRefresh(state, elements);
+      if (state.actorSelectionRequestId === requestId && state.selectedActorId === actorId) {
+        state.actorSelectionPendingId = '';
+        renderActorList(state, elements);
+        renderActorDetail(state, elements);
+        renderComposer(state, elements);
+        renderOpenTui(state, elements);
+        renderImConversation(state, elements);
+        scheduleActorConsoleRefresh(state, elements);
+      }
     }
   }
 
@@ -1016,12 +1158,14 @@
     state.trackSelectionPendingId = trackId;
     renderTrackList(state, elements);
     renderTrackDetail(state, elements);
+    renderTrackStudioRail(state, elements);
     try {
       await refreshSelectedTrackDetail(state);
     } finally {
       state.trackSelectionPendingId = '';
       renderTrackList(state, elements);
       renderTrackDetail(state, elements);
+      renderTrackStudioRail(state, elements);
     }
   }
 
@@ -1342,14 +1486,16 @@
       createButton: document.getElementById('create-button'),
       refreshButton: document.getElementById('refresh-button'),
       serverStatus: document.getElementById('server-status'),
-      pageTitle: document.getElementById('page-title'),
-      pageSummary: document.getElementById('page-summary'),
       actorsList: document.getElementById('actors-list'),
+      selectedActorAvatar: document.getElementById('selected-actor-avatar'),
+      selectedActorSubtitle: document.getElementById('selected-actor-subtitle'),
       actorRuntimeDetail: document.getElementById('actor-runtime-detail'),
+      actorRuntimeSummary: document.getElementById('actor-runtime-summary'),
       actorTaskSummary: document.getElementById('actor-task-summary'),
       actorTrackSummary: document.getElementById('actor-track-summary'),
       tracksList: document.getElementById('tracks-list'),
       trackDetail: document.getElementById('track-detail'),
+      trackStudioRail: document.getElementById('track-studio-rail'),
       instructionInput: document.getElementById('instruction-input'),
       sendButton: document.getElementById('send-button'),
       interruptButton: document.getElementById('interrupt-button'),
@@ -1508,6 +1654,7 @@
   return {
     applyActorConsolePayload,
     applyActorsPayload,
+    actorInitials,
     applyImConversationPayload,
     applyTrackDetailPayload,
     applyTracksPayload,
@@ -1531,7 +1678,10 @@
     replaceImPendingSend,
     refreshSelectedActorConversation,
     pollImEventsOnce,
+    renderActorRowsHtml,
+    renderImConversation,
     renderTrackDetailHtml,
+    renderTrackStudioRailHtml,
     renderComposer,
     sectionCopy,
     selectActor,

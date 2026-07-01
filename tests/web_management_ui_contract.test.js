@@ -63,37 +63,99 @@ test('production html keeps all real control ids used by the web UI', () => {
   });
 });
 
-test('production html uses the actor-console workspace layout', () => {
+test('production html uses the Team Room and Track Studio workspace layout', () => {
   [
-    'class="app-shell"',
-    'class="sidebar"',
-    'class="workspace-page"',
-    'class="view-section actor-view"',
-    'class="view-section track-view"',
-    'class="actor-console-grid"',
-    'console-column',
-    'runtime-column',
-    'class="workspace-panel actor-roster-panel"',
-    'class="workspace-panel track-list-panel"',
+    'class="webui-root"',
+    'class="tabs app-tabs"',
+    'class="screen view-section team-room-view"',
+    'class="screen view-section track-view"',
+    'class="proto-shell team-room"',
+    'class="room-sidebar"',
+    'class="room-main"',
+    'class="room-header"',
+    'class="room-thread"',
+    'class="composer"',
+    'class="person-panel"',
+    'class="person-card"',
+    'class="proto-shell track-studio"',
+    'class="studio-side"',
+    'class="studio-doc"',
+    'class="doc-page"',
+    'class="studio-rail"',
   ].forEach((marker) => {
     assertIncludes(indexHtml, marker);
   });
 });
 
-test('production stylesheet supports actor console and track workspace states', () => {
+test('production html removes the old management shell completely', () => {
   [
-    '.app-shell',
-    '.sidebar',
-    '.workspace-page',
+    'class="app-shell"',
+    'class="sidebar"',
+    'class="workspace-page"',
+    'class="page-header"',
+    'class="workspace-switcher"',
+    'class="workspace-mark"',
+    'class="nav-item"',
+    'class="breadcrumb"',
+    'id="page-title"',
+    'id="page-summary"',
+  ].forEach((forbidden) => {
+    assertExcludes(indexHtml, forbidden);
+  });
+});
+
+test('production html uses the final prototype root and primary tabs', () => {
+  assertIncludes(indexHtml, 'class="webui-root"');
+  assertIncludes(indexHtml, 'class="tabs app-tabs"');
+  assertIncludes(indexHtml, 'id="actor-nav-button"');
+  assertIncludes(indexHtml, 'id="tracks-nav-button"');
+  const primaryNav = indexHtml.match(/<nav class="tabs app-tabs"[\s\S]*?<\/nav>/);
+  assert.ok(primaryNav, 'Expected final top-level app tabs');
+  const labels = Array.from(primaryNav[0].matchAll(/<button[\s\S]*?>([\s\S]*?)<\/button>/g))
+    .map((match) => match[1].replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' '));
+  assert.deepEqual(labels, ['Team room', 'Tracks']);
+});
+
+test('production stylesheet supports Team Room and Track Studio states', () => {
+  [
+    '.webui-root',
+    '.tabs.app-tabs',
     '.view-section[hidden]',
-    '.actor-console-grid',
-    '.console-column',
-    '.runtime-column',
+    '.proto-shell',
+    '.team-room',
+    '.room-sidebar',
+    '.room-main',
+    '.room-header',
+    '.room-thread',
+    '.composer',
+    '.person-panel',
+    '.person-card',
+    '.track-studio',
+    '.studio-side',
+    '.studio-doc',
+    '.doc-page',
+    '.studio-rail',
     '.actor-list',
     '.track-list',
     '.selectable-row.is-selected',
     '.button.danger',
     '@media (max-width: 860px)',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+});
+
+test('production stylesheet restores prototype room and studio proportions', () => {
+  [
+    'grid-template-columns: 260px minmax(0, 1fr) 320px;',
+    'grid-template-columns: 250px minmax(0, 1fr) 320px;',
+    'background: #f7f6f1;',
+    'background: #ebe8dc;',
+    'background: #fbfbf8;',
+    'background: #f0eee4;',
+    'background: #f6f5f2;',
+    'background: #ece9e0;',
+    'background: #f0ede5;',
   ].forEach((marker) => {
     assertIncludes(stylesCss, marker);
   });
@@ -105,8 +167,8 @@ test('production stylesheet supports pending and loading feedback states', () =>
     '.button.is-pending',
     '.selectable-row.is-loading',
     '.inline-loading',
-    '.im-row.pending',
-    '.im-row.failed',
+    '.message.pending',
+    '.message.failed',
   ].forEach((marker) => {
     assertIncludes(stylesCss, marker);
   });
@@ -158,8 +220,14 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, "selectedActorId) + '/input'");
   assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tasks'");
   assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tracks'");
-  assertExcludes(appJs, "/api/tracks/' + encodeURIComponent(state.selectedTrackId) + '/comments'");
-  assertExcludes(appJs, '/api/web/' + 'im');
+  [
+    "/api/instances/' + encodeURIComponent(state.selectedActorId) + '/side'",
+    "/api/instances/' + encodeURIComponent(state.selectedActorId) + '/side/close'",
+    "/api/tracks/' + encodeURIComponent(state.selectedTrackId) + '/comments'",
+    '/api/web/' + 'im',
+  ].forEach((forbidden) => {
+    assertExcludes(appJs, forbidden);
+  });
   assertExcludes(appJs, 'buildWeb' + 'ImConversationUrl');
   assertExcludes(appJs, 'ensureWeb' + 'ImSession');
   assertExcludes(appJs, 'apply' + 'ImEventsPayload');
@@ -193,25 +261,94 @@ test('production javascript keeps draft input off the full page render path', ()
   assertExcludes(appJs, 'render(state, ' + 'elements);');
 });
 
-test('production assets present actor-centered console wording', () => {
-  assertIncludes(indexHtml, '>Role<');
-  assertIncludes(indexHtml, 'Actor Console');
-  assertIncludes(indexHtml, 'Actors');
-  assertIncludes(indexHtml, 'Tracks');
-  assertIncludes(indexHtml, 'Runtime');
-  assertIncludes(indexHtml, 'Task');
-  assertIncludes(indexHtml, 'Track workspace');
-  assertIncludes(indexHtml, '>Message<');
-  assertIncludes(indexHtml, 'Send a direct message to the selected actor.');
-  assertExcludes(combinedAssets, 'Instance control room');
-  assertExcludes(combinedAssets, 'Control room');
-  assertExcludes(combinedAssets, '>' + 'Buddy' + '<');
-  assertExcludes(combinedAssets, 'selected' + 'Buddy');
-  assertExcludes(combinedAssets, 'Stored local ' + 'role instances');
-  assertExcludes(combinedAssets, '>Instruction<');
-  assertExcludes(combinedAssets, 'thread input');
-  assertExcludes(combinedAssets, 'steer');
-  assertIncludes(combinedAssets, 'BuddySwitch');
+test('production assets present Team room and Tracks as the only primary tabs', () => {
+  assertIncludes(indexHtml, '>Team room<');
+  assertIncludes(indexHtml, '>Tracks<');
+  assertExcludes(indexHtml, 'Actor Console');
+  assertExcludes(indexHtml, '>Actors<');
+  assertExcludes(indexHtml, 'Create Actor');
+  assertExcludes(indexHtml, 'Runtime health');
+  assertExcludes(indexHtml, '>Artifacts<');
+  assertExcludes(indexHtml, 'Workstream OS');
+  assertExcludes(indexHtml, 'Capacity');
+});
+
+test('primary navigation has exactly two visible destinations', () => {
+  const primaryNav = indexHtml.match(/<nav class="tabs app-tabs"[\s\S]*?<\/nav>/);
+  assert.ok(primaryNav, 'Expected final primary nav');
+  const buttonLabels = Array.from(primaryNav[0].matchAll(/<button[\s\S]*?>([\s\S]*?)<\/button>/g))
+    .map((match) => match[1].replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' '));
+  assert.deepEqual(buttonLabels, ['Team room', 'Tracks']);
+});
+
+test('Team room keeps direct thread centered and actions in the teammate card', () => {
+  const roomMain = indexHtml.match(/<section class="room-main"[\s\S]*?<\/section>\s*<aside id="actor-console"/);
+  assert.ok(roomMain, 'Expected center room main before teammate rail');
+  [
+    'class="room-header"',
+    'class="room-thread"',
+    'id="im-conversation"',
+    'class="composer"',
+    'id="instruction-input"',
+    'placeholder="Message the selected teammate."',
+    'id="send-button"',
+    'id="interrupt-button"',
+    '>Message<',
+  ].forEach((marker) => {
+    assertIncludes(roomMain[0], marker);
+  });
+  [
+    'id="open-tui-button"',
+    'id="clear-button"',
+    'id="stop-button"',
+    'id="resume-button"',
+    'id="delete-button"',
+  ].forEach((forbidden) => {
+    assertExcludes(roomMain[0], forbidden);
+  });
+
+  const teammateRail = indexHtml.match(/<aside id="actor-console" class="person-panel"[\s\S]*?<\/aside>/);
+  assert.ok(teammateRail, 'Expected selected teammate rail');
+  [
+    'class="person-card"',
+    'id="actor-runtime-detail"',
+    'id="actor-task-summary"',
+    'id="actor-track-summary"',
+    'id="open-tui-button"',
+    'id="clear-button"',
+    'id="stop-button"',
+    'id="resume-button"',
+    'id="delete-button"',
+    'id="action-availability-status"',
+    'id="message-banner"',
+  ].forEach((marker) => {
+    assertIncludes(teammateRail[0], marker);
+  });
+  [
+    'id="instruction-input"',
+    'id="send-button"',
+    'id="interrupt-button"',
+  ].forEach((forbidden) => {
+    assertExcludes(teammateRail[0], forbidden);
+  });
+});
+
+test('Tracks shell presents read-only Track Studio labels', () => {
+  const trackView = indexHtml.match(/<section id="track-view"[\s\S]*?<\/section>\s*<\/main>/);
+  assert.ok(trackView, 'Expected Tracks view');
+  assertIncludes(trackView[0], '>Tracks<');
+  assertIncludes(trackView[0], '>Track Studio<');
+  assertIncludes(trackView[0], 'Outcome, current state, materials, proofs, updates, and comments');
+  assertIncludes(trackView[0], 'id="track-studio-rail"');
+  assertIncludes(trackView[0], 'aria-label="Track comments and context"');
+  [
+    '<textarea',
+    'composer',
+    'Submit',
+    'Resolve',
+  ].forEach((forbidden) => {
+    assertExcludes(trackView[0], forbidden);
+  });
 });
 
 test('first version does not reintroduce removed initialize ui or route', () => {
@@ -250,6 +387,41 @@ test('first version does not ship mock-only controls', () => {
     'terminal selector',
     'terminal-select',
     'open-terminal-choice',
+  ].forEach((forbidden) => {
+    assertExcludes(combinedAssets, forbidden);
+  });
+});
+
+test('Team room assets do not invent fake teammate facts', () => {
+  [
+    'Dev Actor',
+    'PM Actor',
+    'Test Actor',
+    'Market Actor',
+    '72%',
+    '68%',
+    'last proof',
+    '4 collaborators',
+    'collaborators',
+    'unread',
+    'current focus',
+    'load percentage',
+    'capacity bar',
+    'availability score',
+  ].forEach((forbidden) => {
+    assertExcludes(combinedAssets.toLowerCase(), forbidden.toLowerCase());
+  });
+});
+
+test('production assets do not add decorative or fake layout markers', () => {
+  [
+    'track-workspace-grid',
+    'orb',
+    'blob',
+    'capacity-bar',
+    'avatar-stack',
+    'unread-badge',
+    'fake-metric',
   ].forEach((forbidden) => {
     assertExcludes(combinedAssets, forbidden);
   });
