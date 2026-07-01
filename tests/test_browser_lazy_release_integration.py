@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from itertools import count
 from typing import Any
@@ -26,16 +27,15 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_manifest  # noqa: E402
-import env.tools.search._impl as search_impl  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 
 
 LAUNCHER = ROOT / "buddyswitch-codex"
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+DAEMON_CORE = ROOT / "tools" / "launcher" / "daemon_core.py"
+DAEMON_MAILBOX = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
 PAGE_EXPIRED_HANDLER = ROOT / "tools" / "launcher" / "browser_page_expired_handler.py"
 RELEASE_HANDLER = ROOT / "tools" / "launcher" / "browser_release_handler.py"
 TRIGGERS = ROOT / "tools" / "launcher" / "daemon_triggers.py"
@@ -300,10 +300,18 @@ for raw_line in sys.stdin:
             },
         }
     elif method == "tools/call":
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        tool_name = params.get("name")
+        if tool_name == "select_page":
+            response_text = "Selected page: https://www.google.com/search?q=lazy+release+smoke [selected]"
+        elif tool_name == "take_snapshot":
+            response_text = "Snapshot: lazy release smoke result page"
+        else:
+            response_text = "fake upstream tool response"
         response = {
             "jsonrpc": "2.0",
             "id": request_id,
-            "result": {"content": [{"type": "text", "text": "fake upstream tool response"}]},
+            "result": {"content": [{"type": "text", "text": response_text}]},
         }
     else:
         response = {"jsonrpc": "2.0", "id": request_id, "result": {}}
@@ -406,12 +414,17 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
 
 calls_path.parent.mkdir(parents=True, exist_ok=True)
 with calls_path.open("a", encoding="utf-8") as handle:
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        pgid = None
     handle.write(
         json.dumps(
             {
                 "instance_root": str(instance_root),
                 "started": started,
                 "pid": pid,
+                "pgid": pgid,
                 "port": port,
             },
             ensure_ascii=True,
@@ -517,23 +530,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
             stderr = proc.stderr.read()
         self.fail(f"timed out waiting for proxy response; code={proc.poll()}; stderr:\n{stderr}")
 
-    def _dispatch_search_open_browser(self, *, instance_json: Path, actor_id: str, role: str) -> dict[str, Any]:
-        manifest = env_manifest.load_manifest(MANIFEST)
-        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
-        return dispatch_env_tool_request(
-            payload={
-                "tool": "search",
-                "action": "open_browser",
-                "args": {"query": "lazy release smoke", "engine": "google"},
-            },
-            active_role=role,
-            actor_id=actor_id,
-            instance_json=instance_json,
-            instance_payload=instance_payload,
-            manifest=manifest,
-            manifest_path=MANIFEST,
-        )
-
     def _seed_active_task(self, *, actor_id: str, role: str) -> None:
         task_sys.ingest(
             {
@@ -579,6 +575,27 @@ with calls_path.open("a", encoding="utf-8") as handle:
         context.instance_payload = {"browser_port": None}
         return context
 
+    def _start_mailbox(self, *, instance_root: Path, actor_id: str, role: str) -> tuple[Any, Any, threading.Thread]:
+        daemon_core = load_module(DAEMON_CORE)
+        daemon_mailbox = load_module(DAEMON_MAILBOX)
+        instance_root.mkdir(parents=True, exist_ok=True)
+        state = daemon_core.DaemonState.load(
+            instance_root=instance_root,
+            actor_id=actor_id,
+            main_thread_id="thr-main",
+        )
+        server = daemon_mailbox.DaemonMailboxServer(
+            socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
+            local_actor_address={"role_id": role, "actor_id": actor_id},
+            handlers=[],
+            state=state,
+            now=lambda: "2026-06-24T00:00:00Z",
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.close)
+        return daemon_core, server, thread
+
     def _launcher_release(self, *, actor_id: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(LAUNCHER), "env", "browser", "release", "--instance", actor_id],
@@ -599,6 +616,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     pass
 
     def test_lazy_runtime_releases_after_idle_and_restarts_on_next_browser_call(self) -> None:
+        """Proves cockpit new_page -> list_pages -> select_page -> take_snapshot -> idle close -> release -> restart."""
         actor_id = "act-dev-browser"
         role = "dev"
         with tempfile.TemporaryDirectory() as temp_root:
@@ -620,7 +638,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
             ensure_calls = temp_root_path / "ensure_calls.jsonl"
             upstream_argv = temp_root_path / "upstream_argv.jsonl"
             upstream_calls = temp_root_path / "upstream_calls.jsonl"
-            search_schedules: list[dict[str, object]] = []
             release_schedules: list[dict[str, object]] = []
             fake_port = free_port()
 
@@ -628,19 +645,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
             self._write_fake_upstream(fake_upstream)
             self._write_ensure_script(ensure_script)
             self.addCleanup(self._cleanup_fake_chrome_pids, ensure_calls)
-            original_search_schedule = search_impl.browser_lifecycle.daemon_client.schedule_trigger
-
-            def fake_search_schedule_trigger(**kwargs: object) -> dict[str, object]:
-                search_schedules.append(dict(kwargs))
-                return {"schedule": {"schedule_id": "schedule-page"}}
-
-            search_impl.browser_lifecycle.daemon_client.schedule_trigger = fake_search_schedule_trigger
-            self.addCleanup(
-                setattr,
-                search_impl.browser_lifecycle.daemon_client,
-                "schedule_trigger",
-                original_search_schedule,
-            )
 
             base_env = os.environ.copy()
             base_env.update(
@@ -657,7 +661,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "BUDDYSWITCH_TEST_FAKE_CHROME_SERVER": str(fake_chrome),
                     "BUDDYSWITCH_TEST_BROWSER_ENSURE_CALLS": str(ensure_calls),
                     "BUDDYSWITCH_BROWSER_COCKPIT_ENSURE_COMMAND": f"{sys.executable} {ensure_script}",
-                    "BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND": f"{sys.executable} {ensure_script}",
                     "BUDDYSWITCH_TEST_UPSTREAM_ARGV": str(upstream_argv),
                     "BUDDYSWITCH_TEST_UPSTREAM_CALLS": str(upstream_calls),
                     "NO_PROXY": "127.0.0.1,localhost",
@@ -667,6 +670,11 @@ with calls_path.open("a", encoding="utf-8") as handle:
 
             with patch.dict(os.environ, base_env, clear=False):
                 proxy = self._start_proxy(instance_root=instance_root, upstream=fake_upstream, env=base_env)
+                daemon_core, mailbox_server, mailbox_thread = self._start_mailbox(
+                    instance_root=instance_root,
+                    actor_id=actor_id,
+                    role=role,
+                )
 
                 first_proxy_response = self._send_proxy_tool_call(
                     proxy,
@@ -679,18 +687,69 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertTrue((instance_root / "runtime" / "browser" / "cockpit-upstream.pgid").exists())
                 self.assertTrue(port_accepts(fake_port))
                 self.assertTrue(read_jsonl(upstream_argv), "first browser call must start upstream MCP")
-                self.assertTrue(read_jsonl(ensure_calls)[0]["started"], "first browser call must launch fake runtime")
+                first_ensure_events = read_jsonl(ensure_calls)
+                self.assertTrue(first_ensure_events[0]["started"], "first browser call must launch fake runtime")
+                first_browser_pid = first_ensure_events[0].get("pid")
+                first_browser_pgid = first_ensure_events[0].get("pgid")
+                self.assertIsInstance(first_browser_pid, int, msg=first_ensure_events)
+                self.assertIsInstance(first_browser_pgid, int, msg=first_ensure_events)
+                assert isinstance(first_browser_pid, int)
 
-                search_response = self._dispatch_search_open_browser(instance_json=instance_json, actor_id=actor_id, role=role)
-                self.assertTrue(search_response.get("ok"), msg=search_response)
-                self.assertEqual(search_response.get("page_opened"), True, msg=search_response)
-                self.assertEqual(search_schedules[-1]["trigger_type"], "browser.page.expired")
-                self.assertEqual(search_schedules[-1]["schedule_key"], "browser.page.idle:target-1")
+                new_page_response = self._send_proxy_tool_call(
+                    proxy,
+                    request_id=2,
+                    tool_name="new_page",
+                    arguments={"url": "https://www.google.com/search?q=lazy+release+smoke"},
+                )
+                self.assertFalse(new_page_response.get("result", {}).get("isError"), msg=new_page_response)
+                self.assertIn("target-1", json.dumps(new_page_response, ensure_ascii=True))
+
+                listed_response = self._send_proxy_tool_call(
+                    proxy,
+                    request_id=3,
+                    tool_name="list_pages",
+                    arguments={},
+                )
+                self.assertFalse(listed_response.get("result", {}).get("isError"), msg=listed_response)
+                listed_text = json.dumps(listed_response, ensure_ascii=True)
+                self.assertIn("BuddySwitch browser-session state", listed_text)
+                self.assertIn("target_id: target-1", listed_text)
+                self.assertIn("current: true", listed_text)
+
+                selected_response = self._send_proxy_tool_call(
+                    proxy,
+                    request_id=4,
+                    tool_name="select_page",
+                    arguments={"pageId": 1},
+                )
+                self.assertFalse(selected_response.get("result", {}).get("isError"), msg=selected_response)
+                selected_text = json.dumps(selected_response, ensure_ascii=True)
+                self.assertIn("Selected page:", selected_text)
+                self.assertIn("Browser page idle refreshed", selected_text)
+
+                snapshot_response = self._send_proxy_tool_call(
+                    proxy,
+                    request_id=5,
+                    tool_name="take_snapshot",
+                    arguments={},
+                )
+                self.assertFalse(snapshot_response.get("result", {}).get("isError"), msg=snapshot_response)
+                snapshot_text = json.dumps(snapshot_response, ensure_ascii=True)
+                self.assertIn("Snapshot: lazy release smoke result page", snapshot_text)
+                self.assertIn("Browser page idle refreshed", snapshot_text)
+
+                saved_daemon_state = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+                self.assertEqual(
+                    saved_daemon_state["scheduled_triggers"]["schedule-1"]["schedule_key"],
+                    "browser.page.idle:target-1",
+                )
                 page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
                 targets = page_idle.get("targets")
                 self.assertIsInstance(targets, dict, msg=page_idle)
                 assert isinstance(targets, dict)
                 self.assertEqual(list(targets), ["target-1"])
+                mailbox_server.close()
+                mailbox_thread.join(timeout=2)
 
                 page_handler = load_module(PAGE_EXPIRED_HANDLER)
                 release_handler = load_module(RELEASE_HANDLER)
@@ -731,10 +790,14 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.lock").exists())
                 self.assertFalse((instance_root / "browser" / "chrome.pid").exists())
                 self.assertTrue(wait_until(lambda: not port_accepts(fake_port)), "release must stop fake Chrome endpoint")
+                self.assertTrue(
+                    wait_until(lambda: not pid_alive(first_browser_pid)),
+                    "release must stop first fake Chrome process",
+                )
 
                 second_proxy_response = self._send_proxy_tool_call(
                     proxy,
-                    request_id=2,
+                    request_id=6,
                     tool_name="list_pages",
                     arguments={},
                 )
@@ -747,6 +810,10 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 final_release = self._launcher_release(actor_id=actor_id, env=base_env)
                 self.assertEqual(final_release.returncode, 0, msg=f"stdout:\n{final_release.stdout}\nstderr:\n{final_release.stderr}")
                 self.assertTrue(wait_until(lambda: not port_accepts(fake_port)), "cleanup release must stop fake Chrome endpoint")
+                for event in read_jsonl(ensure_calls):
+                    pid = event.get("pid")
+                    if isinstance(pid, int):
+                        self.assertTrue(wait_until(lambda pid=pid: not pid_alive(pid)), msg=f"fake Chrome pid still alive: {pid}")
 
 
 if __name__ == "__main__":

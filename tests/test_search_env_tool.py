@@ -191,22 +191,6 @@ def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
 class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
-        ensure_noop = self._runtime_path("fake-search-browser-ensure-noop.py")
-        ensure_noop.write_text("raise SystemExit(0)\n", encoding="utf-8")
-        ensure_patch = patch.dict(os.environ, {"BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND": f"{sys.executable} {ensure_noop}"})
-        ensure_patch.start()
-        self.addCleanup(ensure_patch.stop)
-        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
-
-        def default_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
-            return {
-                "idle_refreshed": True,
-                "idle_seconds": 300,
-                "idle_expires_at": "2026-06-24T00:05:00Z",
-            }
-
-        search_impl.browser_lifecycle.refresh_page_idle = default_refresh_page_idle
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
 
     def _instance_json(
         self,
@@ -514,6 +498,180 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._assert_no_env_cli_hint(response)
         self._assert_next_option(response, tool="search", action="open_browser")
 
+    def _dispatch_with_browser_session_result(
+        self,
+        result: object,
+        *,
+        query: str = "creator analytics pain",
+        engine: str = "google",
+        browser_url: str = "http://127.0.0.1:9222",
+    ) -> tuple[dict[str, object], list[dict[str, object]], list[dict[str, object]]]:
+        ensure_calls: list[dict[str, object]] = []
+        open_calls: list[dict[str, object]] = []
+        original_ensure = search_impl.browser_session.ensure_browser_url_for_instance
+        original_open = search_impl.browser_session.open_or_reuse_page
+
+        def fake_ensure_browser_url_for_instance(*, instance_root: Path, actor_id: str) -> str:
+            ensure_calls.append({"instance_root": instance_root, "actor_id": actor_id})
+            return browser_url
+
+        def fake_open_or_reuse_page(**kwargs: object) -> object:
+            open_calls.append(kwargs)
+            return result
+
+        self.addCleanup(setattr, search_impl.browser_session, "ensure_browser_url_for_instance", original_ensure)
+        self.addCleanup(setattr, search_impl.browser_session, "open_or_reuse_page", original_open)
+        search_impl.browser_session.ensure_browser_url_for_instance = fake_ensure_browser_url_for_instance
+        search_impl.browser_session.open_or_reuse_page = fake_open_or_reuse_page
+        instance_json = self._instance_json(browser_port=None)
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": query, "engine": engine},
+            instance_json=instance_json,
+        )
+        return response, ensure_calls, open_calls
+
+    def test_search_open_browser_delegates_search_url_to_browser_session(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        result = search_impl.browser_session.BrowserSessionOpenResult(
+            kind="opened",
+            target_url=target_url,
+            page_count=2,
+            projected_page_count=3,
+            target_id="target-opened",
+            page_opened=True,
+            idle_refreshed=True,
+            idle_seconds=300,
+            idle_expires_at="2026-07-01T00:05:00Z",
+        )
+
+        response, ensure_calls, open_calls = self._dispatch_with_browser_session_result(result)
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("page_opened"), True)
+        self.assertEqual(response.get("target_url"), target_url)
+        self.assertEqual(response.get("browser_page_count"), 3)
+        self.assertEqual(response.get("idle_refreshed"), True)
+        self.assertEqual(ensure_calls[0]["instance_root"], self._runtime_path("act-market-search-example.json").parent)
+        self.assertEqual(open_calls[0]["target_url"], target_url)
+        self.assertEqual(open_calls[0]["browser_url"], "http://127.0.0.1:9222")
+        self._assert_no_browser_endpoint_leak(response)
+
+    def test_search_open_browser_maps_reused_browser_session_result(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        result = search_impl.browser_session.BrowserSessionOpenResult(
+            kind="reused",
+            target_url=target_url,
+            page_count=4,
+            projected_page_count=4,
+            target_id="target-existing",
+            page_reused=True,
+            idle_refreshed=True,
+            idle_seconds=300,
+        )
+
+        response, _ensure_calls, open_calls = self._dispatch_with_browser_session_result(result)
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("page_opened"), False)
+        self.assertEqual(response.get("page_reused"), True)
+        self.assertEqual(response.get("reused_target_id"), "target-existing")
+        self.assertEqual(response.get("browser_page_count"), 4)
+        self.assertEqual(open_calls[0]["target_url"], target_url)
+
+    def test_search_open_browser_maps_blocked_browser_session_result(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        result = search_impl.browser_session.BrowserSessionOpenResult(
+            kind="blocked",
+            target_url=target_url,
+            page_count=10,
+            projected_page_count=10,
+            message=HARD_PAGE_BLOCK,
+        )
+
+        response, _ensure_calls, open_calls = self._dispatch_with_browser_session_result(result)
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_LIMIT_REACHED")
+        self.assertEqual(response.get("browser_page_count"), 10)
+        self.assertEqual(response.get("page_opened"), False)
+        self.assertEqual(open_calls[0]["target_url"], target_url)
+
+    def test_search_open_browser_maps_verification_failure_result(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        result = search_impl.browser_session.BrowserSessionOpenResult(
+            kind="verification_failed",
+            target_url=target_url,
+            page_count=None,
+            message="Browser page-count verification failed: simulated list failure",
+        )
+
+        response, _ensure_calls, open_calls = self._dispatch_with_browser_session_result(result)
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_COUNT_UNVERIFIED")
+        self.assertEqual(response.get("page_opened"), False)
+        self.assertIn("page-count", json.dumps(response, ensure_ascii=True).lower())
+        self.assertEqual(open_calls[0]["target_url"], target_url)
+
+    def test_search_open_browser_appends_browser_session_page_hint(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        result = search_impl.browser_session.BrowserSessionOpenResult(
+            kind="opened",
+            target_url=target_url,
+            page_count=4,
+            projected_page_count=5,
+            target_id="target-opened",
+            page_opened=True,
+            idle_refreshed=True,
+            idle_seconds=300,
+        )
+
+        response, _ensure_calls, _open_calls = self._dispatch_with_browser_session_result(result)
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("browser_page_count"), 5)
+        self.assertIn(SOFT_PAGE_HINT_5, json.dumps(response, ensure_ascii=True))
+
+    def test_search_open_browser_maps_registration_failure_result(self) -> None:
+        target_url = "https://www.google.com/search?q=creator+analytics+pain"
+        result = search_impl.browser_session.BrowserSessionOpenResult(
+            kind="registration_failed",
+            target_url=target_url,
+            page_count=2,
+            projected_page_count=3,
+            target_id="target-created",
+            message="daemon unavailable",
+        )
+
+        response, _ensure_calls, open_calls = self._dispatch_with_browser_session_result(result)
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_LIFECYCLE_REGISTRATION_FAILED")
+        self.assertEqual(response.get("page_opened"), False)
+        self.assertEqual(response.get("created_target_id"), "target-created")
+        self.assertIn("daemon unavailable", response.get("idle_refresh_error", ""))
+        self.assertEqual(open_calls[0]["target_url"], target_url)
+
+    def test_search_open_browser_has_no_standalone_browser_stack(self) -> None:
+        text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
+        forbidden = [
+            "_ensure_browser_runtime",
+            "_browser_endpoint",
+            "_reload_instance_payload",
+            "_open_browser_page",
+            "BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND",
+            "cdp_background_page.py",
+            "Target.createTarget",
+            "refresh_page_idle(",
+            "close_page_target(",
+            "evaluate_page_open_gate(",
+        ]
+        for pattern in forbidden:
+            self.assertNotIn(pattern, text)
+
+    @unittest.skip("search.open_browser delegates page creation to browser-session; direct CDP create is covered by browser-session tests")
     def test_search_open_browser_creates_background_cdp_target(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
@@ -545,6 +703,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(params.get("url"), target_url)
         self.assertIs(params.get("background"), True)
 
+    @unittest.skip("search.open_browser delegates idle registration to browser-session; wrapper result mapping is covered above")
     def test_search_open_browser_refreshes_idle_after_new_target(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
@@ -589,6 +748,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ],
         )
 
+    @unittest.skip("search.open_browser delegates registration cleanup to browser-session; cleanup is covered by browser-session tests")
     def test_search_open_browser_closes_new_target_when_idle_registration_fails(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
@@ -621,6 +781,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(rpc_requests[1].get("params"), {"targetId": "target-search"})
         self.assertEqual(state.get("targets"), [], msg=state)
 
+    @unittest.skip("search.open_browser delegates reuse idle refresh to browser-session; wrapper reuse mapping is covered above")
     def test_search_reuse_refreshes_idle_for_reused_target(self) -> None:
         target_url = "https://www.google.com/search?q=creator+analytics+pain"
         state: dict[str, object] = {
@@ -665,6 +826,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(state.get("rpc_requests", []), [], msg=state)
 
+    @unittest.skip("search.open_browser delegates reuse registration failures to browser-session; wrapper failure mapping is covered above")
     def test_search_open_browser_reuse_idle_registration_failure_returns_error_without_closing_existing_page(self) -> None:
         target_url = "https://www.google.com/search?q=creator+analytics+pain"
         state: dict[str, object] = {
@@ -699,6 +861,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(state.get("rpc_requests", []), [], msg=state)
         self.assertEqual(state["targets"], [{"id": "target-existing-search", "type": "page", "url": target_url}])
 
+    @unittest.skip("search.open_browser no longer owns page-count/open behavior; wrapper hint behavior is covered above")
     def test_search_open_browser_below_hint_threshold_opens_without_page_hint(self) -> None:
         state: dict[str, object] = {"requests": [], "targets": _page_targets(3)}
         _server, _thread, port = self._start_cdp_server(state)
@@ -721,6 +884,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(rpc_requests, list)
         self.assertEqual(len(rpc_requests), 1)
 
+    @unittest.skip("search.open_browser no longer owns page-count/open behavior; wrapper hint behavior is covered above")
     def test_search_open_browser_reaching_hint_threshold_opens_with_page_hint(self) -> None:
         state: dict[str, object] = {"requests": [], "targets": _page_targets(4)}
         _server, _thread, port = self._start_cdp_server(state)
@@ -768,6 +932,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(state.get("rpc_requests", []), [], msg=state)
 
+    @unittest.skip("search.open_browser delegates exact URL reuse to browser-session; wrapper reuse mapping is covered above")
     def test_search_open_browser_reuses_exact_url_at_hard_page_limit_without_creating_target(self) -> None:
         target_url = "https://www.google.com/search?q=creator+analytics+pain"
         targets = _page_targets(9) + [{"id": "target-existing-search", "type": "page", "url": target_url}]
@@ -819,27 +984,24 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         for engine, query, expected_target_url in cases:
             with self.subTest(engine=engine, query=query):
-                state: dict[str, object] = {"requests": []}
-                _server, _thread, port = self._start_cdp_server(state)
-                instance_json = self._instance_json(browser_port=port)
-                response = self._dispatch(
-                    action="open_browser",
-                    args={"query": query, "engine": engine},
-                    instance_json=instance_json,
+                result = search_impl.browser_session.BrowserSessionOpenResult(
+                    kind="opened",
+                    target_url=expected_target_url,
+                    page_count=0,
+                    projected_page_count=1,
+                    target_id="target-opened",
+                    page_opened=True,
+                )
+                response, _ensure_calls, open_calls = self._dispatch_with_browser_session_result(
+                    result,
+                    query=query,
+                    engine=engine,
                 )
                 self.assertTrue(response.get("ok"), msg=response)
                 self.assertEqual(response.get("target_url"), expected_target_url)
-                requests = state.get("requests")
-                self.assertIsInstance(requests, list, msg=state)
-                assert isinstance(requests, list)
-                self.assertFalse(any(urlparse(request["path"]).path == "/json/new" for request in requests))
-                rpc_requests = state.get("rpc_requests")
-                self.assertIsInstance(rpc_requests, list, msg=state)
-                assert isinstance(rpc_requests, list)
-                params = rpc_requests[0]["params"]
-                self.assertEqual(params["url"], expected_target_url)
-                self.assertIs(params["background"], True)
+                self.assertEqual(open_calls[0]["target_url"], expected_target_url)
 
+    @unittest.skip("search.open_browser delegates browser ensure to browser-session; ensure delegation is covered above")
     def test_search_open_browser_ensures_browser_when_port_missing(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
@@ -941,10 +1103,8 @@ raise SystemExit(7)
         self.assertNotIn('"launcher"', text)
         self.assertNotIn("tools" + "/launcher", text)
         self.assertNotIn("scripts/env/client.py", text)
-        self.assertIn('"scripts"', text)
-        self.assertIn('"env"', text)
-        self.assertIn("cdp_background_page.py", text)
-        self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
+        self.assertNotIn("cdp_background_page.py", text)
+        self.assertNotIn("Target.createTarget", text)
         self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
 
     def test_search_open_browser_rejects_invalid_browser_port(self) -> None:

@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from itertools import count
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +79,14 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.handler_module = load_module(HANDLER_PATH)
         self.triggers = load_module(TRIGGERS_PATH)
+        lifecycle = self.handler_module.browser_lifecycle
+        originals = {
+            "close_page_target": lifecycle.close_page_target,
+            "schedule_browser_cockpit_release": lifecycle.schedule_browser_cockpit_release,
+            "current_target_id": lifecycle.current_target_id,
+            "refresh_current_page_idle": lifecycle.refresh_current_page_idle,
+        }
+        self.addCleanup(lambda: [setattr(lifecycle, name, value) for name, value in originals.items()])
 
     def _trigger(
         self,
@@ -469,6 +480,11 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.release_module = load_module(RELEASE_HANDLER_PATH)
         self.triggers = load_module(TRIGGERS_PATH)
+        self._original_subprocess_run = subprocess.run
+        self.addCleanup(setattr, subprocess, "run", self._original_subprocess_run)
+        lifecycle = self.release_module.browser_lifecycle
+        self._original_read_page_targets = lifecycle.read_page_targets
+        self.addCleanup(setattr, lifecycle, "read_page_targets", self._original_read_page_targets)
 
     def _trigger(self, *, reason: str = "page_idle_empty", target_actor_address: dict[str, str] | None = None) -> Any:
         return self.triggers.DaemonTrigger(
@@ -600,6 +616,47 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "handled")
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][-5:], ["env", "browser", "release", "--instance", "act-dev-browser"])
+
+    def test_release_launcher_env_uses_shared_root_from_instance_root_when_actor_home_is_bound(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class Completed:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(argv: list[str], **kwargs: object) -> Completed:
+            captured["argv"] = [str(item) for item in argv]
+            captured["env"] = dict(kwargs.get("env")) if isinstance(kwargs.get("env"), dict) else {}
+            return Completed()
+
+        self.release_module.subprocess.run = fake_run
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / ".codex-buddyswitch"
+            context = self._context(shared_root / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([{"id": "target-blank", "type": "page", "url": "about:blank"}])
+            handler = self.release_module.BrowserReleaseHandler()
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "HOME": str(context.instance_root / "home"),
+                    "CODEX_HOME": str(context.instance_root / "codex-home"),
+                },
+                clear=False,
+            ):
+                os.environ.pop("BUDDYSWITCH_SHARED_ROOT", None)
+                os.environ.pop("BUDDYSWITCH_SOURCE_HOME", None)
+
+                result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(captured["argv"][-5:], ["env", "browser", "release", "--instance", "act-dev-browser"])
+        env = captured["env"]
+        self.assertEqual(env["BUDDYSWITCH_SHARED_ROOT"], str(shared_root))
+        self.assertEqual(env["BUDDYSWITCH_SOURCE_HOME"], str(shared_root.parent))
+        self.assertEqual(env["BUDDYSWITCH_REPO_ROOT"], str(ROOT))
+        self.assertEqual(env["HOME"], str(context.instance_root / "home"))
 
     def test_release_rejects_wrong_target_actor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

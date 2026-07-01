@@ -4,19 +4,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
-import os
-import shlex
-import subprocess
 from typing import Any, TypedDict
 from urllib.parse import urlencode
 
 import env_profiles
-from env import cdp_browser_lifecycle as browser_lifecycle
+from env import cdp_browser_session as browser_session
 from env.cdp_browser_session import (
     BROWSER_PAGE_LIMIT,
     BROWSER_PAGE_LIMIT_BLOCK_TEXT,
-    evaluate_page_open_gate,
 )
 from env.tool_runtime.context import default_manifest_path as DEFAULT_MANIFEST
 from .tool import DEFINITION
@@ -65,59 +60,6 @@ def _load_search_boundary(context: SearchServiceContext) -> dict[str, Any]:
     if not isinstance(search, dict):
         raise ValueError("env profile tool_capability.search must be an object")
     return dict(search)
-
-
-def _browser_endpoint(instance_payload: dict[str, Any]) -> tuple[str | None, str | None]:
-    port = instance_payload.get("browser_port")
-    if port is None:
-        return None, "browser endpoint is not recorded"
-    if isinstance(port, bool) or not isinstance(port, int):
-        return None, f"invalid browser port: {port}"
-    if port < 1 or port > 65535:
-        return None, f"invalid browser port: {port}"
-    return f"http://127.0.0.1:{port}", None
-
-
-def _reload_instance_payload(context: SearchServiceContext) -> dict[str, Any]:
-    try:
-        payload = json.loads(Path(context["instance_json"]).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"failed to reload instance browser state: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError("failed to reload instance browser state: instance JSON was not an object")
-    return payload
-
-
-def _ensure_browser_runtime(context: SearchServiceContext) -> tuple[bool, str | None]:
-    override = os.environ.get("BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND")
-    if override:
-        command = shlex.split(override)
-    else:
-        command = [
-            str(env_profiles.ROOT / "buddyswitch-codex"),
-            "env",
-            "browser",
-            "ensure",
-            "--instance",
-            context["actor_id"],
-        ]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=env_profiles.ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30.0,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "browser ensure timed out"
-    except OSError as exc:
-        return False, f"browser ensure failed: {exc}"
-    if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
-        return False, detail
-    return True, None
 
 
 def _normalize_query(args: dict[str, Any]) -> str | None:
@@ -193,44 +135,6 @@ def _build_search_url(query: str, engine: str) -> str:
     if engine == "x":
         return f"https://x.com/search?{encoded}&src=typed_query"
     raise ValueError(f"unsupported search engine: {engine}")
-
-
-def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, str | None, str | None]:
-    helper = env_profiles.ROOT / "scripts" / "env" / "cdp_background_page.py"
-    try:
-        completed = subprocess.run(
-            [
-                "python3",
-                str(helper),
-                "--browser-url",
-                browser_endpoint,
-                "--url",
-                target_url,
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=5.0,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "Chrome DevTools Target.createTarget timed out", None
-    except OSError as exc:
-        return False, str(exc), None
-    if completed.returncode == 0:
-        try:
-            payload = json.loads(completed.stdout.strip())
-        except json.JSONDecodeError as exc:
-            return False, f"Target.createTarget returned invalid JSON: {exc}", None
-        if not isinstance(payload, dict):
-            return False, "Target.createTarget response was not an object", None
-        target_id = payload.get("targetId")
-        if not isinstance(target_id, str) or not target_id.strip():
-            return False, "Target.createTarget response missing result.targetId", None
-        return True, None, target_id.strip()
-    reason = completed.stderr.strip() or completed.stdout.strip()
-    if reason:
-        return False, reason, None
-    return False, f"Chrome DevTools Target.createTarget exited with status {completed.returncode}", None
 
 
 def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, Any]:
@@ -447,7 +351,6 @@ def _browser_open_failed(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     reason: str,
 ) -> dict[str, Any]:
     return tool_results.rejection(
@@ -506,7 +409,6 @@ def _browser_page_count_unverified(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     reason: str,
 ) -> dict[str, Any]:
     return tool_results.rejection(
@@ -547,7 +449,6 @@ def _browser_page_limit_reached(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     browser_page_count: int,
 ) -> dict[str, Any]:
     return tool_results.rejection(
@@ -580,7 +481,6 @@ def _browser_lifecycle_registration_failed(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     reason: str,
     page_reused: bool,
     target_id: str | None,
@@ -634,23 +534,6 @@ def _browser_lifecycle_registration_failed(
     )
 
 
-def _refresh_browser_page_idle(
-    *,
-    instance_root: Path,
-    target_id: str,
-    target_url: str,
-) -> tuple[dict[str, Any], str | None]:
-    idle_extra = browser_lifecycle.refresh_page_idle(
-        instance_root=instance_root,
-        target_id=target_id,
-        target_url=target_url,
-    )
-    idle_seconds = idle_extra.get("idle_seconds") if isinstance(idle_extra, dict) else None
-    if isinstance(idle_seconds, int):
-        return idle_extra, f"Browser page idle refreshed: {idle_seconds}s."
-    return idle_extra, None
-
-
 def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str, Any]) -> dict[str, Any]:
     permission = boundary.get("search_api")
     if permission == "user-approved-only":
@@ -669,7 +552,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
             retryable=True,
             retry_guidance="Use browser backend now or obtain explicit user-approved fallback before retry.",
             allowed_next_actions=[
-                "Use search.open_browser for browser-native discovery.",
+                "Use chrome-devtools-cockpit for browser-native discovery; use search.open_browser only for search query URL construction.",
                 "Ask the user for explicit one-off approval before requesting a non-browser downgrade.",
             ],
             correctable_fields=["backend"],
@@ -718,7 +601,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
         retryable=True,
         retry_guidance="Use browser backend or configure search_api provider before retry.",
         allowed_next_actions=[
-            "Use search.open_browser for browser-native discovery.",
+            "Use chrome-devtools-cockpit for browser-native discovery; use search.open_browser only for search query URL construction.",
             "Configure a BuddySwitch-managed search API provider before using search_api.",
         ],
         correctable_fields=["backend"],
@@ -755,7 +638,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
 
 
 def _status_payload(context: SearchServiceContext, boundary: dict[str, Any]) -> dict[str, Any]:
-    browser_endpoint, browser_reason = _browser_endpoint(context["instance_payload"])
+    _browser_url, browser_reason = browser_session.browser_url_from_instance_payload(context["instance_payload"])
     browser_available = boundary.get("browser_cockpit") != "unavailable"
     search_api_permission = boundary.get("search_api")
     search_api_available = bool(SEARCH_API_PROVIDER_AVAILABLE and search_api_permission == "available")
@@ -798,7 +681,7 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
         durability="none",
         read_scope="search capability and backend/browser readiness metadata",
         allowed_next_actions=[
-            "Use search.open_browser with backend browser for browser-native discovery.",
+            "Use chrome-devtools-cockpit for browser-native discovery; use search.open_browser only for focused search query URL construction.",
         ],
         allowed_next_action_options=[
             tool_results.next_action_option(
@@ -850,7 +733,7 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
         durability="none",
         read_scope="search request planning metadata and target URL intent without browser session mutation",
         allowed_next_actions=[
-            "Call search.open_browser to open the target in the instance browser, then traverse result pages in chrome-devtools-cockpit.",
+            "Use chrome-devtools-cockpit for page inspection; call search.open_browser only to hand this planned search URL to browser-session when you need that wrapper.",
         ],
         allowed_next_action_options=[
             tool_results.next_action_option(
@@ -872,6 +755,30 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
     )
 
 
+def _idle_extra_from_open_result(result: browser_session.BrowserSessionOpenResult) -> dict[str, Any]:
+    return {
+        "idle_refreshed": result.idle_refreshed,
+        **({"idle_seconds": result.idle_seconds} if result.idle_seconds is not None else {}),
+        **({"idle_expires_at": result.idle_expires_at} if result.idle_expires_at is not None else {}),
+    }
+
+
+def _idle_summary(result: browser_session.BrowserSessionOpenResult) -> str | None:
+    if result.idle_refreshed and result.idle_seconds is not None:
+        return f"Browser page idle refreshed: {result.idle_seconds}s."
+    if result.idle_refreshed:
+        return "Browser page idle refreshed."
+    return None
+
+
+def _page_hint(result: browser_session.BrowserSessionOpenResult) -> str | None:
+    if result.kind != "opened" or result.projected_page_count is None:
+        return None
+    if result.projected_page_count < browser_session.BROWSER_PAGE_HINT_THRESHOLD:
+        return None
+    return browser_session.BROWSER_PAGE_HINT_TEMPLATE.format(count=result.projected_page_count)
+
+
 def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchServiceContext) -> dict[str, Any]:
     payload_error = _require_allowed_fields("search.open_browser", args, context)
     if payload_error is not None:
@@ -890,59 +797,58 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             reason="profile search browser_cockpit is unavailable",
         )
     target_url = _build_search_url(query, engine)
-    ensure_ok, ensure_reason = _ensure_browser_runtime(context)
-    if not ensure_ok:
-        return _browser_ensure_failed(
-            context=context,
-            target_url=target_url,
-            reason=ensure_reason or "browser ensure failed",
-        )
-    try:
-        fresh_payload = _reload_instance_payload(context)
-    except RuntimeError as exc:
-        return _browser_ensure_failed(context=context, target_url=target_url, reason=str(exc))
-    browser_endpoint, browser_reason = _browser_endpoint(fresh_payload)
-    if browser_endpoint is None:
-        return _browser_unavailable(
-            action="search.open_browser",
-            context=context,
-            reason=browser_reason or "instance browser endpoint is missing",
-            target_url=target_url,
-        )
-    page_gate = evaluate_page_open_gate(browser_endpoint, target_url)
-    if page_gate.kind == "verification_failed":
+    browser_url, browser_reason = browser_session.browser_url_from_instance_payload(context["instance_payload"])
+    if browser_url is None:
+        if browser_reason and "invalid browser port" in browser_reason:
+            return _browser_unavailable(
+                action="search.open_browser",
+                context=context,
+                reason=browser_reason,
+                target_url=target_url,
+            )
+        try:
+            browser_url = browser_session.ensure_browser_url_for_instance(
+                instance_root=Path(context["instance_json"]).parent,
+                actor_id=context["actor_id"],
+            )
+        except browser_session.BrowserSessionError as exc:
+            return _browser_ensure_failed(context=context, target_url=target_url, reason=str(exc))
+
+    result = browser_session.open_or_reuse_page(
+        instance_root=Path(context["instance_json"]).parent,
+        browser_url=browser_url,
+        target_url=target_url,
+    )
+    if result.kind == "verification_failed":
         return _browser_page_count_unverified(
             context=context,
             target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            reason=page_gate.message or "Browser page-count verification failed.",
+            reason=result.message or "Browser page-count verification failed.",
         )
-    if page_gate.kind == "block":
+    if result.kind == "blocked":
         return _browser_page_limit_reached(
             context=context,
             target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            browser_page_count=page_gate.page_count or BROWSER_PAGE_LIMIT,
+            browser_page_count=result.page_count or BROWSER_PAGE_LIMIT,
         )
-    if page_gate.kind == "reuse":
-        target_id = page_gate.target_id or ""
-        try:
-            idle_extra, idle_summary = _refresh_browser_page_idle(
-                instance_root=context["instance_json"].parent,
-                target_id=target_id,
-                target_url=target_url,
-            )
-        except Exception as exc:
-            return _browser_lifecycle_registration_failed(
-                context=context,
-                target_url=target_url,
-                browser_endpoint=browser_endpoint,
-                reason=str(exc),
-                page_reused=True,
-                target_id=target_id,
-                browser_page_count=page_gate.page_count,
-            )
+    if result.kind == "registration_failed":
+        return _browser_lifecycle_registration_failed(
+            context=context,
+            target_url=target_url,
+            reason=result.message or "browser page lifecycle registration failed",
+            page_reused=result.page_reused,
+            target_id=result.target_id,
+            browser_page_count=result.projected_page_count if result.projected_page_count is not None else result.page_count,
+        )
+    if result.kind in {"open_failed", "invalid_request"}:
+        return _browser_open_failed(
+            context=context,
+            target_url=target_url,
+            reason=result.message or "browser-session page open failed",
+        )
+    if result.kind == "reused":
         effect_summary = "Reused an existing browser page for the planned target URL; no new page was opened."
+        idle_summary = _idle_summary(result)
         if idle_summary:
             effect_summary = f"{effect_summary} {idle_summary}"
         return tool_results.success(
@@ -962,51 +868,19 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
                 "target_url": target_url,
                 "page_opened": False,
                 "page_reused": True,
-                "reused_target_id": target_id,
-                "browser_page_count": page_gate.page_count,
+                "reused_target_id": result.target_id,
+                "browser_page_count": result.page_count,
                 "browser_page_limit": BROWSER_PAGE_LIMIT,
                 "permission_boundary": "search.browser",
                 "mutates_product_state": False,
-                **idle_extra,
+                **_idle_extra_from_open_result(result),
             },
         )
-    opened, open_reason, target_id = _open_browser_page(browser_endpoint, target_url)
-    if not opened:
-        return _browser_open_failed(
-            context=context,
-            target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            reason=open_reason or "Chrome DevTools page open failed",
-        )
-    hint = page_gate.hint_text()
     effect_summary = "Opened the planned target URL in launcher-managed browser session without writing product objects."
-    try:
-        idle_extra, idle_summary = _refresh_browser_page_idle(
-            instance_root=context["instance_json"].parent,
-            target_id=target_id or "",
-            target_url=target_url,
-        )
-    except Exception as exc:
-        close_result: dict[str, Any] | None = None
-        close_error: str | None = None
-        if target_id:
-            try:
-                close_result = browser_lifecycle.close_page_target(browser_endpoint, target_id)
-            except Exception as close_exc:
-                close_error = str(close_exc)
-        return _browser_lifecycle_registration_failed(
-            context=context,
-            target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            reason=str(exc),
-            page_reused=False,
-            target_id=target_id,
-            close_result=close_result,
-            close_error=close_error,
-            browser_page_count=page_gate.projected_page_count,
-        )
+    idle_summary = _idle_summary(result)
     if idle_summary:
         effect_summary = f"{effect_summary} {idle_summary}"
+    hint = _page_hint(result)
     if hint:
         effect_summary = f"{effect_summary} {hint}"
     return tool_results.success(
@@ -1032,11 +906,12 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "query": query,
             "target_url": target_url,
             "page_opened": True,
-            "browser_page_count": page_gate.projected_page_count,
+            "created_target_id": result.target_id,
+            "browser_page_count": result.projected_page_count,
             "browser_page_limit": BROWSER_PAGE_LIMIT,
             "permission_boundary": "search.browser",
             "mutates_product_state": False,
-            **idle_extra,
+            **_idle_extra_from_open_result(result),
         },
     )
 

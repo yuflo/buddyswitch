@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-from env.cdp_browser_session import BROWSER_PAGE_LIMIT_BLOCK_TEXT, evaluate_page_open_gate  # noqa: E402
+from env import cdp_browser_session as browser_session  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +39,20 @@ PAGE_SCOPED_USE_TOOLS = {
     "wait_for",
     "fill",
     "press_key",
+}
+BROWSER_SESSION_TOOL_DESCRIPTIONS = {
+    "new_page": "BuddySwitch chrome-devtools-cockpit opens or reuses a managed browser-session page, registers idle TTL, and does not activate the foreground browser.",
+    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect managed browser-session pages, target ids, current-page state, URLs, titles, and idle state before opening more pages.",
+    "select_page": "BuddySwitch selects an existing browser-session page without foreground activation and refreshes current-page idle state.",
+    "take_snapshot": "Use after list_pages/select_page to inspect the selected browser-session page content.",
+    "take_screenshot": "Use after list_pages/select_page to capture the selected browser-session page.",
+    "navigate_page": "Page-scoped browser-session action; navigation refreshes managed browser idle state.",
+    "click": "Page-scoped browser-session action; interaction refreshes managed browser idle state.",
+    "type_text": "Page-scoped browser-session action; interaction refreshes managed browser idle state.",
+    "evaluate_script": "Page-scoped browser-session action; evaluation refreshes managed browser idle state.",
+    "wait_for": "Page-scoped browser-session action; waiting refreshes managed browser idle state.",
+    "fill": "Page-scoped browser-session action; form filling refreshes managed browser idle state.",
+    "press_key": "Page-scoped browser-session action; keyboard input refreshes managed browser idle state.",
 }
 SELECTED_URL_RE = re.compile(r"(https?://\S+)\s+\[selected\]", re.IGNORECASE)
 LIFECYCLE_WARNING_PREFIX = "Browser lifecycle warning:"
@@ -203,6 +218,7 @@ def ensure_browser_url(instance_root: str | None) -> str | None:
         completed = subprocess.run(
             command,
             cwd=ROOT,
+            env=browser_session.launcher_env_for_instance_root(root),
             text=True,
             capture_output=True,
             check=False,
@@ -236,13 +252,6 @@ def _idle_hint_from_result(result: dict[str, Any] | None) -> str:
     return "Browser page idle refreshed."
 
 
-def _lifecycle_error_text(action: str, exc: BaseException, close_result: dict[str, Any] | None = None) -> str:
-    text = f"Browser page lifecycle registration failed during {action}: {exc}"
-    if close_result is not None:
-        text = f"{text} Closed browser target: {json.dumps(close_result, ensure_ascii=True)}"
-    return text
-
-
 def _refresh_current_idle_hint(
     *,
     root: Path,
@@ -257,6 +266,129 @@ def _refresh_current_idle_hint(
         page_id=page_id,
     )
     return _idle_hint_from_result(result)
+
+
+def _browser_session_open_text(result: browser_session.BrowserSessionOpenResult) -> str:
+    action = "opened" if result.kind == "opened" else "reused"
+    lines = [
+        f"BuddySwitch browser-session {action} page.",
+        f"state: {result.kind}",
+        f"target_url: {result.target_url}",
+        f"target_id: {result.target_id or '<unknown>'}",
+    ]
+    if result.page_count is not None:
+        if result.projected_page_count is not None and result.projected_page_count != result.page_count:
+            lines.append(f"page_count: {result.page_count} -> {result.projected_page_count}")
+        else:
+            lines.append(f"page_count: {result.page_count}")
+    if (
+        result.kind == "opened"
+        and result.projected_page_count is not None
+        and result.projected_page_count >= browser_session.BROWSER_PAGE_HINT_THRESHOLD
+    ):
+        lines.append(browser_session.BROWSER_PAGE_HINT_TEMPLATE.format(count=result.projected_page_count))
+    if result.idle_refreshed:
+        idle = f"Browser page idle refreshed: {result.idle_seconds}s" if result.idle_seconds is not None else "Browser page idle refreshed"
+        if result.idle_expires_at:
+            idle = f"{idle}; idle_expires_at: {result.idle_expires_at}"
+        lines.append(f"{idle}.")
+    return "\n".join(lines)
+
+
+def _browser_session_error_text(result: browser_session.BrowserSessionOpenResult) -> str:
+    lines = [
+        "BuddySwitch browser-session did not open a page.",
+        f"state: {result.kind}",
+    ]
+    if result.target_url:
+        lines.append(f"target_url: {result.target_url}")
+    if result.target_id:
+        lines.append(f"target_id: {result.target_id}")
+    if result.page_count is not None:
+        lines.append(f"page_count: {result.page_count}")
+    if result.message:
+        lines.append(result.message)
+    return "\n".join(lines)
+
+
+def _format_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc(value: str) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _target_id(target: dict[str, Any]) -> str | None:
+    for key in ("id", "targetId"):
+        value = target.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _browser_session_state_text(*, browser_url: str, instance_root: str | None) -> str:
+    try:
+        targets = browser_lifecycle.read_page_targets(browser_url)
+    except Exception as exc:
+        detail = str(exc).replace(browser_url, "browser endpoint")
+        return f"BuddySwitch browser-session state:\n- unavailable: {detail}"
+    root = _instance_root_path(instance_root)
+    idle_state: dict[str, Any] = {}
+    if root is not None:
+        try:
+            idle_state = browser_lifecycle._read_page_idle_state(root)
+        except Exception:
+            idle_state = {}
+    current_target_id = idle_state.get("current_target_id")
+    current_target_id = current_target_id.strip() if isinstance(current_target_id, str) and current_target_id.strip() else None
+    idle_targets = idle_state.get("targets")
+    idle_targets = idle_targets if isinstance(idle_targets, dict) else {}
+
+    lines = [
+        "BuddySwitch browser-session state:",
+        f"- current_target_id: {current_target_id or '<none>'}",
+        "- pages:",
+    ]
+    if not targets:
+        lines.append("  - <none>")
+        return "\n".join(lines)
+    for target in targets:
+        target_id = _target_id(target) or "<unknown>"
+        title = target.get("title")
+        url = target.get("url")
+        target_idle = idle_targets.get(target_id)
+        target_idle = target_idle if isinstance(target_idle, dict) else {}
+        last_used_at = target_idle.get("last_used_at")
+        expires_at = None
+        parsed_last_used = _parse_utc(last_used_at) if isinstance(last_used_at, str) else None
+        if parsed_last_used is not None:
+            expires_at = _format_utc(parsed_last_used + timedelta(seconds=browser_lifecycle.BROWSER_PAGE_IDLE_SECONDS))
+        lines.extend(
+            [
+                f"  - target_id: {target_id}",
+                f"    title: {title if isinstance(title, str) and title else '<untitled>'}",
+                f"    url: {url if isinstance(url, str) and url else '<unknown>'}",
+                f"    current: {'true' if target_id == current_target_id else 'false'}",
+                f"    idle_tracked: {'true' if target_idle else 'false'}",
+            ]
+        )
+        if isinstance(last_used_at, str) and last_used_at.strip():
+            lines.append(f"    last_used_at: {last_used_at.strip()}")
+        if expires_at is not None:
+            lines.append(f"    idle_expires_at: {expires_at}")
+    return "\n".join(lines)
 
 
 def _refresh_page_idle_hint(
@@ -304,52 +436,20 @@ def mutate_tool_call(
                 "BuddySwitch blocked new_page because chrome-devtools-cockpit requires --instance-root "
                 "to register browser lifecycle state before opening pages.",
             ), None
+        root = _instance_root_path(instance_root)
+        assert root is not None
         target_url = arguments.get("url")
-        hint: str | None = None
-        if isinstance(target_url, str) and target_url.strip():
-            gate = evaluate_page_open_gate(browser_url, target_url.strip())
-            if gate.kind == "verification_failed":
-                return None, tool_error_response(
-                    message,
-                    gate.message or "Browser page-count verification failed.",
-                ), None
-            if gate.kind == "block":
-                return None, tool_error_response(message, BROWSER_PAGE_LIMIT_BLOCK_TEXT), None
-            if gate.kind == "reuse":
-                target_id = gate.target_id or "<unknown>"
-                root = _instance_root_path(instance_root)
-                assert root is not None
-                try:
-                    idle_hint = _refresh_current_idle_hint(
-                        root=root,
-                        target_id=target_id,
-                        target_url=target_url.strip(),
-                    )
-                except Exception as exc:
-                    return None, tool_error_response(message, _lifecycle_error_text("new_page reuse", exc)), None
-                suffix = f" {idle_hint}" if idle_hint else ""
-                return None, tool_success_response(
-                    message,
-                    f"Reused existing browser page {target_id}. No new page was opened.{suffix}",
-                ), None
-            hint = gate.hint_text()
-            try:
-                before_targets = browser_lifecycle.read_page_targets(browser_url)
-            except browser_lifecycle.BrowserLifecycleError:
-                before_targets = None
-        rewritten = copy.deepcopy(message)
-        rewritten_params = rewritten.setdefault("params", {})
-        rewritten_arguments = dict(arguments)
-        rewritten_arguments["background"] = True
-        rewritten_params["arguments"] = rewritten_arguments
-        if isinstance(target_url, str) and target_url.strip():
-            return rewritten, None, {
-                "kind": "new_page",
-                "target_url": target_url.strip(),
-                "before_targets": before_targets,
-                "page_hint": hint,
-            }
-        return rewritten, None, hint
+        result = browser_session.open_or_reuse_page(
+            instance_root=root,
+            browser_url=browser_url,
+            target_url=target_url if isinstance(target_url, str) else "",
+        )
+        if result.kind in {"opened", "reused"}:
+            return None, tool_success_response(message, _browser_session_open_text(result)), None
+        return None, tool_error_response(message, _browser_session_error_text(result)), None
+
+    if name == "list_pages":
+        return message, None, {"kind": "list_pages"}
 
     if name == "select_page":
         rewritten = copy.deepcopy(message)
@@ -414,15 +514,13 @@ def patch_tool_list_message(message: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(tool, dict):
             continue
         name = tool.get("name")
+        if isinstance(name, str) and name in BROWSER_SESSION_TOOL_DESCRIPTIONS:
+            tool["description"] = append_description(tool.get("description"), BROWSER_SESSION_TOOL_DESCRIPTIONS[name])
         if name == "new_page":
-            tool["description"] = append_description(
-                tool.get("description"),
-                "BuddySwitch proxy forces background:true so new tabs are opened through the non-activating cockpit path.",
-            )
             patch_schema_property(
                 tool,
                 "background",
-                "BuddySwitch forces this to true for chrome-devtools-cockpit.",
+                "Ignored by BuddySwitch because chrome-devtools-cockpit opens managed browser-session pages without foreground activation.",
             )
             patch_schema_property(
                 tool,
@@ -430,10 +528,6 @@ def patch_tool_list_message(message: dict[str, Any]) -> dict[str, Any]:
                 "BuddySwitch blocks this parameter because upstream does not apply background creation to this path.",
             )
         elif name == "select_page":
-            tool["description"] = append_description(
-                tool.get("description"),
-                "BuddySwitch proxy forces bringToFront:false for non-activating page selection.",
-            )
             patch_schema_property(
                 tool,
                 "bringToFront",
@@ -493,27 +587,6 @@ def unique_page_target_for_url(browser_url: str, target_url: str) -> str | None:
     return str(matches[0])
 
 
-def _new_page_target_ids(before_targets: list[Any], after_targets: list[Any]) -> list[str]:
-    before_ids: set[str] = set()
-    for target in before_targets:
-        if not isinstance(target, dict) or target.get("type") != "page":
-            continue
-        for key in ("id", "targetId"):
-            target_id = target.get(key)
-            if isinstance(target_id, str) and target_id.strip():
-                before_ids.add(target_id.strip())
-
-    new_ids: list[str] = []
-    for target in after_targets:
-        if not isinstance(target, dict) or target.get("type") != "page":
-            continue
-        for key in ("id", "targetId"):
-            target_id = target.get(key)
-            if isinstance(target_id, str) and target_id.strip() and target_id.strip() not in before_ids:
-                new_ids.append(target_id.strip())
-    return new_ids
-
-
 def _tool_response_succeeded(message: dict[str, Any]) -> bool:
     result = message.get("result")
     return isinstance(result, dict) and result.get("isError") is not True
@@ -536,6 +609,10 @@ def patch_tool_response_page_use_metadata(
     root = _instance_root_path(instance_root)
     if root is None:
         return patched
+    if kind == "list_pages":
+        if not _tool_response_succeeded(message):
+            return patched
+        return patch_tool_response_hint(patched, _browser_session_state_text(browser_url=browser_url, instance_root=instance_root))
     if kind == "select_page":
         page_id = metadata.get("page_id")
         target_id: str | None = None
@@ -594,45 +671,7 @@ def patch_tool_response_page_use_metadata(
                 f"{LIFECYCLE_WARNING_PREFIX} current page idle was not refreshed: {exc}",
             )
         return patch_tool_response_hint(patched, hint)
-    if kind != "new_page":
-        return patched
-    before_targets = metadata.get("before_targets")
-    target_url = metadata.get("target_url")
-    if not isinstance(before_targets, list) or not isinstance(target_url, str) or not target_url:
-        return patched
-    target_id: str | None = None
-    try:
-        after_targets = browser_lifecycle.read_page_targets(browser_url)
-        target_id = browser_lifecycle.new_page_target_id(before_targets, after_targets)
-        if target_id is None:
-            if not _new_page_target_ids(before_targets, after_targets):
-                return patched
-            return tool_error_response(
-                message,
-                _lifecycle_error_text(
-                    "new_page",
-                    browser_lifecycle.BrowserLifecycleError(
-                        "created browser target was not uniquely resolved after upstream response"
-                    ),
-                ),
-            )
-        hint = _refresh_current_idle_hint(
-            root=root,
-            target_id=target_id,
-            target_url=target_url,
-        )
-    except Exception as exc:
-        close_result: dict[str, Any] | None = None
-        if target_id:
-            try:
-                close_result = browser_lifecycle.close_page_target(browser_url, target_id)
-            except Exception as close_exc:
-                return tool_error_response(
-                    message,
-                    f"{_lifecycle_error_text('new_page', exc)} Failed to close browser target {target_id}: {close_exc}",
-                )
-        return tool_error_response(message, _lifecycle_error_text("new_page", exc, close_result))
-    return patch_tool_response_hint(patched, hint)
+    return patched
 
 
 def write_json_line(message: dict[str, Any], output_lock: threading.Lock) -> None:

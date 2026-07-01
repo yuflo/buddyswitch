@@ -152,22 +152,34 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
     def setUp(self) -> None:
         super().setUp()
-        ensure_noop = self._runtime_path("fake-search-browser-ensure-noop.py")
-        ensure_noop.write_text("raise SystemExit(0)\n", encoding="utf-8")
-        ensure_patch = patch.dict(os.environ, {"BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND": f"{sys.executable} {ensure_noop}"})
-        ensure_patch.start()
-        self.addCleanup(ensure_patch.stop)
-        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
+        self._browser_session_open_results: list[object] = []
+        original_ensure = search_impl.browser_session.ensure_browser_url_for_instance
+        original_open = search_impl.browser_session.open_or_reuse_page
 
-        def default_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
-            return {
-                "idle_refreshed": True,
-                "idle_seconds": 300,
-                "idle_expires_at": "2026-06-24T00:05:00Z",
-            }
+        def default_ensure_browser_url_for_instance(**_kwargs: object) -> str:
+            raise search_impl.browser_session.BrowserSessionError("browser runtime unavailable for response contract")
 
-        search_impl.browser_lifecycle.refresh_page_idle = default_refresh_page_idle
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
+        def default_open_or_reuse_page(**kwargs: object) -> object:
+            if self._browser_session_open_results:
+                return self._browser_session_open_results.pop(0)
+            target_url = kwargs.get("target_url")
+            return search_impl.browser_session.BrowserSessionOpenResult(
+                kind="opened",
+                target_url=target_url if isinstance(target_url, str) else "",
+                page_count=0,
+                projected_page_count=1,
+                target_id="target-search-contract",
+                page_opened=True,
+                idle_refreshed=True,
+                idle_seconds=300,
+                idle_expires_at="2026-06-24T00:05:00Z",
+                message="opened",
+            )
+
+        search_impl.browser_session.ensure_browser_url_for_instance = default_ensure_browser_url_for_instance
+        search_impl.browser_session.open_or_reuse_page = default_open_or_reuse_page
+        self.addCleanup(setattr, search_impl.browser_session, "ensure_browser_url_for_instance", original_ensure)
+        self.addCleanup(setattr, search_impl.browser_session, "open_or_reuse_page", original_open)
 
     @staticmethod
     def _meaningful_text_entries(value: object) -> list[str]:
@@ -641,9 +653,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         self._assert_success_matches_declared_action_semantics("search.request", search_plan)
 
-        cdp_state: dict[str, object] = {"requests": []}
-        _server, _thread, browser_port = self._start_cdp_server(cdp_state)
-        dev_payload["browser_port"] = browser_port
+        dev_payload["browser_port"] = 9222
         dev_instance.write_text(json.dumps(dev_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         browser_open = self._dispatch(
             instance_json=dev_instance,
@@ -675,19 +685,22 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         actor_id = "act-dev-search-reuse-contract"
         dev_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev")
         target_url = "https://www.google.com/search?q=BuddySwitch"
-        cdp_state: dict[str, object] = {
-            "requests": [],
-            "targets": [
-                {
-                    "id": "target-existing-contract",
-                    "type": "page",
-                    "url": target_url,
-                }
-            ],
-        }
-        _server, _thread, browser_port = self._start_cdp_server(cdp_state)
+        self._browser_session_open_results.append(
+            search_impl.browser_session.BrowserSessionOpenResult(
+                kind="reused",
+                target_url=target_url,
+                page_count=1,
+                projected_page_count=1,
+                target_id="target-existing-contract",
+                page_reused=True,
+                idle_refreshed=True,
+                idle_seconds=300,
+                idle_expires_at="2026-06-24T00:05:00Z",
+                message="reused",
+            )
+        )
         dev_payload = json.loads(dev_instance.read_text(encoding="utf-8"))
-        dev_payload["browser_port"] = browser_port
+        dev_payload["browser_port"] = 9222
         dev_instance.write_text(json.dumps(dev_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
         browser_reuse = self._dispatch(
@@ -708,7 +721,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(browser_reuse.get("mutates_product_state"), False, msg=browser_reuse)
         self.assertNotIn("browser_endpoint", json.dumps(browser_reuse, ensure_ascii=True))
         self.assertNotIn("browser_url", json.dumps(browser_reuse, ensure_ascii=True))
-        self.assertEqual(cdp_state.get("rpc_requests", []), [], msg=cdp_state)
 
     def test_relation_success_responses_describe_object_mutations(self) -> None:
         actor_id = "act-pm-mutation-response"

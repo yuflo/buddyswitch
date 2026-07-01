@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -21,6 +20,7 @@ for candidate in (HELPER_DIR, SCRIPTS, SCRIPTS_ENV):
 
 import daemon_core  # noqa: E402
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
+import cdp_browser_session as browser_session  # noqa: E402
 
 
 BROWSER_COCKPIT_RELEASE_EVENT_TYPE = "browser.cockpit.release"
@@ -102,10 +102,8 @@ def _has_real_user_page(browser_url: str) -> bool:
     return False
 
 
-def _launcher_env() -> dict[str, str]:
-    env = os.environ.copy()
-    env.setdefault("BUDDYSWITCH_REPO_ROOT", str(ROOT))
-    return env
+def _launcher_env(instance_root: Path) -> dict[str, str]:
+    return browser_session.launcher_env_for_instance_root(instance_root)
 
 
 class BrowserReleaseHandler:
@@ -149,7 +147,7 @@ class BrowserReleaseHandler:
             completed = subprocess.run(
                 [str(ROOT / "buddyswitch-codex"), "env", "browser", "release", "--instance", actor_id.strip()],
                 cwd=ROOT,
-                env=_launcher_env(),
+                env=_launcher_env(root),
                 text=True,
                 capture_output=True,
                 check=False,
