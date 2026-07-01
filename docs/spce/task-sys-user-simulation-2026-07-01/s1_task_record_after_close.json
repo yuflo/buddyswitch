@@ -1,0 +1,62 @@
+{
+  "id": "task-user-input-dfb1031f4c23",
+  "source_type": "user.input",
+  "source_ref": {
+    "id": "user-input-e1ae8333c2fe",
+    "surface": "cli"
+  },
+  "actor_target": {
+    "role_id": "test",
+    "actor_id": "act-test-12a3b51dabba"
+  },
+  "inbound_context": {
+    "text": "\u8bf7\u5feb\u901f\u786e\u8ba4 Task Sys side close \u4e3b\u8def\u5f84\u662f\u5426\u80fd\u95ed\u73af\uff0c\u5e76\u7528 Task Sys \u5b8c\u6210\u5f53\u524d\u4efb\u52a1\u3002",
+    "surface": "cli",
+    "thread_id": "019f1e28-959d-7f02-9766-bec7aa5c27eb"
+  },
+  "status": "closed",
+  "active_processor": null,
+  "parent_handoff_params": null,
+  "side_result": null,
+  "events": [
+    {
+      "type": "created",
+      "at": "2026-07-01T22:50:21+08:00"
+    },
+    {
+      "type": "side_frame_started",
+      "at": "2026-07-01T22:50:21+08:00",
+      "data": {
+        "instruction": "start_side"
+      }
+    },
+    {
+      "type": "closed",
+      "at": "2026-07-01T22:50:38+08:00",
+      "data": {
+        "processor": "side"
+      }
+    },
+    {
+      "type": "side_cleanup_recorded",
+      "at": "2026-07-01T22:50:38+08:00",
+      "data": {
+        "side_thread_id": "019f1e28-d9f6-7a42-b1b7-1037f3a01565"
+      }
+    }
+  ],
+  "created_at": "2026-07-01T22:50:21+08:00",
+  "updated_at": "2026-07-01T22:50:38+08:00",
+  "close_result": {
+    "processor": "side",
+    "updated_at": "2026-07-01T22:50:38+08:00",
+    "summary": "Side validation completed in the simulated actor frame.",
+    "side_thread_id": "019f1e28-d9f6-7a42-b1b7-1037f3a01565",
+    "cleanup": {
+      "physical_close_ok": false,
+      "registry_unregistered": true,
+      "physical_close_error": "thread/turns/list failed (-32600): ephemeral threads do not support thread/turns/list",
+      "side_thread_id": "019f1e28-d9f6-7a42-b1b7-1037f3a01565"
+    }
+  }
+}

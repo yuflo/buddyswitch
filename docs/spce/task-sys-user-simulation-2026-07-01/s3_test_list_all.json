@@ -1,0 +1,52 @@
+{
+  "command": "list",
+  "instance": {
+    "actor_id": "act-test-12a3b51dabba",
+    "instance_json": "/tmp/buddyswitch-task-sys-user-sim-20260701/instances/act-test-12a3b51dabba/instance.json",
+    "role": "test",
+    "shared_root": "/private/tmp/buddyswitch-task-sys-user-sim-20260701",
+    "state_root": "/private/tmp/buddyswitch-task-sys-user-sim-20260701/state"
+  },
+  "result": {
+    "action": "task_sys.list",
+    "active_actor": {
+      "actor_id": "act-test-12a3b51dabba",
+      "role_id": "test"
+    },
+    "active_count": 0,
+    "active_role": "test",
+    "allowed_next_actions": [
+      "Use task_sys.get for full task detail.",
+      "Use task_sys.close when the active frame completed the source-bound task.",
+      "Use task_sys.need_parent when side processing requires parent work."
+    ],
+    "durability": "none",
+    "effect_summary": "Listed actor-owned Task Sys tasks.",
+    "ok": true,
+    "read_scope": "actor-owned task sys task records",
+    "recoverable_count": 0,
+    "state_changed": false,
+    "tasks": [
+      {
+        "active_processor": null,
+        "event_types": [
+          "created",
+          "side_frame_started",
+          "closed",
+          "side_cleanup_recorded"
+        ],
+        "id": "task-user-input-dfb1031f4c23",
+        "source_ref": {
+          "id": "user-input-e1ae8333c2fe",
+          "surface": "cli"
+        },
+        "source_type": "user.input",
+        "status": "closed",
+        "task_id": "task-user-input-dfb1031f4c23",
+        "updated_at": "2026-07-01T22:50:38+08:00"
+      }
+    ],
+    "tool": "task_sys"
+  },
+  "status": "all"
+}

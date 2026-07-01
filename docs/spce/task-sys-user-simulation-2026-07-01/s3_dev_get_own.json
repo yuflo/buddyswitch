@@ -1,0 +1,152 @@
+{
+  "command": "get",
+  "expect_error": false,
+  "instance": {
+    "actor_id": "act-dev-0267c50795f0",
+    "instance_json": "/tmp/buddyswitch-task-sys-user-sim-20260701/instances/act-dev-0267c50795f0/instance.json",
+    "role": "dev",
+    "shared_root": "/private/tmp/buddyswitch-task-sys-user-sim-20260701",
+    "state_root": "/private/tmp/buddyswitch-task-sys-user-sim-20260701/state"
+  },
+  "result": {
+    "action": "task_sys.get",
+    "active_actor": {
+      "actor_id": "act-dev-0267c50795f0",
+      "role_id": "dev"
+    },
+    "active_role": "dev",
+    "allowed_next_actions": [
+      "Use task_sys.get for full task detail.",
+      "Use task_sys.close when the active frame completed the source-bound task.",
+      "Use task_sys.need_parent when side processing requires parent work."
+    ],
+    "durability": "none",
+    "effect_summary": "Read actor-owned Task Sys task detail.",
+    "events": [
+      {
+        "at": "2026-07-01T22:52:39+08:00",
+        "type": "created"
+      },
+      {
+        "at": "2026-07-01T22:52:39+08:00",
+        "data": {
+          "instruction": "start_side"
+        },
+        "type": "side_frame_started"
+      },
+      {
+        "at": "2026-07-01T22:52:59+08:00",
+        "data": {
+          "interrupt": false
+        },
+        "type": "side_parent_requested"
+      },
+      {
+        "at": "2026-07-01T22:52:59+08:00",
+        "type": "parent_handoff_started"
+      },
+      {
+        "at": "2026-07-01T22:52:59+08:00",
+        "data": {
+          "side_thread_id": "019f1e2a-f65d-7763-b786-e8ea7a09aa24"
+        },
+        "type": "side_cleanup_recorded"
+      }
+    ],
+    "ok": true,
+    "read_scope": "actor-owned task sys task records",
+    "state_changed": false,
+    "task": {
+      "active_processor": "parent",
+      "actor_target": {
+        "actor_id": "act-dev-0267c50795f0",
+        "role_id": "dev"
+      },
+      "created_at": "2026-07-01T22:52:39+08:00",
+      "events": [
+        {
+          "at": "2026-07-01T22:52:39+08:00",
+          "type": "created"
+        },
+        {
+          "at": "2026-07-01T22:52:39+08:00",
+          "data": {
+            "instruction": "start_side"
+          },
+          "type": "side_frame_started"
+        },
+        {
+          "at": "2026-07-01T22:52:59+08:00",
+          "data": {
+            "interrupt": false
+          },
+          "type": "side_parent_requested"
+        },
+        {
+          "at": "2026-07-01T22:52:59+08:00",
+          "type": "parent_handoff_started"
+        },
+        {
+          "at": "2026-07-01T22:52:59+08:00",
+          "data": {
+            "side_thread_id": "019f1e2a-f65d-7763-b786-e8ea7a09aa24"
+          },
+          "type": "side_cleanup_recorded"
+        }
+      ],
+      "id": "task-user-input-cb4ec5a04200",
+      "inbound_context": {
+        "surface": "cli",
+        "text": "\u8bf7\u521b\u5efa\u4e00\u4e2a\u72ec\u7acb\u7684 dev Task Sys active task\uff0c\u7528\u4e8e\u9a8c\u8bc1 actor-owned list/get \u9694\u79bb\u3002",
+        "thread_id": "019f1e2a-b00c-7f11-8927-285f16070eaf"
+      },
+      "parent_handoff_params": {
+        "interrupt": false,
+        "parent_frame_context": {
+          "required_parent_work": "Create an independent dev Task Sys active task for validating actor-owned list/get isolation, using parent-authorized Task Sys operations/resources.",
+          "side_decision": "Side frame cannot create a new active Task Sys task because side processing is limited to exact source reads/closures and one frame operation: task_sys.close or task_sys.need_parent.",
+          "source_ref_id": "user-input-8edee3e88304",
+          "source_surface": "cli",
+          "source_text": "\u8bf7\u521b\u5efa\u4e00\u4e2a\u72ec\u7acb\u7684 dev Task Sys active task\uff0c\u7528\u4e8e\u9a8c\u8bc1 actor-owned list/get \u9694\u79bb\u3002",
+          "source_thread_id": "019f1e2a-b00c-7f11-8927-285f16070eaf",
+          "source_type": "user.input"
+        },
+        "relation": "requires_parent_task_sys_creation"
+      },
+      "side_result": {
+        "cleanup": {
+          "physical_close_error": "thread/turns/list failed (-32600): ephemeral threads do not support thread/turns/list",
+          "physical_close_ok": false,
+          "registry_unregistered": true,
+          "side_thread_id": "019f1e2a-f65d-7763-b786-e8ea7a09aa24"
+        },
+        "outcome": "need_parent",
+        "params": {
+          "interrupt": false,
+          "parent_frame_context": {
+            "required_parent_work": "Create an independent dev Task Sys active task for validating actor-owned list/get isolation, using parent-authorized Task Sys operations/resources.",
+            "side_decision": "Side frame cannot create a new active Task Sys task because side processing is limited to exact source reads/closures and one frame operation: task_sys.close or task_sys.need_parent.",
+            "source_ref_id": "user-input-8edee3e88304",
+            "source_surface": "cli",
+            "source_text": "\u8bf7\u521b\u5efa\u4e00\u4e2a\u72ec\u7acb\u7684 dev Task Sys active task\uff0c\u7528\u4e8e\u9a8c\u8bc1 actor-owned list/get \u9694\u79bb\u3002",
+            "source_thread_id": "019f1e2a-b00c-7f11-8927-285f16070eaf",
+            "source_type": "user.input"
+          },
+          "relation": "requires_parent_task_sys_creation"
+        },
+        "side_thread_id": "019f1e2a-f65d-7763-b786-e8ea7a09aa24",
+        "updated_at": "2026-07-01T22:52:59+08:00"
+      },
+      "source_ref": {
+        "id": "user-input-8edee3e88304",
+        "surface": "cli"
+      },
+      "source_type": "user.input",
+      "status": "parent_processing",
+      "updated_at": "2026-07-01T22:52:59+08:00"
+    },
+    "task_id": "task-user-input-cb4ec5a04200",
+    "tool": "task_sys"
+  },
+  "task_id": "task-user-input-cb4ec5a04200"
+}
