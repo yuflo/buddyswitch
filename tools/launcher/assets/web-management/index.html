@@ -8,152 +8,141 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="BuddySwitch workspace">
-        <div class="workspace-switcher">
-          <div class="workspace-mark" aria-hidden="true">BS</div>
-          <div>
-            <div class="workspace-name">BuddySwitch</div>
-            <div class="workspace-meta">Local runtime</div>
-          </div>
-        </div>
+    <main class="webui-root">
+      <nav class="tabs app-tabs" aria-label="Primary">
+        <button id="actor-nav-button" class="tab is-active" type="button">Team room</button>
+        <button id="tracks-nav-button" class="tab" type="button">Tracks</button>
+      </nav>
 
-        <nav class="sidebar-nav" aria-label="Primary">
-          <button id="actor-nav-button" class="nav-item is-active" type="button">
-            <span class="nav-glyph" aria-hidden="true"></span>
-            Actors
-          </button>
-          <button id="tracks-nav-button" class="nav-item" type="button">
-            <span class="nav-glyph track-glyph" aria-hidden="true"></span>
-            Tracks
-          </button>
-        </nav>
-
-        <section class="sidebar-section create-section" aria-labelledby="create-heading">
-          <div class="sidebar-heading" id="create-heading">Create Actor</div>
-          <label class="field compact-field">
-            <span>Role</span>
-            <select id="role-select"></select>
-          </label>
-          <button id="create-button" class="button primary full-width" type="button">Create</button>
-        </section>
-      </aside>
-
-      <main class="workspace-page">
-        <header class="page-header">
-          <div class="breadcrumb">BuddySwitch / Web management</div>
-          <div class="title-row">
-            <div>
-              <h1 id="page-title">Actor Console</h1>
-              <p id="page-summary" class="page-summary">Select an actor, inspect runtime and task state, message directly, and use lifecycle controls in one place.</p>
+      <section id="actor-view" class="screen view-section team-room-view">
+        <article class="proto-shell team-room" aria-label="Team room">
+          <aside class="room-sidebar" aria-labelledby="teammates-heading">
+            <div class="brand-line">
+              <span class="brand-mark" aria-hidden="true">BS</span>
+              <span>BuddySwitch</span>
             </div>
-            <div class="header-actions">
-              <span id="server-status" class="status-pill">Checking</span>
-              <button id="refresh-button" class="button secondary" type="button">Refresh</button>
+            <div class="nav-stack" aria-label="Team room context">
+              <div class="nav-link active">
+                <span>Team room</span>
+                <span id="server-status" class="tag">Checking</span>
+              </div>
+              <div class="nav-link">
+                <span>Tracks</span>
+                <span class="tag">open threads</span>
+              </div>
             </div>
-          </div>
-        </header>
+            <p class="label" id="teammates-heading">People</p>
+            <div id="actors-list" class="actor-list list" aria-live="polite"></div>
+            <div class="start-teammate-panel person-card">
+              <p class="label" id="create-heading">Start teammate</p>
+              <label class="field compact-field">
+                <span>Role</span>
+                <select id="role-select"></select>
+              </label>
+              <button id="create-button" class="mini-button primary full-width" type="button">Start</button>
+            </div>
+          </aside>
 
-        <section id="actor-view" class="view-section actor-view">
-          <div class="actor-console-grid">
-            <section class="workspace-panel actor-roster-panel" aria-labelledby="actors-heading">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="actors-heading">Actors</h2>
-                  <p class="panel-subtitle">Runtime actors available to the Web interface</p>
-                </div>
+          <section class="room-main" aria-labelledby="conversation-heading">
+            <header class="room-header">
+              <div>
+                <h2 id="conversation-heading">Direct thread</h2>
+                <p class="micro">Selected teammate conversation from the Web IM session and direct conversation APIs.</p>
               </div>
-              <div id="actors-list" class="actor-list" aria-live="polite"></div>
-            </section>
-
-            <section id="actor-console" class="workspace-panel console-column" aria-labelledby="console-heading">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="console-heading">Selected actor</h2>
-                  <p class="panel-subtitle">Runtime, task, Track, and direct message context</p>
-                </div>
+              <div class="pill-row">
+                <button id="refresh-button" class="mini-button" type="button">Refresh</button>
               </div>
-              <div class="console-stack">
-                <section class="console-section" aria-labelledby="runtime-heading">
-                  <h3 id="runtime-heading">Runtime</h3>
-                  <dl id="actor-runtime-detail" class="detail-grid"></dl>
-                </section>
-                <section class="console-section" aria-labelledby="task-heading">
-                  <h3 id="task-heading">Task</h3>
-                  <div id="actor-task-summary" class="summary-stack"></div>
-                </section>
-                <section class="console-section" aria-labelledby="actor-tracks-heading">
-                  <h3 id="actor-tracks-heading">Track summary</h3>
-                  <div id="actor-track-summary" class="summary-stack"></div>
-                </section>
-              </div>
-            </section>
-
-            <aside class="workspace-panel runtime-column" aria-label="Selected actor actions">
-              <div class="panel-heading compact">
-                <div>
-                  <h2>Actions</h2>
-                  <p class="panel-subtitle">Message and runtime controls</p>
-                </div>
-              </div>
-              <div class="action-body">
+            </header>
+            <div class="room-thread">
+              <div id="im-conversation" class="im-conversation" aria-live="polite"></div>
+            </div>
+            <div class="composer">
+              <div class="composer-box">
                 <label class="field textarea-field">
                   <span>Message</span>
-                  <textarea id="instruction-input" rows="6" placeholder="Send a direct message to the selected actor."></textarea>
+                  <textarea id="instruction-input" rows="4" placeholder="Message the selected teammate."></textarea>
                 </label>
-                <div class="action-group" aria-label="Message and interruption actions">
-                  <button id="send-button" class="button primary" type="button">Send</button>
-                  <button id="interrupt-button" class="button secondary" type="button">Interrupt</button>
-                </div>
-                <div class="terminal-actions" aria-label="TUI actions">
-                  <div class="terminal-action-row">
-                    <button id="open-tui-button" class="button secondary accent-action" type="button">Open TUI</button>
-                    <span id="open-tui-status" class="inline-status"></span>
-                  </div>
-                  <div id="open-tui-fallback" class="command-fallback" hidden>
-                    <code id="open-tui-command" class="mono-value long-value"></code>
-                    <button id="copy-tui-command-button" class="button secondary compact-button" type="button">Copy command</button>
-                  </div>
-                </div>
-                <div class="action-group lifecycle-actions" aria-label="Lifecycle actions">
-                  <button id="clear-button" class="button secondary" type="button">Clear</button>
-                  <button id="stop-button" class="button secondary" type="button">Stop</button>
-                  <button id="resume-button" class="button secondary" type="button">Resume</button>
-                  <button id="delete-button" class="button danger" type="button">Delete</button>
-                </div>
-                <p id="action-availability-status" class="inline-status action-availability-status" aria-live="polite"></p>
-                <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
-                <div id="im-conversation" class="im-conversation" aria-live="polite"></div>
               </div>
-            </aside>
-          </div>
-        </section>
+              <div class="pill-row">
+                <button id="send-button" class="mini-button primary" type="button">Send</button>
+                <button id="interrupt-button" class="mini-button" type="button">Interrupt</button>
+              </div>
+            </div>
+          </section>
 
-        <section id="track-view" class="view-section track-view" hidden>
-          <div class="track-workspace-grid">
-            <section class="workspace-panel track-list-panel" aria-labelledby="tracks-heading">
-              <div class="panel-heading">
+          <aside id="actor-console" class="person-panel" aria-labelledby="teammate-card-heading">
+            <section class="person-card selected-teammate-card">
+              <div class="person-card-head">
+                <span class="avatar teal" id="selected-actor-avatar" aria-hidden="true">BS</span>
                 <div>
-                  <h2 id="tracks-heading">Track workspace</h2>
-                  <p class="panel-subtitle">Shared Track pages for coordination and review</p>
+                  <h2 id="teammate-card-heading">Selected teammate</h2>
+                  <p class="micro mono" id="selected-actor-subtitle">No teammate selected</p>
                 </div>
               </div>
-              <div id="tracks-list" class="track-list" aria-live="polite"></div>
+              <div id="actor-runtime-detail" class="metric-grid"></div>
             </section>
-
-            <section class="workspace-panel track-detail-panel" aria-labelledby="track-detail-heading">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="track-detail-heading">Track detail</h2>
-                  <p class="panel-subtitle">Outcome, current state, materials, proofs, updates, and comments</p>
-                </div>
+            <section class="person-card">
+              <h3>Runtime</h3>
+              <div id="actor-runtime-summary" class="summary-stack"></div>
+            </section>
+            <section class="person-card">
+              <h3>Task</h3>
+              <div id="actor-task-summary" class="summary-stack"></div>
+            </section>
+            <section class="person-card">
+              <h3>Track summary</h3>
+              <div id="actor-track-summary" class="summary-stack"></div>
+            </section>
+            <section class="person-card actions-card">
+              <h3>Actions</h3>
+              <div class="pill-row left">
+                <button id="open-tui-button" class="mini-button" type="button">Open TUI</button>
+                <button id="clear-button" class="mini-button" type="button">Clear</button>
+                <button id="stop-button" class="mini-button" type="button">Stop</button>
+                <button id="resume-button" class="mini-button" type="button">Resume</button>
+                <button id="delete-button" class="mini-button danger" type="button">Delete</button>
               </div>
+              <p id="open-tui-status" class="inline-status"></p>
+              <div id="open-tui-fallback" class="command-fallback" hidden>
+                <code id="open-tui-command" class="mono-value long-value"></code>
+                <button id="copy-tui-command-button" class="mini-button" type="button">Copy command</button>
+              </div>
+              <p id="action-availability-status" class="inline-status action-availability-status" aria-live="polite"></p>
+              <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
+            </section>
+          </aside>
+        </article>
+      </section>
+
+      <section id="track-view" class="screen view-section track-view" hidden>
+        <article class="proto-shell track-studio" aria-label="Track Studio">
+          <aside class="studio-side" aria-labelledby="tracks-heading">
+            <div class="brand-line">
+              <span class="brand-mark track-mark" aria-hidden="true">BS</span>
+              <span>Tracks</span>
+            </div>
+            <p class="label" id="tracks-heading">Tracks</p>
+            <div id="tracks-list" class="track-list list" aria-live="polite"></div>
+          </aside>
+
+          <section class="studio-doc" aria-labelledby="track-detail-heading">
+            <div class="doc-page">
+              <div class="pill-row left">
+                <span class="tag blue">Track Studio</span>
+                <span class="tag">read only</span>
+              </div>
+              <h2 id="track-detail-heading" class="doc-title">Track Studio</h2>
+              <p class="micro">Outcome, current state, materials, proofs, updates, and comments</p>
               <div id="track-detail" class="track-detail" aria-live="polite"></div>
-            </section>
-          </div>
-        </section>
-      </main>
-    </div>
+            </div>
+          </section>
+
+          <aside class="studio-rail" aria-label="Track comments and context">
+            <div id="track-studio-rail" class="track-studio-rail" aria-live="polite"></div>
+          </aside>
+        </article>
+      </section>
+    </main>
     <script src="/static/app.js"></script>
   </body>
 </html>

@@ -41,8 +41,6 @@ function createRenderElements() {
   });
   return {
     serverStatus: node(),
-    pageTitle: node(),
-    pageSummary: node(),
     refreshButton: node(),
     messageBanner: node(),
     instructionInput: node(),
@@ -58,6 +56,7 @@ function createRenderElements() {
     actorTrackSummary: node(),
     tracksList: node(),
     trackDetail: node(),
+    trackStudioRail: node(),
     imConversation: node(),
     sendButton: node(),
     interruptButton: node(),
@@ -80,7 +79,7 @@ test('create button requires selected role and no start busy state', () => {
   assert.equal(app.computeCreateEnabled({ selectedRole: 'pm', isCreating: false }), true);
 });
 
-test('state defaults to actor console as the primary section', () => {
+test('state defaults to Team room as the primary section', () => {
   const state = app.createState();
 
   assert.equal(state.selectedSection, 'actors');
@@ -120,6 +119,30 @@ test('actor payload sync chooses first actor and clears stale selection', () => 
   assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-pm-demo', 'act-dev-demo']);
 });
 
+test('teammate roster renders prototype person rows from supported actor facts', () => {
+  const state = app.createState();
+  state.roles = [{ id: 'dev', label: 'Developer', scope: 'product' }];
+  state.selectedActorId = 'act-dev-demo';
+  state.actors = [
+    {
+      actor_id: 'act-dev-demo',
+      role: 'dev',
+      runtime: { status: 'active', app_server_health: 'healthy' },
+    },
+  ];
+
+  const html = app.renderActorRowsHtml(state);
+
+  assert.match(html, /person-row/);
+  assert.match(html, /avatar/);
+  assert.match(html, />DV</);
+  assert.match(html, /Developer/);
+  assert.match(html, /act-dev-demo/);
+  assert.match(html, /active/);
+  assert.match(html, /healthy/);
+  assert.doesNotMatch(html, /Dev Actor|PM Actor|72%|capacity|current focus|last proof/i);
+});
+
 test('track payload sync chooses first track and keeps comments inside detail state', () => {
   const state = app.createState();
 
@@ -140,6 +163,73 @@ test('track payload sync chooses first track and keeps comments inside detail st
   assert.equal(state.selectedTrackId, 'track-alpha');
   assert.equal(state.selectedTrackDetail.id, 'track-alpha');
   assert.deepEqual(state.selectedTrackDetail.comment_threads[0].comments.map((row) => row.id), ['comment-1']);
+});
+
+test('Track Studio renders read-only materials proofs updates and comment threads', () => {
+  const html = app.renderTrackDetailHtml({
+    id: 'track-alpha',
+    title: 'Team Room redesign',
+    outcome: 'Ship the Team room shell',
+    state: 'active',
+    now: { next: 'Render Track Studio', blocker: null },
+    updated_at: '2026-07-01T10:00:00Z',
+    materials: [{ label: 'Brief', artifact_id: 'artifact-brief', template: 'markdown' }],
+    proofs: [{ label: 'Proof', artifact_id: 'artifact-proof', template: 'markdown' }],
+    updates: [{ id: 'upd-1', summary: 'Decision captured', kind: 'decision' }],
+    comment_summary: { comment_count: 2, open_thread_count: 1 },
+    comment_threads: [{ thread_id: 'thread-open', status: 'open', latest_comment_preview: 'Looks right', comment_count: 2 }],
+  });
+
+  assert.match(html, /Team Room redesign/);
+  assert.match(html, /doc-title/);
+  assert.match(html, /Current state/);
+  assert.match(html, /Materials and proofs/);
+  assert.match(html, /Brief/);
+  assert.match(html, /Proof/);
+  assert.match(html, /Decision captured/);
+  assert.match(html, /Total comments/);
+  assert.match(html, /Looks right/);
+  assert.doesNotMatch(html, /<textarea|composer|submit|<button[^>]*>Resolve|collaborators/i);
+});
+
+test('direct thread renders final prototype message bubbles', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.imConversation = [
+    { direction: 'reply', sender: 'dev/act-dev-demo', deliveryStatus: '', wakeStatus: '', replyTo: '', content: 'Ready.' },
+    { direction: 'sent', sender: 'you', deliveryStatus: 'delivered', wakeStatus: 'submitted', replyTo: '', content: 'Continue.' },
+  ];
+
+  app.renderImConversation(state, elements);
+
+  assert.match(elements.imConversation.innerHTML, /class="message reply/);
+  assert.match(elements.imConversation.innerHTML, /class="message you/);
+  assert.match(elements.imConversation.innerHTML, /reply · dev\/act-dev-demo/);
+  assert.match(elements.imConversation.innerHTML, /sent · you · delivered \/ submitted/);
+});
+
+test('Track Studio rail renders read-only comment context without write controls', () => {
+  const html = app.renderTrackStudioRailHtml({
+    id: 'track-alpha',
+    state: 'active',
+    outcome: 'Ship the Team room shell',
+    now: { next: 'Render Track Studio', blocker: null },
+    comment_summary: { comment_count: 2, open_thread_count: 1, resolved_thread_count: 1 },
+    comment_threads: [
+      {
+        thread_id: 'thread-open',
+        status: 'open',
+        latest_comment_preview: 'Looks right',
+        comment_count: 2,
+      },
+    ],
+  });
+
+  assert.match(html, /Context/);
+  assert.match(html, /Comments/);
+  assert.match(html, /thread-open/);
+  assert.match(html, /Looks right/);
+  assert.doesNotMatch(html, /<textarea|composer|submit|<button[^>]*>Resolve/i);
 });
 
 test('actor selection clears stale feedback before fetch completes', async () => {
@@ -206,6 +296,89 @@ test('actor selection clears stale feedback before fetch completes', async () =>
     assert.match(elements.actorRuntimeDetail.innerHTML, /Loading/);
 
     await selection;
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rapid actor switching keeps the latest selected teammate visible', async () => {
+  const originalFetch = globalThis.fetch;
+  let resolveFirst;
+  let resolveSecond;
+  const first = new Promise((resolve) => { resolveFirst = resolve; });
+  const second = new Promise((resolve) => { resolveSecond = resolve; });
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-first/console') {
+      return first;
+    }
+    if (requestUrl === '/api/actors/act-second/console') {
+      return second;
+    }
+    if (requestUrl.startsWith('/api/im/conversations/direct')) {
+      return Promise.resolve({
+        ok: false,
+        json: async function () {
+          return { ok: false, error: { code: 'E_IM_NOT_FOUND', message: 'not found' } };
+        },
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-first', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-second', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-old';
+
+    const firstSelection = app.selectActor(state, elements, 'act-first');
+    const secondSelection = app.selectActor(state, elements, 'act-second');
+
+    resolveSecond({
+      ok: true,
+      json: async function () {
+        return {
+          ok: true,
+          console: {
+            actor: { actor_id: 'act-second', role: 'pm' },
+            runtime: { status: 'active', app_server_health: 'healthy' },
+            task_sys: { active_tasks: [] },
+            tracks: { items: [] },
+            im: { target: { identity_id: 'act-second', role_id: 'pm' } },
+          },
+        };
+      },
+    });
+    await secondSelection;
+
+    resolveFirst({
+      ok: true,
+      json: async function () {
+        return {
+          ok: true,
+          console: {
+            actor: { actor_id: 'act-first', role: 'dev' },
+            runtime: { status: 'active', app_server_health: 'healthy' },
+            task_sys: { active_tasks: [] },
+            tracks: { items: [] },
+            im: { target: { identity_id: 'act-first', role_id: 'dev' } },
+          },
+        };
+      },
+    });
+    await firstSelection;
+
+    assert.equal(state.selectedActorId, 'act-second');
+    assert.equal(state.actorConsole.actor.actor_id, 'act-second');
     if (state.actorRefreshTimer) {
       clearTimeout(state.actorRefreshTimer);
       state.actorRefreshTimer = null;
@@ -311,14 +484,14 @@ test('web product route builders target coarse phase-two APIs only', () => {
   assert.equal(app.buildTrackDetailUrl('track-alpha'), '/api/tracks/track-alpha');
 });
 
-test('section copy follows selected workspace', () => {
+test('section copy follows Team room and Tracks destinations', () => {
   assert.deepEqual(app.sectionCopy('actors'), {
-    title: 'Actor Console',
-    summary: 'Select an actor, inspect runtime and task state, message directly, and use lifecycle controls in one place.',
+    title: 'Team room',
+    summary: 'Message teammates, inspect current runtime facts, and keep coordination in one room.',
   });
   assert.deepEqual(app.sectionCopy('tracks'), {
-    title: 'Track workspace',
-    summary: 'Review shared Tracks, materials, proofs, updates, and comments.',
+    title: 'Tracks',
+    summary: 'Review Track outcomes, current state, materials, proofs, updates, and comments.',
   });
 });
 
