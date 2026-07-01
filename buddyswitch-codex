@@ -218,7 +218,6 @@ buddyswitch_start_failure_cleanup() {
   buddyswitch_runtime_broker_stop || true
   buddyswitch_browser_instance_stop "${actor_id}" || true
   buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-  buddyswitch_instance_clear_browser_port "${actor_id}"
   buddyswitch_instance_record_failure "${actor_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}"
 }
 

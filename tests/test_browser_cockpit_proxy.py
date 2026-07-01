@@ -836,6 +836,35 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
         self.assertIn("url: https://example.com/current", text)
         self.assertIn("current: true", text)
         self.assertIn("idle_expires_at: 2026-07-01T00:05:00Z", text)
+        self.assertNotIn("Browser lifecycle warning:", text)
+
+    def test_list_pages_with_no_tracked_pages_schedules_release(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("list_pages", {})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(len(forwarded), 1)
+            self.assertEqual(forwarded[0]["params"]["name"], "list_pages")
+            self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            release_schedules = [
+                item
+                for item in saved["scheduled_triggers"].values()
+                if item["type"] == "browser.cockpit.release"
+            ]
+            self.assertEqual(len(release_schedules), 1)
+            self.assertEqual(release_schedules[0]["payload"], {"reason": "page_idle_empty"})
+            self.assertEqual(release_schedules[0]["schedule_key"], "browser.cockpit.release")
 
     def test_upstream_exit_does_not_stop_proxy_and_next_call_restarts(self) -> None:
         messages = [

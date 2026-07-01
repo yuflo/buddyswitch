@@ -391,6 +391,21 @@ def _browser_session_state_text(*, browser_url: str, instance_root: str | None) 
     return "\n".join(lines)
 
 
+def _schedule_release_if_no_tracked_pages(root: Path) -> str | None:
+    try:
+        state = browser_lifecycle._read_page_idle_state(root)
+        targets = state.get("targets")
+        if isinstance(targets, dict) and targets:
+            return None
+        browser_lifecycle.schedule_browser_cockpit_release(
+            instance_root=root,
+            reason="page_idle_empty",
+        )
+        return None
+    except Exception as exc:
+        return f"{LIFECYCLE_WARNING_PREFIX} list_pages idle release was not scheduled: {exc}"
+
+
 def _refresh_page_idle_hint(
     *,
     root: Path,
@@ -612,7 +627,11 @@ def patch_tool_response_page_use_metadata(
     if kind == "list_pages":
         if not _tool_response_succeeded(message):
             return patched
-        return patch_tool_response_hint(patched, _browser_session_state_text(browser_url=browser_url, instance_root=instance_root))
+        patched = patch_tool_response_hint(patched, _browser_session_state_text(browser_url=browser_url, instance_root=instance_root))
+        warning = _schedule_release_if_no_tracked_pages(root)
+        if warning:
+            patched = patch_tool_response_hint(patched, warning)
+        return patched
     if kind == "select_page":
         page_id = metadata.get("page_id")
         target_id: str | None = None

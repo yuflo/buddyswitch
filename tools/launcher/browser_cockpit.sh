@@ -694,6 +694,7 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
     sleep 1
   done
 
+  _buddyswitch_browser_terminate_pid_value "${chrome_pid}"
   rm -f "${marker_file}"
   if buddyswitch_browser_check_endpoint 2>/dev/null; then
     echo "Browser cockpit not ready: $(buddyswitch_browser_url) (endpoint reachable but no usable page target)" >&2
@@ -877,20 +878,15 @@ buddyswitch_browser_instance_stop() {
     return 2
   fi
 
-  marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/browser/chrome.pid"
-  if [[ ! -f "${marker_file}" ]]; then
-    return 0
-  fi
+  buddyswitch_browser_instance_stop_cockpit_upstream "${actor_id}"
 
+  marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/browser/chrome.pid"
   marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
-  if [[ -n "${marker_pid}" && "${marker_pid}" =~ ^[0-9]+$ ]] && kill -0 "${marker_pid}" 2>/dev/null; then
-    kill "${marker_pid}" 2>/dev/null || true
-    sleep 0.2
-    if kill -0 "${marker_pid}" 2>/dev/null; then
-      kill -9 "${marker_pid}" 2>/dev/null || true
-    fi
-  fi
+  _buddyswitch_browser_terminate_pid_value "${marker_pid}"
   rm -f "${marker_file}"
+
+  buddyswitch_browser_instance_clear_page_idle_state "${actor_id}"
+  buddyswitch_instance_clear_browser_port "${actor_id}"
 }
 
 _buddyswitch_browser_numeric_pid() {
@@ -995,10 +991,7 @@ buddyswitch_browser_instance_release() {
   ownership="$(buddyswitch_browser_instance_endpoint_ownership_state "${actor_id}")"
   case "${ownership}" in
     owned|inactive)
-      buddyswitch_browser_instance_stop_cockpit_upstream "${actor_id}"
       buddyswitch_browser_instance_stop "${actor_id}"
-      buddyswitch_browser_instance_clear_page_idle_state "${actor_id}"
-      buddyswitch_instance_clear_browser_port "${actor_id}"
       echo "Browser cockpit released: ${actor_id}"
       ;;
     foreign|unknown)

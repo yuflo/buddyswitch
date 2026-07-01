@@ -606,14 +606,20 @@ with calls_path.open("a", encoding="utf-8") as handle:
             check=False,
         )
 
-    def _cleanup_fake_chrome_pids(self, ensure_calls: Path) -> None:
-        for entry in read_jsonl(ensure_calls):
-            pid = entry.get("pid")
-            if isinstance(pid, int) and pid_alive(pid):
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except OSError:
-                    pass
+    def _cleanup_fake_chrome_pids(self, pids: list[int]) -> None:
+        for pid in list(dict.fromkeys(pids)):
+            if not pid_alive(pid):
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                continue
+            if wait_until(lambda pid=pid: not pid_alive(pid), timeout=1.0):
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
 
     def test_lazy_runtime_releases_after_idle_and_restarts_on_next_browser_call(self) -> None:
         """Proves cockpit new_page -> list_pages -> select_page -> take_snapshot -> idle close -> release -> restart."""
@@ -639,12 +645,13 @@ with calls_path.open("a", encoding="utf-8") as handle:
             upstream_argv = temp_root_path / "upstream_argv.jsonl"
             upstream_calls = temp_root_path / "upstream_calls.jsonl"
             release_schedules: list[dict[str, object]] = []
+            fake_chrome_pids: list[int] = []
             fake_port = free_port()
 
             self._write_fake_chrome_server(fake_chrome)
             self._write_fake_upstream(fake_upstream)
             self._write_ensure_script(ensure_script)
-            self.addCleanup(self._cleanup_fake_chrome_pids, ensure_calls)
+            self.addCleanup(self._cleanup_fake_chrome_pids, fake_chrome_pids)
 
             base_env = os.environ.copy()
             base_env.update(
@@ -694,6 +701,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertIsInstance(first_browser_pid, int, msg=first_ensure_events)
                 self.assertIsInstance(first_browser_pgid, int, msg=first_ensure_events)
                 assert isinstance(first_browser_pid, int)
+                fake_chrome_pids.append(first_browser_pid)
 
                 new_page_response = self._send_proxy_tool_call(
                     proxy,
@@ -739,9 +747,14 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertIn("Browser page idle refreshed", snapshot_text)
 
                 saved_daemon_state = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-                self.assertEqual(
-                    saved_daemon_state["scheduled_triggers"]["schedule-1"]["schedule_key"],
-                    "browser.page.idle:target-1",
+                scheduled_rows = list(saved_daemon_state["scheduled_triggers"].values())
+                self.assertTrue(
+                    any(row.get("schedule_key") == "browser.cockpit.release" for row in scheduled_rows),
+                    msg=saved_daemon_state["scheduled_triggers"],
+                )
+                self.assertTrue(
+                    any(row.get("schedule_key") == "browser.page.idle:target-1" for row in scheduled_rows),
+                    msg=saved_daemon_state["scheduled_triggers"],
                 )
                 page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
                 targets = page_idle.get("targets")
@@ -806,6 +819,10 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertEqual(len(read_jsonl(upstream_argv)), 2, "next browser call must restart upstream MCP")
                 start_events = [entry for entry in read_jsonl(ensure_calls) if entry.get("started") is True]
                 self.assertGreaterEqual(len(start_events), 2, "next browser call must relaunch fake runtime")
+                for event in start_events:
+                    pid = event.get("pid")
+                    if isinstance(pid, int) and pid not in fake_chrome_pids:
+                        fake_chrome_pids.append(pid)
 
                 final_release = self._launcher_release(actor_id=actor_id, env=base_env)
                 self.assertEqual(final_release.returncode, 0, msg=f"stdout:\n{final_release.stdout}\nstderr:\n{final_release.stderr}")

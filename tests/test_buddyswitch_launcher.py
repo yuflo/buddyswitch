@@ -5152,6 +5152,51 @@ exec "$real_git" "$@"
             self.assertFalse(browser_pid.exists())
             self.assertFalse((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
 
+    def test_stop_active_instance_clears_browser_runtime_state(self) -> None:
+        upstream_proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        upstream_pgid = os.getpgid(upstream_proc.pid)
+        self.addCleanup(self._terminate_registered_process, upstream_proc.pid, upstream_pgid)
+
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_root = Path(str(ctx["instance_root"]))
+            instance_json = instance_root / "instance.json"
+            payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            payload["browser_port"] = 9333
+            instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+            runtime_browser_dir = instance_root / "runtime" / "browser"
+            runtime_browser_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_browser_dir / "cockpit-upstream.pid").write_text(f"{upstream_proc.pid}\n", encoding="utf-8")
+            (runtime_browser_dir / "cockpit-upstream.pgid").write_text(f"{upstream_pgid}\n", encoding="utf-8")
+            (runtime_browser_dir / "page_idle.json").write_text(
+                json.dumps({"targets": {}, "page_id_to_target_id": {}}, ensure_ascii=True) + "\n",
+                encoding="utf-8",
+            )
+            (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", str(ctx["actor_id"])],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            upstream_proc.wait(timeout=2)
+            self.assertFalse((runtime_browser_dir / "cockpit-upstream.pid").exists())
+            self.assertFalse((runtime_browser_dir / "cockpit-upstream.pgid").exists())
+            self.assertFalse((runtime_browser_dir / "page_idle.json").exists())
+            self.assertFalse((runtime_browser_dir / "page_idle.lock").exists())
+            stored = json.loads(instance_json.read_text(encoding="utf-8"))
+            self.assertIsNone(stored["browser_port"])
+
     def test_stop_json_marks_instance_inactive_after_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))

@@ -106,6 +106,11 @@ def _launcher_env(instance_root: Path) -> dict[str, str]:
     return browser_session.launcher_env_for_instance_root(instance_root)
 
 
+def _skip(reason: str) -> daemon_core.HandlerResult:
+    print(f"Browser cockpit release skipped: {reason}", file=sys.stderr)
+    return daemon_core.HandlerResult.handled()
+
+
 class BrowserReleaseHandler:
     name = "browser_cockpit_release"
 
@@ -129,21 +134,21 @@ class BrowserReleaseHandler:
                 raise PermissionError("wrong target actor for browser cockpit release trigger")
             _payload(trigger)
             if _parent_turn_is_running(runtime):
-                return daemon_core.HandlerResult.handled()
+                return _skip("parent_turn_running")
             root = _instance_root(context)
             if root is None:
-                return daemon_core.HandlerResult.handled()
+                return _skip("instance_root_missing")
             if _page_idle_targets(root):
-                return daemon_core.HandlerResult.handled()
+                return _skip("page_idle_targets_remain")
             instance_payload = _fresh_instance_payload(context)
             actor_id = instance_payload.get("actor_id")
             if not isinstance(actor_id, str) or not actor_id.strip():
                 actor_id = local_actor["actor_id"]
             endpoint = _browser_endpoint(instance_payload)
             if endpoint is None:
-                return daemon_core.HandlerResult.handled()
+                return _skip("browser_port_missing")
             if _has_real_user_page(endpoint):
-                return daemon_core.HandlerResult.handled()
+                return _skip("real_user_page_present")
             completed = subprocess.run(
                 [str(ROOT / "buddyswitch-codex"), "env", "browser", "release", "--instance", actor_id.strip()],
                 cwd=ROOT,

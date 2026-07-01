@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import tempfile
@@ -643,6 +644,98 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             ]
             self.assertTrue(any(call.get("path") == "Target.createTarget" for call in calls))
             self.assertFalse(any(call.get("path") == "/json/new" for call in calls))
+
+    def test_browser_ensure_failure_kills_launched_chrome(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+
+            state_file = temp_root_path / "cdp-state.json"
+            self._write_cdp_state(
+                state_file,
+                version_ok=False,
+                pages=[{"id": "intro", "type": "page", "url": "chrome://intro/"}],
+                allow_background_create_about_blank=False,
+            )
+            self._write_exec(
+                fake_bin / "curl",
+                """#!/usr/bin/env bash
+set -euo pipefail
+url=""
+for arg in "$@"; do
+  case "${arg}" in
+    http://*|https://*)
+      url="${arg}"
+      ;;
+  esac
+done
+if [[ ! -f "${BUDDYSWITCH_TEST_CHROME_PID_FILE:-}" ]]; then
+  exit 22
+fi
+case "${url}" in
+  */json/version)
+    printf '{"Browser":"test"}\n'
+    exit 0
+    ;;
+  */json/list)
+    printf '[{"id":"intro","type":"page","url":"chrome://intro/"}]\n'
+    exit 0
+    ;;
+esac
+exit 22
+""",
+            )
+            self._write_exec(
+                fake_bin / "fake-chrome",
+                """#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${BUDDYSWITCH_TEST_CHROME_PID_FILE:-}" ]]; then
+  printf '%s\n' "$$" > "${BUDDYSWITCH_TEST_CHROME_PID_FILE}"
+fi
+sleep 60
+""",
+            )
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_background_page_tool(fake_bin / "background-page")
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            actor_id = "act-pm-browser"
+            instance_root = self._write_instance_record(shared_root, actor_id)
+            chrome_pid_file = temp_root_path / "chrome.pid"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
+            env["BUDDYSWITCH_TEST_CHROME_PID_FILE"] = str(chrome_pid_file)
+
+            ensure = subprocess.run(
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(ensure.returncode, 0)
+            chrome_pid = int(chrome_pid_file.read_text(encoding="utf-8").strip())
+            self.addCleanup(self._kill_process_if_live, chrome_pid)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(chrome_pid, 0)
+            self.assertFalse((instance_root / "browser" / "chrome.pid").exists())
+
+    @staticmethod
+    def _kill_process_if_live(pid: int) -> None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
 
     def test_browser_ensure_uses_bounded_timeouts_for_cdp_probes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

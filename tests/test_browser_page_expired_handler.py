@@ -603,6 +603,22 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "handled")
         self.assertEqual(calls, [])
 
+    def test_release_logs_skip_reason_when_real_user_page_exists(self) -> None:
+        calls = self._install_launcher_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([{"id": "target-user", "type": "page", "url": "https://example.com/open"}])
+            handler = self.release_module.BrowserReleaseHandler()
+            with mock.patch.object(self.release_module.sys, "stderr") as stderr:
+                result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [])
+        self.assertTrue(stderr.write.called)
+        written = "".join(str(call.args[0]) for call in stderr.write.call_args_list if call.args)
+        self.assertIn("Browser cockpit release skipped: real_user_page_present", written)
+
     def test_release_invokes_launcher_after_rechecks_pass(self) -> None:
         calls = self._install_launcher_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
