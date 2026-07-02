@@ -1,9 +1,0 @@
-{"actor_id": "act-test-12a3b51dabba", "event": "daemon_started", "main_thread_id": "019f1e28-959d-7f02-9766-bec7aa5c27eb", "pid": 83565, "service": "daemon", "ts": "2026-07-01T14:50:11Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "daemon_ready", "main_thread_id": "019f1e28-959d-7f02-9766-bec7aa5c27eb", "pid": 83565, "service": "daemon", "ts": "2026-07-01T14:50:11Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "notification_received", "origin_id": null, "service": "daemon", "trigger_type": "app_server.thread_goal_cleared", "ts": "2026-07-01T14:50:11Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "notification_received", "origin_id": null, "service": "daemon", "trigger_type": "app_server.mcpServer_startupStatus_updated", "ts": "2026-07-01T14:50:11Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "notification_received", "origin_id": null, "service": "daemon", "trigger_type": "app_server.mcpServer_startupStatus_updated", "ts": "2026-07-01T14:50:11Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "notification_received", "origin_id": null, "service": "daemon", "trigger_type": "app_server.mcpServer_startupStatus_updated", "ts": "2026-07-01T14:50:17Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "notification_received", "origin_id": null, "service": "daemon", "trigger_type": "app_server.thread_started", "ts": "2026-07-01T14:50:21Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "notification_received", "origin_id": null, "service": "daemon", "trigger_type": "app_server.thread_status_changed", "ts": "2026-07-01T14:50:21Z"}
-{"actor_id": "act-test-12a3b51dabba", "event": "notification_received", "origin_id": null, "service": "daemon", "trigger_type": "app_server.thread_status_changed", "ts": "2026-07-01T14:50:43Z"}

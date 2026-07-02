@@ -1,2 +1,0 @@
-{"actor_id": "act-dev-0267c50795f0", "event": "app_server_start_requested", "service": "app_server", "socket_path": "/tmp/buddyswitch-task-sys-user-sim-20260701/instances/act-dev-0267c50795f0/runtime/app-server.sock", "ts": "2026-07-01T14:52:20Z"}
-{"actor_id": "act-dev-0267c50795f0", "event": "app_server_ready", "pid": 86242, "service": "app_server", "socket_path": "/tmp/buddyswitch-task-sys-user-sim-20260701/instances/act-dev-0267c50795f0/runtime/app-server.sock", "ts": "2026-07-01T14:52:20Z"}
