@@ -17,7 +17,7 @@ from env.cdp_browser_session import (
 from env.tool_runtime.context import default_manifest_path as DEFAULT_MANIFEST
 from .tool import DEFINITION
 from env.tool_runtime import results as tool_results
-from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
+from env.tool_runtime.broker_client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 ALLOWED_BACKENDS = ("browser", "search_api")
 ALLOWED_ENGINES = ("google", "web", "reddit", "x")
