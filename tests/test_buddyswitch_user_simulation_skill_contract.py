@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for the BuddySwitch user simulation testing skill."""
+"""Target-locked contract tests for the BuddySwitch user simulation skill."""
 
 from __future__ import annotations
 
@@ -12,11 +12,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / ".agents" / "skills" / "buddyswitch-user-simulation-testing"
 SKILL_FILE = SKILL_ROOT / "SKILL.md"
 REFERENCE_DIR = SKILL_ROOT / "references"
-INVOCATION_REFERENCE = SKILL_ROOT / "references" / "invocation-and-pairing.md"
-SIMULATION_MEANS_REFERENCE = SKILL_ROOT / "references" / "simulation-means.md"
-GATE_LEVELS_REFERENCE = SKILL_ROOT / "references" / "gate-levels.md"
-SCENARIO_MATRIX_REFERENCE = SKILL_ROOT / "references" / "scenario-matrix.md"
 OPENAI_YAML = SKILL_ROOT / "agents" / "openai.yaml"
+
+OLD_ABSTRACTION_FILES = (
+    REFERENCE_DIR / "invocation-and-pairing.md",
+    REFERENCE_DIR / "simulation-means.md",
+    REFERENCE_DIR / "gate-levels.md",
+    REFERENCE_DIR / "scenario-matrix.md",
+    REFERENCE_DIR / "evidence-schema.md",
+    SKILL_ROOT / "scripts" / "init_simulation_evidence.py",
+    SKILL_ROOT / "scripts" / "summarize_simulation_evidence.py",
+)
 
 
 def _text(path: Path) -> str:
@@ -29,7 +35,7 @@ def _frontmatter_description(skill_text: str) -> str:
         raise AssertionError("SKILL.md is missing YAML frontmatter")
     for line in match.group("body").splitlines():
         if line.startswith("description:"):
-            return line.removeprefix("description:").strip()
+            return line.removeprefix("description:").strip().strip('"')
     raise AssertionError("SKILL.md frontmatter is missing description")
 
 
@@ -48,8 +54,16 @@ def _section(text: str, heading: str, end_heading: str | None = None) -> str:
     return text[start : start + len(heading) + next_heading.start()]
 
 
+def _assert_order(testcase: unittest.TestCase, text: str, *needles: str) -> None:
+    last = -1
+    for needle in needles:
+        idx = text.find(needle, last + 1)
+        testcase.assertGreater(idx, last, msg=f"{needle!r} not found after previous term")
+        last = idx
+
+
 class BuddySwitchUserSimulationSkillContractTests(unittest.TestCase):
-    def test_frontmatter_description_is_effect_preserving(self) -> None:
+    def test_description_triggers_only_target_locked_skill_use(self) -> None:
         description = _frontmatter_description(_text(SKILL_FILE))
         lowered = description.lower()
 
@@ -60,199 +74,177 @@ class BuddySwitchUserSimulationSkillContractTests(unittest.TestCase):
             "feature memo",
             "target behavior",
             "existing evidence",
-            "claim downgrade",
-            "plan",
-            "run",
-            "audit",
-            "extend",
+            "user path",
+            "cleanup proof",
+            "evidence-backed",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, lowered)
-        self.assertNotIn("through codex cli", lowered)
 
-    def test_main_skill_keeps_non_bypassable_boundaries_inline(self) -> None:
+        for drift in ("means", "gate", "scenario matrix", "plan, run, audit, or extend"):
+            with self.subTest(drift=drift):
+                self.assertNotIn(drift, lowered)
+
+    def test_main_file_states_the_two_locked_targets(self) -> None:
+        skill = _text(SKILL_FILE)
+        lowered = skill.lower()
+
+        self.assertIn("memo, target behavior, or existing evidence", lowered)
+        self.assertIn("infer", lowered)
+        self.assertIn("smallest credible buddyswitch user path", lowered)
+        self.assertIn("cleanup proof", lowered)
+        self.assertIn("stability conclusion", lowered)
+        self.assertIn("interrupt only", lowered)
+        self.assertIn("real risk", lowered)
+        self.assertIn("semantic ambiguity", lowered)
+
+    def test_run_requests_must_attempt_user_path_before_reporting(self) -> None:
+        skill = _text(SKILL_FILE)
+        run_section = _section(skill, "## Mandatory User Path", "\n## Minimal Evidence")
+
+        self.assertRegex(run_section.lower(), r"verify|test|prove|run")
+        self.assertIn("or record a concrete blocker", run_section.lower())
+        _assert_order(
+            self,
+            run_section,
+            "infer effect",
+            "choose one user surface",
+            "create actor or identify explicit target",
+            "capture baseline status",
+            "perform user entry action",
+            "observe effect",
+            "capture state/log/browser evidence",
+            "clean up",
+            "report bounded claim",
+        )
+        _assert_order(
+            self,
+            run_section,
+            "./buddyswitch-codex instance start --role <role> --json",
+            "./buddyswitch-codex instance status <actor-id> --json",
+            "./buddyswitch-codex instance input <actor-id> --text",
+            "./buddyswitch-codex instance status <actor-id> --json",
+            "./buddyswitch-codex instance stop <actor-id> --json",
+            "./buddyswitch-codex instance delete <actor-id> --yes --json",
+        )
+
+    def test_browser_claim_requires_actor_facing_page_evidence(self) -> None:
+        skill = _text(SKILL_FILE)
+        browser = _section(skill, "## Browser And Cockpit Claims", "\n## Minimal Evidence")
+        lowered = browser.lower()
+
+        self.assertIn("actor/resource id", lowered)
+        self.assertIn("actor-facing browser/cockpit action", lowered)
+        self.assertIn("url/page/target/screenshot evidence", lowered)
+        self.assertIn("state or log evidence", lowered)
+        self.assertIn("cleanup proof", lowered)
+        self.assertRegex(lowered, r"missing.*partial|downgrade")
+
+    def test_minimal_evidence_checklist_replaces_large_evidence_framework(self) -> None:
+        evidence = _section(_text(SKILL_FILE), "## Minimal Evidence", "\n## Claim Rule")
+        lowered = evidence.lower()
+
+        for required in (
+            "target effect",
+            "primary user surface",
+            "actor/resource id",
+            "baseline status",
+            "user entry action",
+            "observed product effect",
+            "state/log/browser evidence",
+            "cleanup result",
+            "probe-only confirmation",
+            "claim limit",
+            "remaining risk",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, lowered)
+
+        self.assertIn("user-path proof is incomplete", lowered)
+
+    def test_claim_rule_is_simple_and_blocks_fake_static_overclaiming(self) -> None:
+        claim = _section(_text(SKILL_FILE), "## Claim Rule", "\n## Report Format")
+        lowered = claim.lower()
+
+        for result in ("PASS", "PARTIAL", "FAIL", "BLOCKED"):
+            with self.subTest(result=result):
+                self.assertIn(f"`{result}`", claim)
+
+        self.assertNotIn("FULL PASS", claim)
+        self.assertNotIn("CONTROL-PLANE PASS", claim)
+        self.assertNotIn("AUDIT ONLY", claim)
+        self.assertIn("fake/control-plane/static-only", lowered)
+        self.assertIn("not user-path proof", lowered)
+
+    def test_probe_only_and_risk_interruptions_stay_inline(self) -> None:
         skill = _text(SKILL_FILE)
         lowered = skill.lower()
 
         self.assertIn("## Probe-Only Boundary", skill)
-        self.assertIn("## Risk Confirmation", skill)
-        self.assertIn("source edits", lowered)
+        self.assertIn("## Interrupt Only For Risk", skill)
+        self.assertIn("source edits are forbidden", lowered)
         self.assertIn("run live codex", lowered)
         self.assertIn("signed-in chrome", lowered)
         self.assertIn("preserve actors", lowered)
         self.assertIn("delete or mutate user data", lowered)
+        self.assertIn("material product meaning", lowered)
 
-    def test_sop_steps_have_checkable_completion_criteria(self) -> None:
-        sop = _section(_text(SKILL_FILE), "## SOP", "\n## Operating Modes")
-        steps = re.findall(r"(?m)^\d+\. .+", sop)
-        self.assertGreaterEqual(len(steps), 8)
-
-        missing_done = [step for step in steps if "Done when:" not in step]
-        self.assertEqual([], missing_done)
-
-    def test_invocation_reference_is_single_source_for_defaults_and_checkpoint(self) -> None:
-        skill = _text(SKILL_FILE)
-        invocation = _text(INVOCATION_REFERENCE)
-
-        self.assertIn("references/invocation-and-pairing.md", skill)
-        self.assertRegex(skill, r"(?is)mode.*defaults.*checkpoint|checkpoint.*defaults.*mode")
-        self.assertNotIn("## Minimum Input", skill)
-        self.assertNotIn("## Defaults", skill)
-        self.assertNotIn("Optional overrides:", skill)
-        self.assertNotIn("Best input:", skill)
-        self.assertNotIn("## Simulation Checkpoint\nI will prove:", skill)
-
-        self.assertIn("## Defaults When Input Is Sparse", invocation)
-        self.assertIn("## One Checkpoint", invocation)
-        self.assertIn("## Prompt Templates", invocation)
-        self.assertIn("Continue without waiting", invocation)
-        self.assertIn("Risk Confirmation", invocation)
-
-    def test_skipped_required_means_or_gate_blocks_full_pass(self) -> None:
-        skill = _text(SKILL_FILE).lower()
-        means = _text(SIMULATION_MEANS_REFERENCE).lower()
-        gates = _text(GATE_LEVELS_REFERENCE).lower()
-
-        self.assertIn("required means", skill)
-        self.assertIn("required gate", skill)
-        self.assertRegex(skill, r"(cannot|never) (be |report )?`?full pass`?")
-        self.assertIn("downgrade", skill)
-
-        self.assertIn("target-relevant", means)
-        self.assertIn("required means", means)
-        self.assertIn("downgrade", means)
-        self.assertRegex(means, r"(cannot|never) (be |report )?`?full pass`?")
-
-        self.assertIn("required gate", gates)
-        self.assertIn("downgrade", gates)
-        self.assertRegex(gates, r"(cannot|never) (be |report )?`?full pass`?")
-
-    def test_report_format_and_unacceptable_conclusions_stay_inline(self) -> None:
-        skill = _text(SKILL_FILE)
-        report = _section(skill, "## Report Format", "\n## Unacceptable Conclusions")
-        unacceptable = _section(skill, "## Unacceptable Conclusions")
-
-        for heading in (
-            "## Result",
-            "## Effects Tested",
-            "## Claim Proven",
-            "## Means Used",
-            "## Strategy",
-            "## Subagents",
-            "## Gates",
-            "## Evidence",
-            "## Cleanup",
-            "## Remaining Risk",
-        ):
-            with self.subTest(heading=heading):
-                self.assertIn(heading, report)
-
-        lowered = unacceptable.lower()
-        self.assertIn("fake codex", lowered)
-        self.assertIn("live codex", lowered)
-        self.assertIn("unit tests passed", lowered)
-        self.assertIn("multi-entry stable", lowered)
-        self.assertIn("browser user behavior covered", lowered)
-
-    def test_openai_metadata_matches_phase_1_trigger_boundary(self) -> None:
-        metadata = _text(OPENAI_YAML)
-
-        short_description_match = re.search(r'^\s*short_description:\s*"([^"]+)"$', metadata, re.MULTILINE)
-        self.assertIsNotNone(short_description_match)
-        short_description = short_description_match.group(1)
-        self.assertGreaterEqual(len(short_description), 25)
-        self.assertLessEqual(len(short_description), 64)
-
-        default_prompt_match = re.search(r'^\s*default_prompt:\s*"([^"]+)"$', metadata, re.MULTILINE)
-        self.assertIsNotNone(default_prompt_match)
-        default_prompt = default_prompt_match.group(1)
-        lowered = default_prompt.lower()
-        self.assertIn("$buddyswitch-user-simulation-testing", default_prompt)
-        self.assertIn("probe-only", lowered)
-        self.assertIn("simulated-user", lowered)
-        self.assertIn("evidence-backed", lowered)
-        self.assertRegex(lowered, r"claim (limit|downgrade)")
-
-    def test_browser_adapter_details_are_routed_by_strong_pointer(self) -> None:
-        skill = _text(SKILL_FILE)
-        means = _text(SIMULATION_MEANS_REFERENCE)
-
-        self.assertIn("Browser tools are adapters, not top-level means", skill)
-        self.assertIn("references/simulation-means.md", skill)
-        self.assertIn("Browser Adapter Notes", skill)
-        for term in ("browser", "Chrome", "CDP", "Playwright", "profile", "extension", "Desktop", "Computer Use"):
-            with self.subTest(term=term):
-                self.assertRegex(skill, rf"(?is)Browser Adapter Notes.*{re.escape(term)}|{re.escape(term)}.*Browser Adapter Notes")
-
-        for detail in (
-            "Do not spend simulation time reinstalling Chrome/browser plugins",
-            "Browser is not available: extension",
-            "agent.browsers.list()",
-            "untrusted-code-signing-identity",
-            "Screen Recording and Accessibility permissions",
-        ):
-            with self.subTest(detail=detail):
-                self.assertNotIn(detail, skill)
-
-        self.assertIn("## Browser Adapter Notes", means)
-        self.assertIn("Do not loop on reinstalling Chrome/browser plugins", means)
-        self.assertIn("Browser is not available: extension", means)
-        self.assertIn("agent.browsers.list()", means)
-
-    def test_subagent_details_are_routed_with_bounded_default(self) -> None:
-        skill = _text(SKILL_FILE)
-        scenario = _text(SCENARIO_MATRIX_REFERENCE)
-
-        lowered_skill = skill.lower()
-        self.assertIn("bounded sub-agents by default", lowered_skill)
-        self.assertIn("main agent owns the final claim", lowered_skill)
-        self.assertIn("subagents/<name>/", skill)
-        self.assertIn("source-edit ban", lowered_skill)
-
-        for split_detail in (
-            "G2 has more than two independent surfaces",
-            "Static residue audit can run in parallel",
-            "Log/state review can run after a scenario",
-            "Stress/recovery and failure-analysis probes",
-        ):
-            with self.subTest(split_detail=split_detail):
-                self.assertNotIn(split_detail, skill)
-                self.assertIn(split_detail, scenario)
-
-        self.assertIn("## Sub-Agent Fit", scenario)
-        self.assertIn("Web API/UI lifecycle", scenario)
-        self.assertIn("IM wake", scenario)
-        self.assertIn("Track comment wake", scenario)
-
-    def test_long_references_have_table_of_contents(self) -> None:
-        long_references: list[Path] = []
-        for path in sorted(REFERENCE_DIR.glob("*.md")):
-            lines = _text(path).splitlines()
-            if len(lines) <= 100:
-                continue
-            long_references.append(path)
-            top = "\n".join(lines[:30])
+    def test_old_abstraction_files_are_removed_not_preserved_as_second_route(self) -> None:
+        for path in OLD_ABSTRACTION_FILES:
             with self.subTest(path=str(path.relative_to(ROOT))):
-                self.assertIn("## Table Of Contents", top)
-                self.assertRegex(top, r"- \[.+\]\(#.+\)")
+                self.assertFalse(path.exists(), msg=f"{path} should be deleted")
 
-        self.assertTrue(long_references)
+    def test_reference_routing_only_keeps_target_support_references(self) -> None:
+        skill = _text(SKILL_FILE)
 
-    def test_main_reference_routing_uses_conditional_read_pointers(self) -> None:
-        routing = _section(_text(SKILL_FILE), "## Reference Routing", "\n## Probe-Only Boundary")
+        self.assertIn("references/memo-to-goals.md", skill)
+        self.assertIn("references/buddy-runtime-surfaces.md", skill)
 
-        for reference in (
+        for forbidden in (
             "references/invocation-and-pairing.md",
-            "references/memo-to-goals.md",
             "references/simulation-means.md",
             "references/gate-levels.md",
             "references/scenario-matrix.md",
             "references/evidence-schema.md",
-            "references/buddy-runtime-surfaces.md",
+            "scripts/init_simulation_evidence.py",
+            "scripts/summarize_simulation_evidence.py",
         ):
-            with self.subTest(reference=reference):
-                self.assertIn(f"`{reference}`", routing)
-                self.assertRegex(routing, rf"`{re.escape(reference)}`.*\b(first|when|before)\b")
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, skill)
+
+    def test_main_file_mentions_user_path_before_drift_terms(self) -> None:
+        skill = _text(SKILL_FILE)
+        user_path_idx = skill.find("## Mandatory User Path")
+        self.assertGreaterEqual(user_path_idx, 0)
+
+        for drift in (
+            "means family",
+            "required gate",
+            "G0",
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "scenario matrix",
+            "bounded sub-agents by default",
+            "stress-recovery",
+        ):
+            with self.subTest(drift=drift):
+                self.assertNotIn(drift, skill)
+
+    def test_openai_metadata_matches_low_burden_target(self) -> None:
+        metadata = _text(OPENAI_YAML)
+        lowered = metadata.lower()
+
+        self.assertIn("buddyswitch", lowered)
+        self.assertIn("memo", lowered)
+        self.assertIn("target behavior", lowered)
+        self.assertIn("existing evidence", lowered)
+        self.assertIn("user path", lowered)
+        self.assertIn("cleanup proof", lowered)
+        self.assertIn("evidence-backed", lowered)
+        self.assertNotIn("means", lowered)
+        self.assertNotIn("gates", lowered)
 
 
 if __name__ == "__main__":
