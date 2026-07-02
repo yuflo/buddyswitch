@@ -2,6 +2,17 @@
 
 This reference keeps user input small. Codex should infer defaults and ask only for risky or product-semantic ambiguity.
 
+## Table Of Contents
+
+- [Feature Memo Only](#feature-memo-only)
+- [Optional Overrides](#optional-overrides)
+- [Target-Only Fallback](#target-only-fallback)
+- [One Checkpoint](#one-checkpoint)
+- [Prompt Templates](#prompt-templates)
+- [Pairings](#pairings)
+- [Tooling](#tooling)
+- [Defaults When Input Is Sparse](#defaults-when-input-is-sparse)
+
 ## Feature Memo Only
 
 Preferred invocation:
@@ -74,7 +85,7 @@ Continue without waiting when all are true:
 - no actors or runtime state will be preserved;
 - the product effect is not ambiguous.
 
-Wait for explicit confirmation only for risk conditions listed in `SKILL.md`.
+Wait for explicit confirmation only for Risk Confirmation conditions listed in `SKILL.md`.
 
 Record the checkpoint in evidence with `confirmed_by`:
 

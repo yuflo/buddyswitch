@@ -6,6 +6,17 @@ The second column names the product entry surface or concrete adapter. Before re
 
 When `G2` includes more than two independent surfaces, split them across bounded sub-agents when tooling is available. Do not share an actor or run root across sub-agents unless the scenario explicitly tests cross-surface interaction.
 
+## Table Of Contents
+
+- [Core CLI Lifecycle](#core-cli-lifecycle)
+- [Web Management](#web-management)
+- [IM Wake](#im-wake)
+- [Track Comment Wake](#track-comment-wake)
+- [Stress And Recovery](#stress-and-recovery)
+- [Browser Cockpit / Search](#browser-cockpit--search)
+- [Sub-Agent Fit](#sub-agent-fit)
+- [Role Defaults](#role-defaults)
+
 ## Core CLI Lifecycle
 
 | Scenario | Entry surface / adapter | Minimum actions | Required assertions |
@@ -68,6 +79,13 @@ When `G2` includes more than two independent surfaces, split them across bounded
 ## Sub-Agent Fit
 
 Use this table when deciding whether to split work.
+
+Good split examples:
+
+- G2 has more than two independent surfaces, such as Web, IM wake, and Track comment wake.
+- Static residue audit can run in parallel with runtime simulation.
+- Log/state review can run after a scenario while the main agent prepares the next scenario.
+- Stress/recovery and failure-analysis probes can run in isolated actor/run roots.
 
 | Workstream | Sub-Agent Fit | Actor / Run Root Rule | Notes |
 | --- | --- | --- | --- |

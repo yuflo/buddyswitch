@@ -6,6 +6,16 @@ First choose the **performance means family**: how the user behavior is simulate
 
 Do not promote adapter names such as Web API, IM wake, Track wake, or Chrome DevTools MCP into top-level means. They are implementation choices under a broader means family.
 
+## Table Of Contents
+
+- [Means Families](#means-families)
+- [Adapter Map](#adapter-map)
+- [Effect-To-Means Rules](#effect-to-means-rules)
+- [Selection Rules](#selection-rules)
+- [Browser Adapter Notes](#browser-adapter-notes)
+- [Output Labels](#output-labels)
+- [Evidence By Means Family](#evidence-by-means-family)
+
 ## Means Families
 
 | Means Family | What It Represents | Typical Adapters | Best For | Does Not Prove |
@@ -56,7 +66,7 @@ Infer the required means from the target effect before choosing concrete adapter
 - For "stable" claims, include `stress-recovery-drive` that matches the claim: repeated sends, small concurrency, stop/resume, restart, release/reacquire, or cleanup failure.
 - For real Codex, signed-in Chrome, extension, or external profile claims, include `live-dependency-smoke` and get explicit user authorization when required.
 - For rebuild/replace claims, include `static-residue-audit` over live code, role guidance, tests, and UI assets.
-- If a family is target-relevant but skipped, downgrade the result. Do not replace a skipped family with a lower-level adapter.
+- If a required means family is target-relevant but skipped, downgrade the result and never report `FULL PASS`. Do not replace a skipped family with a lower-level adapter.
 
 ## Browser Adapter Notes
 

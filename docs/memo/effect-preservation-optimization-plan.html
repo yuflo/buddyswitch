@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BuddySwitch User Simulation Testing Skill Effect Preservation Plan</title>
+  <style>
+    :root {
+      --bg: #f7f6f1;
+      --paper: #ffffff;
+      --ink: #1c2228;
+      --muted: #65717a;
+      --line: #d8d6cc;
+      --soft: #efeee8;
+      --accent: #28666e;
+      --accent-soft: #e4f0ef;
+      --ok: #2f6f4e;
+      --ok-soft: #e8f2ec;
+      --warn: #9a6a19;
+      --warn-soft: #fff4dc;
+      --danger: #ad4632;
+      --danger-soft: #fff0eb;
+      --info: #3f6d9a;
+      --info-soft: #e8eef7;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.45;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .page {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .top {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr);
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 16px;
+    }
+
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+
+    .kicker {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font: 800 12px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { letter-spacing: 0; }
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(28px, 4vw, 42px);
+      line-height: 1.08;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+
+    p { margin: 0 0 10px; }
+
+    .lead {
+      max-width: 860px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .metric {
+      background: #fbfbf8;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      min-height: 94px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 25px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .verdict {
+      display: grid;
+      gap: 10px;
+    }
+
+    .verdict-row {
+      display: grid;
+      grid-template-columns: 104px 1fr;
+      gap: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .verdict-row:last-child { border-bottom: 0; padding-bottom: 0; }
+
+    .label {
+      color: var(--muted);
+      font: 800 11px/1.25 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    code {
+      font-family: var(--mono);
+      background: var(--soft);
+      border: 1px solid #e1dfd7;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-size: 12px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font: 700 12px/1 var(--sans);
+      cursor: pointer;
+    }
+
+    button.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .section {
+      margin-top: 16px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #fbfbf8;
+      color: #39434a;
+      font: 800 11px/1.2 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .effect-id, .change-id {
+      font: 800 12px/1 var(--mono);
+      white-space: nowrap;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      margin: 2px 4px 2px 0;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font: 800 11px/1.2 var(--mono);
+      white-space: nowrap;
+    }
+
+    .tag.low { color: var(--ok); background: var(--ok-soft); border-color: #b8d8c2; }
+    .tag.med { color: var(--warn); background: var(--warn-soft); border-color: #e4cc91; }
+    .tag.high { color: var(--danger); background: var(--danger-soft); border-color: #edb9ab; }
+    .tag.keep { color: var(--info); background: var(--info-soft); border-color: #c6d5e8; }
+    .tag.phase { color: var(--accent); background: var(--accent-soft); border-color: #b9d8d4; }
+
+    .hidden { display: none; }
+
+    .phase-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .phase-card {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: var(--radius);
+      padding: 14px;
+      min-height: 232px;
+    }
+
+    .phase-card .step {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 10px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font: 800 12px/1 var(--mono);
+    }
+
+    .checklist-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 250px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      font: 12px/1.5 var(--mono);
+      color: var(--ink);
+      background: #fbfbf8;
+    }
+
+    .copybar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .evidence-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .evidence-list div {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      background: #fbfbf8;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .page { padding: 20px; }
+      .top, .checklist-grid { grid-template-columns: 1fr; }
+      .summary-grid, .phase-grid, .evidence-list { grid-template-columns: 1fr; }
+      table { min-width: 860px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="top">
+      <section class="panel">
+        <p class="kicker">Implementation handoff plan</p>
+        <h1>BuddySwitch user simulation skill 效果保持优化计划</h1>
+        <p class="lead">This HTML helps the user confirm that refactoring <code>buddyswitch-user-simulation-testing</code> will preserve current behavior by turning the skill into an effect contract, mapping each proposed change to possible loss, and defining validation before any skill rewrite is accepted.</p>
+        <div class="summary-grid">
+          <div class="metric"><strong>15</strong><span>当前效果合同项，从触发到证据、报告和脚本验证。</span></div>
+          <div class="metric"><strong>9</strong><span>建议改造动作；其中 3 项需要额外保护或后置验证。</span></div>
+          <div class="metric"><strong>0</strong><span>本 artifact 不改 skill 本体；这里只给效果保持计划。</span></div>
+        </div>
+      </section>
+      <aside class="panel verdict">
+        <div class="verdict-row">
+          <div class="label">结论</div>
+          <div>推荐做行为保持型压缩：主文件保留 steering 和不可丢的 completion criteria，表格、示例和 branch 细节下沉到 references。</div>
+        </div>
+        <div class="verdict-row">
+          <div class="label">高风险点</div>
+          <div>触发描述、checkpoint 默认继续、browser/sub-agent 细节、最终 report 格式。它们影响 predictability，不能只靠“更短”来判断。</div>
+        </div>
+        <div class="verdict-row">
+          <div class="label">策略</div>
+          <div>先冻结效果合同，再分批改造，每批用 prompt fixture、schema validator、forward-test 输出证明未损失。</div>
+        </div>
+        <div class="verdict-row">
+          <div class="label">来源</div>
+          <div><code>.agents/skills/buddyswitch-user-simulation-testing/</code> 当前文件和 references；设计判断来自用户提供的 glossary 与本地 <code>skill-creator</code> 规则。</div>
+        </div>
+      </aside>
+    </header>
+
+    <nav class="controls" aria-label="risk filters">
+      <button class="active" data-filter="all">全部改造</button>
+      <button data-filter="high">只看可能损失</button>
+      <button data-filter="med">中等风险</button>
+      <button data-filter="low">低风险</button>
+      <button data-filter="keep">建议保留不动</button>
+    </nav>
+
+    <section class="section panel">
+      <h2>一、当前效果合同</h2>
+      <p class="note">这些不是章节摘要，而是现在 skill 已经产生的行为效果。后续优化必须逐项保留或明确权衡。</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>效果</th>
+              <th>当前行为</th>
+              <th>主要来源</th>
+              <th>保持标准</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="effect-id">E01 触发范围</td><td>从 BuddySwitch feature/implementation memo、target behavior、existing test result 触发，产出 simulated-user plan/run/audit/report。</td><td><code>SKILL.md:3</code></td><td>新 description 仍能覆盖 memo、target-only、audit/extend、evidence-backed claim。</td></tr>
+            <tr><td class="effect-id">E02 Probe-only 边界</td><td>只发现、复现、收集证据、限制稳定性声明；不修产品代码。</td><td><code>SKILL.md:10-12</code>, <code>71-81</code></td><td>主文件必须保留，不下沉成可忽略 reference。</td></tr>
+            <tr><td class="effect-id">E03 低输入负担</td><td>用户只给 memo 或 target 也可运行；Focus/Mode/Records/Constraints 缺省时由 Codex 推断。</td><td><code>SKILL.md:38-69</code>, <code>references/invocation-and-pairing.md</code></td><td>优化后不能变成表单或多轮审批。</td></tr>
+            <tr><td class="effect-id">E04 效果先于场景</td><td>先抽取 P0 user effect、P1 invariant、P2 residue guard、out-of-scope，再选测试。</td><td><code>SKILL.md:31</code>, <code>98-103</code>, <code>references/memo-to-goals.md</code></td><td>每个 plan/run/audit 都必须有 effects 记录。</td></tr>
+            <tr><td class="effect-id">E05 策略综合</td><td>从效果语言推导 means families、gates、adapters、sub-agent candidates、claim downgrades。</td><td><code>SKILL.md:32</code>, <code>104-109</code>, <code>167-178</code></td><td>任何跳过的 required means/gate 都要降级 claim。</td></tr>
+            <tr><td class="effect-id">E06 单次 checkpoint</td><td>只做一个 correction/risk checkpoint；无风险确认时说明边界后继续。</td><td><code>SKILL.md:16-25</code>, <code>33</code>, <code>110-132</code></td><td>不能回退成双审批或要求用户预选机制。</td></tr>
+            <tr><td class="effect-id">E07 风险确认</td><td>live Codex、signed-in Chrome、source edits、preserve state、用户数据 mutation、产品语义分歧时必须停等确认。</td><td><code>SKILL.md:83-94</code></td><td>风险列表必须保留在高注意层级。</td></tr>
+            <tr><td class="effect-id">E08 四种模式</td><td><code>Design</code>, <code>Run</code>, <code>Audit</code>, <code>Extend</code> 有不同执行边界。</td><td><code>SKILL.md:138-143</code></td><td>改造后仍能从用户措辞和 overrides 推断模式。</td></tr>
+            <tr><td class="effect-id">E09 Gate claim discipline</td><td>G0-G4 限制 final claim；跳过相关 gate 不能 <code>FULL PASS</code>。</td><td><code>SKILL.md:155-165</code>, <code>references/gate-levels.md</code></td><td>保留一条内联硬规则，并由 evidence summary 校验。</td></tr>
+            <tr><td class="effect-id">E10 Sub-agent 并行证据</td><td>独立 surfaces、residue audit、log/state review、stress probes 可用 bounded sub-agents；主 agent 汇总 claim。</td><td><code>SKILL.md:34</code>, <code>180-197</code></td><td>下沉细节可以，但默认使用条件和主 agent ownership 不能丢。</td></tr>
+            <tr><td class="effect-id">E11 Browser adapter discipline</td><td>先选 means family，再选 Playwright、Chrome DevTools、Desktop Chrome、Computer Use 等 adapter；CLI Chrome extension 不可用时不空转。</td><td><code>SKILL.md:64</code>, <code>199-213</code>, <code>references/simulation-means.md</code></td><td>触发词 browser/Chrome/profile/CDP/Playwright 必须可靠指向 reference。</td></tr>
+            <tr><td class="effect-id">E12 Records-root evidence</td><td>计划、过程、证据、临时脚本、sub-agent 输出、cleanup proof、summary 全部写到 records root。</td><td><code>SKILL.md:35</code>, <code>223-241</code>, <code>references/evidence-schema.md</code></td><td>所有 pass/partial pass 都要有 schema-backed evidence。</td></tr>
+            <tr><td class="effect-id">E13 BuddySwitch runtime constraints</td><td>走 user-facing surfaces，隔离 HOME/CODEX_HOME/shared root，fake Codex 默认，创建的 actors 必须清理。</td><td><code>SKILL.md:215-221</code>, <code>references/buddy-runtime-surfaces.md</code></td><td>主文件保留短规则，细节由 runtime surfaces reference 承担。</td></tr>
+            <tr><td class="effect-id">E14 Report 和禁止过度声明</td><td>最终报告固定结构，禁止用单一测试或 fake Codex 过度证明 live/multi-entry/stress 稳定。</td><td><code>SKILL.md:243-289</code></td><td>最终 claim 格式和 unacceptable conclusions 要么内联保留，要么有强制读取步骤。</td></tr>
+            <tr><td class="effect-id">E15 脚本化验证</td><td><code>init_simulation_evidence.py</code> 建骨架，<code>summarize_simulation_evidence.py</code> 校验 pass 条件。</td><td><code>scripts/</code>, <code>SKILL.md:153</code>, <code>241</code></td><td>改造后仍要求运行 validator，特别是 pass/partial pass 前。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section panel">
+      <h2>二、逐项改造后评估</h2>
+      <p class="note">“可能损失”列只要非空，就必须有保留手段和验证门槛；高风险项后置到 forward-test 之后。</p>
+      <div class="table-wrap">
+        <table id="changeTable">
+          <thead>
+            <tr>
+              <th>改造</th>
+              <th>动作</th>
+              <th>覆盖效果</th>
+              <th>可能效果损失</th>
+              <th>优化或权衡</th>
+              <th>验证门槛</th>
+              <th>风险</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-risk="med"><td class="change-id">C01</td><td>重写 description，去掉过窄的 <code>through Codex CLI</code>，加入 <code>probe-only</code>, <code>simulated-user</code>, <code>feature memo</code>, <code>target behavior</code>, <code>existing evidence</code>, <code>claim downgrade</code>。</td><td>E01, E02, E08, E14</td><td>触发过宽会让普通测试请求误用；触发过窄会漏掉 Desktop/browser/live/audit 场景。</td><td>保留 <code>BuddySwitch</code> 和 <code>simulated-user</code> 作为强边界，不把通用测试、普通 CI、代码修复写进 trigger。</td><td>用 8 个 prompt fixtures 做人工/子代理触发审核：memo run、plan only、target-only、audit evidence、ordinary unit-test request、bugfix request、browser profile request、non-BuddySwitch request。</td><td><span class="tag med">medium</span></td></tr>
+            <tr data-risk="low"><td class="change-id">C02</td><td>把 <code>SKILL.md</code> 收成执行骨架：Purpose、Non-negotiables、SOP、completion criteria、reference routing。</td><td>E02-E15</td><td>如果只压缩不补 completion criteria，agent 可能更早宣布完成。</td><td>每个 SOP step 加 checkable completion criterion，例如 effects extracted、strategy recorded、checkpoint recorded、summary validator clean。</td><td>静态 diff 检查：15 个效果至少有一个主文件或 reference 位置承接；SOP 每步都有 done 条件。</td><td><span class="tag low">low</span></td></tr>
+            <tr data-risk="med"><td class="change-id">C03</td><td>把 minimum input、defaults、checkpoint examples、pairings 的重复内容单一来源化到 <code>references/invocation-and-pairing.md</code>。</td><td>E03, E06, E08</td><td>如果 SOP 没有强制先读 invocation reference，默认继续和低输入行为会变弱。</td><td>主文件只保留一句硬规则：do the thinking, one correction checkpoint, continue unless risk confirmation。SOP step 1 必须读 invocation reference 来定 mode/defaults/checkpoint。</td><td>Design prompt 和 Run prompt 输出必须都包含 inferred defaults 和一个 checkpoint；Run 且无风险时不得等待二次批准。</td><td><span class="tag med">medium</span></td></tr>
+            <tr data-risk="keep"><td class="change-id">C04</td><td>保留 probe-only boundary 和 risk confirmation 列表在主文件，不下沉。</td><td>E02, E07, E12, E13</td><td>无。这里是主动不改，避免把安全/授权边界降到 reference 层。</td><td>可只删重复措辞，不删具体风险列表和 source-edit ban。</td><td>全文搜索必须仍能在 <code>SKILL.md</code> 直接看到 <code>Probe-Only Boundary</code> 和 <code>Risk Confirmation</code>。</td><td><span class="tag keep">keep</span></td></tr>
+            <tr data-risk="low"><td class="change-id">C05</td><td>把 means/gate 表格级内容下沉到 <code>simulation-means.md</code> 和 <code>gate-levels.md</code>；主文件保留 “required gate/means skipped means downgrade, never FULL PASS”。</td><td>E05, E09, E14</td><td>如果把 FULL PASS 限制也移走，最终声明容易过度。</td><td>主文件保留唯一硬规则；reference 承担完整矩阵和例子。</td><td>Audit existing evidence fixture 中，缺 G4 或 G3 时必须给 <code>PARTIAL PASS</code> 或 downgrade，不得 <code>FULL PASS</code>。</td><td><span class="tag low">low</span></td></tr>
+            <tr data-risk="high"><td class="change-id">C06</td><td>把 browser adapter 细节只放在 <code>simulation-means.md</code>，主文件只保留 “browser tools are adapters, not top-level means”。</td><td>E11</td><td>高风险：agent 可能不读取 reference，回到 Chrome extension reinstall loop，或错误声称 signed-in Chrome coverage。</td><td>保留带触发词的强指针：when effect mentions browser, Chrome, CDP, Playwright, profile, extension, Desktop, or Computer Use, read Browser Adapter Notes before choosing tools。</td><td>Browser target-only prompt 必须选择 Playwright/browser MCP 或 Chrome DevTools 的正确边界，并显式 downgrade signed-in Chrome profile claim。</td><td><span class="tag high">high</span></td></tr>
+            <tr data-risk="med"><td class="change-id">C07</td><td>把 sub-agent split examples 下沉到 <code>scenario-matrix.md</code> 的 Sub-Agent Fit，主文件保留 bounded sub-agent default 和 main-agent final claim ownership。</td><td>E10, E12, E14</td><td>可能损失并行 evidence collection 倾向，或 sub-agent 写入边界变弱。</td><td>主文件保留 “use bounded sub-agents by default when independent evidence can be collected without shared mutable state”。写入路径和 source-edit ban 仍在主文件。</td><td>包含 Web/IM/Track 三 surface 的 plan fixture 必须提出 sub-agent split 或记录 unavailable downgrade。</td><td><span class="tag med">medium</span></td></tr>
+            <tr data-risk="high"><td class="change-id">C08</td><td>暂不移动 exact report format 和 unacceptable conclusions；后续若要下沉，先新建 <code>references/reporting.md</code> 并强制 SOP final step 读取。</td><td>E14</td><td>高风险：最终输出格式漂移、claim overreach、remaining risk 被省略。</td><td>第一轮保留在主文件。压缩目标让位于 predictability。</td><td>所有 forward-test 输出必须包含 Result, Effects Tested, Claim Proven, Means Used, Strategy, Subagents, Gates, Evidence, Cleanup, Remaining Risk。</td><td><span class="tag high">high</span></td></tr>
+            <tr data-risk="low"><td class="change-id">C09</td><td>给超过 100 行的 reference 加短 TOC，并调整 context pointers 的 wording。</td><td>E03-E13</td><td>低风险。主要收益是减少 pointer miss 和 reference 内部查找成本。</td><td>不改 reference 语义，只加目录和更明确的 “when to read”。</td><td>引用文件 heading 一层可见；主文件每个 reference pointer 都有条件词。</td><td><span class="tag low">low</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>三、分阶段优化计划</h2>
+      <div class="phase-grid">
+        <article class="phase-card">
+          <span class="step">0</span>
+          <h3>冻结效果合同</h3>
+          <p>把 E01-E15 作为 rewrite acceptance checklist。任何删除或移动都必须映射到这些效果。</p>
+          <span class="tag phase">artifact first</span>
+          <span class="tag low">no skill edits</span>
+        </article>
+        <article class="phase-card">
+          <span class="step">1</span>
+          <h3>低风险骨架化</h3>
+          <p>执行 C01-C05：description、SOP completion criteria、defaults/pairing 单一来源、means/gate 下沉。保留 probe-only 和 risk confirmation。</p>
+          <span class="tag med">trigger review</span>
+          <span class="tag low">duplication cut</span>
+        </article>
+        <article class="phase-card">
+          <span class="step">2</span>
+          <h3>受保护下沉</h3>
+          <p>执行 C06-C09 中低风险部分；browser 和 reporting 只在 pointer/forward-test 证明可靠后再移动。</p>
+          <span class="tag high">browser caution</span>
+          <span class="tag keep">report kept</span>
+        </article>
+        <article class="phase-card">
+          <span class="step">3</span>
+          <h3>Forward-test 接受</h3>
+          <p>用真实形态 prompts 测 Design、Run、Audit、Extend、browser target、multi-surface sub-agent。失败则回滚该项下沉，不扩大范围。</p>
+          <span class="tag med">subagent eval</span>
+          <span class="tag low">validator</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="section panel">
+      <h2>四、需要重点分析或权衡的可能损失</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>风险列</th>
+              <th>为什么会损失效果</th>
+              <th>优化方案</th>
+              <th>权衡结论</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>触发描述</td><td>Description 是模型每轮可见的 context pointer。改得太泛会误触发，太窄会漏掉 live/browser/audit。</td><td>用 BuddySwitch + simulated-user + probe-only + evidence-backed claim 形成边界；不要把普通测试、修 bug、CI 纳入。</td><td>值得改，但必须 prompt fixture 审核。</td></tr>
+            <tr><td>低输入和 checkpoint</td><td>把 defaults 下沉后，如果 agent 不读 reference，就会问太多问题或等待批准，破坏 “do the thinking”。</td><td>主文件保留一句不可下沉原则，并在 SOP 第一段强制读 invocation reference。</td><td>可以单一来源化，但 checkpoint 核心语义留在主文件。</td></tr>
+            <tr><td>Browser adapter</td><td>这是高度条件化且容易被工具可用性误导的 branch。下沉过度会让 agent 选错工具或重试不可用 extension。</td><td>保留强 pointer 和关键禁令；browser terms 出现时必须读 Browser Adapter Notes。</td><td>第一轮只压缩重复，不完全移除主文件提示。</td></tr>
+            <tr><td>Report format</td><td>最终报告是每条路径都需要的 completion criterion。下沉后容易省略 remaining risk 或 overclaim guard。</td><td>保留 exact top-level structure 至少一轮；若后续新建 reporting reference，SOP final step 必须强制读取。</td><td>不为缩短主文件牺牲 claim discipline。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section checklist-grid">
+      <div class="panel">
+        <h2>执行检查清单</h2>
+        <textarea id="checklist" readonly>Effect-preserving rewrite checklist:
+1. Freeze E01-E15 as acceptance criteria before editing SKILL.md.
+2. Rewrite description only if it still triggers BuddySwitch probe-only simulated-user planning, running, auditing, extending, and evidence-backed claim downgrade.
+3. Keep Probe-Only Boundary and Risk Confirmation visible in SKILL.md.
+4. Move duplicated defaults/checkpoint examples to references/invocation-and-pairing.md, but keep "do the thinking" and "one checkpoint" in SKILL.md.
+5. Keep a main-file hard rule: skipped required means/gate downgrades the claim and cannot be FULL PASS.
+6. Do not move exact report format in the first pass.
+7. Add completion criteria to SOP steps: effects, strategy, checkpoint, plan, evidence, cleanup, summary validation.
+8. Add TOCs to long references without changing semantics.
+9. Run quick skill validation, script smoke tests, and forward-test prompt fixtures.
+10. Accept the rewrite only when every fixture preserves the relevant E01-E15 behavior.</textarea>
+        <div class="copybar">
+          <button id="copyChecklist">复制 checklist</button>
+          <span id="copyStatus" class="label">Ready</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>验证证据路径</h2>
+        <div class="evidence-list">
+          <div><strong>Skill body</strong><br><code>.agents/skills/buddyswitch-user-simulation-testing/SKILL.md</code></div>
+          <div><strong>Invocation/defaults</strong><br><code>references/invocation-and-pairing.md</code></div>
+          <div><strong>Effect extraction</strong><br><code>references/memo-to-goals.md</code></div>
+          <div><strong>Means and browser</strong><br><code>references/simulation-means.md</code></div>
+          <div><strong>Claim gates</strong><br><code>references/gate-levels.md</code></div>
+          <div><strong>Evidence schema</strong><br><code>references/evidence-schema.md</code></div>
+          <div><strong>Scenarios and sub-agents</strong><br><code>references/scenario-matrix.md</code></div>
+          <div><strong>Runtime surfaces</strong><br><code>references/buddy-runtime-surfaces.md</code></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const filterButtons = Array.from(document.querySelectorAll('[data-filter]'));
+    const changeRows = Array.from(document.querySelectorAll('#changeTable tbody tr'));
+
+    filterButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const filter = button.dataset.filter;
+        filterButtons.forEach((item) => item.classList.toggle('active', item === button));
+        changeRows.forEach((row) => {
+          row.classList.toggle('hidden', filter !== 'all' && row.dataset.risk !== filter);
+        });
+      });
+    });
+
+    document.getElementById('copyChecklist').addEventListener('click', async () => {
+      const text = document.getElementById('checklist').value;
+      const status = document.getElementById('copyStatus');
+      status.textContent = 'Copying';
+      try {
+        await navigator.clipboard.writeText(text);
+        status.textContent = 'Copied';
+      } catch (error) {
+        status.textContent = 'Select manually';
+      }
+      setTimeout(() => { status.textContent = 'Ready'; }, 1600);
+    });
+  </script>
+</body>
+</html>

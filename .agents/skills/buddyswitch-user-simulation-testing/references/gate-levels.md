@@ -2,6 +2,15 @@
 
 Use these gates to decide what a BuddySwitch stability claim is allowed to say after feature effects are confirmed.
 
+## Table Of Contents
+
+- [G0 Contract](#g0-contract)
+- [G1 Fake Product Simulation](#g1-fake-product-simulation)
+- [G2 Entry Surface Simulation](#g2-entry-surface-simulation)
+- [G3 Stress And Recovery](#g3-stress-and-recovery)
+- [G4 Live Codex Smoke](#g4-live-codex-smoke)
+- [Claim Rule](#claim-rule)
+
 ## G0 Contract
 
 Purpose: prove code-level contracts.
@@ -116,4 +125,4 @@ Cannot claim:
 
 ## Claim Rule
 
-The final claim is limited to the confirmed effects and highest required gate that passed. If a confirmed effect includes live service compatibility and G4 is skipped, the result is not `FULL PASS`.
+The final claim is limited to the confirmed effects and highest required gate that passed. If a target-relevant required gate is skipped, failed, or blocked, downgrade the claim and never report `FULL PASS`. If a confirmed effect includes live service compatibility and G4 is skipped, the result is not `FULL PASS`.

@@ -1,4 +1,4 @@
 interface:
   display_name: "BuddySwitch User Simulation Testing"
   short_description: "Probe BuddySwitch user flows and report evidence-backed risks"
-  default_prompt: "Use $buddyswitch-user-simulation-testing on docs/memo/<feature-memo>.md to infer target effects, design/run a probe-only simulated-user verification, and write all evidence under the chosen records root."
+  default_prompt: "Use $buddyswitch-user-simulation-testing on docs/memo/<feature-memo>.md to infer effects, run a probe-only simulated-user verification, and produce evidence-backed claim limits/downgrades under the records root."

@@ -2,6 +2,19 @@
 
 Use this structure for every simulation evidence directory.
 
+## Table Of Contents
+
+- [`summary.json`](#summaryjson)
+- [Command Record](#command-record)
+- [Mandatory Assertions](#mandatory-assertions)
+- [Log Scan](#log-scan)
+- [Cleanup Proof](#cleanup-proof)
+- [Process Record Proof](#process-record-proof)
+- [Strategy Decision Proof](#strategy-decision-proof)
+- [Probe-Only Proof](#probe-only-proof)
+- [Sub-Agent Proof](#sub-agent-proof)
+- [Means Proof](#means-proof)
+
 ```text
 evidence-YYYY-MM-DD[-label]/
   process/

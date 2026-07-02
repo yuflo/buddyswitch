@@ -2,6 +2,18 @@
 
 Use this reference to map user scenarios to code surfaces and evidence.
 
+## Table Of Contents
+
+- [CLI](#cli)
+- [Side Thread Lifecycle](#side-thread-lifecycle)
+- [Task Sys](#task-sys)
+- [Web Management](#web-management)
+- [IM Wake](#im-wake)
+- [Track Comment Wake](#track-comment-wake)
+- [Browser Cockpit / Search](#browser-cockpit--search)
+- [Fake Codex](#fake-codex)
+- [Live Codex](#live-codex)
+
 ## CLI
 
 Main launcher: `./buddyswitch-codex`
