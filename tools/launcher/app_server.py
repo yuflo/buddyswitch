@@ -92,6 +92,14 @@ class AppServerRequestError(AppServerError):
         super().__init__(detail)
 
 
+def _optional_non_empty_text(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise AppServerProtocolError(f"{field_name} must not be empty")
+    return value.strip()
+
+
 def runtime_dir(instance_root: Path) -> Path:
     return instance_root / "runtime"
 
@@ -725,9 +733,16 @@ def thread_fork(
     workspace_dir: Path,
     shared_project_workspace_dir: Path,
     permissions: str,
+    model: str | None = None,
+    model_reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     if not permissions:
         raise AppServerProtocolError("side fork requires an explicit permissions profile")
+    normalized_model = _optional_non_empty_text(model, "model")
+    normalized_effort = _optional_non_empty_text(
+        model_reasoning_effort,
+        "model_reasoning_effort",
+    )
     params: dict[str, Any] = {
         "threadId": parent_thread_id,
         "cwd": str(workspace_dir),
@@ -740,6 +755,10 @@ def thread_fork(
         "ephemeral": True,
         "excludeTurns": True,
     }
+    if normalized_model is not None:
+        params["model"] = normalized_model
+    if normalized_effort is not None:
+        params["config"] = {"model_reasoning_effort": normalized_effort}
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
         return client.request("thread/fork", params)
 

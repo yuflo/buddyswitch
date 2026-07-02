@@ -116,6 +116,8 @@ class RepoConsistencyTests(unittest.TestCase):
             return True
         if path_text.startswith("docs/spec/2026-07-02-side-thread-lifecycle-"):
             return True
+        if path_text.startswith("docs/spec/2026-07-02-side-thread-model-effort-"):
+            return True
         if path_text.startswith("docs/spec/browser-cockpit-lazy-release/"):
             return True
         name = Path(path_text).name
@@ -305,6 +307,14 @@ print(json.dumps({{
         ]
         self.assertEqual(direct_hits, [], msg="\n".join(direct_hits))
 
+        legacy_shell_helpers = tuple(
+            "buddyswitch_instance_" + action + "_side_thread"
+            for action in ("register", "require", "unregister")
+        )
+        for helper in legacy_shell_helpers:
+            helper_hits = self._scan_targets(helper, targets)
+            self.assertEqual(helper_hits, [], msg="\n".join(helper_hits))
+
         terminology_pattern = "|".join(
             (
                 "physical_" + "close",
@@ -315,6 +325,19 @@ print(json.dumps({{
         )
         terminology_hits = self._scan_targets(terminology_pattern, targets)
         self.assertEqual(terminology_hits, [], msg="\n".join(terminology_hits))
+
+    def test_side_thread_model_override_has_no_persistent_config_write_path(self) -> None:
+        targets = ["tools/launcher", "scripts/env", "buddyswitch-codex", "tests"]
+        forbidden = (
+            "thread/" + "settings/update",
+            "config/" + "batchWrite",
+            "Persist" + "ModelSelection",
+            "Update" + "Model",
+        )
+        hits: list[str] = []
+        for token in forbidden:
+            hits.extend(self._scan_targets(token, targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_env_store_module_is_runtime_root_compat_only(self) -> None:
         retired_api = (

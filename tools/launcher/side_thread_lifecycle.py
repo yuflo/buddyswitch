@@ -23,6 +23,27 @@ def _require_text(value: object, field_name: str) -> str:
     return value.strip()
 
 
+def _optional_text(value: object, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise SideThreadLifecycleError(f"{field_name} must not be empty")
+    return value.strip()
+
+
+def _model_config_result(model: str | None, model_reasoning_effort: str | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model_source": "override" if model is not None else "parent_thread",
+        "model_reasoning_effort_source": "override" if model_reasoning_effort is not None else "parent_thread",
+        "model_config_durability": "thread_fork_only",
+    }
+    if model is not None:
+        payload["model"] = model
+    if model_reasoning_effort is not None:
+        payload["model_reasoning_effort"] = model_reasoning_effort
+    return payload
+
+
 def _thread_id_from_fork(result: Mapping[str, Any]) -> str:
     thread = result.get("thread")
     if not isinstance(thread, Mapping):
@@ -81,16 +102,22 @@ def start_side_thread(
     shared_project_workspace_dir: Path,
     permissions: str,
     task_id: str | None = None,
+    model: str | None = None,
+    model_reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     normalized_actor = _require_text(actor_id, "actor_id")
     normalized_parent = _require_text(parent_thread_id, "parent_thread_id")
     normalized_purpose = _require_text(purpose, "purpose")
+    normalized_model = _optional_text(model, "model")
+    normalized_effort = _optional_text(model_reasoning_effort, "model_reasoning_effort")
     forked = app_server.thread_fork(
         socket_path,
         normalized_parent,
         workspace_dir=workspace_dir,
         shared_project_workspace_dir=shared_project_workspace_dir,
         permissions=permissions,
+        model=normalized_model,
+        model_reasoning_effort=normalized_effort,
     )
     side_thread_id = _thread_id_from_fork(forked)
     app_server.thread_inject_items(socket_path, side_thread_id, [app_server.side_boundary_prompt_item()])
@@ -113,6 +140,7 @@ def start_side_thread(
         "thread_action": sent.get("action") or "start",
         "turn_id": turn_id,
         "lease_registered": True,
+        **_model_config_result(normalized_model, normalized_effort),
     }
 
 
@@ -261,7 +289,11 @@ def find_or_start_side_thread(
     workspace_dir: Path,
     shared_project_workspace_dir: Path,
     permissions: str,
+    model: str | None = None,
+    model_reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
+    normalized_model = _optional_text(model, "model")
+    normalized_effort = _optional_text(model_reasoning_effort, "model_reasoning_effort")
     row = side_thread_registry.find_open_side_thread(
         instance_json,
         actor_id=actor_id,
@@ -269,6 +301,8 @@ def find_or_start_side_thread(
     )
     side_thread_id = row.get("thread_id") if isinstance(row, Mapping) else None
     if isinstance(side_thread_id, str) and side_thread_id.strip():
+        if normalized_model is not None or normalized_effort is not None:
+            raise SideThreadLifecycleError("model and effort only applies when starting a new side thread")
         return send_to_side_thread(
             socket_path=socket_path,
             instance_json=instance_json,
@@ -288,6 +322,8 @@ def find_or_start_side_thread(
         workspace_dir=workspace_dir,
         shared_project_workspace_dir=shared_project_workspace_dir,
         permissions=permissions,
+        model=normalized_model,
+        model_reasoning_effort=normalized_effort,
     )
 
 
@@ -307,6 +343,8 @@ def _command_start(args: argparse.Namespace) -> int:
             workspace_dir=Path(args.workspace_dir),
             shared_project_workspace_dir=Path(args.shared_project_workspace_dir),
             permissions=args.permissions,
+            model=args.model,
+            model_reasoning_effort=args.effort,
         )
     )
     return 0
@@ -354,6 +392,8 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--workspace-dir", required=True)
     start.add_argument("--shared-project-workspace-dir", required=True)
     start.add_argument("--permissions", required=True)
+    start.add_argument("--model")
+    start.add_argument("--effort")
     start.set_defaults(func=_command_start)
 
     send = subparsers.add_parser("send")

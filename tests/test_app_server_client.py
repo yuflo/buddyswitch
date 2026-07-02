@@ -367,6 +367,132 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(results[0]["thread"]["id"], "thread-1")
 
+    def test_thread_fork_sends_model_and_reasoning_effort_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_fork() -> None:
+                try:
+                    results.append(
+                        APP_SERVER.thread_fork(
+                            socket_path,
+                            "thread-parent",
+                            workspace_dir=Path("/tmp/bs-workspace"),
+                            shared_project_workspace_dir=Path("/tmp/bs-project"),
+                            permissions="buddyswitch-runtime",
+                            model="gpt-5.4",
+                            model_reasoning_effort="high",
+                        )
+                    )
+                except BaseException as exc:
+                    errors.append(exc)
+
+            fork_thread = threading.Thread(target=run_fork, daemon=True)
+            fork_thread.start()
+            fork_thread.join(timeout=0.05)
+            if errors:
+                raise errors[0]
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/fork")
+            params = request["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(params["threadId"], "thread-parent")
+            self.assertEqual(params["model"], "gpt-5.4")
+            self.assertEqual(params["config"], {"model_reasoning_effort": "high"})
+            self.assertEqual(params["permissions"], "buddyswitch-runtime")
+            self.assertTrue(params["ephemeral"])
+            self.assertTrue(params["excludeTurns"])
+
+            server.send_response(
+                request["id"],
+                {
+                    "thread": {"id": "thread-side-1", "status": {"type": "idle"}},
+                    "model": "gpt-5.4",
+                    "modelProvider": "openai",
+                    "serviceTier": None,
+                    "cwd": "/tmp/bs-workspace",
+                    "runtimeWorkspaceRoots": ["/tmp/bs-workspace", "/tmp/bs-project"],
+                    "instructionSources": [],
+                    "approvalPolicy": "never",
+                    "approvalsReviewer": "user",
+                    "sandbox": {"mode": "workspace-write"},
+                    "activePermissionProfile": {"id": "buddyswitch-runtime"},
+                    "reasoningEffort": "high",
+                },
+            )
+            fork_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results[0]["thread"]["id"], "thread-side-1")
+
+    def test_thread_fork_omits_model_and_effort_when_inheriting_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+            errors: list[BaseException] = []
+
+            def run_fork() -> None:
+                try:
+                    APP_SERVER.thread_fork(
+                        socket_path,
+                        "thread-parent",
+                        workspace_dir=Path("/tmp/bs-workspace"),
+                        shared_project_workspace_dir=Path("/tmp/bs-project"),
+                        permissions="buddyswitch-runtime",
+                    )
+                except BaseException as exc:
+                    errors.append(exc)
+
+            fork_thread = threading.Thread(target=run_fork, daemon=True)
+            fork_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/fork")
+            params = request["params"]
+            assert isinstance(params, dict)
+            self.assertNotIn("model", params)
+            self.assertNotIn("modelProvider", params)
+            self.assertNotIn("config", params)
+
+            server.send_response(
+                request["id"],
+                {
+                    "thread": {"id": "thread-side-1", "status": {"type": "idle"}},
+                    "model": "gpt-5",
+                    "modelProvider": "openai",
+                    "serviceTier": None,
+                    "cwd": "/tmp/bs-workspace",
+                    "runtimeWorkspaceRoots": ["/tmp/bs-workspace", "/tmp/bs-project"],
+                    "instructionSources": [],
+                    "approvalPolicy": "never",
+                    "approvalsReviewer": "user",
+                    "sandbox": {"mode": "workspace-write"},
+                    "activePermissionProfile": {"id": "buddyswitch-runtime"},
+                    "reasoningEffort": None,
+                },
+            )
+            fork_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+
     def test_thread_bootstrap_rollout_injects_minimal_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))

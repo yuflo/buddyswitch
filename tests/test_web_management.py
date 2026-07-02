@@ -1756,6 +1756,58 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(payload["turn_id"], "turn-side-1")
         self.assertEqual(payload["instance"]["thread_id"], "thread-main")
 
+    def test_side_route_passes_model_and_effort_only_for_new_side_thread(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    [
+                        "instance",
+                        "side",
+                        "act-pm-demo",
+                        "--text",
+                        "Start side",
+                        "--model",
+                        "gpt-5.4",
+                        "--effort",
+                        "high",
+                        "--json",
+                    ],
+                    command_json(
+                        {
+                            "actor_id": "act-pm-demo",
+                            "action": "start",
+                            "thread_action": "start",
+                            "parent_thread_id": "thread-main",
+                            "side_thread_id": "thread-side-1",
+                            "turn_id": "turn-side-1",
+                            "model": "gpt-5.4",
+                            "model_reasoning_effort": "high",
+                            "model_source": "override",
+                            "model_reasoning_effort_source": "override",
+                            "model_config_durability": "thread_fork_only",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "act-pm-demo", "--json"],
+                    command_json(active_status("act-pm-demo", "thread-main", "idle")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api(
+            "POST",
+            "/api/instances/act-pm-demo/side",
+            b'{"text":"Start side","model":"gpt-5.4","effort":"high"}',
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["side_thread_id"], "thread-side-1")
+        self.assertEqual(payload["model"], "gpt-5.4")
+        self.assertEqual(payload["model_reasoning_effort"], "high")
+        self.assertEqual(payload["model_config_durability"], "thread_fork_only")
+
     def test_side_send_route_delegates_existing_side(self) -> None:
         runner = OrderedRunner(
             [
@@ -1866,6 +1918,24 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+        self.assertEqual(runner.calls, [])
+
+    def test_side_route_rejects_model_or_effort_with_existing_side_thread_id(self) -> None:
+        runner, base_url = self._start_server()
+        status, payload = self._request_json(
+            base_url,
+            method="POST",
+            path="/api/instances/act-pm-demo/side",
+            payload={
+                "side_thread_id": "thread-side-1",
+                "text": "Follow up",
+                "model": "gpt-5.4",
+                "effort": "high",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+        self.assertIn("only applies when starting a new side thread", payload["error"]["message"])
         self.assertEqual(runner.calls, [])
 
     def test_side_close_route_rejects_missing_side_thread_id(self) -> None:

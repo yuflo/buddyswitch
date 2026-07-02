@@ -235,6 +235,8 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(call["shared_project_workspace_dir"], context.project_workspace_dir)
         self.assertEqual(call["permissions"], context.permissions)
         self.assertEqual(call["task_id"], "task-user-input-abcdef123456")
+        self.assertNotIn("model", call)
+        self.assertNotIn("model_reasoning_effort", call)
         self.assertIn("task_sys.side_frame", call["text"])
         self.assertIn("task_sys.close", call["text"])
         self.assertIn("task_sys.need_parent", call["text"])

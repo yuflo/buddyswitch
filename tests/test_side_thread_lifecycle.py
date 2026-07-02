@@ -77,6 +77,8 @@ class FakeAppServer(types.ModuleType):
         workspace_dir: Path,
         shared_project_workspace_dir: Path,
         permissions: str,
+        model: str | None = None,
+        model_reasoning_effort: str | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -86,6 +88,8 @@ class FakeAppServer(types.ModuleType):
                 "workspace_dir": workspace_dir,
                 "shared_project_workspace_dir": shared_project_workspace_dir,
                 "permissions": permissions,
+                "model": model,
+                "model_reasoning_effort": model_reasoning_effort,
             }
         )
         return {"thread": {"id": "thr-side-1"}}
@@ -261,6 +265,87 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertEqual(rows[0]["purpose"], "task_sys.side_frame")
             self.assertEqual(rows[0]["task_id"], "task-user-input-abc123")
             self.assertEqual(rows[0]["turn_id"], "turn-side-started")
+
+    def test_start_side_thread_passes_model_and_effort_to_fork_without_registry_persistence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+
+            result = self.lifecycle.start_side_thread(
+                socket_path=self.socket_path,
+                instance_json=instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                text="Start side work",
+                purpose="host_control.side",
+                workspace_dir=self.workspace_dir,
+                shared_project_workspace_dir=self.project_workspace_dir,
+                permissions="buddyswitch-runtime",
+                model="gpt-5.4",
+                model_reasoning_effort="high",
+            )
+
+            fork_call = self.app_server.calls[0]
+            self.assertEqual(fork_call["helper"], "thread_fork")
+            self.assertEqual(fork_call["model"], "gpt-5.4")
+            self.assertEqual(fork_call["model_reasoning_effort"], "high")
+            self.assertEqual(result["model_source"], "override")
+            self.assertEqual(result["model"], "gpt-5.4")
+            self.assertEqual(result["model_reasoning_effort_source"], "override")
+            self.assertEqual(result["model_reasoning_effort"], "high")
+            self.assertEqual(result["model_config_durability"], "thread_fork_only")
+
+            row = self._payload(instance_json)["side_threads"][0]
+            self.assertNotIn("model", row)
+            self.assertNotIn("model_reasoning_effort", row)
+
+    def test_start_side_thread_none_model_and_effort_mean_parent_inheritance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+
+            result = self.lifecycle.start_side_thread(
+                socket_path=self.socket_path,
+                instance_json=instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                text="Start side work",
+                purpose="host_control.side",
+                workspace_dir=self.workspace_dir,
+                shared_project_workspace_dir=self.project_workspace_dir,
+                permissions="buddyswitch-runtime",
+            )
+
+            fork_call = self.app_server.calls[0]
+            self.assertIsNone(fork_call["model"])
+            self.assertIsNone(fork_call["model_reasoning_effort"])
+            self.assertEqual(result["model_source"], "parent_thread")
+            self.assertEqual(result["model_reasoning_effort_source"], "parent_thread")
+            self.assertEqual(result["model_config_durability"], "thread_fork_only")
+            self.assertNotIn("model", result)
+            self.assertNotIn("model_reasoning_effort", result)
+
+    def test_find_or_start_rejects_model_or_effort_when_existing_side_thread_would_be_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            self._seed_side_thread(instance_json)
+
+            with self.assertRaisesRegex(
+                self.lifecycle.SideThreadLifecycleError,
+                "only applies when starting a new side thread",
+            ):
+                self.lifecycle.find_or_start_side_thread(
+                    socket_path=self.socket_path,
+                    instance_json=instance_json,
+                    actor_id="act-dev-side",
+                    parent_thread_id="thr-main",
+                    text="Follow up",
+                    purpose="daemon.side_triage",
+                    workspace_dir=self.workspace_dir,
+                    shared_project_workspace_dir=self.project_workspace_dir,
+                    permissions="buddyswitch-runtime",
+                    model="gpt-5.4",
+                )
+
+            self.assertEqual(self.app_server.calls, [])
 
     def test_send_to_active_side_thread_steers_stored_turn_without_turn_list(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

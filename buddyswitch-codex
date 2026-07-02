@@ -511,6 +511,16 @@ for key in ("turn_id", "expected_turn_id"):
     value = source.get(key)
     if isinstance(value, str) and value:
         payload[key] = value
+for key in (
+    "model",
+    "model_reasoning_effort",
+    "model_source",
+    "model_reasoning_effort_source",
+    "model_config_durability",
+):
+    value = source.get(key)
+    if isinstance(value, str) and value:
+        payload[key] = value
 print(json.dumps(payload, ensure_ascii=True))
 PY
     return 0
@@ -545,7 +555,7 @@ PY
 }
 
 instance_side() {
-  local actor_id="${1:-}" text="" side_thread_id="" parent_thread_id="" arg output json=0
+  local actor_id="${1:-}" text="" side_thread_id="" parent_thread_id="" model="" effort="" arg output json=0
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
     return 2
@@ -571,6 +581,22 @@ instance_side() {
         side_thread_id="$2"
         shift 2
         ;;
+      --model)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "instance side requires --model <model>" >&2
+          return 2
+        fi
+        model="$2"
+        shift 2
+        ;;
+      --effort)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "instance side requires --effort <effort>" >&2
+          return 2
+        fi
+        effort="$2"
+        shift 2
+        ;;
       --json)
         json=1
         shift
@@ -584,6 +610,10 @@ instance_side() {
 
   if [[ -z "${text}" ]]; then
     echo "instance side requires --text <text>" >&2
+    return 2
+  fi
+  if [[ -n "${side_thread_id}" && ( -n "${model}" || -n "${effort}" ) ]]; then
+    echo "instance side --model/--effort only applies when starting a new side thread" >&2
     return 2
   fi
 
@@ -604,7 +634,7 @@ instance_side() {
     return $?
   fi
 
-  output="$(buddyswitch_side_thread_lifecycle_start "${actor_id}" "${parent_thread_id}" "${text}" 2>&1)" || {
+  output="$(buddyswitch_side_thread_lifecycle_start "${actor_id}" "${parent_thread_id}" "${text}" "${model}" "${effort}" 2>&1)" || {
     [[ -n "${output}" ]] && echo "${output}" >&2
     return 1
   }

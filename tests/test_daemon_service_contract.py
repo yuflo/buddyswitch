@@ -931,6 +931,8 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(calls[0]["workspace_dir"], context.workspace_dir)
             self.assertEqual(calls[0]["shared_project_workspace_dir"], context.project_workspace_dir)
             self.assertEqual(calls[0]["permissions"], "buddyswitch-runtime")
+            self.assertNotIn("model", calls[0])
+            self.assertNotIn("model_reasoning_effort", calls[0])
             records = self._runtime_records(instance["instance_root"])
             self.assertEqual([record["runtime_method"] for record in records], ["side_start", "side_send"])
             self.assertEqual([record["side_thread_id"] for record in records], ["thr-side-1", "thr-side-1"])

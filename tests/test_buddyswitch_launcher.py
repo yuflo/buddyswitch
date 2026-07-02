@@ -3488,6 +3488,59 @@ exec "$real_git" "$@"
             self.assertEqual(side_thread["parent_thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(side_thread["status"], "open")
 
+    def test_side_start_accepts_model_and_effort_as_thread_fork_only_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"next_side_thread_id": "thread-side-1"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["actor_id"],
+                    "--text",
+                    "Use a specific side model",
+                    "--model",
+                    "gpt-5.4",
+                    "--effort",
+                    "high",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
+            payload = json.loads(side_result.stdout)
+            self.assertEqual(payload["action"], "start")
+            self.assertEqual(payload["model"], "gpt-5.4")
+            self.assertEqual(payload["model_reasoning_effort"], "high")
+            self.assertEqual(payload["model_config_durability"], "thread_fork_only")
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
+            self.assertEqual(fork["params"]["model"], "gpt-5.4")
+            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "high"})
+            methods = [row["rpc_method"] for row in rpc_rows]
+            self.assertNotIn("thread/" + "settings/update", methods)
+            self.assertNotIn("config/" + "batchWrite", methods)
+
+            instance_payload = json.loads((ctx["instance_root"] / "instance.json").read_text(encoding="utf-8"))
+            side_thread = instance_payload["side_threads"][0]
+            self.assertNotIn("model", side_thread)
+            self.assertNotIn("model_reasoning_effort", side_thread)
+
     def test_side_create_human_output_prints_side_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
@@ -3687,6 +3740,54 @@ exec "$real_git" "$@"
             self.assertNotIn("turn/start", methods)
             self.assertNotIn("turn/steer", methods)
             self.assertNotIn("turn/interrupt", methods)
+
+    def test_side_send_rejects_model_and_effort_before_rpc_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            self._set_instance_side_threads(
+                ctx["instance_root"],
+                [
+                    {
+                        "thread_id": "thread-side-1",
+                        "parent_thread_id": main_thread_id,
+                        "status": "open",
+                        "turn_id": "turn-side-1",
+                    }
+                ],
+            )
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["actor_id"],
+                    "--side-thread-id",
+                    "thread-side-1",
+                    "--text",
+                    "Bad switch",
+                    "--model",
+                    "gpt-5.4",
+                    "--effort",
+                    "high",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(side_result.returncode, 0)
+            self.assertIn("only applies when starting a new side thread", side_result.stderr)
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            self.assertEqual(rpc_rows, [])
 
     def test_side_send_rejects_main_thread_id_as_side_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

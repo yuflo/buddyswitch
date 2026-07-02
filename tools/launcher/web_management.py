@@ -466,12 +466,20 @@ class WebManagementService:
         *,
         text: str,
         side_thread_id: str | None,
+        model: str | None,
+        effort: str | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
         args = ["instance", "side", actor_id]
         if side_thread_id is not None:
             args.extend(["--side-thread-id", side_thread_id])
-        args.extend(["--text", text, "--json"])
+        args.extend(["--text", text])
+        if side_thread_id is None:
+            if model:
+                args.extend(["--model", model])
+            if effort:
+                args.extend(["--effort", effort])
+        args.append("--json")
         result = self._run_command(args, timeout_seconds=timeout_seconds)
         return load_command_json_object(
             result.stdout,
@@ -496,20 +504,61 @@ class WebManagementService:
         side_thread_id = payload.get("side_thread_id")
         if side_thread_id is not None and (not isinstance(side_thread_id, str) or not side_thread_id.strip()):
             raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
+        model = payload.get("model")
+        if model is not None and (not isinstance(model, str) or not model.strip()):
+            raise HttpError(status=400, code="INVALID_REQUEST", message="model must not be empty.")
+        effort = payload.get("effort")
+        if effort is not None and (not isinstance(effort, str) or not effort.strip()):
+            raise HttpError(status=400, code="INVALID_REQUEST", message="effort must not be empty.")
+        normalized_model = model.strip() if isinstance(model, str) else None
+        normalized_effort = effort.strip() if isinstance(effort, str) else None
+        if side_thread_id is not None and (normalized_model is not None or normalized_effort is not None):
+            raise HttpError(
+                status=400,
+                code="INVALID_REQUEST",
+                message="model and effort only applies when starting a new side thread.",
+            )
         return self._run_busy(
             f"instance:{actor_id}",
-            lambda: self._side_under_lock(actor_id, text, side_thread_id if isinstance(side_thread_id, str) else None),
+            lambda: self._side_under_lock(
+                actor_id,
+                text,
+                side_thread_id if isinstance(side_thread_id, str) else None,
+                normalized_model,
+                normalized_effort,
+            ),
         )
 
-    def _side_under_lock(self, actor_id: str, text: str, side_thread_id: str | None) -> dict[str, Any]:
+    def _side_under_lock(
+        self,
+        actor_id: str,
+        text: str,
+        side_thread_id: str | None,
+        model: str | None,
+        effort: str | None,
+    ) -> dict[str, Any]:
         parsed = self._run_side_command(
             actor_id,
             text=text,
             side_thread_id=side_thread_id,
+            model=model,
+            effort=effort,
             timeout_seconds=60,
         )
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
-        for key in ("action", "thread_action", "parent_thread_id", "side_thread_id", "turn_id", "expected_turn_id"):
+        for key in (
+            "action",
+            "thread_action",
+            "parent_thread_id",
+            "side_thread_id",
+            "turn_id",
+            "expected_turn_id",
+            "model",
+            "model_reasoning_effort",
+            "model_source",
+            "model_reasoning_effort_source",
+            "model_config_durability",
+        ):
             value = parsed.get(key)
             if isinstance(value, str):
                 payload[key] = value
