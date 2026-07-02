@@ -25,8 +25,10 @@ import app_server  # noqa: E402
 import daemon_mailbox  # noqa: E402
 import daemon_triggers  # noqa: E402
 import runtime_event_log  # noqa: E402
-import side_thread_registry  # noqa: E402
+import side_thread_lifecycle  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
+from task_sys_runtime import cleanup_task_sys_side_lease as task_sys_cleanup_task_sys_side_lease  # noqa: E402
+from task_sys_runtime import execute_instruction as task_sys_execute_instruction  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
@@ -898,6 +900,12 @@ class DaemonRuntime:
         self.state = state
         self.client = client
 
+    def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
+        return task_sys_execute_instruction(self.context, instruction)
+
+    def cleanup_task_sys_side_lease(self, task_id: str) -> dict[str, Any]:
+        return task_sys_cleanup_task_sys_side_lease(self.context, task_id)
+
     def parent_activity(self) -> dict[str, Any]:
         try:
             result = app_server.thread_read(self.context.socket_path, self.context.main_thread_id, include_turns=False)
@@ -1091,153 +1099,45 @@ class DaemonRuntime:
             result["interrupted_turn_id"] = interrupted_turn_id
         return result
 
-    def _start_side_triage(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
-        side_thread_id: str | None = None
-        try:
-            result = app_server.side_start(
-                self.context.socket_path,
-                self.context.main_thread_id,
-                text,
-                workspace_dir=self.context.workspace_dir,
-                shared_project_workspace_dir=self.context.project_workspace_dir,
-                permissions=self.context.permissions,
-            )
-            side_thread_id = _string_field(result, "side_thread_id", "sideThreadId")
-            if not side_thread_id:
-                raise app_server.AppServerProtocolError("side_start did not return a side_thread_id")
-            side_thread_registry.register_side_thread(
-                self.context.instance_json,
-                actor_id=self.context.actor_id,
-                parent_thread_id=self.context.main_thread_id,
-                side_thread_id=side_thread_id,
-            )
-            turn_id = _string_field(result, "turn_id", "turnId")
-        except Exception as exc:
-            self._record_runtime_call(
-                handler_name=handler_name,
-                origin_id=origin_id,
-                runtime_method="side_start",
-                side_thread_id=side_thread_id,
-                status="failed",
-                error=str(exc),
-            )
-            raise
-        self._record_runtime_call(
-            handler_name=handler_name,
-            origin_id=origin_id,
-            runtime_method="side_start",
-            side_thread_id=side_thread_id,
-            turn_id=turn_id,
-            status="succeeded",
+    def submit_side_triage_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
+        result = side_thread_lifecycle.find_or_start_side_thread(
+            socket_path=self.context.socket_path,
+            instance_json=self.context.instance_json,
+            actor_id=self.context.actor_id,
+            parent_thread_id=self.context.main_thread_id,
+            text=text,
+            purpose="daemon.side_triage",
+            workspace_dir=self.context.workspace_dir,
+            shared_project_workspace_dir=self.context.project_workspace_dir,
+            permissions=self.context.permissions,
         )
-        payload = dict(result)
-        payload["action"] = "start"
-        payload["side_thread_id"] = side_thread_id
-        return payload
-
-    def _send_side_triage(
-        self,
-        side_thread_id: str,
-        text: str,
-        *,
-        handler_name: str,
-        origin_id: str | None,
-    ) -> dict[str, Any]:
-        try:
-            side_thread_registry.require_side_thread(
-                self.context.instance_json,
-                actor_id=self.context.actor_id,
-                parent_thread_id=self.context.main_thread_id,
-                side_thread_id=side_thread_id,
-            )
-            result = app_server.input_turn(
-                self.context.socket_path,
-                side_thread_id,
-                text,
-                self.context.permissions,
-            )
-            turn_id = _string_field(result, "turn_id", "turnId")
-        except Exception as exc:
+        action = result.get("action")
+        side_thread_id = _string_field(result, "side_thread_id", "sideThreadId")
+        if action == "send" and side_thread_id:
             self._record_runtime_call(
                 handler_name=handler_name,
                 origin_id=origin_id,
                 runtime_method="side_send",
                 side_thread_id=side_thread_id,
-                status="failed",
-                error=str(exc),
+                turn_id=_string_field(result, "turn_id", "turnId"),
+                status="succeeded",
             )
-            raise
-        self._record_runtime_call(
-            handler_name=handler_name,
-            origin_id=origin_id,
-            runtime_method="side_send",
-            side_thread_id=side_thread_id,
-            turn_id=turn_id,
-            status="succeeded",
-        )
-        payload: dict[str, Any] = dict(result)
-        payload["action"] = "send"
-        payload["thread_action"] = result.get("action")
-        payload["side_thread_id"] = side_thread_id
-        return payload
-
-    def submit_side_triage_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
-        row = side_thread_registry.find_open_side_thread(
-            self.context.instance_json,
-            actor_id=self.context.actor_id,
-            parent_thread_id=self.context.main_thread_id,
-        )
-        side_thread_id = row.get("thread_id") if isinstance(row, dict) else None
-        if isinstance(side_thread_id, str) and side_thread_id:
-            return self._send_side_triage(side_thread_id, text, handler_name=handler_name, origin_id=origin_id)
-        return self._start_side_triage(text, handler_name=handler_name, origin_id=origin_id)
-
-    def _require_side_thread(self, side_thread_id: str) -> dict[str, Any]:
-        return side_thread_registry.require_side_thread(
-            self.context.instance_json,
-            actor_id=self.context.actor_id,
-            parent_thread_id=self.context.main_thread_id,
-            side_thread_id=side_thread_id,
-        )
-
-    def _close_side_triage(self, side_thread_id: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
-        try:
-            side_thread_registry.require_side_thread(
-                self.context.instance_json,
-                actor_id=self.context.actor_id,
-                parent_thread_id=self.context.main_thread_id,
-                side_thread_id=side_thread_id,
-            )
-            result = app_server.side_close(self.context.socket_path, side_thread_id)
-            side_thread_registry.unregister_side_thread(
-                self.context.instance_json,
-                actor_id=self.context.actor_id,
-                parent_thread_id=self.context.main_thread_id,
-                side_thread_id=side_thread_id,
-            )
-            turn_id = _string_field(result, "turn_id", "turnId")
-        except Exception as exc:
+            payload = dict(result)
+            payload["action"] = "send"
+            return payload
+        if side_thread_id:
             self._record_runtime_call(
                 handler_name=handler_name,
                 origin_id=origin_id,
-                runtime_method="side_close",
+                runtime_method="side_start",
                 side_thread_id=side_thread_id,
-                status="failed",
-                error=str(exc),
+                turn_id=_string_field(result, "turn_id", "turnId"),
+                status="succeeded",
             )
-            raise
-        self._record_runtime_call(
-            handler_name=handler_name,
-            origin_id=origin_id,
-            runtime_method="side_close",
-            side_thread_id=side_thread_id,
-            turn_id=turn_id,
-            status="succeeded",
-        )
-        payload: dict[str, Any] = dict(result)
-        payload["action"] = "close"
-        payload["side_thread_id"] = side_thread_id
-        return payload
+            payload = dict(result)
+            payload["action"] = "start"
+            return payload
+        raise app_server.AppServerProtocolError("side lifecycle did not return a side_thread_id")
 
 
 def load_daemon_context(instance_json: Path) -> DaemonContext:
@@ -1369,6 +1269,26 @@ def heartbeat_daemon_actor(
     )
 
 
+def _dispatch_task_sys_mailbox_command(
+    context: DaemonContext,
+    state: DaemonState,
+    action: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    runtime = DaemonRuntime(context=context, state=state)
+    if action == "execute_instruction":
+        instruction = params.get("instruction")
+        if not isinstance(instruction, dict):
+            raise ValueError("instruction must be an object")
+        return runtime.execute_task_sys_instruction(instruction)
+    if action == "cleanup_side_lease":
+        task_id = params.get("task_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id must be a non-empty string")
+        return runtime.cleanup_task_sys_side_lease(task_id)
+    raise ValueError(f"unsupported Task Sys mailbox action: {action}")
+
+
 def start_daemon_mailbox(
     *,
     context: DaemonContext,
@@ -1389,6 +1309,7 @@ def start_daemon_mailbox(
             trigger,
             handlers,
         ),
+        task_sys_dispatcher=lambda action, params: _dispatch_task_sys_mailbox_command(context, state, action, params),
     )
     thread = __import__("threading").Thread(target=server.serve_forever, daemon=True)
     thread.start()

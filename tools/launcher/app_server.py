@@ -858,42 +858,50 @@ def input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -
     return {"action": "steer", "turn_id": result.get("turnId"), "expected_turn_id": in_progress_turn_id}
 
 
-def side_start(
-    socket_path: Path,
-    parent_thread_id: str,
-    text: str,
-    *,
-    workspace_dir: Path,
-    shared_project_workspace_dir: Path,
-    permissions: str,
-) -> dict[str, Any]:
-    forked = thread_fork(
-        socket_path,
-        parent_thread_id,
-        workspace_dir=workspace_dir,
-        shared_project_workspace_dir=shared_project_workspace_dir,
-        permissions=permissions,
-    )
-    thread = forked.get("thread")
-    if not isinstance(thread, dict):
-        raise AppServerProtocolError("thread/fork did not return a thread object")
-    side_thread_id = thread.get("id")
-    if not isinstance(side_thread_id, str) or not side_thread_id:
-        raise AppServerProtocolError("thread/fork did not return a child thread id")
-
-    thread_inject_items(socket_path, side_thread_id, [side_boundary_prompt_item()])
-    sent = input_turn(socket_path, side_thread_id, text, permissions)
-    payload: dict[str, Any] = {
-        "action": "start",
-        "thread_action": sent.get("action"),
-        "parent_thread_id": parent_thread_id,
-        "side_thread_id": side_thread_id,
-        "turn_id": sent.get("turn_id"),
-    }
-    expected_turn_id = sent.get("expected_turn_id")
-    if isinstance(expected_turn_id, str) and expected_turn_id:
-        payload["expected_turn_id"] = expected_turn_id
+def turn_start(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
+    if not permissions:
+        raise AppServerProtocolError("turn start requires an explicit permissions profile")
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        result = client.request(
+            "turn/start",
+            {
+                "threadId": thread_id,
+                "input": text_input_payload(text),
+                "permissions": permissions,
+            },
+        )
+    turn = result.get("turn")
+    turn_id = turn.get("id") if isinstance(turn, dict) else None
+    payload = dict(result)
+    payload["action"] = "start"
+    payload["turn_id"] = turn_id
     return payload
+
+
+def turn_steer(socket_path: Path, thread_id: str, turn_id: str, text: str) -> dict[str, Any]:
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        result = client.request("turn/steer", build_turn_steer_params(thread_id, turn_id, text))
+    returned_turn_id = result.get("turnId")
+    payload = dict(result)
+    payload["action"] = "steer"
+    payload["turn_id"] = returned_turn_id if isinstance(returned_turn_id, str) and returned_turn_id else turn_id
+    payload["expected_turn_id"] = turn_id
+    return payload
+
+
+def turn_interrupt(socket_path: Path, thread_id: str, turn_id: str) -> dict[str, Any]:
+    if not isinstance(turn_id, str) or not turn_id.strip():
+        raise AppServerProtocolError("turn interrupt requires a turn id")
+    normalized_turn_id = turn_id.strip()
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        client.request(
+            "turn/interrupt",
+            {
+                "threadId": thread_id,
+                "turnId": normalized_turn_id,
+            },
+        )
+    return {"ok": True, "turn_id": normalized_turn_id}
 
 
 def interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
@@ -909,23 +917,6 @@ def interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
             },
         )
     return {"ok": True, "turn_id": turn_id}
-
-
-def side_close(socket_path: Path, side_thread_id: str) -> dict[str, Any]:
-    turn_id = active_turn_id(socket_path, side_thread_id)
-    startup_interrupt = turn_id is None
-    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
-        client.request(
-            "turn/interrupt",
-            {
-                "threadId": side_thread_id,
-                "turnId": turn_id or "",
-            },
-        )
-    payload: dict[str, Any] = {"ok": True, "startup_interrupt": startup_interrupt}
-    if turn_id:
-        payload["turn_id"] = turn_id
-    return payload
 
 
 def goal_get(socket_path: Path, thread_id: str) -> dict[str, Any]:
@@ -1031,27 +1022,8 @@ def _command_input(args: argparse.Namespace) -> int:
     return 0
 
 
-def _command_side_start(args: argparse.Namespace) -> int:
-    payload = side_start(
-        Path(args.socket),
-        args.parent_thread_id,
-        args.text,
-        workspace_dir=Path(args.workspace_dir),
-        shared_project_workspace_dir=Path(args.shared_project_workspace_dir),
-        permissions=args.permissions,
-    )
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0
-
-
 def _command_interrupt(args: argparse.Namespace) -> int:
     payload = interrupt_turn(Path(args.socket), args.thread_id)
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0
-
-
-def _command_side_close(args: argparse.Namespace) -> int:
-    payload = side_close(Path(args.socket), args.side_thread_id)
     print(json.dumps(payload, ensure_ascii=True))
     return 0
 
@@ -1146,24 +1118,10 @@ def build_parser() -> argparse.ArgumentParser:
     input_parser.add_argument("--permissions", required=True)
     input_parser.set_defaults(func=_command_input)
 
-    side_start_parser = subparsers.add_parser("side-start")
-    side_start_parser.add_argument("--socket", required=True)
-    side_start_parser.add_argument("--parent-thread-id", required=True)
-    side_start_parser.add_argument("--text", required=True)
-    side_start_parser.add_argument("--workspace-dir", required=True)
-    side_start_parser.add_argument("--shared-project-workspace-dir", required=True)
-    side_start_parser.add_argument("--permissions", required=True)
-    side_start_parser.set_defaults(func=_command_side_start)
-
     interrupt = subparsers.add_parser("interrupt")
     interrupt.add_argument("--socket", required=True)
     interrupt.add_argument("--thread-id", required=True)
     interrupt.set_defaults(func=_command_interrupt)
-
-    side_close_parser = subparsers.add_parser("side-close")
-    side_close_parser.add_argument("--socket", required=True)
-    side_close_parser.add_argument("--side-thread-id", required=True)
-    side_close_parser.set_defaults(func=_command_side_close)
 
     goal_get_parser = subparsers.add_parser("goal-get")
     goal_get_parser.add_argument("--socket", required=True)

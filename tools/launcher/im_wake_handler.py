@@ -16,7 +16,6 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import daemon_core  # noqa: E402
 import task_sys_ingress  # noqa: E402
-import task_sys_runtime  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
@@ -62,7 +61,6 @@ class ImMessageCreatedHandler:
             message_id = _payload_id(trigger, "message_id")
             conversation_id = _payload_id(trigger, "conversation_id")
             event_id = _payload_id(trigger, "event_id")
-            del runtime
             result = task_sys_ingress.ingest_im_message(
                 actor_id=target_actor.actor_id,
                 role_id=target_actor.role_id,
@@ -70,7 +68,10 @@ class ImMessageCreatedHandler:
                 conversation_id=conversation_id,
                 event_id=event_id,
             )
-            task_sys_runtime.execute_instruction(context, result["instruction"])
+            execute = getattr(runtime, "execute_task_sys_instruction", None)
+            if not callable(execute):
+                raise RuntimeError("daemon runtime does not support Task Sys instruction execution")
+            execute(result["instruction"])
             return daemon_core.HandlerResult.handled()
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))

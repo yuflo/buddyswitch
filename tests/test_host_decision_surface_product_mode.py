@@ -52,7 +52,6 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
                 "source": {"type": "test.decision_surface", "ref": source_ref},
                 "actor_target": {"actor_id": actor_id, "role_id": role},
                 "context": {"fixture": "decision surface"},
-                "initial_processor": "checkpoint",
             }
         )
         return str(result["task_id"])

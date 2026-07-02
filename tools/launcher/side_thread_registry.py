@@ -79,6 +79,7 @@ def register_side_thread(
     side_thread_id: str,
     task_id: str | None = None,
     purpose: str | None = None,
+    turn_id: str | None = None,
     now: NowFn | None = None,
 ) -> dict[str, Any]:
     actor = _require_id(actor_id, "Actor id")
@@ -96,11 +97,48 @@ def register_side_thread(
         row["task_id"] = _require_id(task_id, "Task id")
     if purpose is not None:
         row["purpose"] = _require_id(purpose, "Side thread purpose")
+    if turn_id is not None:
+        row["turn_id"] = _require_id(turn_id, "Turn id")
     payload["side_threads"] = [item for item in _side_rows(payload) if item.get("thread_id") != side]
     payload["side_threads"].append(row)
     payload["updated_at"] = timestamp
     _write_payload(Path(instance_json), payload)
     return row
+
+
+def update_side_thread(
+    instance_json: Path,
+    *,
+    actor_id: str,
+    parent_thread_id: str,
+    side_thread_id: str,
+    turn_id: str | None = None,
+    status: str | None = None,
+    now: NowFn | None = None,
+) -> dict[str, Any]:
+    actor = _require_id(actor_id, "Actor id")
+    parent, side = _validate_side_identity(parent_thread_id, side_thread_id)
+    payload = _load_payload(Path(instance_json), actor)
+    timestamp = _now_value(now)
+    updated_row: dict[str, Any] | None = None
+    rows: list[dict[str, Any]] = []
+    for row in _side_rows(payload):
+        if row.get("thread_id") == side and row.get("parent_thread_id") == parent and row.get("status") == "open":
+            updated_row = dict(row)
+            if turn_id is not None:
+                updated_row["turn_id"] = _require_id(turn_id, "Turn id")
+            if status is not None:
+                updated_row["status"] = _require_id(status, "Side thread status")
+            updated_row["updated_at"] = timestamp
+            rows.append(updated_row)
+            continue
+        rows.append(row)
+    if updated_row is None:
+        raise SideThreadRegistryError(f"Side thread is not registered for this instance: {side}")
+    payload["side_threads"] = rows
+    payload["updated_at"] = timestamp
+    _write_payload(Path(instance_json), payload)
+    return updated_row
 
 
 def _is_task_bound_lease(row: dict[str, Any]) -> bool:

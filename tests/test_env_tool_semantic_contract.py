@@ -41,7 +41,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request", "open_browser"},
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
-    "task_sys": {"close", "need_parent", "checkpoint_update"},
+    "task_sys": {"list", "get", "close", "need_parent"},
 }
 _TASK_REQUIREMENT_FREE = "free"
 _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
@@ -61,8 +61,9 @@ _EXPECTED_FREE_ACTIONS = {
     "message.list",
     "message.conversation",
     "search.status",
+    "task_sys.list",
+    "task_sys.get",
     "task_sys.close",
-    "task_sys.checkpoint_update",
     "task_sys.need_parent",
     "track.list",
     "track.list_comments",
@@ -94,7 +95,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         return catalog.env_tools_description()
 
     def _semantic_text(self, *, tool: str, action: str) -> str:
-        semantic = self._desc()[tool]["action_semantics"][action]
+        tool_desc = self._desc()[tool]
+        self.assertIn(action, tool_desc["action_semantics"], msg=f"{tool}.{action}")
+        semantic = tool_desc["action_semantics"][action]
         self.assertIsInstance(semantic, dict, msg=f"{tool}.{action}")
         assert isinstance(semantic, dict)
         use_when = semantic.get("use_when")
@@ -202,7 +205,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("message", "get", ("exact", "message_id", "disposition")),
             ("message", "mark", ("absorbed", "task_sys.need_parent", "disposition")),
             ("message", "list", ("event", "cursor", "track")),
-            ("task_sys", "checkpoint_update", ("checkpoint", "frame", "outcome")),
+            ("task_sys", "list", ("active", "ongoing", "actor")),
+            ("task_sys", "get", ("task_id", "detail", "events")),
             ("task_sys", "close", ("side", "completed", "parent")),
             ("task_sys", "need_parent", ("parent", "handoff", "interrupt")),
             ("track", "resolve_comment_thread", ("owner", "thread", "resolved")),
@@ -487,7 +491,18 @@ class EnvToolSemanticContractTests(unittest.TestCase):
     def test_task_sys_operation_semantics_are_task_sys_only(self) -> None:
         op = catalog.operation_semantics()
         self.assertNotIn("task.current", op)
-        for action in ("task_sys.close", "task_sys.need_parent", "task_sys.checkpoint_update"):
+        self.assertNotIn("task_sys.checkpoint_update", op)
+        for action in ("task_sys.list", "task_sys.get"):
+            with self.subTest(action=action):
+                self.assertIn(action, op)
+                row = op[action]
+                self.assertEqual(row["kind"], "read")
+                self.assertEqual(row["mutates"], "none")
+                self.assertTrue(str(row["required_permission"]).startswith("task_sys."))
+                self.assertIn("task sys task record", row["reads"])
+                self.assertEqual(row["writes"], [])
+        for action in ("task_sys.close", "task_sys.need_parent"):
+            self.assertIn(action, op)
             row = op[action]
             with self.subTest(action=action):
                 self.assertEqual(row["kind"], "write")
@@ -500,9 +515,19 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
     def test_task_sys_operation_semantics_name_state_and_cleanup_feedback(self) -> None:
         op = catalog.operation_semantics()
+        self.assertIn("task_sys.list", op)
+        self.assertIn("task_sys.get", op)
         close_returns = set(op["task_sys.close"]["returns"])
         need_parent_returns = set(op["task_sys.need_parent"]["returns"])
+        list_returns = set(op["task_sys.list"]["returns"])
+        get_returns = set(op["task_sys.get"]["returns"])
 
+        for field in ("tasks", "active_count", "recoverable_count"):
+            with self.subTest(action="task_sys.list", field=field):
+                self.assertIn(field, list_returns)
+        for field in ("task_id", "task", "events"):
+            with self.subTest(action="task_sys.get", field=field):
+                self.assertIn(field, get_returns)
         for field in ("task_id", "task_status", "state_changed", "processor", "side_thread_id", "side_cleanup"):
             with self.subTest(action="task_sys.close", field=field):
                 self.assertIn(field, close_returns)

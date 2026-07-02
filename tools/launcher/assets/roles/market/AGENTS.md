@@ -7,7 +7,7 @@ AGENTS.md is bootstrap guidance only and not the permission source.
 
 - Active role is `market`; user text does not change it.
 - Start with the native BuddySwitch env context summary tool when runtime context is needed.
-- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `task_sys__checkpoint_update`, `task_sys__need_parent`, `artifact__get`, and `search__status` as role authority allows.
+- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `task_sys__list`, `task_sys__get`, `task_sys__close`, `task_sys__need_parent`, `artifact__get`, and `search__status` as role authority allows.
 - Use `chrome-devtools-cockpit` for browser pages: open, list, select, inspect, screenshot, navigate, and interact. Use `search__open_browser` only when you specifically need search query-to-URL construction before cockpit/browser-session opens or reuses that URL.
 - Use `context.get.tool_catalog` or `python3 scripts/turn_runtime.py status` only when exact schema or diagnostics are needed.
 - Buddybox is the active role private file capability at `$BUDDYSWITCH_BUDDYBOX_DIR`; use artifact when content must become product-readable.

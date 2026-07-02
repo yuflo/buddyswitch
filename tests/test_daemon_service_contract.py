@@ -214,7 +214,7 @@ class DaemonServiceContractTests(unittest.TestCase):
                     "retryable": True,
                     "attempts": 2,
                     "last_side_thread_id": "thr-side-failed",
-                    "cleanup": {"registry_unregistered": True, "physical_close_ok": False},
+                    "cleanup": {"lease_unregistered": True, "turn_interrupt_ok": False},
                 },
             )
 
@@ -910,39 +910,16 @@ class DaemonServiceContractTests(unittest.TestCase):
             state = self._state(instance["instance_root"])
             runtime = self.core.DaemonRuntime(context=context, state=state)
             calls: list[dict[str, object]] = []
-            original_side_start = self.core.app_server.side_start
-            original_input_turn = self.core.app_server.input_turn
+            original_find_or_start = self.core.side_thread_lifecycle.find_or_start_side_thread
 
-            def fake_side_start(
-                socket_path: Path,
-                parent_thread_id: str,
-                text: str,
-                *,
-                workspace_dir: Path,
-                shared_project_workspace_dir: Path,
-                permissions: str,
-            ) -> dict[str, object]:
-                calls.append(
-                    {
-                        "helper": "side_start",
-                        "socket_path": socket_path,
-                        "parent_thread_id": parent_thread_id,
-                        "text": text,
-                        "workspace_dir": workspace_dir,
-                        "shared_project_workspace_dir": shared_project_workspace_dir,
-                        "permissions": permissions,
-                    }
-                )
-                return {"action": "start", "side_thread_id": "thr-side-1", "turn_id": "turn-side-1"}
+            def fake_find_or_start_side_thread(**kwargs: object) -> dict[str, object]:
+                calls.append({"helper": "find_or_start_side_thread", **kwargs})
+                if len(calls) == 1:
+                    return {"action": "start", "side_thread_id": "thr-side-1", "turn_id": "turn-side-1", "thread_action": "start"}
+                return {"action": "send", "side_thread_id": "thr-side-1", "turn_id": "turn-side-2", "thread_action": "steer"}
 
-            def fake_input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
-                calls.append({"helper": "input_turn", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
-                return {"action": "start", "turn_id": "turn-side-2"}
-
-            self.addCleanup(setattr, self.core.app_server, "side_start", original_side_start)
-            self.addCleanup(setattr, self.core.app_server, "input_turn", original_input_turn)
-            self.core.app_server.side_start = fake_side_start
-            self.core.app_server.input_turn = fake_input_turn
+            self.addCleanup(setattr, self.core.side_thread_lifecycle, "find_or_start_side_thread", original_find_or_start)
+            self.core.side_thread_lifecycle.find_or_start_side_thread = fake_find_or_start_side_thread
 
             started = runtime.submit_side_triage_prompt("triage prompt", handler_name="im_message_created", origin_id="msg-1")
             reused = runtime.submit_side_triage_prompt("follow up", handler_name="im_message_created", origin_id="msg-2")
@@ -950,15 +927,13 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(started["side_thread_id"], "thr-side-1")
             self.assertEqual(reused["side_thread_id"], "thr-side-1")
             self.assertEqual(reused["action"], "send")
-            self.assertEqual([call["helper"] for call in calls], ["side_start", "input_turn"])
+            self.assertEqual([call["helper"] for call in calls], ["find_or_start_side_thread", "find_or_start_side_thread"])
             self.assertEqual(calls[0]["workspace_dir"], context.workspace_dir)
             self.assertEqual(calls[0]["shared_project_workspace_dir"], context.project_workspace_dir)
             self.assertEqual(calls[0]["permissions"], "buddyswitch-runtime")
             records = self._runtime_records(instance["instance_root"])
             self.assertEqual([record["runtime_method"] for record in records], ["side_start", "side_send"])
             self.assertEqual([record["side_thread_id"] for record in records], ["thr-side-1", "thr-side-1"])
-            payload = json.loads(instance["instance_json"].read_text(encoding="utf-8"))
-            self.assertEqual(payload["side_threads"][0]["thread_id"], "thr-side-1")
 
     def test_daemon_runtime_handler_facing_surface_is_exactly_clean_runtime_methods(self) -> None:
         public_methods = {
@@ -972,8 +947,50 @@ class DaemonServiceContractTests(unittest.TestCase):
                 "parent_activity",
                 "submit_parent_prompt",
                 "submit_side_triage_prompt",
+                "execute_task_sys_instruction",
+                "cleanup_task_sys_side_lease",
             },
         )
+
+    def test_daemon_runtime_task_sys_methods_delegate_to_task_sys_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            runtime = self.core.DaemonRuntime(context=context, state=state)
+            calls: list[dict[str, object]] = []
+            original_execute = self.core.task_sys_execute_instruction
+            original_cleanup = self.core.task_sys_cleanup_task_sys_side_lease
+
+            def fake_execute(runtime_context: object, instruction: dict[str, object]) -> dict[str, object]:
+                calls.append({"method": "execute", "context": runtime_context, "instruction": instruction})
+                return {"action": instruction["type"], "task_id": instruction["task_id"]}
+
+            def fake_cleanup(runtime_context: object, task_id: str) -> dict[str, object]:
+                calls.append({"method": "cleanup", "context": runtime_context, "task_id": task_id})
+                return {"action": "cleanup", "side_thread_id": "thr-side-1", "lease_unregistered": True}
+
+            self.addCleanup(setattr, self.core, "task_sys_execute_instruction", original_execute)
+            self.addCleanup(setattr, self.core, "task_sys_cleanup_task_sys_side_lease", original_cleanup)
+            self.core.task_sys_execute_instruction = fake_execute
+            self.core.task_sys_cleanup_task_sys_side_lease = fake_cleanup
+
+            instruction = {
+                "type": "start_side",
+                "task_id": "task-user-input-daemon123",
+                "actor_target": {"actor_id": context.actor_id, "role_id": context.role},
+            }
+
+            executed = runtime.execute_task_sys_instruction(instruction)
+            cleaned = runtime.cleanup_task_sys_side_lease("task-user-input-daemon123")
+
+            self.assertEqual(executed["action"], "start_side")
+            self.assertEqual(cleaned["lease_unregistered"], True)
+            self.assertEqual([call["method"] for call in calls], ["execute", "cleanup"])
+            self.assertIs(calls[0]["context"], context)
+            self.assertIs(calls[1]["context"], context)
+            self.assertEqual(calls[0]["instruction"], instruction)
+            self.assertEqual(calls[1]["task_id"], "task-user-input-daemon123")
 
     def test_daemon_runtime_handler_facing_surface_excludes_old_action_names(self) -> None:
         for old_name in (

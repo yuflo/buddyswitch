@@ -16,8 +16,6 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
-import task_sys_ingress  # noqa: E402
-import task_sys_runtime  # noqa: E402
 
 
 def _string_field(payload: dict[str, Any], *names: str) -> str:
@@ -55,26 +53,8 @@ def record_completed_turn(
     runtime: Any,
     previous_turn: dict[str, str],
 ) -> daemon_core.HandlerResult:
-    del runtime
-    try:
-        result = task_sys_ingress.ingest_turn_completed(
-            actor_id=context.actor_id,
-            role_id=context.role,
-            thread_id=previous_turn["thread_id"],
-            turn_id=previous_turn["turn_id"],
-            status=previous_turn["status"],
-        )
-        runtime_result = task_sys_runtime.execute_instruction(context, result["instruction"])
-        turn_id = runtime_result.get("turn_id") if isinstance(runtime_result, dict) else None
-        if isinstance(turn_id, str) and turn_id:
-            state.record_daemon_origin_turn(
-                turn_id,
-                handler_name="task_checkout",
-                origin_turn_id=previous_turn["turn_id"],
-            )
-        return daemon_core.HandlerResult.handled()
-    except Exception as exc:
-        return daemon_core.HandlerResult.failed(str(exc))
+    del context, state, runtime, previous_turn
+    return daemon_core.HandlerResult.ignored()
 
 
 class TaskCheckoutHandler:

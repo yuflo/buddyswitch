@@ -42,8 +42,8 @@ class _TaskSysToolContext(dict):
         self.cleanups.append(task_id)
         return {
             "side_thread_id": "thr-side-tool",
-            "registry_unregistered": True,
-            "physical_close_ok": True,
+            "lease_unregistered": True,
+            "turn_interrupt_ok": True,
         }
 
     def submit_parent_prompt(self, *_args: Any, **_kwargs: Any) -> None:
@@ -163,13 +163,12 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["active_processor"], "side")
         self.assertNotIn("close_result", record)
 
-    def test_task_sys_tool_registers_close_need_parent_and_checkpoint_update(self) -> None:
+    def test_task_sys_tool_registers_list_get_close_and_need_parent(self) -> None:
         tool_registry.clear_cache()
 
         actions = tool_registry.supported_actions("task_sys")
 
-        self.assertIn("checkpoint_update", actions)
-        self.assertEqual(actions - {"checkpoint_update"}, {"close", "need_parent"})
+        self.assertEqual(actions, {"list", "get", "close", "need_parent"})
 
     def test_task_sys_close_tool_closes_parent_processing_task(self) -> None:
         task_sys = _task_sys()
@@ -212,13 +211,13 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(result["processor"], "side")
         self.assertEqual(result["side_thread_id"], "thr-side-tool")
         self.assertEqual(context.cleanups, [task_id])
-        self.assertEqual(result["side_cleanup"]["registry_unregistered"], True)
+        self.assertEqual(result["side_cleanup"]["lease_unregistered"], True)
         record = self._task_record(task_id)
         self.assertEqual(record["status"], "closed")
         self.assertEqual(record["close_result"]["processor"], "side")
         self.assertEqual(record["close_result"]["side_thread_id"], "thr-side-tool")
-        self.assertEqual(record["close_result"]["cleanup"]["physical_close_ok"], True)
-        self.assertEqual(record["close_result"]["cleanup"]["registry_unregistered"], True)
+        self.assertEqual(record["close_result"]["cleanup"]["turn_interrupt_ok"], True)
+        self.assertEqual(record["close_result"]["cleanup"]["lease_unregistered"], True)
 
     def test_task_sys_need_parent_tool_still_marks_parent_processing_after_runtime_submit(self) -> None:
         task_sys = _task_sys()
@@ -255,7 +254,7 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["status"], "parent_processing")
         self.assertEqual(record["active_processor"], "parent")
         self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-tool")
-        self.assertEqual(record["side_result"]["cleanup"]["registry_unregistered"], True)
+        self.assertEqual(record["side_result"]["cleanup"]["lease_unregistered"], True)
 
     def test_task_sys_need_parent_tool_leaves_task_parent_ready_when_parent_runtime_fails(self) -> None:
         task_sys = _task_sys()
@@ -285,7 +284,7 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(record["status"], "needs_parent")
         self.assertIsNone(record["active_processor"])
         self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-tool")
-        self.assertEqual(record["side_result"]["cleanup"]["registry_unregistered"], True)
+        self.assertEqual(record["side_result"]["cleanup"]["lease_unregistered"], True)
 
 
 if __name__ == "__main__":

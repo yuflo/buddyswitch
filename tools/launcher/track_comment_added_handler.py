@@ -16,7 +16,6 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import daemon_core  # noqa: E402
 import task_sys_ingress  # noqa: E402
-import task_sys_runtime  # noqa: E402
 from env.domain import track_comments as track_comment_rules  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as track_comment_repo  # noqa: E402
@@ -114,7 +113,6 @@ class TrackCommentAddedHandler:
                 raise PermissionError("target actor is not an intended recipient for this Track comment")
             self._ensure_track_readable(payload["track_id"])
 
-            del runtime
             result = task_sys_ingress.ingest_track_comment(
                 actor_id=target_actor.actor_id,
                 role_id=target_actor.role_id,
@@ -123,7 +121,10 @@ class TrackCommentAddedHandler:
                 thread_id=payload["thread_id"],
                 source_actor_address=source_actor.to_payload(),
             )
-            task_sys_runtime.execute_instruction(context, result["instruction"])
+            execute = getattr(runtime, "execute_task_sys_instruction", None)
+            if not callable(execute):
+                raise RuntimeError("daemon runtime does not support Task Sys instruction execution")
+            execute(result["instruction"])
             return daemon_core.HandlerResult.handled()
         except Exception as exc:
             return daemon_core.HandlerResult.failed(str(exc))

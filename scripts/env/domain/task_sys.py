@@ -10,23 +10,19 @@ from uuid import uuid4
 from env.repos import runtime_files
 
 TASK_STATUSES = (
-    "new",
     "side_processing",
     "closed",
     "needs_parent",
     "parent_processing",
-    "checkpoint",
     "runtime_failed",
     "side_no_result",
     "side_timed_out",
 )
-ACTIVE_TASK_STATUSES = ("new", "side_processing", "needs_parent", "parent_processing", "checkpoint")
+ACTIVE_TASK_STATUSES = ("side_processing", "needs_parent", "parent_processing")
 RECOVERABLE_TASK_STATUSES = ("runtime_failed", "side_no_result", "side_timed_out")
 TASK_CLOSE_STATUSES = ("side_processing", "parent_processing", "closed")
-RUNTIME_INSTRUCTION_TYPES = ("start_side", "submit_parent", "interrupt_submit_parent", "no_actor_action")
-INITIAL_PROCESSORS = ("side", "none", "checkpoint")
+RUNTIME_INSTRUCTION_TYPES = ("start_side", "submit_parent", "interrupt_submit_parent")
 SIDE_RESULT_OUTCOMES = ("need_parent",)
-CHECKPOINT_UPDATE_OUTCOMES = ("close", "continue")
 
 
 def _require_text(value: Any, field: str) -> str:
@@ -64,25 +60,11 @@ def _normalize_context(value: Any) -> dict[str, Any]:
     return _payload_copy(_require_mapping(value, "context"))
 
 
-def _normalize_initial_processor(value: Any) -> str:
-    if value is None:
-        return "side"
-    if value not in INITIAL_PROCESSORS:
-        raise ValueError(f"initial_processor must be one of {', '.join(INITIAL_PROCESSORS)}")
-    return str(value)
-
-
 def _normalize_side_result_outcome(value: Any) -> str:
     if value == "close":
         raise ValueError("record_side_result no longer closes tasks; use task_sys.close")
     if value not in SIDE_RESULT_OUTCOMES:
         raise ValueError(f"side result outcome must be one of {', '.join(SIDE_RESULT_OUTCOMES)}")
-    return str(value)
-
-
-def _normalize_checkpoint_update_outcome(value: Any) -> str:
-    if value not in CHECKPOINT_UPDATE_OUTCOMES:
-        raise ValueError(f"checkpoint update outcome must be one of {', '.join(CHECKPOINT_UPDATE_OUTCOMES)}")
     return str(value)
 
 
@@ -123,6 +105,33 @@ def _new_task_id(source_type: str) -> str:
     return f"task-{runtime_files.slugify(source_type)}-{uuid4().hex[:12]}"
 
 
+def _event(event_type: str, *, at: str, data: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    row: dict[str, Any] = {"type": event_type, "at": at}
+    if data:
+        row["data"] = _payload_copy(data)
+    return row
+
+
+def _append_event(record: dict[str, Any], event_type: str, *, at: str, data: Mapping[str, Any] | None = None) -> None:
+    events = record.get("events")
+    if not isinstance(events, list):
+        events = []
+    record["events"] = [*events, _event(event_type, at=at, data=data)]
+
+
+def _reject_unsupported_ingest_fields(payload: Mapping[str, Any]) -> None:
+    allowed = {"source", "actor_target", "context"}
+    unsupported = sorted(key for key in payload if key not in allowed)
+    if unsupported:
+        raise ValueError(f"envelope has unsupported fields: {', '.join(unsupported)}")
+
+
+def _reject_retired_source(source_type: str) -> None:
+    retired_source = "{}_{}.{}".format("app", "server", "turn_completed")
+    if source_type == retired_source:
+        raise ValueError(f"{retired_source} is not a Task Sys ingest source")
+
+
 def _side_frame(*, task_id: str, source: Mapping[str, Any], actor_target: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "kind": "task_sys.side_frame",
@@ -147,37 +156,6 @@ def _parent_frame(record: Mapping[str, Any]) -> dict[str, Any]:
         "inbound_context": _payload_copy(_require_mapping(record.get("inbound_context"), "task.inbound_context")),
         "side_result": _payload_copy(_require_mapping(record.get("side_result"), "task.side_result")),
         "parent_handoff_params": _payload_copy(_require_mapping(record.get("parent_handoff_params"), "task.parent_handoff_params")),
-    }
-
-
-def _checkpoint_frame(record: Mapping[str, Any]) -> dict[str, Any]:
-    task_id = runtime_files.require_id(_require_text(record.get("id"), "task.id"), "task id")
-    metadata = _payload_copy(_require_mapping(record.get("checkpoint_metadata"), "task.checkpoint_metadata"))
-    return {
-        "kind": "task_sys.checkpoint",
-        "task_id": task_id,
-        "source": {
-            "type": _require_text(record.get("source_type"), "task.source_type"),
-            "ref": _payload_copy(_require_mapping(record.get("source_ref"), "task.source_ref")),
-        },
-        "actor_target": _normalize_actor_target(record.get("actor_target")),
-        "completed_turn": _payload_copy(_require_mapping(record.get("inbound_context"), "task.inbound_context")),
-        "checkpoint_state": metadata.get("state") if isinstance(metadata.get("state"), str) else record.get("status"),
-        "current_task_context": _payload_copy(_require_mapping(metadata.get("current_task_context", {}), "checkpoint.current_task_context")),
-        "pending_task_context": list(metadata.get("pending_task_context") if isinstance(metadata.get("pending_task_context"), list) else []),
-        "legal_operations": [
-            {
-                "tool": "task_sys",
-                "action": "checkpoint_update",
-                "required_params": ["task_id", "outcome"],
-                "outcomes": ["close", "continue"],
-            }
-        ],
-        "constraints": [
-            "Do not recommend the next task.",
-            "Do not make decisions for Codex.",
-            "Choose a legal operation based on current work state.",
-        ],
     }
 
 
@@ -252,49 +230,35 @@ def has_active_task_for_actor(actor_target: Mapping[str, Any]) -> bool:
 
 def ingest(envelope: Mapping[str, Any]) -> dict[str, Any]:
     payload = _require_mapping(envelope, "envelope")
+    _reject_unsupported_ingest_fields(payload)
     source = _normalize_source(payload.get("source"))
+    _reject_retired_source(str(source["type"]))
     actor_target = _normalize_actor_target(payload.get("actor_target"))
     context = _normalize_context(payload.get("context"))
-    initial_processor = _normalize_initial_processor(payload.get("initial_processor"))
 
     task_id = _new_task_id(str(source["type"]))
     now = runtime_files.now_iso()
-    if initial_processor == "none":
-        status = "closed"
-        active_processor = None
-        checkpoint_metadata: dict[str, Any] = {}
-    elif initial_processor == "checkpoint":
-        status = "checkpoint"
-        active_processor = "checkpoint"
-        checkpoint_metadata = {"state": "awaiting_update"}
-    else:
-        status = "side_processing"
-        active_processor = "side"
-        checkpoint_metadata = {}
     record = {
         "id": task_id,
         "source_type": source["type"],
         "source_ref": _payload_copy(source["ref"]),
         "actor_target": actor_target,
         "inbound_context": context,
-        "status": status,
-        "active_processor": active_processor,
+        "status": "side_processing",
+        "active_processor": "side",
         "parent_handoff_params": None,
         "side_result": None,
-        "checkpoint_metadata": checkpoint_metadata,
+        "events": [
+            _event("created", at=now),
+            _event("side_frame_started", at=now, data={"instruction": "start_side"}),
+        ],
         "created_at": now,
         "updated_at": now,
     }
     persisted = _persist_task(record)
 
-    if initial_processor == "none":
-        instruction = runtime_instruction("no_actor_action", task_id=task_id, actor_target=actor_target)
-    elif initial_processor == "checkpoint":
-        frame = _checkpoint_frame(persisted)
-        instruction = runtime_instruction("submit_parent", task_id=task_id, actor_target=actor_target, frame=frame)
-    else:
-        frame = _side_frame(task_id=task_id, source=source, actor_target=actor_target, context=context)
-        instruction = runtime_instruction("start_side", task_id=task_id, actor_target=actor_target, frame=frame)
+    frame = _side_frame(task_id=task_id, source=source, actor_target=actor_target, context=context)
+    instruction = runtime_instruction("start_side", task_id=task_id, actor_target=actor_target, frame=frame)
 
     return {"ok": True, "task_id": task_id, "task": persisted, "instruction": instruction}
 
@@ -307,8 +271,6 @@ def record_task_close(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]
 
     if status == "closed":
         return {"ok": True, "task_id": normalized_task_id, "outcome": "close", "task": record, "state_changed": False}
-    if status == "checkpoint":
-        raise ValueError("checkpoint tasks must be updated with task_sys.checkpoint_update")
     if status not in TASK_CLOSE_STATUSES:
         raise ValueError("task must be in side_processing or parent_processing before close")
 
@@ -328,6 +290,7 @@ def record_task_close(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]
             "updated_at": now,
         }
     )
+    _append_event(record, "closed", at=now, data={"processor": processor})
     if processor == "side":
         record["parent_handoff_params"] = None
 
@@ -352,6 +315,7 @@ def record_side_need_parent(task_id: str, result: Mapping[str, Any]) -> dict[str
             "updated_at": now,
         }
     )
+    _append_event(record, "side_parent_requested", at=now, data={"interrupt": params.get("interrupt") is True})
 
     persisted = _persist_task(record)
     return {"ok": True, "task_id": normalized_task_id, "outcome": "need_parent", "task": persisted, "state_changed": True}
@@ -403,6 +367,7 @@ def record_side_runtime_failure(task_id: str, failure: Mapping[str, Any]) -> dic
             "updated_at": now,
         }
     )
+    _append_event(record, "side_runtime_failed", at=now, data={"status": status, "stage": failure_result["stage"]})
     persisted = _persist_task(record)
     return {
         "ok": True,
@@ -430,6 +395,7 @@ def record_side_cleanup(task_id: str, update: Mapping[str, Any]) -> dict[str, An
         normalized_close["cleanup"] = cleanup
         normalized_close["updated_at"] = now
         record.update({"close_result": normalized_close, "updated_at": now})
+        _append_event(record, "side_cleanup_recorded", at=now, data={"side_thread_id": side_thread_id})
         persisted = _persist_task(record)
         return {"ok": True, "task_id": normalized_task_id, "task": persisted, "state_changed": True}
 
@@ -440,6 +406,7 @@ def record_side_cleanup(task_id: str, update: Mapping[str, Any]) -> dict[str, An
         normalized_side_result["cleanup"] = cleanup
         normalized_side_result["updated_at"] = now
         record.update({"side_result": normalized_side_result, "updated_at": now})
+        _append_event(record, "side_cleanup_recorded", at=now, data={"side_thread_id": side_thread_id})
         persisted = _persist_task(record)
         return {"ok": True, "task_id": normalized_task_id, "task": persisted, "state_changed": True}
 
@@ -479,35 +446,6 @@ def record_parent_handoff_started(task_id: str) -> dict[str, Any]:
             "updated_at": now,
         }
     )
+    _append_event(record, "parent_handoff_started", at=now)
     persisted = _persist_task(record)
     return {"ok": True, "task_id": normalized_task_id, "task": persisted}
-
-
-def record_checkpoint_update(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _require_mapping(update, "checkpoint update")
-    outcome = _normalize_checkpoint_update_outcome(payload.get("outcome"))
-    record = _load_task(normalized_task_id)
-    if record.get("status") != "checkpoint":
-        raise ValueError("task must be in checkpoint status before checkpoint update")
-    now = runtime_files.now_iso()
-    metadata = _payload_copy(_require_mapping(record.get("checkpoint_metadata"), "task.checkpoint_metadata"))
-    last_update: dict[str, Any] = {"outcome": outcome, "updated_at": now}
-    summary = payload.get("summary")
-    if isinstance(summary, str) and summary.strip():
-        last_update["summary"] = summary.strip()
-    metadata["last_update"] = last_update
-    if outcome == "close":
-        metadata["state"] = "closed"
-        record.update({"status": "closed", "active_processor": None, "checkpoint_metadata": metadata, "updated_at": now})
-    else:
-        metadata["state"] = "awaiting_update"
-        record.update({"status": "checkpoint", "active_processor": "checkpoint", "checkpoint_metadata": metadata, "updated_at": now})
-    persisted = _persist_task(record)
-    return {
-        "ok": True,
-        "task_id": normalized_task_id,
-        "outcome": outcome,
-        "task": persisted,
-        "frame": _checkpoint_frame(persisted),
-    }

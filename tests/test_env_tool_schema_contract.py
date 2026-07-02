@@ -123,9 +123,11 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_list_comments = catalog.get_action_definition("track", "list_comments").input_schema
         track_resolve_comment = catalog.get_action_definition("track", "resolve_comment_thread").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
+        self.assertEqual(set(catalog.supported_actions("task_sys")), {"list", "get", "close", "need_parent"})
+        task_sys_list = catalog.get_action_definition("task_sys", "list").input_schema
+        task_sys_get = catalog.get_action_definition("task_sys", "get").input_schema
         task_sys_close = catalog.get_action_definition("task_sys", "close").input_schema
         task_sys_need_parent = catalog.get_action_definition("task_sys", "need_parent").input_schema
-        task_sys_checkpoint_update = catalog.get_action_definition("task_sys", "checkpoint_update").input_schema
         context_get = catalog.get_action_definition("context", "get").input_schema
         context_summarize = catalog.get_action_definition("context", "summarize").input_schema
         evidence_issue = catalog.get_action_definition("evidence", "issue_browser").input_schema
@@ -218,11 +220,15 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("artifact_revision_id", track_add_comment["properties"])
         self.assertEqual(track_list_comments["properties"]["status"].get("enum"), ["open", "resolved", "all"])
 
+        self.assertEqual(task_sys_list.get("required"), [])
+        self.assertEqual(task_sys_list["properties"]["status"].get("enum"), ["active", "recoverable", "all"])
+        self.assertEqual(task_sys_list["properties"]["limit"].get("type"), "integer")
+        self.assertEqual(task_sys_list["properties"]["limit"].get("minimum"), 1)
+        self.assertEqual(task_sys_get.get("required"), ["task_id"])
+        self.assertEqual(task_sys_get["properties"]["task_id"].get("type"), "string")
         self.assertEqual(task_sys_close.get("required"), ["task_id"])
         self.assertEqual(task_sys_need_parent.get("required"), ["task_id", "params"])
         self.assertEqual(task_sys_need_parent["properties"]["params"]["properties"]["interrupt"].get("type"), "boolean")
-        self.assertEqual(task_sys_checkpoint_update.get("required"), ["task_id", "outcome"])
-        self.assertEqual(task_sys_checkpoint_update["properties"]["outcome"].get("enum"), ["close", "continue"])
 
         self.assertEqual(context_get["properties"]["limit"].get("type"), "integer")
         self.assertEqual(context_get["properties"]["limit"].get("minimum"), 1)

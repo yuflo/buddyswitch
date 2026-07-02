@@ -22,7 +22,19 @@ class SubmitTurnError(RuntimeError):
 
 def submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
     try:
-        return app_server.input_turn(socket_path, thread_id, text, permissions)
+        thread_payload = app_server.thread_read(socket_path, thread_id, include_turns=False)
+        thread = thread_payload.get("thread")
+        if not isinstance(thread, dict):
+            raise app_server.AppServerProtocolError("thread/read did not return a thread object")
+        status_kind = app_server._thread_status_kind(thread.get("status"))
+        if status_kind == "idle":
+            return app_server.turn_start(socket_path, thread_id, text, permissions)
+        if status_kind != "active":
+            raise app_server.AppServerUnavailableError(f"thread {thread_id} is not active or idle")
+        turn_id = app_server.active_turn_id(socket_path, thread_id)
+        if not turn_id:
+            raise app_server.AppServerUnavailableError(f"thread {thread_id} is active but no in-progress turn was found")
+        return app_server.turn_steer(socket_path, thread_id, turn_id, text)
     except app_server.AppServerError as exc:
         raise SubmitTurnError(str(exc)) from exc
 

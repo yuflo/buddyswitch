@@ -806,6 +806,15 @@ def handle_rpc_message(
         if thread.get("rollout_materialized") is False:
             save_server_state(state)
             return rpc_error_response(request_id, -32600, f"no rollout found for thread id {thread_id}")
+    if method == "thread/turns/list":
+        thread_id = str(params_dict.get("threadId")) if isinstance(params_dict, dict) and params_dict.get("threadId") else _main_thread_id(state)
+        if _thread_state(state, thread_id).get("ephemeral") is True:
+            save_server_state(state)
+            return rpc_error_response(
+                request_id,
+                -32600,
+                f"thread/turns/list is unavailable for ephemeral thread {thread_id}",
+            )
 
     responses = state.get("responses", {})
     if isinstance(responses, dict):
