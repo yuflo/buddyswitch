@@ -29,15 +29,16 @@ if str(SCRIPTS) not in sys.path:
 
 from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
+from runtime_kernel import protocol  # noqa: E402
 
 
-LAUNCHER = ROOT / "buddyswitch-codex"
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
 DAEMON_CORE = ROOT / "tools" / "launcher" / "daemon_core.py"
 DAEMON_MAILBOX = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
 PAGE_EXPIRED_HANDLER = ROOT / "tools" / "launcher" / "browser_page_expired_handler.py"
 RELEASE_HANDLER = ROOT / "tools" / "launcher" / "browser_release_handler.py"
+BROWSER_RUNTIME_MANAGER = ROOT / "tools" / "launcher" / "browser_runtime_manager.py"
 TRIGGERS = ROOT / "tools" / "launcher" / "daemon_triggers.py"
 MODULE_COUNTER = count()
 
@@ -434,6 +435,115 @@ with calls_path.open("a", encoding="utf-8") as handle:
 ''',
         )
 
+    def _start_fake_runtime_broker(
+        self,
+        *,
+        socket_path: Path,
+        ensure_script: Path,
+        instance_root: Path,
+        instance_json: Path,
+        calls_path: Path,
+    ) -> Any:
+        stop = threading.Event()
+        ready = threading.Event()
+        socket_path.unlink(missing_ok=True)
+
+        def append_call(request: dict[str, Any]) -> None:
+            calls_path.parent.mkdir(parents=True, exist_ok=True)
+            with calls_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(request, ensure_ascii=True) + "\n")
+
+        def acquire_browser(request_id: str | None) -> dict[str, Any]:
+            completed = subprocess.run(
+                [sys.executable, str(ensure_script), str(instance_root)],
+                cwd=ROOT,
+                env=os.environ.copy(),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
+                return protocol.error_response(
+                    request_id,
+                    code="E_TEST_BROWSER_ACQUIRE_FAILED",
+                    message=detail,
+                    retriable=False,
+                )
+            payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            port = payload.get("browser_port")
+            if isinstance(port, bool) or not isinstance(port, int):
+                return protocol.error_response(
+                    request_id,
+                    code="E_TEST_BROWSER_PORT_MISSING",
+                    message="fake browser ensure did not record browser_port",
+                    retriable=False,
+                )
+            return protocol.success_response(
+                request_id,
+                {
+                    "ok": True,
+                    "browser_url": f"http://127.0.0.1:{port}",
+                    "browser_port": port,
+                    "ready": True,
+                    "state_changed": True,
+                    "durability": "runtime",
+                },
+            )
+
+        def serve() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen()
+                server.settimeout(0.1)
+                ready.set()
+                while not stop.is_set():
+                    try:
+                        conn, _addr = server.accept()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
+                    with conn:
+                        try:
+                            request = protocol.read_message(conn)
+                        except Exception:
+                            continue
+                        if not isinstance(request, dict):
+                            continue
+                        append_call(request)
+                        request_id = request.get("request_id")
+                        request_id = request_id if isinstance(request_id, str) else None
+                        method = request.get("method")
+                        if method == "browser.acquire":
+                            response = acquire_browser(request_id)
+                        else:
+                            response = protocol.error_response(
+                                request_id,
+                                code="E_TEST_UNSUPPORTED_BROKER_METHOD",
+                                message=f"unsupported fake broker method: {method}",
+                                retriable=False,
+                            )
+                        protocol.write_message(conn, response)
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        if not ready.wait(timeout=5):
+            raise AssertionError("fake runtime broker did not start")
+
+        def stop_broker() -> None:
+            stop.set()
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                    client.settimeout(0.1)
+                    client.connect(str(socket_path))
+            except OSError:
+                pass
+            thread.join(timeout=5)
+            socket_path.unlink(missing_ok=True)
+
+        return stop_broker
+
     def _instance_record(self, instance_root: Path, actor_id: str, role: str) -> Path:
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
@@ -596,15 +706,10 @@ with calls_path.open("a", encoding="utf-8") as handle:
         self.addCleanup(server.close)
         return daemon_core, server, thread
 
-    def _launcher_release(self, *, actor_id: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(LAUNCHER), "env", "browser", "release", "--instance", actor_id],
-            cwd=ROOT,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+    def _manager_release(self, *, instance_root: Path, actor_id: str) -> dict[str, object]:
+        manager = load_module(BROWSER_RUNTIME_MANAGER)
+        result = manager.release(instance_root=instance_root, actor_id=actor_id, reason="test_cleanup")
+        return dict(result) if isinstance(result, dict) else {"ok": False, "message": f"invalid manager result: {result!r}"}
 
     def _cleanup_fake_chrome_pids(self, pids: list[int]) -> None:
         for pid in list(dict.fromkeys(pids)):
@@ -642,6 +747,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
             ensure_script = temp_root_path / "fake_browser_ensure.py"
             fake_chrome_state = temp_root_path / "fake_chrome_state.json"
             ensure_calls = temp_root_path / "ensure_calls.jsonl"
+            broker_calls = temp_root_path / "broker_calls.jsonl"
+            broker_socket = temp_root_path / "runtime-broker.sock"
             upstream_argv = temp_root_path / "upstream_argv.jsonl"
             upstream_calls = temp_root_path / "upstream_calls.jsonl"
             release_schedules: list[dict[str, object]] = []
@@ -667,7 +774,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "BUDDYSWITCH_TEST_FAKE_CHROME_STATE": str(fake_chrome_state),
                     "BUDDYSWITCH_TEST_FAKE_CHROME_SERVER": str(fake_chrome),
                     "BUDDYSWITCH_TEST_BROWSER_ENSURE_CALLS": str(ensure_calls),
-                    "BUDDYSWITCH_BROWSER_COCKPIT_ENSURE_COMMAND": f"{sys.executable} {ensure_script}",
+                    "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(broker_socket),
                     "BUDDYSWITCH_TEST_UPSTREAM_ARGV": str(upstream_argv),
                     "BUDDYSWITCH_TEST_UPSTREAM_CALLS": str(upstream_calls),
                     "NO_PROXY": "127.0.0.1,localhost",
@@ -676,6 +783,14 @@ with calls_path.open("a", encoding="utf-8") as handle:
             )
 
             with patch.dict(os.environ, base_env, clear=False):
+                broker_stop = self._start_fake_runtime_broker(
+                    socket_path=broker_socket,
+                    ensure_script=ensure_script,
+                    instance_root=instance_root,
+                    instance_json=instance_json,
+                    calls_path=broker_calls,
+                )
+                self.addCleanup(broker_stop)
                 proxy = self._start_proxy(instance_root=instance_root, upstream=fake_upstream, env=base_env)
                 daemon_core, mailbox_server, mailbox_thread = self._start_mailbox(
                     instance_root=instance_root,
@@ -824,8 +939,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     if isinstance(pid, int) and pid not in fake_chrome_pids:
                         fake_chrome_pids.append(pid)
 
-                final_release = self._launcher_release(actor_id=actor_id, env=base_env)
-                self.assertEqual(final_release.returncode, 0, msg=f"stdout:\n{final_release.stdout}\nstderr:\n{final_release.stderr}")
+                final_release = self._manager_release(instance_root=instance_root, actor_id=actor_id)
+                self.assertIs(final_release.get("ok"), True, msg=final_release)
                 self.assertTrue(wait_until(lambda: not port_accepts(fake_port)), "cleanup release must stop fake Chrome endpoint")
                 for event in read_jsonl(ensure_calls):
                     pid = event.get("pid")

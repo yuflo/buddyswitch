@@ -22,6 +22,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 from env import cdp_browser_session as browser_session  # noqa: E402
+from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -182,54 +183,19 @@ def tools_list_response(request: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def read_instance_payload(instance_root: str | None) -> dict[str, Any]:
-    root = _instance_root_path(instance_root)
-    if root is None:
-        return {}
+def acquire_browser_url() -> str:
     try:
-        payload = json.loads((root / "instance.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def browser_url_from_instance(instance_root: str | None) -> str | None:
-    payload = read_instance_payload(instance_root)
-    port = payload.get("browser_port")
-    if isinstance(port, bool) or not isinstance(port, int) or port < 1 or port > 65535:
-        return None
-    return f"http://127.0.0.1:{port}"
-
-
-def ensure_browser_url(instance_root: str | None) -> str | None:
-    root = _instance_root_path(instance_root)
-    if root is None:
-        return None
-    payload = read_instance_payload(instance_root)
-    actor_id = payload.get("actor_id")
-    if not isinstance(actor_id, str) or not actor_id.strip():
-        return browser_url_from_instance(instance_root)
-    override = os.environ.get("BUDDYSWITCH_BROWSER_COCKPIT_ENSURE_COMMAND")
-    if override:
-        command = shlex.split(override) + [str(root)]
-    else:
-        command = [str(ROOT / "buddyswitch-codex"), "env", "browser", "ensure", "--instance", actor_id.strip()]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=browser_session.launcher_env_for_instance_root(root),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30.0,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"browser ensure failed: {exc}") from exc
-    if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
-        raise RuntimeError(f"browser ensure failed: {detail}")
-    return browser_url_from_instance(instance_root)
+        result = request_runtime_broker("browser.acquire", {"reason": "chrome-devtools-cockpit"})
+    except RuntimeBrokerError as exc:
+        raise RuntimeError(f"browser acquire failed: {exc.message}") from exc
+    if result.get("ok") is not True:
+        error = result.get("error") if isinstance(result.get("error"), dict) else {}
+        detail = error.get("message") if isinstance(error.get("message"), str) else "broker returned a failed result"
+        raise RuntimeError(f"browser acquire failed: {detail}")
+    browser_url = result.get("browser_url")
+    if not isinstance(browser_url, str) or not browser_url.strip():
+        raise RuntimeError("browser acquire failed: broker did not return browser_url")
+    return browser_url.strip()
 
 
 def focus_block_text(method: str) -> str:
@@ -992,7 +958,7 @@ def run_proxy(args: argparse.Namespace, passthrough_args: list[str], instance_ro
                 continue
 
             try:
-                active_browser_url = ensure_browser_url(instance_root) or ""
+                active_browser_url = acquire_browser_url()
             except RuntimeError as exc:
                 if is_jsonrpc_request(message):
                     write_json_line(tool_error_response(message, str(exc)), output_lock)

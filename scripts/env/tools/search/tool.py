@@ -145,7 +145,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need general browser discovery or page inspection; use chrome-devtools-cockpit.',
-                    'You need only query-to-URL wrapping before browser-session opens or reuses the page; use search.open_browser.',
+                    'You need query-to-URL wrapping plus broker-managed browser open/reuse; use search.open_browser.',
                     'You want implicit backend auto selection instead of explicit backend payload.',
                 ),
                 risk_hints={
@@ -160,7 +160,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='open_browser',
                 title='search.open_browser',
-                description='Build a search URL and ask browser-session to open or reuse it.',
+                description='Build a search URL and ask the broker browser capability to open or reuse it.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -185,18 +185,18 @@ def _build_definition() -> ToolDefinition:
                 task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='none',
                 authority='profile.search_boundary',
-                visibility='browser-session search URL wrapper',
+                visibility='broker browser search URL wrapper',
                 durability='transient',
-                result_content_level='search URL, browser-session result, and search-specific wording',
-                success_effect='Builds a search URL and delegates open/reuse/page-limit/idle handling to browser-session.',
-                failure_state_guarantee='Rejected wrapper calls do not bypass browser-session page limits and do not mutate product state.',
+                result_content_level='search URL, broker browser result, and search-specific wording',
+                success_effect='Builds a search URL and delegates open/reuse/page-limit/idle handling to broker browser capability.',
+                failure_state_guarantee='Rejected wrapper calls do not bypass broker browser page limits and do not mutate product state.',
                 reads=(
                     'search profile',
                     'query payload',
-                    'browser-session result',
+                    'broker browser result',
                 ),
                 writes=(
-                    'no direct browser writes; browser-session may open or reuse a managed page',
+                    'no direct browser writes; broker browser capability may open or reuse a managed page',
                 ),
                 does_not_write=(
                     'product objects',
@@ -216,7 +216,7 @@ def _build_definition() -> ToolDefinition:
                     'browser_page_limit',
                 ),
                 use_when=(
-                    'You need search-specific query URL construction before browser-session opens or reuses a page.',
+                    'You need search-specific query URL construction before broker browser capability opens or reuses a page.',
                 ),
                 do_not_use_when=(
                     'You only need search metadata or URL planning without opening a page.',

@@ -1,0 +1,1406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browser Cockpit Control-Plane Rebuild</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --panel-soft: #fbfbf8;
+      --text: #171717;
+      --muted: #5f6368;
+      --line: #d7d7ce;
+      --strong: #263238;
+      --accent: #1f6f78;
+      --accent-soft: #e2f0f1;
+      --danger: #b42318;
+      --danger-soft: #fde7e4;
+      --warn: #8a5a00;
+      --warn-soft: #fff3d6;
+      --ok: #146c43;
+      --ok-soft: #e5f3ea;
+      --code: #202124;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.52 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .page {
+      width: min(1440px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    .top {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.6fr);
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 16px;
+    }
+
+    .summary,
+    .control-box,
+    .panel,
+    .node,
+    .risk,
+    .evidence {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .summary {
+      padding: 22px 24px;
+      min-height: 220px;
+    }
+
+    .kicker {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: inline-block;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(26px, 3vw, 44px);
+      line-height: 1.08;
+      letter-spacing: 0;
+      max-width: 980px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      max-width: 960px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .control-box {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .control-box strong {
+      display: block;
+      color: var(--strong);
+      margin-bottom: 4px;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      border-radius: 999px;
+      padding: 5px 9px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .pill.danger {
+      border-color: #f1b8b2;
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .pill.ok {
+      border-color: #b7dec5;
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .view-switch {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button[aria-pressed="true"] {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .panel {
+      padding: 18px;
+      overflow: hidden;
+    }
+
+    .panel.before {
+      border-top: 5px solid var(--danger);
+    }
+
+    .panel.after {
+      border-top: 5px solid var(--ok);
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .flow {
+      margin-top: 14px;
+      display: grid;
+      gap: 9px;
+    }
+
+    .node {
+      padding: 12px;
+      position: relative;
+    }
+
+    .node-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 4px;
+      font-weight: 750;
+    }
+
+    .node small {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .node.bad {
+      border-color: #f1b8b2;
+      background: #fffafa;
+    }
+
+    .node.good {
+      border-color: #b7dec5;
+      background: #fbfffc;
+    }
+
+    .node.neutral {
+      background: var(--panel-soft);
+    }
+
+    .arrow {
+      text-align: center;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 22px;
+      padding: 2px 7px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tag.bad {
+      border-color: #efb0aa;
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .tag.good {
+      border-color: #b7dec5;
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .tag.warn {
+      border-color: #ecd391;
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .tag.info {
+      border-color: #9fc9ce;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: 1.05fr 1fr 1fr;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .matrix > div {
+      padding: 10px 12px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      min-height: 48px;
+      background: #fff;
+    }
+
+    .matrix > div:nth-child(3n) {
+      border-right: 0;
+    }
+
+    .matrix > div:nth-last-child(-n+3) {
+      border-bottom: 0;
+    }
+
+    .matrix .head {
+      background: #f0f1ee;
+      color: var(--strong);
+      font-weight: 800;
+    }
+
+    .matrix .bad-cell {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .matrix .good-cell {
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    code,
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      color: var(--code);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 22px 0 10px;
+    }
+
+    .wide {
+      margin-bottom: 16px;
+    }
+
+    .owner-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .owner {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 148px;
+    }
+
+    .owner .label {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    .risk-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .chain-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 12px;
+    }
+
+    .chain-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel-soft);
+    }
+
+    .chain-card.before-chain {
+      border-top: 4px solid var(--danger);
+    }
+
+    .chain-card.after-chain {
+      border-top: 4px solid var(--ok);
+    }
+
+    .chain-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 12px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .chain-header strong {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--strong);
+    }
+
+    .swim {
+      display: grid;
+      grid-template-columns: 34px minmax(120px, 1fr) minmax(88px, 0.78fr) minmax(120px, 1fr) minmax(110px, 0.9fr);
+      border-bottom: 1px solid var(--line);
+      min-height: 54px;
+    }
+
+    .swim:last-child {
+      border-bottom: 0;
+    }
+
+    .swim > div {
+      padding: 9px;
+      border-right: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .swim > div:last-child {
+      border-right: 0;
+    }
+
+    .swim .idx {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f0f1ee;
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    .swim .lane-head {
+      background: #f0f1ee;
+      color: var(--strong);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .swim .empty {
+      background: #fafaf7;
+      color: #a2a39d;
+    }
+
+    .swim .breach {
+      background: var(--danger-soft);
+      color: var(--danger);
+      font-weight: 750;
+    }
+
+    .swim .clean {
+      background: var(--ok-soft);
+      color: var(--ok);
+      font-weight: 750;
+    }
+
+    .swim .handoff {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 750;
+    }
+
+    .callout-line {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .topology-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 12px;
+    }
+
+    .topology-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      overflow: hidden;
+    }
+
+    .topology-card.before-topology {
+      border-top: 4px solid var(--danger);
+    }
+
+    .topology-card.after-topology {
+      border-top: 4px solid var(--ok);
+    }
+
+    .topology-head {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .topology-head strong {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--strong);
+    }
+
+    .svg-frame {
+      padding: 10px;
+      overflow-x: auto;
+    }
+
+    .call-graph {
+      width: 100%;
+      min-width: 700px;
+      height: auto;
+      display: block;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .call-graph text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .sequence-graph {
+      min-width: 880px;
+    }
+
+    .sequence-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .caption-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 12px 12px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .risk {
+      padding: 14px;
+      border-top: 4px solid var(--warn);
+    }
+
+    .risk.p0 {
+      border-top-color: var(--danger);
+    }
+
+    .risk.done {
+      border-top-color: var(--ok);
+    }
+
+    .evidence {
+      padding: 14px;
+      background: #fcfcfa;
+    }
+
+    .evidence-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .ev {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 980px) {
+      .page {
+        width: min(100vw - 20px, 760px);
+        padding-top: 14px;
+      }
+
+      .top,
+      .grid,
+      .chain-grid,
+      .topology-grid,
+      .risk-grid,
+      .evidence-list {
+        grid-template-columns: 1fr;
+      }
+
+      .owner-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .matrix {
+        grid-template-columns: 1fr;
+      }
+
+      .matrix > div,
+      .matrix > div:nth-child(3n),
+      .matrix > div:nth-last-child(-n+3) {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .matrix > div:last-child {
+        border-bottom: 0;
+      }
+
+      .view-switch {
+        grid-template-columns: 1fr;
+      }
+
+      .swim {
+        grid-template-columns: 30px 1fr;
+      }
+
+      .swim > div {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .swim > div:last-child {
+        border-bottom: 0;
+      }
+
+      .swim .lane-head {
+        display: none;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .owner-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .summary,
+      .control-box,
+      .panel {
+        padding: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="top" aria-labelledby="title">
+      <div class="summary">
+        <div class="kicker"><span class="dot"></span> Browser Cockpit Control-Plane Rebuild</div>
+        <h1 id="title">改造目标：actor runtime 永远不感知 source root，也不回调 launcher CLI</h1>
+        <p class="lead">
+          这页展示 browser cockpit 改造前后的链路。当前问题不是 search 打开 URL 能力不足，
+          而是 browser acquisition control-plane 被 actor runtime 触发，导致 sparse runtime 误碰
+          <code>source root</code>、<code>buddyswitch-codex</code> 和 launcher helper。
+        </p>
+      </div>
+
+      <aside class="control-box" aria-label="artifact controls">
+        <div>
+          <strong>Artifact job</strong>
+          <p class="subtle">用空间化链路图对齐边界、职责和必须删除的耦合点。</p>
+        </div>
+        <div class="pill-row" aria-label="target contracts">
+          <span class="pill danger">禁止 runtime -&gt; source root</span>
+          <span class="pill danger">禁止 runtime -&gt; buddyswitch-codex</span>
+          <span class="pill ok">broker 是唯一控制面 IPC</span>
+          <span class="pill ok">browser manager 拥有 ensure/release</span>
+        </div>
+        <div class="view-switch" aria-label="view switch">
+          <button type="button" data-view="both" aria-pressed="true">前后对照</button>
+          <button type="button" data-view="before" aria-pressed="false">只看改造前</button>
+          <button type="button" data-view="after" aria-pressed="false">只看目标态</button>
+        </div>
+      </aside>
+    </section>
+
+    <section class="grid" aria-label="before and after flows">
+      <article class="panel before" data-section="before">
+        <h2>改造前：runtime helper 回调 launcher CLI</h2>
+        <p class="subtle">失败点在 browser acquisition，不在 URL page operation。</p>
+        <div class="flow">
+          <div class="node neutral">
+            <div class="node-title">search__open_browser <span class="tag">actor runtime</span></div>
+            <small>构造 search URL。发现 instance payload 没有 <code>browser_port</code>。</small>
+          </div>
+          <div class="arrow">calls</div>
+          <div class="node bad">
+            <div class="node-title">cdp_browser_session.ensure_browser_url_for_instance <span class="tag bad">边界破口</span></div>
+            <small>runtime-projected code 开始承担 browser acquisition。</small>
+          </div>
+          <div class="arrow">subprocess</div>
+          <div class="node bad">
+            <div class="node-title">ROOT / buddyswitch-codex <span class="tag bad">source root 推导</span></div>
+            <small>通过 <code>__file__</code> 推导 ROOT，在 sparse workspace 下指向错误位置。</small>
+          </div>
+          <div class="arrow">exec failed</div>
+          <div class="node bad">
+            <div class="node-title">workspace/buddyswitch-codex missing <span class="tag bad">P0 暴露点</span></div>
+            <small>actor workspace 本来就禁止包含 <code>buddyswitch-codex</code>、<code>tools</code>、<code>tests</code>、<code>docs</code>。</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel after" data-section="after">
+        <h2>目标态：runtime 只请求 capability</h2>
+        <p class="subtle">browser acquisition 全部收敛到 control-plane。</p>
+        <div class="flow">
+          <div class="node neutral">
+            <div class="node-title">search__open_browser / cockpit tool <span class="tag">actor runtime</span></div>
+            <small>只表达意图：打开 search URL 或 browser page。</small>
+          </div>
+          <div class="arrow">broker RPC only</div>
+          <div class="node good">
+            <div class="node-title">runtime broker <span class="tag good">唯一 IPC 边界</span></div>
+            <small>校验 actor、instance、role 和权限。runtime 不拿 source root。</small>
+          </div>
+          <div class="arrow">control-plane call</div>
+          <div class="node good">
+            <div class="node-title">browser runtime manager <span class="tag good">ensure owner</span></div>
+            <small>分配 port、启动 Chrome、登记 <code>browser_port</code>、管理 pid/profile/release。</small>
+          </div>
+          <div class="arrow">returns capability</div>
+          <div class="node good">
+            <div class="node-title">browser session data-plane <span class="tag good">page operation</span></div>
+            <small>已有 <code>browser_url</code> 后执行 list/reuse/open/idle TTL。</small>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel wide" aria-labelledby="sequence-title">
+      <div class="section-title">
+        <div>
+          <h2 id="sequence-title">主调用链可视化：从 tool call 到 Chrome</h2>
+          <p class="subtle">同一组泳道里，上方是当前断裂链，下方是目标链；先看箭头顺序，再看红色越界点和绿色 ownership。</p>
+        </div>
+      </div>
+
+      <div class="svg-frame">
+        <svg class="call-graph sequence-graph" viewBox="0 0 1180 720" role="img" aria-labelledby="sequence-graph-title sequence-graph-desc">
+          <title id="sequence-graph-title">Browser cockpit 主调用链改造前后总览</title>
+          <desc id="sequence-graph-desc">图中用五条泳道展示从 tool call 到 Chrome 的完整调用链。改造前，actor runtime 通过 cdp browser session 越界调用 ROOT/buddyswitch-codex 并失败。目标态，actor runtime 只通过 broker RPC 请求 browser capability，由 control-plane 的 browser manager 完成 acquisition，并进入 Chrome CDP page operation。</desc>
+          <defs>
+            <marker id="seq-arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#b42318"></path>
+            </marker>
+            <marker id="seq-arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#146c43"></path>
+            </marker>
+            <marker id="seq-arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f6f78"></path>
+            </marker>
+            <marker id="seq-arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b8f94"></path>
+            </marker>
+          </defs>
+
+          <rect x="20" y="26" width="150" height="650" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+          <rect x="182" y="26" width="208" height="650" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+          <rect x="402" y="26" width="180" height="650" fill="#f4fbfc" stroke="#9fc9ce"></rect>
+          <rect x="594" y="26" width="236" height="650" fill="#fbfffc" stroke="#b7dec5"></rect>
+          <rect x="842" y="26" width="318" height="650" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+
+          <text x="42" y="55" font-size="13" font-weight="800" fill="#263238">USER / MCP ENTRY</text>
+          <text x="204" y="55" font-size="13" font-weight="800" fill="#263238">ACTOR RUNTIME</text>
+          <text x="424" y="55" font-size="13" font-weight="800" fill="#1f6f78">BOUNDARY / IPC</text>
+          <text x="616" y="55" font-size="13" font-weight="800" fill="#146c43">CONTROL-PLANE</text>
+          <text x="864" y="55" font-size="13" font-weight="800" fill="#263238">BROWSER RUNTIME</text>
+
+          <rect x="34" y="86" width="1120" height="244" rx="8" fill="#fffafa" stroke="#efb0aa"></rect>
+          <rect x="34" y="370" width="1120" height="266" rx="8" fill="#fbfffc" stroke="#b7dec5"></rect>
+          <text x="54" y="113" font-size="14" font-weight="800" fill="#b42318">改造前：runtime helper 拿不到 browser_url，于是回调 launcher CLI</text>
+          <text x="54" y="397" font-size="14" font-weight="800" fill="#146c43">目标态：runtime 只发 capability request，browser acquisition 在 control-plane 闭环</text>
+
+          <rect x="52" y="142" width="102" height="58" rx="8" fill="#ffffff" stroke="#d7d7ce"></rect>
+          <text x="66" y="166" font-size="14" font-weight="800" fill="#171717">tool call</text>
+          <text x="66" y="185" font-size="12" fill="#5f6368">search open</text>
+
+          <line x1="154" y1="171" x2="206" y2="171" stroke="#8b8f94" stroke-width="2.5" marker-end="url(#seq-arrow-gray)"></line>
+
+          <rect x="212" y="132" width="146" height="78" rx="8" fill="#ffffff" stroke="#d7d7ce"></rect>
+          <text x="228" y="158" font-size="14" font-weight="800" fill="#171717">search__open_browser</text>
+          <text x="228" y="178" font-size="12" fill="#5f6368">构造 URL</text>
+          <text x="228" y="196" font-size="12" fill="#5f6368">browser_port missing</text>
+
+          <line x1="285" y1="210" x2="285" y2="244" stroke="#b42318" stroke-width="3" marker-end="url(#seq-arrow-red)"></line>
+
+          <rect x="212" y="250" width="146" height="66" rx="8" fill="#fde7e4" stroke="#b42318"></rect>
+          <text x="228" y="275" font-size="14" font-weight="800" fill="#b42318">cdp_browser_session</text>
+          <text x="228" y="295" font-size="12" fill="#b42318">ensure_browser_url</text>
+
+          <line x1="358" y1="283" x2="424" y2="283" stroke="#b42318" stroke-width="3" marker-end="url(#seq-arrow-red)"></line>
+
+          <rect x="430" y="250" width="128" height="66" rx="8" fill="#fde7e4" stroke="#b42318"></rect>
+          <text x="448" y="275" font-size="14" font-weight="800" fill="#b42318">越界</text>
+          <text x="448" y="295" font-size="12" fill="#b42318">runtime 做 ensure</text>
+
+          <line x1="558" y1="283" x2="622" y2="283" stroke="#b42318" stroke-width="3" marker-end="url(#seq-arrow-red)"></line>
+
+          <rect x="628" y="238" width="176" height="90" rx="8" fill="#fffafa" stroke="#efb0aa"></rect>
+          <text x="646" y="265" font-size="14" font-weight="800" fill="#171717">ROOT/buddyswitch-codex</text>
+          <text x="646" y="285" font-size="12" fill="#b42318">ROOT 来自 __file__</text>
+          <text x="646" y="303" font-size="12" fill="#b42318">sparse workspace 找不到 CLI</text>
+
+          <line x1="804" y1="283" x2="890" y2="283" stroke="#8b8f94" stroke-width="2.5" stroke-dasharray="7 6" marker-end="url(#seq-arrow-gray)"></line>
+
+          <rect x="898" y="238" width="218" height="90" rx="8" fill="#f4f4f0" stroke="#c9cbc3" stroke-dasharray="7 6"></rect>
+          <text x="918" y="265" font-size="14" font-weight="800" fill="#8b8f94">Chrome / CDP expected</text>
+          <text x="918" y="285" font-size="12" fill="#8b8f94">启动 Chrome、写 browser_port</text>
+          <text x="918" y="303" font-size="12" fill="#8b8f94">但这一步没有发生</text>
+
+          <path d="M 716 328 L 716 348 L 288 348 L 288 322" fill="none" stroke="#b42318" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#seq-arrow-red)"></path>
+          <text x="442" y="345" font-size="12" font-weight="800" fill="#b42318">失败返回：E_SEARCH_BROWSER_ENSURE_FAILED</text>
+
+          <rect x="52" y="432" width="102" height="62" rx="8" fill="#ffffff" stroke="#d7d7ce"></rect>
+          <text x="66" y="457" font-size="14" font-weight="800" fill="#171717">tool call</text>
+          <text x="66" y="477" font-size="12" fill="#5f6368">search / cockpit</text>
+
+          <line x1="154" y1="463" x2="206" y2="463" stroke="#1f6f78" stroke-width="3" marker-end="url(#seq-arrow-blue)"></line>
+
+          <rect x="212" y="422" width="146" height="82" rx="8" fill="#ffffff" stroke="#9fc9ce"></rect>
+          <text x="228" y="448" font-size="14" font-weight="800" fill="#171717">runtime intent only</text>
+          <text x="228" y="468" font-size="12" fill="#1f6f78">search: open_url</text>
+          <text x="228" y="486" font-size="12" fill="#1f6f78">cockpit: acquire/page</text>
+
+          <line x1="358" y1="463" x2="424" y2="463" stroke="#1f6f78" stroke-width="3" marker-end="url(#seq-arrow-blue)"></line>
+
+          <rect x="430" y="422" width="128" height="82" rx="8" fill="#e2f0f1" stroke="#1f6f78"></rect>
+          <text x="448" y="448" font-size="14" font-weight="800" fill="#1f6f78">broker RPC</text>
+          <text x="448" y="468" font-size="12" fill="#1f6f78">browser.open_url</text>
+          <text x="448" y="486" font-size="12" fill="#1f6f78">browser.acquire</text>
+
+          <line x1="558" y1="463" x2="622" y2="463" stroke="#146c43" stroke-width="3" marker-end="url(#seq-arrow-green)"></line>
+
+          <rect x="628" y="410" width="176" height="72" rx="8" fill="#e5f3ea" stroke="#146c43"></rect>
+          <text x="646" y="437" font-size="14" font-weight="800" fill="#146c43">runtime broker</text>
+          <text x="646" y="457" font-size="12" fill="#146c43">validate actor / role</text>
+          <text x="646" y="475" font-size="12" fill="#146c43">唯一控制面入口</text>
+
+          <line x1="716" y1="482" x2="716" y2="526" stroke="#146c43" stroke-width="3" marker-end="url(#seq-arrow-green)"></line>
+
+          <rect x="628" y="532" width="176" height="82" rx="8" fill="#e5f3ea" stroke="#146c43"></rect>
+          <text x="646" y="558" font-size="14" font-weight="800" fill="#146c43">browser manager</text>
+          <text x="646" y="578" font-size="12" fill="#146c43">allocate / start Chrome</text>
+          <text x="646" y="596" font-size="12" fill="#146c43">write browser_port / lifecycle</text>
+
+          <line x1="804" y1="573" x2="890" y2="573" stroke="#146c43" stroke-width="3" marker-end="url(#seq-arrow-green)"></line>
+
+          <rect x="898" y="518" width="218" height="72" rx="8" fill="#ffffff" stroke="#b7dec5"></rect>
+          <text x="918" y="545" font-size="14" font-weight="800" fill="#171717">Chrome CDP endpoint</text>
+          <text x="918" y="565" font-size="12" fill="#146c43">owned browser runtime state</text>
+          <text x="918" y="583" font-size="12" fill="#146c43">browser_url 只在授权边界内使用</text>
+
+          <line x1="1007" y1="590" x2="1007" y2="618" stroke="#1f6f78" stroke-width="3" marker-end="url(#seq-arrow-blue)"></line>
+
+          <rect x="898" y="624" width="218" height="66" rx="8" fill="#ffffff" stroke="#9fc9ce"></rect>
+          <text x="918" y="650" font-size="14" font-weight="800" fill="#171717">page operation</text>
+          <text x="918" y="670" font-size="12" fill="#1f6f78">reuse / Target.createTarget / TTL</text>
+
+          <path d="M 898 657 C 688 706, 428 704, 286 506" fill="none" stroke="#1f6f78" stroke-width="3" stroke-dasharray="7 6" marker-end="url(#seq-arrow-blue)"></path>
+          <text x="392" y="684" font-size="12" font-weight="800" fill="#1f6f78">返回 opened / reused / blocked；不返回 source root，不执行 CLI</text>
+        </svg>
+      </div>
+
+      <div class="sequence-legend">
+        <span class="tag bad">红色</span>
+        <span>actor runtime 越权承担 browser acquisition，并尝试定位 launcher CLI。</span>
+        <span class="tag good">绿色</span>
+        <span>control-plane 内部 ownership：broker 校验，browser manager 启动/登记/释放。</span>
+        <span class="tag info">蓝色</span>
+        <span>能力调用和 page data-plane：open/reuse/page TTL。</span>
+      </div>
+    </section>
+
+    <section class="panel wide" aria-labelledby="topology-title">
+      <div class="section-title">
+        <div>
+          <h2 id="topology-title">一眼调用拓扑图</h2>
+          <p class="subtle">横向是边界，箭头是调用方向；红色代表 runtime 越界，灰色虚线代表因为越界失败而没有走到的预期动作。</p>
+        </div>
+      </div>
+
+      <div class="topology-grid">
+        <article class="topology-card before-topology" data-section="before">
+          <div class="topology-head">
+            <div>
+              <strong>改造前：调用从 runtime 逃逸到 source launcher</strong>
+              <p class="subtle">核心问题：browser acquisition 被 runtime helper 触发。</p>
+            </div>
+            <span class="tag bad">broken topology</span>
+          </div>
+          <div class="svg-frame">
+            <svg class="call-graph" viewBox="0 0 1040 480" role="img" aria-labelledby="before-graph-title before-graph-desc">
+              <title id="before-graph-title">改造前 browser open 调用拓扑</title>
+              <desc id="before-graph-desc">search open browser 在 actor runtime 中调用 cdp browser session ensure，再越界执行 buddyswitch-codex，最终在 sparse workspace 找不到 CLI。</desc>
+              <defs>
+                <marker id="before-arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#b42318"></path>
+                </marker>
+                <marker id="before-arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b8f94"></path>
+                </marker>
+              </defs>
+
+              <rect x="16" y="18" width="244" height="430" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+              <rect x="280" y="18" width="190" height="430" fill="#fff8f7" stroke="#efb0aa"></rect>
+              <rect x="490" y="18" width="250" height="430" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+              <rect x="760" y="18" width="264" height="430" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+
+              <text x="36" y="45" font-size="13" font-weight="800" fill="#263238">ACTOR RUNTIME</text>
+              <text x="302" y="45" font-size="13" font-weight="800" fill="#b42318">BAD BOUNDARY</text>
+              <text x="512" y="45" font-size="13" font-weight="800" fill="#263238">SOURCE CONTROL-PLANE</text>
+              <text x="782" y="45" font-size="13" font-weight="800" fill="#263238">BROWSER RUNTIME</text>
+
+              <rect x="42" y="78" width="190" height="58" rx="8" fill="#ffffff" stroke="#d7d7ce"></rect>
+              <text x="58" y="102" font-size="15" font-weight="800" fill="#171717">search__open_browser</text>
+              <text x="58" y="122" font-size="12" fill="#5f6368">构造 search URL</text>
+
+              <line x1="137" y1="136" x2="137" y2="170" stroke="#5f6368" stroke-width="2" marker-end="url(#before-arrow-gray)"></line>
+
+              <rect x="42" y="174" width="190" height="70" rx="8" fill="#fffafa" stroke="#efb0aa"></rect>
+              <text x="58" y="199" font-size="14" font-weight="800" fill="#171717">cdp_browser_session</text>
+              <text x="58" y="219" font-size="12" fill="#b42318">ensure_browser_url_for_instance</text>
+
+              <line x1="232" y1="209" x2="294" y2="209" stroke="#b42318" stroke-width="3" marker-end="url(#before-arrow-red)"></line>
+
+              <rect x="300" y="174" width="150" height="70" rx="8" fill="#fde7e4" stroke="#b42318"></rect>
+              <text x="318" y="199" font-size="14" font-weight="800" fill="#b42318">越界点</text>
+              <text x="318" y="219" font-size="12" fill="#b42318">runtime 做 acquisition</text>
+
+              <line x1="450" y1="209" x2="520" y2="209" stroke="#b42318" stroke-width="3" marker-end="url(#before-arrow-red)"></line>
+
+              <rect x="526" y="170" width="190" height="78" rx="8" fill="#fffafa" stroke="#efb0aa"></rect>
+              <text x="542" y="196" font-size="14" font-weight="800" fill="#171717">ROOT / buddyswitch-codex</text>
+              <text x="542" y="216" font-size="12" fill="#b42318">ROOT 来自 __file__</text>
+              <text x="542" y="235" font-size="12" fill="#b42318">指向 sparse workspace</text>
+
+              <line x1="620" y1="248" x2="620" y2="290" stroke="#b42318" stroke-width="3" marker-end="url(#before-arrow-red)"></line>
+
+              <rect x="526" y="294" width="190" height="74" rx="8" fill="#fde7e4" stroke="#b42318"></rect>
+              <text x="542" y="320" font-size="14" font-weight="800" fill="#b42318">E_SEARCH_BROWSER_ENSURE_FAILED</text>
+              <text x="542" y="340" font-size="12" fill="#b42318">workspace/buddyswitch-codex</text>
+              <text x="542" y="358" font-size="12" fill="#b42318">不存在</text>
+
+              <line x1="716" y1="209" x2="812" y2="209" stroke="#8b8f94" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#before-arrow-gray)"></line>
+              <rect x="820" y="172" width="170" height="74" rx="8" fill="#f4f4f0" stroke="#c9cbc3" stroke-dasharray="7 6"></rect>
+              <text x="838" y="198" font-size="14" font-weight="800" fill="#8b8f94">Chrome / CDP</text>
+              <text x="838" y="218" font-size="12" fill="#8b8f94">未启动或未确认</text>
+              <text x="838" y="236" font-size="12" fill="#8b8f94">page open 未发生</text>
+
+              <rect x="42" y="392" width="948" height="38" rx="8" fill="#fff3d6" stroke="#ecd391"></rect>
+              <text x="58" y="416" font-size="13" font-weight="800" fill="#8a5a00">读法：红色路径说明 runtime 既发起 browser acquisition，又试图定位 launcher CLI；这违反 actor runtime 不感知 source root 的底线。</text>
+            </svg>
+          </div>
+          <div class="caption-strip">
+            <span class="tag bad">断点</span>
+            <span class="mono">runtime -&gt; ROOT/buddyswitch-codex</span>
+            <span class="tag warn">未发生</span>
+            <span>Chrome 启动、browser_port 写回、page open 都没走到。</span>
+          </div>
+        </article>
+
+        <article class="topology-card after-topology" data-section="after">
+          <div class="topology-head">
+            <div>
+              <strong>目标态：acquisition 在 control-plane 内闭环</strong>
+              <p class="subtle">runtime 只通过 broker 请求 browser capability。</p>
+            </div>
+            <span class="tag good">target topology</span>
+          </div>
+          <div class="svg-frame">
+            <svg class="call-graph" viewBox="0 0 1040 480" role="img" aria-labelledby="after-graph-title after-graph-desc">
+              <title id="after-graph-title">目标态 browser open 调用拓扑</title>
+              <desc id="after-graph-desc">search 或 cockpit 在 actor runtime 中通过 browser client 发送 broker RPC，runtime broker 调用 browser runtime manager 完成 acquisition，再使用 browser session 打开或复用页面。</desc>
+              <defs>
+                <marker id="after-arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#146c43"></path>
+                </marker>
+                <marker id="after-arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f6f78"></path>
+                </marker>
+              </defs>
+
+              <rect x="16" y="18" width="244" height="430" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+              <rect x="280" y="18" width="190" height="430" fill="#e2f0f1" stroke="#9fc9ce"></rect>
+              <rect x="490" y="18" width="250" height="430" fill="#fbfffc" stroke="#b7dec5"></rect>
+              <rect x="760" y="18" width="264" height="430" fill="#fbfbf8" stroke="#d7d7ce"></rect>
+
+              <text x="36" y="45" font-size="13" font-weight="800" fill="#263238">ACTOR RUNTIME</text>
+              <text x="302" y="45" font-size="13" font-weight="800" fill="#1f6f78">BROKER IPC</text>
+              <text x="512" y="45" font-size="13" font-weight="800" fill="#146c43">CONTROL-PLANE</text>
+              <text x="782" y="45" font-size="13" font-weight="800" fill="#263238">BROWSER RUNTIME</text>
+
+              <rect x="42" y="76" width="190" height="60" rx="8" fill="#ffffff" stroke="#d7d7ce"></rect>
+              <text x="58" y="100" font-size="15" font-weight="800" fill="#171717">search / cockpit</text>
+              <text x="58" y="120" font-size="12" fill="#5f6368">只表达 open URL 意图</text>
+
+              <line x1="137" y1="136" x2="137" y2="168" stroke="#5f6368" stroke-width="2" marker-end="url(#after-arrow-blue)"></line>
+
+              <rect x="42" y="172" width="190" height="62" rx="8" fill="#ffffff" stroke="#9fc9ce"></rect>
+              <text x="58" y="197" font-size="14" font-weight="800" fill="#171717">browser_client.open_url</text>
+              <text x="58" y="217" font-size="12" fill="#1f6f78">不带 source root / CLI path</text>
+
+              <line x1="232" y1="203" x2="302" y2="203" stroke="#1f6f78" stroke-width="3" marker-end="url(#after-arrow-blue)"></line>
+
+              <rect x="308" y="172" width="136" height="62" rx="8" fill="#e2f0f1" stroke="#1f6f78"></rect>
+              <text x="326" y="197" font-size="14" font-weight="800" fill="#1f6f78">broker RPC</text>
+              <text x="326" y="217" font-size="12" fill="#1f6f78">唯一控制面入口</text>
+
+              <line x1="444" y1="203" x2="526" y2="203" stroke="#146c43" stroke-width="3" marker-end="url(#after-arrow-green)"></line>
+
+              <rect x="532" y="76" width="174" height="64" rx="8" fill="#e5f3ea" stroke="#146c43"></rect>
+              <text x="550" y="101" font-size="14" font-weight="800" fill="#146c43">runtime broker</text>
+              <text x="550" y="121" font-size="12" fill="#146c43">校验 actor / role / instance</text>
+
+              <line x1="620" y1="140" x2="620" y2="172" stroke="#146c43" stroke-width="3" marker-end="url(#after-arrow-green)"></line>
+
+              <rect x="532" y="176" width="174" height="74" rx="8" fill="#e5f3ea" stroke="#146c43"></rect>
+              <text x="550" y="202" font-size="14" font-weight="800" fill="#146c43">browser manager</text>
+              <text x="550" y="222" font-size="12" fill="#146c43">port / profile / pid</text>
+              <text x="550" y="240" font-size="12" fill="#146c43">写 browser_port</text>
+
+              <line x1="706" y1="213" x2="806" y2="213" stroke="#146c43" stroke-width="3" marker-end="url(#after-arrow-green)"></line>
+
+              <rect x="814" y="176" width="176" height="74" rx="8" fill="#ffffff" stroke="#b7dec5"></rect>
+              <text x="832" y="202" font-size="14" font-weight="800" fill="#171717">Chrome CDP endpoint</text>
+              <text x="832" y="222" font-size="12" fill="#146c43">ready browser_url</text>
+              <text x="832" y="240" font-size="12" fill="#146c43">owned runtime state</text>
+
+              <line x1="902" y1="250" x2="902" y2="294" stroke="#1f6f78" stroke-width="3" marker-end="url(#after-arrow-blue)"></line>
+
+              <rect x="770" y="300" width="220" height="74" rx="8" fill="#ffffff" stroke="#9fc9ce"></rect>
+              <text x="790" y="326" font-size="14" font-weight="800" fill="#171717">browser session data-plane</text>
+              <text x="790" y="346" font-size="12" fill="#1f6f78">list / reuse / Target.createTarget</text>
+              <text x="790" y="364" font-size="12" fill="#1f6f78">idle TTL</text>
+
+              <path d="M 770 337 C 560 422, 300 420, 148 236" fill="none" stroke="#1f6f78" stroke-width="3" stroke-dasharray="7 6" marker-end="url(#after-arrow-blue)"></path>
+              <text x="286" y="414" font-size="12" font-weight="800" fill="#1f6f78">返回 opened / reused / blocked，不返回 source root</text>
+
+              <rect x="42" y="392" width="948" height="38" rx="8" fill="#e5f3ea" stroke="#b7dec5"></rect>
+              <text x="58" y="416" font-size="13" font-weight="800" fill="#146c43">读法：绿色链路把 acquisition 锁在 control-plane；蓝色链路只是 runtime 与 broker/browser data-plane 的能力调用。</text>
+            </svg>
+          </div>
+          <div class="caption-strip">
+            <span class="tag good">关键边界</span>
+            <span class="mono">runtime -&gt; broker RPC</span>
+            <span class="tag good">owner</span>
+            <span>browser manager 拥有 ensure/release，runtime 不碰 source root。</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel wide" aria-labelledby="call-chain-title">
+      <div class="section-title">
+        <div>
+          <h2 id="call-chain-title">系统调用链条：改造前 vs 目标态</h2>
+          <p class="subtle">每一行是一跳；重点看哪一跳跨越了 runtime/control-plane 边界。</p>
+        </div>
+      </div>
+
+      <div class="chain-grid">
+        <article class="chain-card before-chain" data-section="before">
+          <div class="chain-header">
+            <div>
+              <strong>改造前调用链</strong>
+              <p class="subtle">runtime helper 直接尝试进入 launcher control-plane。</p>
+            </div>
+            <span class="tag bad">bad boundary</span>
+          </div>
+          <div class="swim" aria-hidden="true">
+            <div class="idx">#</div>
+            <div class="lane-head">actor runtime</div>
+            <div class="lane-head">boundary</div>
+            <div class="lane-head">control-plane</div>
+            <div class="lane-head">browser</div>
+          </div>
+          <div class="swim">
+            <div class="idx">1</div>
+            <div><code>search__open_browser</code><br><span class="subtle">MCP tool call 进入 runtime</span></div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+          </div>
+          <div class="swim">
+            <div class="idx">2</div>
+            <div>构造 search URL<br><span class="subtle">读取 <code>instance_payload.browser_port</code></span></div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+          </div>
+          <div class="swim">
+            <div class="idx">3</div>
+            <div><code>cdp_browser_session.ensure_browser_url_for_instance</code></div>
+            <div class="breach">runtime 开始做 acquisition</div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+          </div>
+          <div class="swim">
+            <div class="idx">4</div>
+            <div>用 <code>__file__</code> 推导 <code>ROOT</code></div>
+            <div class="breach">错误 authority</div>
+            <div>拼 <code>ROOT/buddyswitch-codex</code></div>
+            <div class="empty">-</div>
+          </div>
+          <div class="swim">
+            <div class="idx">5</div>
+            <div class="empty">-</div>
+            <div class="breach">subprocess 越界</div>
+            <div><code>env browser ensure</code><br><span class="subtle">本应启动 Chrome / 写 port</span></div>
+            <div class="empty">未到达</div>
+          </div>
+          <div class="swim">
+            <div class="idx">6</div>
+            <div>返回 <code>E_SEARCH_BROWSER_ENSURE_FAILED</code></div>
+            <div class="breach">workspace/buddyswitch-codex missing</div>
+            <div class="empty">-</div>
+            <div class="empty">no page opened</div>
+          </div>
+        </article>
+
+        <article class="chain-card after-chain" data-section="after">
+          <div class="chain-header">
+            <div>
+              <strong>目标态调用链</strong>
+              <p class="subtle">runtime 只发 capability request，control-plane 拥有 acquisition。</p>
+            </div>
+            <span class="tag good">clean boundary</span>
+          </div>
+          <div class="swim" aria-hidden="true">
+            <div class="idx">#</div>
+            <div class="lane-head">actor runtime</div>
+            <div class="lane-head">boundary</div>
+            <div class="lane-head">control-plane</div>
+            <div class="lane-head">browser</div>
+          </div>
+          <div class="swim">
+            <div class="idx">1</div>
+            <div><code>search__open_browser</code> / <code>new_page</code><br><span class="subtle">只表达 open URL 意图</span></div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+          </div>
+          <div class="swim">
+            <div class="idx">2</div>
+            <div><code>browser_client.open_url(url)</code></div>
+            <div class="handoff">broker socket RPC</div>
+            <div class="empty">-</div>
+            <div class="empty">-</div>
+          </div>
+          <div class="swim">
+            <div class="idx">3</div>
+            <div class="empty">runtime 不带 source root</div>
+            <div class="clean">校验 actor / role / instance</div>
+            <div><code>runtime broker</code></div>
+            <div class="empty">-</div>
+          </div>
+          <div class="swim">
+            <div class="idx">4</div>
+            <div class="empty">-</div>
+            <div class="clean">control-plane 内部调用</div>
+            <div><code>browser runtime manager.acquire</code><br><span class="subtle">分配 port / 启 Chrome / 写 <code>browser_port</code></span></div>
+            <div>Chrome CDP endpoint ready</div>
+          </div>
+          <div class="swim">
+            <div class="idx">5</div>
+            <div><code>browser_session.open_or_reuse_page</code></div>
+            <div class="handoff">uses returned capability</div>
+            <div class="empty">-</div>
+            <div><code>Target.createTarget</code> / reuse / idle TTL</div>
+          </div>
+          <div class="swim">
+            <div class="idx">6</div>
+            <div>返回 opened / reused / blocked</div>
+            <div class="clean">无 CLI、无 source root</div>
+            <div>保持 lifecycle state</div>
+            <div>managed page state</div>
+          </div>
+        </article>
+      </div>
+
+      <div class="callout-line">
+        <span class="tag bad">删除</span>
+        <span><code>runtime -&gt; subprocess(buddyswitch-codex)</code></span>
+        <span class="tag good">保留</span>
+        <span><code>runtime -&gt; broker socket -&gt; browser manager</code></span>
+        <span class="tag warn">核心差异</span>
+        <span>browser acquisition 的边界从 runtime helper 移到 control-plane。</span>
+      </div>
+    </section>
+
+    <section class="panel wide" aria-labelledby="contract-title">
+      <div class="section-title">
+        <div>
+          <h2 id="contract-title">硬边界 Contract</h2>
+          <p class="subtle">这些不是偏好，是改造验收条件。</p>
+        </div>
+      </div>
+      <div class="matrix" role="table" aria-label="architecture contracts">
+        <div class="head">维度</div>
+        <div class="head">当前状态</div>
+        <div class="head">目标状态</div>
+
+        <div>Source root 可见性</div>
+        <div class="bad-cell">actor runtime 可通过 helper 间接碰到 <code>BUDDYSWITCH_REPO_ROOT</code> 或 <code>__file__</code> 推导 root。</div>
+        <div class="good-cell">只有 launcher/control-plane 持有 source root。runtime 不读、不传、不推导。</div>
+
+        <div>Browser ensure owner</div>
+        <div class="bad-cell"><code>cdp_browser_session.py</code> 在 runtime 中触发 ensure。</div>
+        <div class="good-cell">browser runtime manager 拥有 ensure/release/stop。CLI 和 broker 都只是入口。</div>
+
+        <div>Search 职责</div>
+        <div class="bad-cell">search wrapper 可触发 browser acquisition。</div>
+        <div class="good-cell">search 只做 query/engine 校验和 search URL 构造，再请求 browser capability。</div>
+
+        <div>Cockpit 职责</div>
+        <div class="bad-cell">cockpit proxy 可 shell 回 launcher CLI 来拿 browser_url。</div>
+        <div class="good-cell">cockpit 使用 broker 获取 browser_url，然后执行 page operation。</div>
+
+        <div>MCP 注册</div>
+        <div class="bad-cell">ensure 顺手修复 cockpit MCP，导致 acquisition 与 MCP 配置耦合。</div>
+        <div class="good-cell">instance start 注册 cockpit MCP。browser ensure 只管理 browser runtime。</div>
+
+        <div>回归防线</div>
+        <div class="bad-cell">测试容易只验证 source checkout，不覆盖 sparse runtime 边界。</div>
+        <div class="good-cell">contract test 明确禁止 runtime-projected code 执行或定位 <code>buddyswitch-codex</code>。</div>
+      </div>
+    </section>
+
+    <section class="panel wide" aria-labelledby="owner-title">
+      <div class="section-title">
+        <div>
+          <h2 id="owner-title">模块职责重分配</h2>
+          <p class="subtle">每个模块只保留一个清晰身份。</p>
+        </div>
+      </div>
+      <div class="owner-grid">
+        <div class="owner">
+          <div class="label">Launcher CLI</div>
+          <h3>人工和 host 入口</h3>
+          <ul>
+            <li>instance lifecycle</li>
+            <li>workspace projection</li>
+            <li>debug env browser commands</li>
+            <li>不再被 runtime shell 回调</li>
+          </ul>
+        </div>
+        <div class="owner">
+          <div class="label">Runtime Broker</div>
+          <h3>唯一 IPC 边界</h3>
+          <ul>
+            <li><code>browser.acquire</code></li>
+            <li><code>browser.status</code></li>
+            <li><code>browser.release</code></li>
+            <li><code>browser.open_url</code></li>
+          </ul>
+        </div>
+        <div class="owner">
+          <div class="label">Browser Manager</div>
+          <h3>runtime owner</h3>
+          <ul>
+            <li>port/profile/log/pid</li>
+            <li>Chrome startup</li>
+            <li><code>instance.json</code> browser_port</li>
+            <li>owned/foreign cleanup</li>
+          </ul>
+        </div>
+        <div class="owner">
+          <div class="label">Browser Session</div>
+          <h3>page data-plane</h3>
+          <ul>
+            <li>list/reuse/open page</li>
+            <li>page limit</li>
+            <li>idle TTL</li>
+            <li>no subprocess, no CLI</li>
+          </ul>
+        </div>
+        <div class="owner">
+          <div class="label">Search Tool</div>
+          <h3>URL wrapper</h3>
+          <ul>
+            <li>query validation</li>
+            <li>engine validation</li>
+            <li>build search URL</li>
+            <li>browser capability caller</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="risk-grid" aria-label="risk priorities">
+      <article class="risk p0">
+        <h3>P0 设计缺口</h3>
+        <p>browser acquisition control-plane 不应存在于 runtime-projected code。当前失败只是这个边界漏洞的具体暴露。</p>
+      </article>
+      <article class="risk">
+        <h3>P1 收敛目标</h3>
+        <p><code>search__open_browser</code> 和 <code>chrome-devtools-cockpit</code> 统一通过 broker 请求 browser capability，不各自触发 ensure。</p>
+      </article>
+      <article class="risk done">
+        <h3>保留能力</h3>
+        <p>已有 page operation 能力继续保留：<code>Target.createTarget</code>、reuse、page limit、idle TTL。</p>
+      </article>
+    </section>
+
+    <section class="evidence" aria-labelledby="evidence-title">
+      <h2 id="evidence-title">证据锚点</h2>
+      <p class="subtle">这些文件说明当前链路和边界破口在哪里。</p>
+      <div class="evidence-list">
+        <div class="ev">
+          <h3>search 入口触发 ensure</h3>
+          <p class="mono">scripts/env/tools/search/_impl.py:800-817</p>
+          <p class="subtle">没有 browser_url 时调用 <code>browser_session.ensure_browser_url_for_instance</code>。</p>
+        </div>
+        <div class="ev">
+          <h3>runtime helper shell 到 CLI</h3>
+          <p class="mono">scripts/env/cdp_browser_session.py:128-144</p>
+          <p class="subtle">默认命令拼 <code>ROOT / "buddyswitch-codex"</code> 并用 <code>cwd=ROOT</code>。</p>
+        </div>
+        <div class="ev">
+          <h3>sparse runtime 禁止 source surface</h3>
+          <p class="mono">tools/launcher/workspace.sh:198-208</p>
+          <p class="subtle"><code>buddyswitch-codex</code>、<code>tools</code>、<code>tests</code>、<code>docs</code> 不应在 actor workspace 中出现。</p>
+        </div>
+        <div class="ev">
+          <h3>ensure 当前写 browser_port</h3>
+          <p class="mono">buddyswitch-codex:1541-1567</p>
+          <p class="subtle">locked ensure 后调用 <code>buddyswitch_instance_set_browser_port</code>。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const buttons = Array.from(document.querySelectorAll("[data-view]"));
+    const beforeSections = Array.from(document.querySelectorAll('[data-section="before"]'));
+    const afterSections = Array.from(document.querySelectorAll('[data-section="after"]'));
+
+    function setView(view) {
+      buttons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.view === view));
+      });
+      beforeSections.forEach((section) => {
+        section.classList.toggle("hidden", view === "after");
+      });
+      afterSections.forEach((section) => {
+        section.classList.toggle("hidden", view === "before");
+      });
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => setView(button.dataset.view));
+    });
+  </script>
+</body>
+</html>

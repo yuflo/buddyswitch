@@ -221,6 +221,53 @@ print(json.dumps({{
             self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
             self.assertEqual(completed.stdout.strip(), "", msg=f"{token}\n{completed.stdout}")
 
+    def test_browser_control_plane_has_no_live_old_acquisition_residue(self) -> None:
+        forbidden_patterns = (
+            "_".join(("ensure", "browser", "url", "for", "instance")),
+            "BUDDYSWITCH_BROWSER_COCKPIT_" + "ENSURE_COMMAND",
+            'ROOT / "' + "buddyswitch-codex" + '"',
+            "env browser " + "ensure",
+            "env browser " + "release",
+        )
+        scan_targets = [
+            "scripts/env",
+            "scripts/runtime_kernel",
+            "tools/launcher",
+            "tests",
+        ]
+        allowed_files = {
+            "tests/test_buddyswitch_launcher.py",
+            "tests/test_browser_cockpit_launcher.py",
+            "tests/test_imessage_channel.py",
+            "tests/test_submit_turn.py",
+            "tests/test_web_management.py",
+        }
+        allowed_lines = (
+            "tools/launcher/browser_cockpit.sh:77:",
+            "tools/launcher/browser_cockpit.sh:78:",
+        )
+        hits: list[str] = []
+        for pattern in forbidden_patterns:
+            completed = subprocess.run(
+                ["rg", "-n", pattern, *scan_targets, "-S", "-g", "!**/__pycache__/**", "-g", "!**/*.pyc"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+            for line in completed.stdout.splitlines():
+                if not line.strip():
+                    continue
+                path = line.split(":", 1)[0]
+                if path in allowed_files:
+                    continue
+                if any(fragment in line for fragment in allowed_lines):
+                    continue
+                hits.append(line)
+
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
     def test_env_store_module_is_runtime_root_compat_only(self) -> None:
         retired_api = (
             "create_track",

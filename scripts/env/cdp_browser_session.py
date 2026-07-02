@@ -5,18 +5,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
-import shlex
 import sys
-import subprocess
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 SCRIPTS_ROOT = SCRIPTS_DIR.parent
-ROOT = SCRIPTS_ROOT.parent
 for candidate in (SCRIPTS_ROOT, SCRIPTS_DIR):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -78,86 +74,6 @@ class BrowserSessionOpenResult:
 
 class BrowserPageSnapshotError(RuntimeError):
     pass
-
-
-class BrowserSessionError(RuntimeError):
-    pass
-
-
-def shared_root_for_instance_root(instance_root: Path) -> Path:
-    root = Path(instance_root)
-    if root.name.startswith("act-") and root.parent.name == "instances":
-        return root.parent.parent
-    raise BrowserSessionError(f"cannot derive shared root from instance root: {root}")
-
-
-def launcher_env_for_instance_root(instance_root: Path, base_env: dict[str, str] | None = None) -> dict[str, str]:
-    env = dict(base_env or os.environ)
-    shared_root = shared_root_for_instance_root(Path(instance_root))
-    env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-    env.setdefault("BUDDYSWITCH_SOURCE_HOME", str(shared_root.parent))
-    env.setdefault("BUDDYSWITCH_REPO_ROOT", str(ROOT))
-    return env
-
-
-def browser_url_from_instance_payload(instance_payload: dict[str, Any]) -> tuple[str | None, str | None]:
-    port = instance_payload.get("browser_port")
-    if port is None:
-        return None, "browser URL is not recorded"
-    if isinstance(port, bool) or not isinstance(port, int):
-        return None, f"invalid browser port: {port}"
-    if port < 1 or port > 65535:
-        return None, f"invalid browser port: {port}"
-    return f"http://127.0.0.1:{port}", None
-
-
-def _read_instance_payload(instance_root: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads((Path(instance_root) / "instance.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise BrowserSessionError(f"failed to read instance browser state: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise BrowserSessionError("failed to read instance browser state: instance JSON was not an object")
-    return payload
-
-
-def browser_url_from_instance_root(instance_root: Path) -> tuple[str | None, str | None]:
-    return browser_url_from_instance_payload(_read_instance_payload(Path(instance_root)))
-
-
-def ensure_browser_url_for_instance(*, instance_root: Path, actor_id: str) -> str:
-    root = Path(instance_root)
-    if not isinstance(actor_id, str) or not actor_id.strip():
-        raise BrowserSessionError("actor_id is required to ensure browser URL")
-    current_url, current_reason = browser_url_from_instance_root(root)
-    if current_url is None and current_reason and current_reason.startswith("invalid browser port"):
-        raise BrowserSessionError(current_reason)
-    override = os.environ.get("BUDDYSWITCH_BROWSER_COCKPIT_ENSURE_COMMAND")
-    if override:
-        command = shlex.split(override) + [str(root)]
-    else:
-        command = [str(ROOT / "buddyswitch-codex"), "env", "browser", "ensure", "--instance", actor_id.strip()]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=launcher_env_for_instance_root(root),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30.0,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise BrowserSessionError("browser ensure timed out") from exc
-    except OSError as exc:
-        raise BrowserSessionError(f"browser ensure failed: {exc}") from exc
-    if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
-        raise BrowserSessionError(detail)
-    browser_url, reason = browser_url_from_instance_root(root)
-    if browser_url is None:
-        raise BrowserSessionError(reason or "instance browser URL is missing after ensure")
-    return browser_url
 
 
 def _read_target_list(browser_url: str, timeout_seconds: float) -> list[Any]:

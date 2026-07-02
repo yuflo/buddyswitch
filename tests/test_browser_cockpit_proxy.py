@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -24,6 +25,12 @@ from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from runtime_kernel import protocol  # noqa: E402
+
 PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
@@ -338,6 +345,95 @@ for raw_line in sys.stdin:
         self.addCleanup(server.shutdown)
         return f"http://127.0.0.1:{server.server_port}"
 
+    def _start_fake_runtime_broker(self, *, socket_path: Path, browser_url: str, calls_path: Path) -> Any:
+        stop = threading.Event()
+        ready = threading.Event()
+        browser_port = urlparse(browser_url).port
+        if browser_port is None:
+            raise AssertionError(f"test browser_url has no port: {browser_url}")
+        try:
+            socket_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        def append_call(request: dict[str, Any]) -> None:
+            calls_path.parent.mkdir(parents=True, exist_ok=True)
+            with calls_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(request, ensure_ascii=True) + "\n")
+
+        def serve() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen()
+                server.settimeout(0.1)
+                ready.set()
+                while not stop.is_set():
+                    try:
+                        conn, _addr = server.accept()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
+                    with conn:
+                        try:
+                            request = protocol.read_message(conn)
+                        except Exception:
+                            continue
+                        if not isinstance(request, dict):
+                            continue
+                        append_call(request)
+                        request_id = request.get("request_id")
+                        method = request.get("method")
+                        if method == "browser.acquire":
+                            response = {
+                                "protocol": protocol.PROTOCOL,
+                                "request_id": request_id,
+                                "ok": True,
+                                "result": {
+                                    "ok": True,
+                                    "browser_url": browser_url,
+                                    "browser_port": browser_port,
+                                    "ready": True,
+                                    "state_changed": True,
+                                    "durability": "runtime",
+                                },
+                            }
+                        else:
+                            response = {
+                                "protocol": protocol.PROTOCOL,
+                                "request_id": request_id,
+                                "ok": False,
+                                "error": {
+                                    "code": "E_TEST_UNSUPPORTED_BROKER_METHOD",
+                                    "message": f"unsupported fake broker method: {method}",
+                                },
+                                "permission_boundary": "test.fake_broker",
+                                "state_changed": False,
+                                "durability": "none",
+                            }
+                        protocol.write_message(conn, response)
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        if not ready.wait(timeout=5):
+            raise AssertionError("fake runtime broker did not start")
+
+        def stop_broker() -> None:
+            stop.set()
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                    client.settimeout(0.1)
+                    client.connect(str(socket_path))
+            except OSError:
+                pass
+            thread.join(timeout=5)
+            try:
+                socket_path.unlink()
+            except FileNotFoundError:
+                pass
+
+        return stop_broker
+
     def _run_proxy(
         self,
         messages: list[dict[str, Any]],
@@ -353,7 +449,7 @@ for raw_line in sys.stdin:
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
         self._last_proxy_all_calls: list[dict[str, Any]] = []
         self._last_proxy_marker_snapshot: dict[str, Any] = {}
-        self._last_proxy_ensure_call: dict[str, Any] = {}
+        self._last_proxy_broker_calls: list[dict[str, Any]] = []
         if browser_url is None:
             browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
         with tempfile.TemporaryDirectory() as temp_root:
@@ -379,57 +475,21 @@ for raw_line in sys.stdin:
                     encoding="utf-8",
                 )
             upstream = temp_root_path / "fake_upstream.py"
-            ensure_helper = temp_root_path / "fake_ensure.py"
             calls_path = temp_root_path / "calls.jsonl"
             all_calls_path = temp_root_path / "all-calls.jsonl"
             argv_path = temp_root_path / "argv.jsonl"
-            ensure_calls_path = temp_root_path / "ensure-calls.jsonl"
+            broker_calls_path = temp_root_path / "broker-calls.jsonl"
+            broker_socket_path = temp_root_path / "runtime-broker.sock"
             marker_snapshot_path = temp_root_path / "marker-snapshot.json"
             exit_without_response_once_path = temp_root_path / "exit-without-response.once"
             self._write_fake_upstream(upstream)
-            ensure_helper.write_text(
-                """#!/usr/bin/env python3
-import json
-import os
-import sys
-from pathlib import Path
-
-instance_root = Path(sys.argv[1])
-calls_path = Path(os.environ["BUDDYSWITCH_TEST_PROXY_ENSURE_CALLS"])
-browser_port = int(os.environ["BUDDYSWITCH_TEST_PROXY_ENSURE_PORT"])
-calls_path.write_text(
-    json.dumps(
-        {
-            "argv": sys.argv,
-            "instance_root": str(instance_root),
-            "BUDDYSWITCH_SHARED_ROOT": os.environ.get("BUDDYSWITCH_SHARED_ROOT"),
-            "BUDDYSWITCH_SOURCE_HOME": os.environ.get("BUDDYSWITCH_SOURCE_HOME"),
-            "BUDDYSWITCH_REPO_ROOT": os.environ.get("BUDDYSWITCH_REPO_ROOT"),
-            "HOME": os.environ.get("HOME"),
-            "CODEX_HOME": os.environ.get("CODEX_HOME"),
-        },
-        ensure_ascii=True,
-    )
-    + "\\n",
-    encoding="utf-8",
-)
-instance_json = instance_root / "instance.json"
-payload = json.loads(instance_json.read_text(encoding="utf-8"))
-payload["browser_port"] = browser_port
-instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")
-""",
-                encoding="utf-8",
-            )
-            ensure_helper.chmod(ensure_helper.stat().st_mode | stat.S_IXUSR)
 
             env = os.environ.copy()
             env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ALL_CALLS"] = str(all_calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
             env["BUDDYSWITCH_TEST_PROXY_MARKER_SNAPSHOT"] = str(marker_snapshot_path)
-            env["BUDDYSWITCH_TEST_PROXY_ENSURE_CALLS"] = str(ensure_calls_path)
-            env["BUDDYSWITCH_TEST_PROXY_ENSURE_PORT"] = str(urlparse(browser_url).port)
-            env["BUDDYSWITCH_BROWSER_COCKPIT_ENSURE_COMMAND"] = f"{sys.executable} {ensure_helper}"
+            env["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = str(broker_socket_path)
             if instance_root is not None:
                 env["BUDDYSWITCH_TEST_PROXY_INSTANCE_ROOT"] = str(instance_root)
             if exit_without_response_once:
@@ -441,6 +501,11 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
                     env.pop(key, None)
             if extra_env:
                 env.update(extra_env)
+            broker_stop = self._start_fake_runtime_broker(
+                socket_path=broker_socket_path,
+                browser_url=browser_url,
+                calls_path=broker_calls_path,
+            )
             command = [
                 sys.executable,
                 str(PROXY),
@@ -480,7 +545,9 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
             except subprocess.TimeoutExpired:
                 os.killpg(proc.pid, signal.SIGKILL)
                 stdout, stderr = proc.communicate()
+                broker_stop()
                 self.fail(f"proxy timed out\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            broker_stop()
 
             self.assertEqual(proc.returncode, 0, msg=f"proxy failed\nstdout:\n{stdout}\nstderr:\n{stderr}")
             responses = [json.loads(line) for line in stdout.splitlines() if line.strip()]
@@ -499,10 +566,10 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
                 if marker_snapshot_path.exists()
                 else {}
             )
-            self._last_proxy_ensure_call = (
-                json.loads(ensure_calls_path.read_text(encoding="utf-8"))
-                if ensure_calls_path.exists()
-                else {}
+            self._last_proxy_broker_calls = (
+                [json.loads(line) for line in broker_calls_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                if broker_calls_path.exists()
+                else []
             )
             upstream_argv = json.loads(argv_path.read_text(encoding="utf-8").splitlines()[0]) if argv_path.exists() else []
             return responses, forwarded, upstream_argv, stderr
@@ -572,6 +639,35 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
             self.assertIn("new_page", by_name)
             self.assertIn("BuddySwitch", json.dumps(by_name["new_page"], ensure_ascii=True))
 
+    def test_first_tools_call_uses_broker_acquire_not_ensure_subprocess(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            responses, forwarded, upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("list_pages", {})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                initial_browser_port_missing=True,
+                extra_env={
+                    "BUDDYSWITCH_TEST_PROXY_BROKER_BROWSER_URL": browser_url,
+                },
+            )
+
+        self.assertEqual(responses[0]["id"], 1)
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "list_pages")
+        self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+        self.assertEqual([call.get("method") for call in self._last_proxy_broker_calls], ["browser.acquire"])
+        broker_params = self._last_proxy_broker_calls[0].get("params")
+        self.assertIsInstance(broker_params, dict, msg=self._last_proxy_broker_calls[0])
+        assert isinstance(broker_params, dict)
+        self.assertEqual(broker_params.get("reason"), "chrome-devtools-cockpit")
+        broker_params_text = json.dumps(broker_params, ensure_ascii=True)
+        self.assertNotIn("source_root", broker_params_text)
+        self.assertNotIn("launcher_path", broker_params_text)
+        self.assertNotIn("buddyswitch-" + "codex", broker_params_text)
+
     def test_invalid_json_before_upstream_does_not_start_upstream(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
@@ -639,7 +735,7 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-    def test_first_tools_call_ensures_browser_and_starts_upstream(self) -> None:
+    def test_first_tools_call_acquires_browser_and_starts_upstream(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
 
         with tempfile.TemporaryDirectory() as temp_root:
@@ -650,13 +746,13 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
                 instance_root=instance_root,
                 initial_browser_port_missing=True,
             )
-            instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
 
         self.assertEqual(responses[0]["id"], 1)
         self.assertEqual(len(forwarded), 1)
         self.assertEqual(forwarded[0]["params"]["name"], "list_pages")
         self.assertIn(f"--browser-url={browser_url}", upstream_argv)
-        self.assertEqual(instance_payload["browser_port"], urlparse(browser_url).port)
+        self.assertEqual([call.get("method") for call in self._last_proxy_broker_calls], ["browser.acquire"])
+        self.assertEqual(self._last_proxy_broker_calls[0].get("params"), {"reason": "chrome-devtools-cockpit"})
         self.assertEqual(
             [message.get("method") for message in self._last_proxy_all_calls],
             ["initialize", "notifications/initialized", "tools/call"],
@@ -667,7 +763,7 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
         self.assertFalse((instance_root / "runtime" / "browser" / "cockpit-upstream.pid").exists())
         self.assertFalse((instance_root / "runtime" / "browser" / "cockpit-upstream.pgid").exists())
 
-    def test_first_tools_call_ensures_browser_uses_shared_root_from_instance_root_when_actor_home_is_bound(self) -> None:
+    def test_first_tools_call_broker_acquire_params_do_not_include_source_root_when_actor_home_is_bound(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
 
         with tempfile.TemporaryDirectory() as temp_root:
@@ -688,10 +784,13 @@ instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\\n
         self.assertEqual(responses[0]["id"], 1)
         self.assertEqual(forwarded, [])
         self.assertEqual(upstream_argv, [])
-        self.assertEqual(self._last_proxy_ensure_call["BUDDYSWITCH_SHARED_ROOT"], str(shared_root))
-        self.assertEqual(self._last_proxy_ensure_call["BUDDYSWITCH_SOURCE_HOME"], str(shared_root.parent))
-        self.assertEqual(self._last_proxy_ensure_call["BUDDYSWITCH_REPO_ROOT"], str(ROOT))
-        self.assertEqual(self._last_proxy_ensure_call["HOME"], str(instance_root / "home"))
+        self.assertEqual([call.get("method") for call in self._last_proxy_broker_calls], ["browser.acquire"])
+        broker_params_text = json.dumps(self._last_proxy_broker_calls[0].get("params"), ensure_ascii=True)
+        self.assertNotIn(str(ROOT), broker_params_text)
+        self.assertNotIn(str(shared_root), broker_params_text)
+        self.assertNotIn(str(shared_root.parent), broker_params_text)
+        self.assertNotIn("HOME", broker_params_text)
+        self.assertNotIn("CODEX_HOME", broker_params_text)
 
     def test_new_page_opens_locally_through_browser_session_without_forwarding(self) -> None:
         cdp_state: dict[str, object] = {

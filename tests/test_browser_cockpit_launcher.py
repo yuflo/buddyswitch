@@ -9,7 +9,10 @@ import signal
 import stat
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 
@@ -18,11 +21,21 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 
 class BrowserCockpitLauncherTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._kill_temp_buddyswitch_browser_processes()
+        self.addCleanup(self._kill_temp_buddyswitch_browser_processes)
+
     def _write_exec(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
-    def _write_instance_record(self, shared_root: Path, actor_id: str = "act-pm-browser") -> Path:
+    def _write_instance_record(
+        self,
+        shared_root: Path,
+        actor_id: str = "act-pm-browser",
+        *,
+        browser_port: int | None = None,
+    ) -> Path:
         instance_root = shared_root / "instances" / actor_id
         instance_root.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -32,13 +45,41 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
             "current_task_id": None,
             "current_track_id": None,
             "workspace_dir": str(instance_root / "workspace"),
-            "browser_port": None,
+            "browser_port": browser_port,
             "created_at": "2026-05-02T00:00:00Z",
             "updated_at": "2026-05-02T00:00:00Z",
         }
         record_path = instance_root / "instance.json"
         record_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         return instance_root
+
+    def _start_fake_cdp_server(self, state: dict[str, object]) -> int:
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                if self.path == "/json/version":
+                    payload: object = {"Browser": "test"}
+                elif self.path == "/json/list":
+                    payload = state.get("pages", [])
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return int(server.server_port)
 
     def _write_cdp_state(
         self,
@@ -229,6 +270,135 @@ fi
 if [[ -n "${BUDDYSWITCH_TEST_BROWSER_READY_FILE:-}" ]]; then
   touch "${BUDDYSWITCH_TEST_BROWSER_READY_FILE}"
 fi
+if [[ "${BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP:-0}" == "1" ]]; then
+  python3 - "$@" <<'PY'
+import base64
+import hashlib
+import json
+import os
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+port = None
+for arg in sys.argv[1:]:
+    if arg.startswith("--remote-debugging-port="):
+        port = int(arg.split("=", 1)[1])
+if port is None:
+    raise SystemExit("missing --remote-debugging-port")
+
+state_path_raw = os.environ.get("BUDDYSWITCH_TEST_CDP_STATE_FILE")
+state_path = Path(state_path_raw) if state_path_raw else None
+calls_path_raw = os.environ.get("BUDDYSWITCH_TEST_CDP_CALLS_FILE")
+calls_path = Path(calls_path_raw) if calls_path_raw else None
+
+def read_state():
+    if state_path is None or not state_path.exists():
+        return {"pages": [{"id": "target-about-blank", "type": "page", "url": "about:blank"}]}
+    return json.loads(state_path.read_text(encoding="utf-8"))
+
+def write_state(state):
+    if state_path is None:
+        return
+    state_path.write_text(json.dumps(state, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")
+
+def record_call(method, params):
+    if calls_path is None:
+        return
+    calls_path.parent.mkdir(parents=True, exist_ok=True)
+    with calls_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"path": method, "params": params}, ensure_ascii=True) + "\\n")
+
+def read_ws_frame(stream):
+    first = stream.read(1)
+    if not first:
+        return None, b""
+    second = stream.read(1)
+    if not second:
+        return None, b""
+    opcode = first[0] & 0x0F
+    masked = bool(second[0] & 0x80)
+    length = second[0] & 0x7F
+    if length == 126:
+        length = int.from_bytes(stream.read(2), "big")
+    elif length == 127:
+        length = int.from_bytes(stream.read(8), "big")
+    mask = stream.read(4) if masked else b""
+    payload = bytearray(stream.read(length))
+    if masked:
+        for index in range(length):
+            payload[index] ^= mask[index % 4]
+    return opcode, bytes(payload)
+
+def write_ws_json(stream, payload):
+    data = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    if len(data) < 126:
+        header = bytes([0x81, len(data)])
+    elif len(data) < 65536:
+        header = bytes([0x81, 126]) + len(data).to_bytes(2, "big")
+    else:
+        header = bytes([0x81, 127]) + len(data).to_bytes(8, "big")
+    stream.write(header + data)
+    stream.flush()
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *_args):
+        return
+
+    def do_GET(self):
+        if self.path == "/devtools/browser/fake":
+            key = self.headers.get("Sec-WebSocket-Key", "")
+            accept = base64.b64encode(
+                hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
+            ).decode("ascii")
+            self.send_response(101)
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", accept)
+            self.end_headers()
+            _opcode, payload = read_ws_frame(self.rfile)
+            try:
+                request = json.loads(payload.decode("utf-8"))
+            except Exception:
+                return
+            method = request.get("method")
+            params = request.get("params")
+            if not isinstance(params, dict):
+                params = {}
+            record_call(str(method), params)
+            if method == "Target.createTarget" and params.get("url") == "about:blank":
+                state = read_state()
+                if state.get("allow_background_create_about_blank") is False:
+                    write_ws_json(self.wfile, {"id": request.get("id"), "error": {"message": "creation disabled"}})
+                    return
+                pages = list(state.get("pages", []))
+                if not any(isinstance(page, dict) and page.get("type") == "page" and page.get("url") == "about:blank" for page in pages):
+                    pages.append({"id": "target-about-blank", "type": "page", "url": "about:blank"})
+                    state["pages"] = pages
+                    write_state(state)
+                write_ws_json(self.wfile, {"id": request.get("id"), "result": {"targetId": "target-about-blank"}})
+                return
+            write_ws_json(self.wfile, {"id": request.get("id"), "error": {"message": "unsupported method"}})
+            return
+
+        if self.path == "/json/version":
+            payload = {"Browser": "test", "webSocketDebuggerUrl": f"ws://127.0.0.1:{port}/devtools/browser/fake"}
+        elif self.path == "/json/list":
+            payload = read_state().get("pages", [])
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+PY
+fi
 exit 0
 """,
         )
@@ -338,7 +508,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
         self.assertFalse(any(str(item).startswith("--browser-url") for item in argv), msg=argv)
         self.assertNotIn("chrome-devtools-mcp@latest", argv)
 
-    def test_browser_ensure_starts_chrome_with_shared_profile_and_bootstraps_mcps(self) -> None:
+    def test_browser_ensure_starts_chrome_with_shared_profile_and_does_not_bootstrap_mcps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -369,6 +539,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
             env["BUDDYSWITCH_TEST_CHROME_ARGV_FILE"] = str(chrome_argv_path)
+            env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
@@ -389,7 +560,10 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             )
 
             self.assertTrue((instance_root / "browser" / "profile").exists())
-            self.assertTrue((instance_root / "browser" / "chrome.pid").exists())
+            pid_file = instance_root / "browser" / "chrome.pid"
+            self.assertTrue(pid_file.exists())
+            chrome_pid = int(pid_file.read_text(encoding="utf-8").strip())
+            self.addCleanup(self._kill_process_if_live, chrome_pid)
 
             chrome_argv = [
                 json.loads(line)
@@ -406,22 +580,19 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             self.assertIn("--no-default-browser-check", chrome_args)
             self.assertEqual(chrome_args[-1], "about:blank")
 
-            payloads = [
-                json.loads(line)
-                for line in capture_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            mcp_add_names = [payload["argv"][2] for payload in payloads if payload["argv"][:2] == ["mcp", "add"]]
-            self.assertEqual(mcp_add_names, ["chrome-devtools-cockpit"])
-            cockpit_add = next(payload for payload in payloads if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], instance_root)
-
-            expected_home = instance_root / "home"
-            expected_codex_home = instance_root / "codex-home"
-            for payload in payloads:
-                self.assertEqual(payload["home"], str(expected_home))
-                self.assertEqual(payload["codex_home"], str(expected_codex_home))
-                self.assertEqual(payload["xdg_config_home"], str(instance_root / "xdg-config"))
+            payloads = (
+                [
+                    json.loads(line)
+                    for line in capture_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                if capture_path.exists()
+                else []
+            )
+            self.assertFalse(
+                any(payload["argv"][:2] in (["mcp", "add"], ["mcp", "remove"]) for payload in payloads),
+                msg=payloads,
+            )
 
     def test_browser_ensure_does_not_create_runtime_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -444,6 +615,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
@@ -463,20 +635,22 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 0,
                 msg=f"browser ensure failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
             )
+            chrome_pid = int((instance_root / "browser" / "chrome.pid").read_text(encoding="utf-8").strip())
+            self.addCleanup(self._kill_process_if_live, chrome_pid)
             shared_workspace_dir = shared_root / "workspace"
             instance_workspace_dir = instance_root / "workspace"
             self.assertFalse(shared_workspace_dir.exists(), "browser ensure should not create the legacy runtime workspace")
             self.assertFalse(instance_workspace_dir.exists(), "browser ensure should not create the instance runtime workspace")
-            payloads = [
-                json.loads(line)
-                for line in capture_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            self.assertEqual(
-                payloads[0]["home"],
-                str(instance_root / "home"),
-                "browser ensure should bootstrap from instance-scoped runtime state, not main-checkout skeletons",
+            payloads = (
+                [
+                    json.loads(line)
+                    for line in capture_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                if capture_path.exists()
+                else []
             )
+            self.assertEqual(payloads, [], "browser ensure should not call Codex MCP registration")
 
     def test_browser_status_endpoint_only_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -486,7 +660,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             fake_bin.mkdir(parents=True, exist_ok=True)
 
             state_file = temp_root_path / "cdp-state.json"
-            self._write_cdp_state(state_file, version_ok=True, pages=[])
+            state = {"pages": []}
+            port = self._start_fake_cdp_server(state)
             self._write_fake_curl(fake_bin / "curl")
 
             env = os.environ.copy()
@@ -497,7 +672,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
-            self._write_instance_record(shared_root, actor_id)
+            self._write_instance_record(shared_root, actor_id, browser_port=port)
 
             status = subprocess.run(
                 [str(LAUNCHER), "env", "browser", "status", "--instance", actor_id],
@@ -518,6 +693,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             fake_bin.mkdir(parents=True, exist_ok=True)
 
             state_file = temp_root_path / "cdp-state.json"
+            state: dict[str, object] = {"pages": []}
+            port = self._start_fake_cdp_server(state)
             self._write_fake_curl(fake_bin / "curl")
 
             env = os.environ.copy()
@@ -528,7 +705,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
-            self._write_instance_record(shared_root, actor_id)
+            self._write_instance_record(shared_root, actor_id, browser_port=port)
 
             for url in (
                 "chrome://signin/",
@@ -536,11 +713,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 "devtools://devtools/bundled/inspector.html",
             ):
                 with self.subTest(url=url):
-                    self._write_cdp_state(
-                        state_file,
-                        version_ok=True,
-                        pages=[{"id": "only-page", "type": "page", "url": url}],
-                    )
+                    state["pages"] = [{"id": "only-page", "type": "page", "url": url}]
                     status = subprocess.run(
                         [str(LAUNCHER), "env", "browser", "status", "--instance", actor_id],
                         cwd=ROOT,
@@ -560,6 +733,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             fake_bin.mkdir(parents=True, exist_ok=True)
 
             state_file = temp_root_path / "cdp-state.json"
+            state: dict[str, object] = {"pages": []}
+            port = self._start_fake_cdp_server(state)
             self._write_fake_curl(fake_bin / "curl")
 
             env = os.environ.copy()
@@ -570,15 +745,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
-            self._write_instance_record(shared_root, actor_id)
+            self._write_instance_record(shared_root, actor_id, browser_port=port)
 
             for url in ("http://example.com/", "https://example.com/"):
                 with self.subTest(url=url):
-                    self._write_cdp_state(
-                        state_file,
-                        version_ok=True,
-                        pages=[{"id": "normal-page", "type": "page", "url": url}],
-                    )
+                    state["pages"] = [{"id": "normal-page", "type": "page", "url": url}]
                     status = subprocess.run(
                         [str(LAUNCHER), "env", "browser", "status", "--instance", actor_id],
                         cwd=ROOT,
@@ -621,6 +792,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
@@ -733,9 +905,71 @@ sleep 60
     @staticmethod
     def _kill_process_if_live(pid: int) -> None:
         try:
+            pgid = os.getpgid(pid)
+        except ProcessLookupError:
+            return
+        except OSError:
+            pgid = None
+        if pgid is not None:
+            try:
+                if pgid != os.getpgid(os.getpid()):
+                    os.killpg(pgid, signal.SIGKILL)
+                    return
+            except ProcessLookupError:
+                return
+            except OSError:
+                pass
+        try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             return
+
+    @staticmethod
+    def _temp_buddyswitch_browser_pgids() -> set[int]:
+        completed = subprocess.run(
+            ["ps", "-axo", "pgid=,command="],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return set()
+        current_pgid = os.getpgid(os.getpid())
+        pgids: set[int] = set()
+        for line in completed.stdout.splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                raw_pgid, command = text.split(None, 1)
+                pgid = int(raw_pgid)
+            except ValueError:
+                continue
+            if pgid == current_pgid:
+                continue
+            if "--remote-debugging-port=" not in command:
+                continue
+            if ".codex-buddyswitch/instances/" not in command:
+                continue
+            if "/T/tmp" not in command and "/tmp/" not in command and "/private/tmp/" not in command:
+                continue
+            pgids.add(pgid)
+        return pgids
+
+    @classmethod
+    def _kill_temp_buddyswitch_browser_processes(cls) -> None:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            pgids = cls._temp_buddyswitch_browser_pgids()
+            if not pgids:
+                return
+            for pgid in pgids:
+                try:
+                    os.killpg(pgid, sig)
+                except ProcessLookupError:
+                    continue
+                except OSError:
+                    continue
+            time.sleep(0.2)
 
     def test_browser_ensure_uses_bounded_timeouts_for_cdp_probes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -768,6 +1002,7 @@ sleep 60
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
@@ -782,22 +1017,20 @@ sleep 60
                 check=False,
             )
             self.assertEqual(ensure.returncode, 0, msg=ensure.stderr)
+            chrome_pid = int(
+                (shared_root / "instances" / actor_id / "browser" / "chrome.pid").read_text(encoding="utf-8").strip()
+            )
+            self.addCleanup(self._kill_process_if_live, chrome_pid)
 
             calls = [
                 json.loads(line)
                 for line in calls_file.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            for probe_path in ("/json/version", "/json/list"):
-                probe_calls = [call for call in calls if call.get("path") == probe_path]
-                self.assertTrue(probe_calls, msg=f"Expected at least one call for {probe_path}")
-                for call in probe_calls:
-                    self.assertNotEqual(call.get("connect_timeout"), "", msg=f"{probe_path} missing --connect-timeout")
-                    self.assertNotEqual(call.get("max_time"), "", msg=f"{probe_path} missing --max-time")
             self.assertTrue(any(call.get("path") == "Target.createTarget" for call in calls))
             self.assertFalse(any(call.get("path") == "/json/new" for call in calls))
 
-    def test_browser_ensure_repairs_intro_only_with_background_target(self) -> None:
+    def test_browser_ensure_replaces_intro_only_with_background_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -828,6 +1061,7 @@ sleep 60
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser"
@@ -842,6 +1076,10 @@ sleep 60
                 check=False,
             )
             self.assertEqual(ensure.returncode, 0, msg=ensure.stderr)
+            chrome_pid = int(
+                (shared_root / "instances" / actor_id / "browser" / "chrome.pid").read_text(encoding="utf-8").strip()
+            )
+            self.addCleanup(self._kill_process_if_live, chrome_pid)
             calls = [
                 json.loads(line)
                 for line in calls_file.read_text(encoding="utf-8").splitlines()
@@ -886,7 +1124,7 @@ sleep 60
             self.assertIn("env browser ensure requires --instance <actor-id>", completed.stderr)
             self.assertFalse(shared_root.exists(), "ensure without --instance must fail before creating shared state")
 
-    def test_browser_ensure_repairs_raw_cockpit_mcp_with_matching_browser_url(self) -> None:
+    def test_browser_ensure_does_not_repair_raw_cockpit_mcp(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -900,6 +1138,7 @@ sleep 60
                 pages=[{"id": "ready", "type": "page", "url": "about:blank"}],
             )
             self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
             self._write_fake_codex(fake_bin / "codex")
 
             capture_path = temp_root_path / "calls.jsonl"
@@ -909,7 +1148,9 @@ sleep 60
             env.pop("CODEX_HOME", None)
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser-raw-mcp"
@@ -935,23 +1176,21 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             )
             self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
 
-            payloads = [
-                json.loads(line)
-                for line in capture_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            remove_index = next(
-                index
-                for index, payload in enumerate(payloads)
-                if payload["argv"][:3] == ["mcp", "remove", "chrome-devtools-cockpit"]
+            payloads = (
+                [
+                    json.loads(line)
+                    for line in capture_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                if capture_path.exists()
+                else []
             )
-            add_index = next(
-                index
-                for index, payload in enumerate(payloads)
-                if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"]
+            self.assertFalse(
+                any(payload["argv"][:2] in (["mcp", "add"], ["mcp", "remove"]) for payload in payloads),
+                msg=payloads,
             )
-            self.assertLess(remove_index, add_index)
-            self._assert_cockpit_proxy_registration(payloads[add_index]["argv"], instance_root)
+            text = (instance_codex_home / "config.toml").read_text(encoding="utf-8")
+            self.assertIn("--browser-url=http://127.0.0.1:9222", text)
 
     def test_browser_launcher_source_is_instance_only(self) -> None:
         text = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8")

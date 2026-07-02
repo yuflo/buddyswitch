@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -19,8 +18,8 @@ for candidate in (HELPER_DIR, SCRIPTS, SCRIPTS_ENV):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
+import browser_runtime_manager  # noqa: E402
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-import cdp_browser_session as browser_session  # noqa: E402
 
 
 BROWSER_COCKPIT_RELEASE_EVENT_TYPE = "browser.cockpit.release"
@@ -102,10 +101,6 @@ def _has_real_user_page(browser_url: str) -> bool:
     return False
 
 
-def _launcher_env(instance_root: Path) -> dict[str, str]:
-    return browser_session.launcher_env_for_instance_root(instance_root)
-
-
 def _skip(reason: str) -> daemon_core.HandlerResult:
     print(f"Browser cockpit release skipped: {reason}", file=sys.stderr)
     return daemon_core.HandlerResult.handled()
@@ -132,7 +127,7 @@ class BrowserReleaseHandler:
             target_actor = getattr(trigger, "target_actor_address", None)
             if target_actor != local_actor:
                 raise PermissionError("wrong target actor for browser cockpit release trigger")
-            _payload(trigger)
+            payload = _payload(trigger)
             if _parent_turn_is_running(runtime):
                 return _skip("parent_turn_running")
             root = _instance_root(context)
@@ -149,16 +144,15 @@ class BrowserReleaseHandler:
                 return _skip("browser_port_missing")
             if _has_real_user_page(endpoint):
                 return _skip("real_user_page_present")
-            completed = subprocess.run(
-                [str(ROOT / "buddyswitch-codex"), "env", "browser", "release", "--instance", actor_id.strip()],
-                cwd=ROOT,
-                env=_launcher_env(root),
-                text=True,
-                capture_output=True,
-                check=False,
+            result = browser_runtime_manager.release(
+                instance_root=root,
+                actor_id=actor_id.strip(),
+                reason=payload["reason"],
             )
-            if completed.returncode != 0:
-                detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
+            if result.get("ok") is not True:
+                error = result.get("error")
+                message = error.get("message") if isinstance(error, dict) else result.get("message")
+                detail = message if isinstance(message, str) and message.strip() else "browser runtime manager release failed"
                 return daemon_core.HandlerResult.failed(detail)
             return daemon_core.HandlerResult.handled()
         except Exception as exc:

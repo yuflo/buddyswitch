@@ -4,16 +4,33 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 from env.repos import runtime_files
+from env import cdp_browser_session as browser_session
 from env.tool_runtime import results as tool_results
 from env.tool_runtime.registry import dispatch_env_tool_request
 from env_manifest import ManifestError, load_manifest
+
+def _load_browser_runtime_manager(repo_root: Path) -> Any:
+    module_path = Path(repo_root) / "tools" / "launcher" / "browser_runtime_manager.py"
+    spec = importlib.util.spec_from_file_location("buddyswitch_browser_runtime_manager", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"failed to load browser runtime manager: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("buddyswitch_browser_runtime_manager", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+browser_runtime_manager: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +129,13 @@ def _runtime_source_repo_root(*, manifest_path: Path, repo_root_path: Path | Non
     if repo_root_path is not None:
         return repo_root_path.expanduser().resolve(strict=False)
     return manifest_path.expanduser().resolve(strict=False).parents[1]
+
+
+def _browser_runtime_manager_for_session(session: RuntimeBrokerSession) -> Any:
+    if browser_runtime_manager is not None:
+        return browser_runtime_manager
+    repo_root = _runtime_source_repo_root(manifest_path=session.manifest_path, repo_root_path=session.repo_root_path)
+    return _load_browser_runtime_manager(repo_root)
 
 
 @contextlib.contextmanager
@@ -214,6 +238,244 @@ def _status_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str
     return ping
 
 
+def _instance_root_from_record(*, instance_json_path: Path, instance_record: dict[str, Any]) -> Path:
+    raw_instance_root = instance_record.get("instance_root")
+    if isinstance(raw_instance_root, str) and raw_instance_root.strip():
+        return Path(raw_instance_root.strip()).expanduser().resolve(strict=False)
+    return instance_json_path.parent.resolve(strict=False)
+
+
+def _browser_allowed_actions() -> list[str]:
+    return _allowed("Use broker browser.acquire/status/open_url/release methods from the active runtime.")
+
+
+def _browser_failure(
+    *,
+    code: str,
+    message: str,
+    boundary: str,
+    retriable: bool = False,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = _boundary_error(
+        code,
+        message,
+        boundary=boundary,
+        actions=_browser_allowed_actions(),
+        retriable=retriable,
+    )
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _manager_error(result: dict[str, Any], *, boundary: str) -> dict[str, Any]:
+    error = result.get("error")
+    if isinstance(error, dict):
+        code = error.get("code") if isinstance(error.get("code"), str) else "E_BROWSER_RUNTIME_MANAGER"
+        message = error.get("message") if isinstance(error.get("message"), str) else "browser runtime manager failed"
+        retriable = bool(error.get("retriable", False))
+    else:
+        code = "E_BROWSER_RUNTIME_MANAGER"
+        message = "browser runtime manager failed"
+        retriable = False
+    return _browser_failure(
+        code=code,
+        message=message,
+        boundary=boundary,
+        retriable=retriable,
+        extra={"manager_result": result},
+    )
+
+
+def _validate_browser_target_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    target_url = value.strip()
+    if not target_url:
+        return None
+    parsed = urlsplit(target_url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc:
+        return None
+    return target_url
+
+
+def _browser_acquire_dispatch(
+    *,
+    manager: Any,
+    instance_json_path: Path,
+    instance_record: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    actor_id = str(instance_record["actor_id"]).strip()
+    instance_root = _instance_root_from_record(instance_json_path=instance_json_path, instance_record=instance_record)
+    reason = params.get("reason") if isinstance(params.get("reason"), str) else None
+    result = manager.acquire(instance_root=instance_root, actor_id=actor_id, reason=reason)
+    if result.get("ok") is not True:
+        return _manager_error(result, boundary="browser.acquire")
+    return {"ok": True, **result}
+
+
+def _browser_status_dispatch(
+    *,
+    manager: Any,
+    instance_json_path: Path,
+    instance_record: dict[str, Any],
+) -> dict[str, Any]:
+    actor_id = str(instance_record["actor_id"]).strip()
+    instance_root = _instance_root_from_record(instance_json_path=instance_json_path, instance_record=instance_record)
+    result = manager.status(instance_root=instance_root, actor_id=actor_id)
+    if result.get("ok") is not True:
+        return _manager_error(result, boundary="browser.status")
+    return {"ok": True, **result}
+
+
+def _browser_release_dispatch(
+    *,
+    manager: Any,
+    instance_json_path: Path,
+    instance_record: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    actor_id = str(instance_record["actor_id"]).strip()
+    instance_root = _instance_root_from_record(instance_json_path=instance_json_path, instance_record=instance_record)
+    reason = params.get("reason") if isinstance(params.get("reason"), str) else None
+    result = manager.release(instance_root=instance_root, actor_id=actor_id, reason=reason)
+    if result.get("ok") is not True:
+        return _manager_error(result, boundary="browser.release")
+    return {"ok": True, **result}
+
+
+def _browser_open_result_payload(result: object) -> dict[str, Any]:
+    def field(name: str) -> Any:
+        return getattr(result, name, None)
+
+    projected_page_count = field("projected_page_count")
+    page_count = field("page_count")
+    browser_page_count = projected_page_count if isinstance(projected_page_count, int) else page_count
+    return {
+        "kind": field("kind"),
+        "target_url": field("target_url"),
+        "target_id": field("target_id"),
+        "page_opened": field("page_opened") is True,
+        "page_reused": field("page_reused") is True,
+        "browser_page_count": browser_page_count,
+        "page_count": page_count,
+        "projected_page_count": projected_page_count,
+        "idle_refreshed": field("idle_refreshed") is True,
+        "idle_seconds": field("idle_seconds"),
+        "idle_expires_at": field("idle_expires_at"),
+        "message": field("message"),
+    }
+
+
+def _browser_open_url_dispatch(
+    *,
+    manager: Any,
+    instance_json_path: Path,
+    instance_record: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    target_url = _validate_browser_target_url(params.get("target_url"))
+    if target_url is None:
+        return _browser_failure(
+            code="E_BROWSER_INVALID_URL",
+            message="browser.open_url requires an http(s) target_url",
+            boundary="browser.open_url",
+            extra={
+                "why_blocked": "invalid_target_url",
+                "state_changed": False,
+                "durability": "none",
+            },
+        )
+
+    actor_id = str(instance_record["actor_id"]).strip()
+    instance_root = _instance_root_from_record(instance_json_path=instance_json_path, instance_record=instance_record)
+    reason = params.get("source_tool") if isinstance(params.get("source_tool"), str) else "browser.open_url"
+    acquire = manager.acquire(instance_root=instance_root, actor_id=actor_id, reason=reason)
+    if acquire.get("ok") is not True:
+        return _manager_error(acquire, boundary="browser.open_url")
+    browser_url = acquire.get("browser_url")
+    if not isinstance(browser_url, str) or not browser_url.strip():
+        return _browser_failure(
+            code="E_BROWSER_RUNTIME_MANAGER",
+            message="browser runtime manager did not return browser_url",
+            boundary="browser.open_url",
+            extra={"manager_result": acquire},
+        )
+
+    result = browser_session.open_or_reuse_page(
+        instance_root=instance_root,
+        browser_url=browser_url.strip(),
+        target_url=target_url,
+    )
+    payload = _browser_open_result_payload(result)
+    if payload.get("kind") not in {"opened", "reused"}:
+        return _browser_failure(
+            code="E_BROWSER_OPEN_URL",
+            message=str(payload.get("message") or "browser.open_url did not open or reuse a page"),
+            boundary="browser.open_url",
+            extra={
+                **payload,
+                "why_blocked": payload.get("kind"),
+                "state_changed": bool(acquire.get("state_changed", False)),
+                "durability": acquire.get("durability", "runtime"),
+                "browser_url": browser_url,
+                "browser_port": acquire.get("browser_port"),
+            },
+        )
+    return {
+        "ok": True,
+        **payload,
+        "browser_url": browser_url,
+        "browser_port": acquire.get("browser_port"),
+        "state_changed": bool(acquire.get("state_changed", False)),
+        "durability": acquire.get("durability", "runtime"),
+    }
+
+
+def _browser_dispatch(
+    *,
+    method: str,
+    params: dict[str, Any],
+    session: RuntimeBrokerSession,
+    instance_json_path: Path,
+    instance_record: dict[str, Any],
+) -> dict[str, Any]:
+    manager = _browser_runtime_manager_for_session(session)
+    if method == "browser.acquire":
+        return _browser_acquire_dispatch(
+            manager=manager,
+            instance_json_path=instance_json_path,
+            instance_record=instance_record,
+            params=params,
+        )
+    if method == "browser.status":
+        return _browser_status_dispatch(manager=manager, instance_json_path=instance_json_path, instance_record=instance_record)
+    if method == "browser.release":
+        return _browser_release_dispatch(
+            manager=manager,
+            instance_json_path=instance_json_path,
+            instance_record=instance_record,
+            params=params,
+        )
+    if method == "browser.open_url":
+        return _browser_open_url_dispatch(
+            manager=manager,
+            instance_json_path=instance_json_path,
+            instance_record=instance_record,
+            params=params,
+        )
+    return _boundary_error(
+        "E_RUNTIME_BROKER_PROTOCOL",
+        f"unsupported browser method: {method}",
+        boundary="broker-protocol",
+        actions=_browser_allowed_actions(),
+    )
+
+
 def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSession) -> dict[str, Any]:
     try:
         method_raw = request.get("method")
@@ -281,12 +543,22 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
                 return _ping_dispatch(session=session, instance_record=instance_record)
             if method == "status":
                 return _status_dispatch(session=session, instance_record=instance_record)
+            if method.startswith("browser."):
+                return _browser_dispatch(
+                    method=method,
+                    params=params,
+                    session=session,
+                    instance_json_path=session.instance_json_path,
+                    instance_record=instance_record,
+                )
 
         return _boundary_error(
             "E_RUNTIME_BROKER_PROTOCOL",
             f"unsupported method: {method}",
             boundary="broker-protocol",
-            actions=_allowed("Use supported runtime methods: env.tool, ping, status."),
+            actions=_allowed(
+                "Use supported runtime methods: env.tool, ping, status, browser.acquire, browser.open_url, browser.status, browser.release."
+            ),
         )
     except (ValueError, OSError, json.JSONDecodeError, ManifestError) as exc:
         return _error("E_RUNTIME_BROKER_PERMISSION", str(exc))

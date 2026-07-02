@@ -15,6 +15,7 @@ import socket
 import subprocess
 import threading
 import time
+from types import SimpleNamespace
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -143,6 +144,188 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 continue
             payload[key] = value
         return payload
+
+    def _install_browser_contract_fakes(self, dispatcher: object) -> list[dict[str, object]]:
+        calls: list[dict[str, object]] = []
+
+        class FakeBrowserRuntimeManager:
+            @staticmethod
+            def acquire(**kwargs: object) -> dict[str, object]:
+                calls.append({"method": "acquire", **kwargs})
+                return {
+                    "ok": True,
+                    "browser_url": "http://127.0.0.1:9444",
+                    "browser_port": 9444,
+                    "state_changed": True,
+                    "durability": "runtime",
+                }
+
+            @staticmethod
+            def status(**kwargs: object) -> dict[str, object]:
+                calls.append({"method": "status", **kwargs})
+                return {
+                    "ok": True,
+                    "browser_port": 9444,
+                    "ready": True,
+                    "ownership": "owned",
+                    "state_changed": False,
+                    "durability": "runtime",
+                }
+
+            @staticmethod
+            def release(**kwargs: object) -> dict[str, object]:
+                calls.append({"method": "release", **kwargs})
+                return {
+                    "ok": True,
+                    "handled": True,
+                    "skip_reason": None,
+                    "state_changed": True,
+                    "durability": "runtime",
+                }
+
+        class FakeBrowserSession:
+            @staticmethod
+            def open_or_reuse_page(**kwargs: object) -> object:
+                calls.append({"method": "open_or_reuse_page", **kwargs})
+                return SimpleNamespace(
+                    kind="opened",
+                    target_url=kwargs.get("target_url"),
+                    page_count=1,
+                    projected_page_count=2,
+                    target_id="target-broker-open",
+                    page_opened=True,
+                    page_reused=False,
+                    idle_refreshed=True,
+                    idle_seconds=300,
+                    idle_expires_at="2026-07-02T00:05:00Z",
+                    message=None,
+                )
+
+        patcher_manager = patch.object(
+            dispatcher,
+            "browser_runtime_manager",
+            FakeBrowserRuntimeManager,
+            create=True,
+        )
+        patcher_session = patch.object(
+            dispatcher,
+            "browser_session",
+            FakeBrowserSession,
+            create=True,
+        )
+        patcher_manager.start()
+        patcher_session.start()
+        self.addCleanup(patcher_session.stop)
+        self.addCleanup(patcher_manager.stop)
+        return calls
+
+    def test_browser_open_url_method_has_structured_contract(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        calls = self._install_browser_contract_fakes(dispatcher)
+        instance_json = self._instance_json()
+
+        response = self._dispatch(
+            method="browser.open_url",
+            params={
+                "target_url": "https://example.com/search?q=contract",
+                "source_tool": "search.open_browser",
+            },
+            instance_json=instance_json,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("target_url"), "https://example.com/search?q=contract")
+        self.assertEqual(response.get("page_opened"), True)
+        self.assertEqual(response.get("page_reused"), False)
+        self.assertEqual(response.get("target_id"), "target-broker-open")
+        self.assertEqual(response.get("browser_page_count"), 2)
+        self.assertEqual(response.get("state_changed"), True)
+        self.assertEqual(response.get("durability"), "runtime")
+        self.assertEqual([call["method"] for call in calls], ["acquire", "open_or_reuse_page"])
+
+    def test_browser_acquire_method_has_structured_contract(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        calls = self._install_browser_contract_fakes(dispatcher)
+        instance_json = self._instance_json()
+
+        response = self._dispatch(
+            method="browser.acquire",
+            params={"reason": "chrome-devtools-cockpit"},
+            instance_json=instance_json,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("browser_url"), "http://127.0.0.1:9444")
+        self.assertEqual(response.get("browser_port"), 9444)
+        self.assertEqual(response.get("state_changed"), True)
+        self.assertEqual(response.get("durability"), "runtime")
+        self.assertEqual([call["method"] for call in calls], ["acquire"])
+
+    def test_browser_status_method_has_structured_contract(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        calls = self._install_browser_contract_fakes(dispatcher)
+        instance_json = self._instance_json()
+
+        response = self._dispatch(method="browser.status", params={}, instance_json=instance_json)
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("browser_port"), 9444)
+        self.assertEqual(response.get("ready"), True)
+        self.assertEqual(response.get("ownership"), "owned")
+        self.assertEqual(response.get("state_changed"), False)
+        self.assertEqual(response.get("durability"), "runtime")
+        self.assertEqual([call["method"] for call in calls], ["status"])
+
+    def test_browser_release_method_has_structured_contract(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        calls = self._install_browser_contract_fakes(dispatcher)
+        instance_json = self._instance_json()
+
+        response = self._dispatch(
+            method="browser.release",
+            params={"reason": "page_idle_empty"},
+            instance_json=instance_json,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("handled"), True)
+        self.assertIsNone(response.get("skip_reason"))
+        self.assertEqual(response.get("state_changed"), True)
+        self.assertEqual(response.get("durability"), "runtime")
+        self.assertEqual([call["method"] for call in calls], ["release"])
+
+    def test_browser_method_rejects_actor_mismatch(self) -> None:
+        instance_json = self._instance_json()
+
+        response = self._dispatch(
+            method="browser.open_url",
+            params={
+                "actor_id": self._runtime_actor_id(role="pm", label="act-pm-other"),
+                "target_url": "https://example.com/search?q=contract",
+                "source_tool": "search.open_browser",
+            },
+            instance_json=instance_json,
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_RUNTIME_BROKER_PERMISSION")
+        self.assertEqual(self._error_boundary(response), "active-instance")
+
+    def test_browser_open_url_rejects_invalid_target_url(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        calls = self._install_browser_contract_fakes(dispatcher)
+        instance_json = self._instance_json()
+
+        response = self._dispatch(
+            method="browser.open_url",
+            params={"target_url": "javascript:alert(1)", "source_tool": "search.open_browser"},
+            instance_json=instance_json,
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_BROWSER_INVALID_URL")
+        self.assertEqual(self._error_boundary(response), "browser.open_url")
+        self.assertEqual(calls, [])
 
     def test_env_tool_requests_succeed_with_matching_identity(self) -> None:
         instance_json = self._instance_json()

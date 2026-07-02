@@ -373,6 +373,22 @@ class CdpBrowserSessionTests(unittest.TestCase):
         self.assertIsNone(result.page_count)
         self.assertIn("target_url", result.message or "")
 
+    def test_browser_session_has_no_acquisition_helpers_or_launcher_subprocess(self) -> None:
+        source = SESSION_PATH.read_text(encoding="utf-8")
+        forbidden = [
+            "ensure_" + "browser_url_for_instance",
+            "launcher_" + "env_for_instance_root",
+            "browser_" + "url_from_instance",
+            "shared_" + "root_for_instance_root",
+            "BUDDYSWITCH_BROWSER_" + "COCKPIT_ENSURE_COMMAND",
+            'ROOT / "' + "buddyswitch-codex" + '"',
+            "import " + "subprocess",
+            "import " + "shlex",
+        ]
+        for phrase in forbidden:
+            with self.subTest(phrase=phrase):
+                self.assertNotIn(phrase, source)
+
 
 class CdpBrowserLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:

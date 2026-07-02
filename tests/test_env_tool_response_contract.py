@@ -152,34 +152,37 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
     def setUp(self) -> None:
         super().setUp()
-        self._browser_session_open_results: list[object] = []
-        original_ensure = search_impl.browser_session.ensure_browser_url_for_instance
-        original_open = search_impl.browser_session.open_or_reuse_page
+        self._browser_open_results: list[dict[str, object]] = []
+        original_browser_client = search_impl.browser_client
 
-        def default_ensure_browser_url_for_instance(**_kwargs: object) -> str:
-            raise search_impl.browser_session.BrowserSessionError("browser runtime unavailable for response contract")
+        test_case = self
 
-        def default_open_or_reuse_page(**kwargs: object) -> object:
-            if self._browser_session_open_results:
-                return self._browser_session_open_results.pop(0)
-            target_url = kwargs.get("target_url")
-            return search_impl.browser_session.BrowserSessionOpenResult(
-                kind="opened",
-                target_url=target_url if isinstance(target_url, str) else "",
-                page_count=0,
-                projected_page_count=1,
-                target_id="target-search-contract",
-                page_opened=True,
-                idle_refreshed=True,
-                idle_seconds=300,
-                idle_expires_at="2026-06-24T00:05:00Z",
-                message="opened",
-            )
+        class FakeBrowserClient:
+            @staticmethod
+            def open_url(**kwargs: object) -> dict[str, object]:
+                if test_case._browser_open_results:
+                    return dict(test_case._browser_open_results.pop(0))
+                target_url = kwargs.get("target_url")
+                return {
+                    "ok": True,
+                    "kind": "opened",
+                    "target_url": target_url if isinstance(target_url, str) else "",
+                    "page_count": 0,
+                    "projected_page_count": 1,
+                    "browser_page_count": 1,
+                    "target_id": "target-search-contract",
+                    "page_opened": True,
+                    "page_reused": False,
+                    "idle_refreshed": True,
+                    "idle_seconds": 300,
+                    "idle_expires_at": "2026-06-24T00:05:00Z",
+                    "message": "opened",
+                    "state_changed": True,
+                    "durability": "runtime",
+                }
 
-        search_impl.browser_session.ensure_browser_url_for_instance = default_ensure_browser_url_for_instance
-        search_impl.browser_session.open_or_reuse_page = default_open_or_reuse_page
-        self.addCleanup(setattr, search_impl.browser_session, "ensure_browser_url_for_instance", original_ensure)
-        self.addCleanup(setattr, search_impl.browser_session, "open_or_reuse_page", original_open)
+        search_impl.browser_client = FakeBrowserClient
+        self.addCleanup(setattr, search_impl, "browser_client", original_browser_client)
 
     @staticmethod
     def _meaningful_text_entries(value: object) -> list[str]:
@@ -670,6 +673,19 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertNotIn("browser_url", json.dumps(browser_open, ensure_ascii=True))
 
         no_browser_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev-no-browser")
+        self._browser_open_results.append(
+            {
+                "ok": False,
+                "error": {
+                    "code": "E_BROWSER_MANAGER_UNAVAILABLE",
+                    "message": "browser manager unavailable",
+                },
+                "permission_boundary": "browser.open_url",
+                "state_changed": False,
+                "durability": "none",
+                "why_blocked": "browser manager unavailable",
+            }
+        )
         browser_rejection = self._dispatch(
             instance_json=no_browser_instance,
             actor_id=f"{actor_id}-dev-no-browser",
@@ -685,19 +701,24 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         actor_id = "act-dev-search-reuse-contract"
         dev_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev")
         target_url = "https://www.google.com/search?q=BuddySwitch"
-        self._browser_session_open_results.append(
-            search_impl.browser_session.BrowserSessionOpenResult(
-                kind="reused",
-                target_url=target_url,
-                page_count=1,
-                projected_page_count=1,
-                target_id="target-existing-contract",
-                page_reused=True,
-                idle_refreshed=True,
-                idle_seconds=300,
-                idle_expires_at="2026-06-24T00:05:00Z",
-                message="reused",
-            )
+        self._browser_open_results.append(
+            {
+                "ok": True,
+                "kind": "reused",
+                "target_url": target_url,
+                "page_count": 1,
+                "projected_page_count": 1,
+                "browser_page_count": 1,
+                "target_id": "target-existing-contract",
+                "page_opened": False,
+                "page_reused": True,
+                "idle_refreshed": True,
+                "idle_seconds": 300,
+                "idle_expires_at": "2026-06-24T00:05:00Z",
+                "message": "reused",
+                "state_changed": False,
+                "durability": "runtime",
+            }
         )
         dev_payload = json.loads(dev_instance.read_text(encoding="utf-8"))
         dev_payload["browser_port"] = 9222
