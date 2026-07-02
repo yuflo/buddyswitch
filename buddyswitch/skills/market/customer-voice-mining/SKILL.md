@@ -22,7 +22,7 @@ description: Use when you need to convert interviews, reviews, support notes, sa
 - Interviews, reviews, support notes, sales notes, community posts, and existing evidence rows.
 
 ## Execution Order
-1. Before forming external market claims, use native `search__open_browser` with a focused query, then continue discovery in `chrome-devtools-cockpit` and keep the workflow browser-native.
+1. Before forming external market claims, use `chrome-devtools-cockpit` to open, list, select, and inspect browser pages. Use `search__open_browser` only as a query-to-URL wrapper when the task specifically starts from a search query.
 2. Read upstream artifacts and the original source rows before grouping themes.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when browser-native evidence is required.

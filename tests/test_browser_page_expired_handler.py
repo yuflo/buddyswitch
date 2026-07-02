@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
 from itertools import count
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +78,14 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.handler_module = load_module(HANDLER_PATH)
         self.triggers = load_module(TRIGGERS_PATH)
+        lifecycle = self.handler_module.browser_lifecycle
+        originals = {
+            "close_page_target": lifecycle.close_page_target,
+            "schedule_browser_cockpit_release": lifecycle.schedule_browser_cockpit_release,
+            "current_target_id": lifecycle.current_target_id,
+            "refresh_current_page_idle": lifecycle.refresh_current_page_idle,
+        }
+        self.addCleanup(lambda: [setattr(lifecycle, name, value) for name, value in originals.items()])
 
     def _trigger(
         self,
@@ -469,6 +479,9 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.release_module = load_module(RELEASE_HANDLER_PATH)
         self.triggers = load_module(TRIGGERS_PATH)
+        lifecycle = self.release_module.browser_lifecycle
+        self._original_read_page_targets = lifecycle.read_page_targets
+        self.addCleanup(setattr, lifecycle, "read_page_targets", self._original_read_page_targets)
 
     def _trigger(self, *, reason: str = "page_idle_empty", target_actor_address: dict[str, str] | None = None) -> Any:
         return self.triggers.DaemonTrigger(
@@ -514,30 +527,69 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _install_launcher_recorder(self, returncode: int = 0) -> list[list[str]]:
-        calls: list[list[str]] = []
-        if not hasattr(self.release_module, "subprocess"):
-            return calls
+    def _install_manager_recorder(self, result: dict[str, object] | None = None) -> list[dict[str, object]]:
+        calls: list[dict[str, object]] = []
+        had_manager = hasattr(self.release_module, "browser_runtime_manager")
+        original_manager = getattr(self.release_module, "browser_runtime_manager", None)
 
-        class Completed:
-            def __init__(self, code: int) -> None:
-                self.returncode = code
-                self.stdout = ""
-                self.stderr = "release failed" if code else ""
+        class FakeBrowserRuntimeManager:
+            @staticmethod
+            def release(**kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                if result is not None:
+                    return dict(result)
+                return {
+                    "ok": True,
+                    "handled": True,
+                    "skip_reason": None,
+                    "state_changed": True,
+                    "durability": "runtime",
+                }
 
-        def fake_run(argv: list[str], **_kwargs: object) -> Completed:
-            calls.append([str(item) for item in argv])
-            return Completed(returncode)
-
-        self.release_module.subprocess.run = fake_run
+        self.release_module.browser_runtime_manager = FakeBrowserRuntimeManager
+        if had_manager:
+            self.addCleanup(setattr, self.release_module, "browser_runtime_manager", original_manager)
+        else:
+            self.addCleanup(delattr, self.release_module, "browser_runtime_manager")
         return calls
 
     def _install_cdp_targets(self, targets: list[dict[str, object]]) -> None:
         if hasattr(self.release_module, "browser_lifecycle"):
             self.release_module.browser_lifecycle.read_page_targets = lambda *_args, **_kwargs: targets
 
+    def test_manager_release_uses_browser_runtime_manager_directly(self) -> None:
+        manager_calls: list[dict[str, object]] = []
+
+        class FakeBrowserRuntimeManager:
+            @staticmethod
+            def release(**kwargs: object) -> dict[str, object]:
+                manager_calls.append(dict(kwargs))
+                return {
+                    "ok": True,
+                    "handled": True,
+                    "skip_reason": None,
+                    "state_changed": True,
+                    "durability": "runtime",
+                }
+
+        self.release_module.browser_runtime_manager = FakeBrowserRuntimeManager
+        self.addCleanup(delattr, self.release_module, "browser_runtime_manager")
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([])
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled", msg=getattr(result, "message", None))
+        self.assertEqual(len(manager_calls), 1)
+        self.assertEqual(manager_calls[0]["actor_id"], "act-dev-browser")
+        self.assertEqual(manager_calls[0]["reason"], "page_idle_empty")
+
     def test_release_noops_when_parent_turn_running(self) -> None:
-        calls = self._install_launcher_recorder()
+        calls = self._install_manager_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
             context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
             self._write_page_idle(context.instance_root, {})
@@ -550,7 +602,7 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_release_noops_when_page_idle_targets_remain(self) -> None:
-        calls = self._install_launcher_recorder()
+        calls = self._install_manager_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
             context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
             self._write_page_idle(context.instance_root, {"target-active": {"target_id": "target-active"}})
@@ -563,7 +615,7 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_release_noops_when_browser_port_missing(self) -> None:
-        calls = self._install_launcher_recorder()
+        calls = self._install_manager_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
             context = self._context(Path(temp_root) / "instances" / "act-dev-browser", browser_port=None)
             self._write_page_idle(context.instance_root, {})
@@ -575,7 +627,7 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_release_noops_when_cdp_has_real_user_page(self) -> None:
-        calls = self._install_launcher_recorder()
+        calls = self._install_manager_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
             context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
             self._write_page_idle(context.instance_root, {})
@@ -587,8 +639,24 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "handled")
         self.assertEqual(calls, [])
 
-    def test_release_invokes_launcher_after_rechecks_pass(self) -> None:
-        calls = self._install_launcher_recorder()
+    def test_release_logs_skip_reason_when_real_user_page_exists(self) -> None:
+        calls = self._install_manager_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([{"id": "target-user", "type": "page", "url": "https://example.com/open"}])
+            handler = self.release_module.BrowserReleaseHandler()
+            with mock.patch.object(self.release_module.sys, "stderr") as stderr:
+                result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(calls, [])
+        self.assertTrue(stderr.write.called)
+        written = "".join(str(call.args[0]) for call in stderr.write.call_args_list if call.args)
+        self.assertIn("Browser cockpit release skipped: real_user_page_present", written)
+
+    def test_release_invokes_manager_after_rechecks_pass(self) -> None:
+        calls = self._install_manager_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
             context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
             self._write_page_idle(context.instance_root, {})
@@ -599,7 +667,49 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "handled")
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][-5:], ["env", "browser", "release", "--instance", "act-dev-browser"])
+        self.assertEqual(calls[0]["actor_id"], "act-dev-browser")
+        self.assertEqual(calls[0]["reason"], "page_idle_empty")
+
+    def test_release_surfaces_manager_failure(self) -> None:
+        calls = self._install_manager_recorder({"ok": False, "error": {"message": "manager release failed"}})
+        with tempfile.TemporaryDirectory() as temp_root:
+            context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([{"id": "target-blank", "type": "page", "url": "about:blank"}])
+            handler = self.release_module.BrowserReleaseHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("manager release failed", result.message)
+        self.assertEqual(len(calls), 1)
+
+    def test_release_manager_uses_instance_root_when_actor_home_is_bound(self) -> None:
+        calls = self._install_manager_recorder()
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / ".codex-buddyswitch"
+            context = self._context(shared_root / "instances" / "act-dev-browser")
+            self._write_page_idle(context.instance_root, {})
+            self._install_cdp_targets([{"id": "target-blank", "type": "page", "url": "about:blank"}])
+            handler = self.release_module.BrowserReleaseHandler()
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "HOME": str(context.instance_root / "home"),
+                    "CODEX_HOME": str(context.instance_root / "codex-home"),
+                },
+                clear=False,
+            ):
+                os.environ.pop("BUDDYSWITCH_SHARED_ROOT", None)
+                os.environ.pop("BUDDYSWITCH_SOURCE_HOME", None)
+
+                result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+        self.assertEqual(result.status, "handled")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["instance_root"], context.instance_root)
+        self.assertEqual(calls[0]["actor_id"], "act-dev-browser")
+        self.assertEqual(calls[0]["reason"], "page_idle_empty")
 
     def test_release_rejects_wrong_target_actor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

@@ -243,15 +243,19 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_market_skills_use_native_browser_entry(self) -> None:
         for skill_id in self.MARKET_P0_SKILLS:
-            text = self._market_skill_text(skill_id).lower()
+            text = self._market_skill_text(skill_id)
+            lowered = text.lower()
             with self.subTest(skill=skill_id):
-                self.assertIn("search__open_browser", text)
-                self.assertIn("chrome-devtools-cockpit", text)
-                self.assertIn("native buddyswitch env mcp tools", text)
-                self.assertNotIn("python3 scripts/env/client.py", text)
-                self.assertNotIn("search open-browser --payload", text)
-                self.assertNotIn("search open-browser --query", text)
-                self.assertNotIn("search open_browser --query", text)
+                self.assertIn("search__open_browser", lowered)
+                self.assertIn("chrome-devtools-cockpit", lowered)
+                self.assertIn("query-to-url wrapper", lowered)
+                self.assertIn("native buddyswitch env mcp tools", lowered)
+                self.assertNotIn("use native `search__open_browser`", lowered)
+                self.assertNotIn("start discovery from native `search__open_browser`", lowered)
+                self.assertNotIn("python3 scripts/env/client.py", lowered)
+                self.assertNotIn("search open-browser --payload", lowered)
+                self.assertNotIn("search open-browser --query", lowered)
+                self.assertNotIn("search open_browser --query", lowered)
 
     def test_market_p0_startup_marketer_skill_chain_is_registered(self) -> None:
         lookup = {

@@ -144,7 +144,8 @@ def _build_definition() -> ToolDefinition:
                     'You need explicit backend/query/engine URL planning metadata, including target_url, without opening a browser page (page_opened=false).',
                 ),
                 do_not_use_when=(
-                    'You need to open the search page now in the instance browser session; use search.open_browser.',
+                    'You need general browser discovery or page inspection; use chrome-devtools-cockpit.',
+                    'You need query-to-URL wrapping plus broker-managed browser open/reuse; use search.open_browser.',
                     'You want implicit backend auto selection instead of explicit backend payload.',
                 ),
                 risk_hints={
@@ -159,7 +160,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='open_browser',
                 title='search.open_browser',
-                description='Open or reuse one search URL through launcher-managed browser endpoint under the browser page limit.',
+                description='Build a search URL and ask the broker browser capability to open or reuse it.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -184,19 +185,18 @@ def _build_definition() -> ToolDefinition:
                 task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
                 required_permission='none',
                 authority='profile.search_boundary',
-                visibility='launcher-managed browser session',
+                visibility='broker browser search URL wrapper',
                 durability='transient',
-                result_content_level='browser open/reuse intent, target URL, and page-count state',
-                success_effect='Opens the planned search URL in the launcher-managed browser for browser-native discovery, or reuses the exact URL when it is already open without creating a duplicate page.',
-                failure_state_guarantee='Rejected browser actions do not open a page, do not bypass the page limit, and do not mutate product state.',
+                result_content_level='search URL, broker browser result, and search-specific wording',
+                success_effect='Builds a search URL and delegates open/reuse/page-limit/idle handling to broker browser capability.',
+                failure_state_guarantee='Rejected wrapper calls do not bypass broker browser page limits and do not mutate product state.',
                 reads=(
                     'search profile',
                     'query payload',
-                    'launcher browser endpoint',
-                    'browser page list',
+                    'broker browser result',
                 ),
                 writes=(
-                    'browser session page open when the target URL is not already open and the page limit allows a new page',
+                    'no direct browser writes; broker browser capability may open or reuse a managed page',
                 ),
                 does_not_write=(
                     'product objects',
@@ -216,11 +216,12 @@ def _build_definition() -> ToolDefinition:
                     'browser_page_limit',
                 ),
                 use_when=(
-                    'You need to start browser-native discovery by opening or reusing a query URL in the launcher-managed browser, then continue with chrome-devtools-cockpit.',
+                    'You need search-specific query URL construction before broker browser capability opens or reuses a page.',
                 ),
                 do_not_use_when=(
                     'You only need search metadata or URL planning without opening a page.',
-                    'The browser page limit is already reached and the target URL is not already open; close or reuse pages before retrying.',
+                    'You need general browsing; use chrome-devtools-cockpit directly.',
+                    'The browser page limit is already reached and the target URL is not already open; close or reuse pages through chrome-devtools-cockpit before retrying.',
                     'You are trying to use legacy non-payload flags for query or engine; provide payload fields only.',
                 ),
                 risk_hints={

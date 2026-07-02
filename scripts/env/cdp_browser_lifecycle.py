@@ -137,6 +137,21 @@ def _send_browser_command(
             pass
 
 
+def create_background_page_target(browser_url: str, target_url: str, timeout_seconds: float = 5.0) -> str:
+    if not isinstance(target_url, str) or not target_url.strip():
+        raise BrowserLifecycleError("target_url must be a non-empty string")
+    result = _send_browser_command(
+        browser_url,
+        "Target.createTarget",
+        {"url": target_url.strip(), "background": True},
+        timeout_seconds,
+    )
+    target_id = result.get("targetId")
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise BrowserLifecycleError("Target.createTarget response missing targetId")
+    return target_id.strip()
+
+
 def close_page_target(browser_url: str, target_id: str, timeout_seconds: float = 3.0) -> dict[str, str]:
     if not isinstance(target_id, str) or not target_id.strip():
         raise BrowserLifecycleError("target_id must be a non-empty string")

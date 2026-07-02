@@ -4,28 +4,54 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
-import os
-import shlex
-import subprocess
 from typing import Any, TypedDict
 from urllib.parse import urlencode
 
 import env_profiles
-from env import cdp_browser_lifecycle as browser_lifecycle
 from env.cdp_browser_session import (
+    BROWSER_PAGE_HINT_TEMPLATE,
+    BROWSER_PAGE_HINT_THRESHOLD,
     BROWSER_PAGE_LIMIT,
     BROWSER_PAGE_LIMIT_BLOCK_TEXT,
-    evaluate_page_open_gate,
 )
 from env.tool_runtime.context import default_manifest_path as DEFAULT_MANIFEST
 from .tool import DEFINITION
 from env.tool_runtime import results as tool_results
+from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 ALLOWED_BACKENDS = ("browser", "search_api")
 ALLOWED_ENGINES = ("google", "web", "reddit", "x")
 SEARCH_API_PROVIDER_AVAILABLE = False
 REQUIRED_COCKPIT_TOOL = "chrome-devtools-cockpit"
+
+
+class _RuntimeBrowserClient:
+    @staticmethod
+    def open_url(*, target_url: str, source_tool: str) -> dict[str, Any]:
+        try:
+            return request_runtime_broker("browser.open_url", {"target_url": target_url, "source_tool": source_tool})
+        except RuntimeBrokerError as exc:
+            extra: dict[str, Any] = dict(exc.details)
+            if exc.response:
+                for key, value in exc.response.items():
+                    if key not in {"protocol", "request_id", "ok", "error"}:
+                        extra[key] = value
+            if exc.code == "E_RUNTIME_BROKER_UNAVAILABLE":
+                unavailable = broker_unavailable_feedback()
+                unavailable.update(extra)
+                extra = unavailable
+            payload: dict[str, Any] = {
+                "ok": False,
+                "error": {"code": exc.code, "message": exc.message},
+            }
+            for key, value in extra.items():
+                if key in {"code", "message"}:
+                    continue
+                payload[key] = value
+            return payload
+
+
+browser_client = _RuntimeBrowserClient
 
 
 _ACTION_DEFINITION_MAP = {
@@ -65,59 +91,6 @@ def _load_search_boundary(context: SearchServiceContext) -> dict[str, Any]:
     if not isinstance(search, dict):
         raise ValueError("env profile tool_capability.search must be an object")
     return dict(search)
-
-
-def _browser_endpoint(instance_payload: dict[str, Any]) -> tuple[str | None, str | None]:
-    port = instance_payload.get("browser_port")
-    if port is None:
-        return None, "browser endpoint is not recorded"
-    if isinstance(port, bool) or not isinstance(port, int):
-        return None, f"invalid browser port: {port}"
-    if port < 1 or port > 65535:
-        return None, f"invalid browser port: {port}"
-    return f"http://127.0.0.1:{port}", None
-
-
-def _reload_instance_payload(context: SearchServiceContext) -> dict[str, Any]:
-    try:
-        payload = json.loads(Path(context["instance_json"]).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"failed to reload instance browser state: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError("failed to reload instance browser state: instance JSON was not an object")
-    return payload
-
-
-def _ensure_browser_runtime(context: SearchServiceContext) -> tuple[bool, str | None]:
-    override = os.environ.get("BUDDYSWITCH_SEARCH_BROWSER_ENSURE_COMMAND")
-    if override:
-        command = shlex.split(override)
-    else:
-        command = [
-            str(env_profiles.ROOT / "buddyswitch-codex"),
-            "env",
-            "browser",
-            "ensure",
-            "--instance",
-            context["actor_id"],
-        ]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=env_profiles.ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30.0,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "browser ensure timed out"
-    except OSError as exc:
-        return False, f"browser ensure failed: {exc}"
-    if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip() or f"exit status {completed.returncode}"
-        return False, detail
-    return True, None
 
 
 def _normalize_query(args: dict[str, Any]) -> str | None:
@@ -193,44 +166,6 @@ def _build_search_url(query: str, engine: str) -> str:
     if engine == "x":
         return f"https://x.com/search?{encoded}&src=typed_query"
     raise ValueError(f"unsupported search engine: {engine}")
-
-
-def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, str | None, str | None]:
-    helper = env_profiles.ROOT / "scripts" / "env" / "cdp_background_page.py"
-    try:
-        completed = subprocess.run(
-            [
-                "python3",
-                str(helper),
-                "--browser-url",
-                browser_endpoint,
-                "--url",
-                target_url,
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=5.0,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "Chrome DevTools Target.createTarget timed out", None
-    except OSError as exc:
-        return False, str(exc), None
-    if completed.returncode == 0:
-        try:
-            payload = json.loads(completed.stdout.strip())
-        except json.JSONDecodeError as exc:
-            return False, f"Target.createTarget returned invalid JSON: {exc}", None
-        if not isinstance(payload, dict):
-            return False, "Target.createTarget response was not an object", None
-        target_id = payload.get("targetId")
-        if not isinstance(target_id, str) or not target_id.strip():
-            return False, "Target.createTarget response missing result.targetId", None
-        return True, None, target_id.strip()
-    reason = completed.stderr.strip() or completed.stdout.strip()
-    if reason:
-        return False, reason, None
-    return False, f"Chrome DevTools Target.createTarget exited with status {completed.returncode}", None
 
 
 def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, Any]:
@@ -380,8 +315,8 @@ def _browser_unavailable(
         retryable=True,
         retry_guidance="Restore browser endpoint readiness for this instance, then retry.",
         allowed_next_actions=[
-            "Ensure the launcher-managed browser for this instance is running.",
-            "Retry search.open_browser after browser ensure succeeds.",
+            "Use browser.status to inspect launcher-managed browser readiness.",
+            "Retry search.open_browser after browser readiness is restored.",
         ],
         correctable_fields=["browser readiness"],
         alternative_capabilities=[
@@ -403,51 +338,10 @@ def _browser_unavailable(
     )
 
 
-def _browser_ensure_failed(
-    *,
-    context: SearchServiceContext,
-    target_url: str,
-    reason: str,
-) -> dict[str, Any]:
-    return tool_results.rejection(
-        tool="search",
-        action="search.open_browser",
-        active_actor=context["active_actor"],
-        active_role=context["active_role"],
-        code="E_SEARCH_BROWSER_ENSURE_FAILED",
-        message="failed to ensure browser runtime for search",
-        permission_boundary="search.browser",
-        human_summary="Browser runtime could not be started for search.",
-        why_blocked=reason,
-        impact="No browser page was opened and no BuddySwitch runtime state changed.",
-        state_changed=False,
-        retryable=True,
-        retry_guidance="Check browser runtime readiness, then retry search.open_browser.",
-        allowed_next_actions=[
-            "Use search.status to inspect browser capability before retrying.",
-            "Retry search.open_browser after browser runtime ensure succeeds.",
-        ],
-        allowed_next_action_options=[
-            tool_results.next_action_option(
-                tool="search",
-                action="status",
-                option_id="search_status_for_browser_ensure_failure",
-                reason="Use when you need browser capability metadata before retrying.",
-            )
-        ],
-        extra={
-            "target_url": target_url,
-            "page_opened": False,
-            "reason": reason,
-        },
-    )
-
-
 def _browser_open_failed(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     reason: str,
 ) -> dict[str, Any]:
     return tool_results.rejection(
@@ -506,7 +400,6 @@ def _browser_page_count_unverified(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     reason: str,
 ) -> dict[str, Any]:
     return tool_results.rejection(
@@ -547,7 +440,6 @@ def _browser_page_limit_reached(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     browser_page_count: int,
 ) -> dict[str, Any]:
     return tool_results.rejection(
@@ -580,7 +472,6 @@ def _browser_lifecycle_registration_failed(
     *,
     context: SearchServiceContext,
     target_url: str,
-    browser_endpoint: str,
     reason: str,
     page_reused: bool,
     target_id: str | None,
@@ -634,23 +525,6 @@ def _browser_lifecycle_registration_failed(
     )
 
 
-def _refresh_browser_page_idle(
-    *,
-    instance_root: Path,
-    target_id: str,
-    target_url: str,
-) -> tuple[dict[str, Any], str | None]:
-    idle_extra = browser_lifecycle.refresh_page_idle(
-        instance_root=instance_root,
-        target_id=target_id,
-        target_url=target_url,
-    )
-    idle_seconds = idle_extra.get("idle_seconds") if isinstance(idle_extra, dict) else None
-    if isinstance(idle_seconds, int):
-        return idle_extra, f"Browser page idle refreshed: {idle_seconds}s."
-    return idle_extra, None
-
-
 def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str, Any]) -> dict[str, Any]:
     permission = boundary.get("search_api")
     if permission == "user-approved-only":
@@ -669,7 +543,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
             retryable=True,
             retry_guidance="Use browser backend now or obtain explicit user-approved fallback before retry.",
             allowed_next_actions=[
-                "Use search.open_browser for browser-native discovery.",
+                "Use chrome-devtools-cockpit for browser-native discovery; use search.open_browser only for search query URL construction.",
                 "Ask the user for explicit one-off approval before requesting a non-browser downgrade.",
             ],
             correctable_fields=["backend"],
@@ -718,7 +592,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
         retryable=True,
         retry_guidance="Use browser backend or configure search_api provider before retry.",
         allowed_next_actions=[
-            "Use search.open_browser for browser-native discovery.",
+            "Use chrome-devtools-cockpit for browser-native discovery; use search.open_browser only for search query URL construction.",
             "Configure a BuddySwitch-managed search API provider before using search_api.",
         ],
         correctable_fields=["backend"],
@@ -754,8 +628,21 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
     )
 
 
+def _browser_payload_reason(instance_payload: dict[str, Any]) -> str | None:
+    port = instance_payload.get("browser_port")
+    if port is None or port == "":
+        return "instance browser_port is not recorded"
+    try:
+        value = int(port)
+    except (TypeError, ValueError):
+        return "invalid browser port recorded in active instance"
+    if value < 1 or value > 65535:
+        return "invalid browser port recorded in active instance"
+    return None
+
+
 def _status_payload(context: SearchServiceContext, boundary: dict[str, Any]) -> dict[str, Any]:
-    browser_endpoint, browser_reason = _browser_endpoint(context["instance_payload"])
+    browser_reason = _browser_payload_reason(context["instance_payload"])
     browser_available = boundary.get("browser_cockpit") != "unavailable"
     search_api_permission = boundary.get("search_api")
     search_api_available = bool(SEARCH_API_PROVIDER_AVAILABLE and search_api_permission == "available")
@@ -798,7 +685,7 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
         durability="none",
         read_scope="search capability and backend/browser readiness metadata",
         allowed_next_actions=[
-            "Use search.open_browser with backend browser for browser-native discovery.",
+            "Use chrome-devtools-cockpit for browser-native discovery; use search.open_browser only for focused search query URL construction.",
         ],
         allowed_next_action_options=[
             tool_results.next_action_option(
@@ -848,16 +735,16 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
         effect_summary="Validated search request and returned target URL browser intent with page_opened=false.",
         state_changed=False,
         durability="none",
-        read_scope="search request planning metadata and target URL intent without browser session mutation",
+        read_scope="search request planning metadata and target URL intent without browser mutation",
         allowed_next_actions=[
-            "Call search.open_browser to open the target in the instance browser, then traverse result pages in chrome-devtools-cockpit.",
+            "Use chrome-devtools-cockpit for page inspection; call search.open_browser only to hand this planned search URL to the broker browser capability when you need that wrapper.",
         ],
         allowed_next_action_options=[
             tool_results.next_action_option(
                 tool="search",
                 action="open_browser",
                 option_id="search_open_when_host_needs_page_open",
-                reason="Use when the host needs to open the planned target URL in the browser session.",
+                reason="Use when the host needs to open the planned target URL in the browser.",
             )
         ],
         extra={
@@ -869,6 +756,146 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
             "page_opened": False,
             "permission_boundary": "search.browser",
         },
+    )
+
+
+def _optional_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _broker_target_id(result: dict[str, Any]) -> str | None:
+    target_id = result.get("target_id")
+    return target_id if isinstance(target_id, str) and target_id.strip() else None
+
+
+def _broker_page_count(result: dict[str, Any]) -> int | None:
+    for key in ("browser_page_count", "projected_page_count", "page_count"):
+        value = _optional_int(result.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _idle_extra_from_open_result(result: dict[str, Any]) -> dict[str, Any]:
+    extra: dict[str, Any] = {"idle_refreshed": result.get("idle_refreshed") is True}
+    idle_seconds = _optional_int(result.get("idle_seconds"))
+    if idle_seconds is not None:
+        extra["idle_seconds"] = idle_seconds
+    idle_expires_at = result.get("idle_expires_at")
+    if isinstance(idle_expires_at, str) and idle_expires_at:
+        extra["idle_expires_at"] = idle_expires_at
+    return extra
+
+
+def _idle_summary(result: dict[str, Any]) -> str | None:
+    idle_seconds = _optional_int(result.get("idle_seconds"))
+    if result.get("idle_refreshed") is True and idle_seconds is not None:
+        return f"Browser page idle refreshed: {idle_seconds}s."
+    if result.get("idle_refreshed") is True:
+        return "Browser page idle refreshed."
+    return None
+
+
+def _page_hint(result: dict[str, Any]) -> str | None:
+    if result.get("kind") != "opened":
+        return None
+    page_count = _broker_page_count(result)
+    if page_count is None or page_count < BROWSER_PAGE_HINT_THRESHOLD:
+        return None
+    return BROWSER_PAGE_HINT_TEMPLATE.format(count=page_count)
+
+
+def _broker_message(result: dict[str, Any], fallback: str) -> str:
+    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    message = error.get("message") if isinstance(error.get("message"), str) else result.get("message")
+    return message if isinstance(message, str) and message.strip() else fallback
+
+
+def _broker_code(result: dict[str, Any], fallback: str) -> str:
+    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    code = error.get("code") if isinstance(error.get("code"), str) else None
+    return code.strip() if isinstance(code, str) and code.strip() else fallback
+
+
+def _normalize_broker_next_action_options(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    options: list[dict[str, Any]] = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        tool = row.get("tool")
+        action = row.get("action")
+        reason = row.get("reason")
+        if not isinstance(tool, str) or not isinstance(action, str) or not isinstance(reason, str):
+            continue
+        if isinstance(row.get("native_tool"), str) and isinstance(row.get("source_refs"), list):
+            options.append(dict(row))
+            continue
+        option_id = row.get("id") if isinstance(row.get("id"), str) else row.get("option_id")
+        options.append(
+            tool_results.next_action_option(
+                tool=tool,
+                action=action,
+                option_id=option_id if isinstance(option_id, str) else None,
+                reason=reason,
+            )
+        )
+    return options
+
+
+def _broker_failure_passthrough(
+    *,
+    context: SearchServiceContext,
+    target_url: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    message = _broker_message(result, "browser.open_url failed")
+    permission_boundary = result.get("permission_boundary")
+    if not isinstance(permission_boundary, str) or not permission_boundary.strip():
+        permission_boundary = "browser.open_url"
+    options = _normalize_broker_next_action_options(result.get("allowed_next_action_options"))
+    if not options:
+        options = [
+            tool_results.next_action_option(
+                tool="browser",
+                action="status",
+                option_id="browser_status_for_search_open_failure",
+                reason="Use when you need broker-owned browser readiness before retrying.",
+            )
+        ]
+
+    extra: dict[str, Any] = {
+        "target_url": target_url,
+        "page_opened": False,
+        "reason": result.get("why_blocked") if isinstance(result.get("why_blocked"), str) else message,
+    }
+    for key in ("request_id", "command_hint", "stop_condition", "retriable", "retry_after_ms"):
+        value = result.get(key)
+        if value is not None:
+            extra[key] = value
+
+    return tool_results.rejection(
+        tool="search",
+        action="search.open_browser",
+        active_actor=context["active_actor"],
+        active_role=context["active_role"],
+        code=_broker_code(result, "E_SEARCH_BROWSER_OPEN_FAILED"),
+        message=message,
+        permission_boundary=permission_boundary,
+        human_summary="Browser broker request failed.",
+        why_blocked=extra["reason"],
+        impact="No browser page was opened and no BuddySwitch product state changed.",
+        state_changed=False,
+        durability=str(result.get("durability") or "none"),
+        retryable=bool(result.get("retryable", True)),
+        retry_guidance="Inspect broker-owned browser status, then retry search.open_browser when browser readiness is restored.",
+        allowed_next_actions=[
+            "Use browser.status to inspect broker-owned browser readiness.",
+            "Retry search.open_browser after browser readiness is restored.",
+        ],
+        allowed_next_action_options=options,
+        extra=extra,
     )
 
 
@@ -890,61 +917,74 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             reason="profile search browser_cockpit is unavailable",
         )
     target_url = _build_search_url(query, engine)
-    ensure_ok, ensure_reason = _ensure_browser_runtime(context)
-    if not ensure_ok:
-        return _browser_ensure_failed(
-            context=context,
-            target_url=target_url,
-            reason=ensure_reason or "browser ensure failed",
-        )
-    try:
-        fresh_payload = _reload_instance_payload(context)
-    except RuntimeError as exc:
-        return _browser_ensure_failed(context=context, target_url=target_url, reason=str(exc))
-    browser_endpoint, browser_reason = _browser_endpoint(fresh_payload)
-    if browser_endpoint is None:
-        return _browser_unavailable(
-            action="search.open_browser",
-            context=context,
-            reason=browser_reason or "instance browser endpoint is missing",
-            target_url=target_url,
-        )
-    page_gate = evaluate_page_open_gate(browser_endpoint, target_url)
-    if page_gate.kind == "verification_failed":
-        return _browser_page_count_unverified(
-            context=context,
-            target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            reason=page_gate.message or "Browser page-count verification failed.",
-        )
-    if page_gate.kind == "block":
-        return _browser_page_limit_reached(
-            context=context,
-            target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            browser_page_count=page_gate.page_count or BROWSER_PAGE_LIMIT,
-        )
-    if page_gate.kind == "reuse":
-        target_id = page_gate.target_id or ""
-        try:
-            idle_extra, idle_summary = _refresh_browser_page_idle(
-                instance_root=context["instance_json"].parent,
-                target_id=target_id,
+    result = browser_client.open_url(target_url=target_url, source_tool="search.open_browser")
+    if result.get("ok") is not True:
+        kind = result.get("kind")
+        reason = _broker_message(result, "browser.open_url failed")
+        if kind == "verification_failed":
+            return _browser_page_count_unverified(
+                context=context,
                 target_url=target_url,
+                reason=reason,
             )
-        except Exception as exc:
+        if kind == "blocked":
+            return _browser_page_limit_reached(
+                context=context,
+                target_url=target_url,
+                browser_page_count=_broker_page_count(result) or BROWSER_PAGE_LIMIT,
+            )
+        if kind == "registration_failed":
             return _browser_lifecycle_registration_failed(
                 context=context,
                 target_url=target_url,
-                browser_endpoint=browser_endpoint,
-                reason=str(exc),
-                page_reused=True,
-                target_id=target_id,
-                browser_page_count=page_gate.page_count,
+                reason=reason,
+                page_reused=result.get("page_reused") is True,
+                target_id=_broker_target_id(result),
+                browser_page_count=_broker_page_count(result),
             )
+        if kind in {"open_failed", "invalid_request"}:
+            return _browser_open_failed(
+                context=context,
+                target_url=target_url,
+                reason=reason,
+            )
+        return _broker_failure_passthrough(context=context, target_url=target_url, result=result)
+
+    kind = result.get("kind")
+    if kind == "verification_failed":
+        return _browser_page_count_unverified(
+            context=context,
+            target_url=target_url,
+            reason=_broker_message(result, "Browser page-count verification failed."),
+        )
+    if kind == "blocked":
+        return _browser_page_limit_reached(
+            context=context,
+            target_url=target_url,
+            browser_page_count=_broker_page_count(result) or BROWSER_PAGE_LIMIT,
+        )
+    if kind == "registration_failed":
+        return _browser_lifecycle_registration_failed(
+            context=context,
+            target_url=target_url,
+            reason=_broker_message(result, "browser page lifecycle registration failed"),
+            page_reused=result.get("page_reused") is True,
+            target_id=_broker_target_id(result),
+            browser_page_count=_broker_page_count(result),
+        )
+    if kind in {"open_failed", "invalid_request"}:
+        return _browser_open_failed(
+            context=context,
+            target_url=target_url,
+            reason=_broker_message(result, "browser.open_url page open failed"),
+        )
+    if result.get("page_reused") is True or kind == "reused":
         effect_summary = "Reused an existing browser page for the planned target URL; no new page was opened."
+        idle_summary = _idle_summary(result)
         if idle_summary:
             effect_summary = f"{effect_summary} {idle_summary}"
+        page_count = _broker_page_count(result)
+        target_id = _broker_target_id(result)
         return tool_results.success(
             tool="search",
             action="search.open_browser",
@@ -962,53 +1002,24 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
                 "target_url": target_url,
                 "page_opened": False,
                 "page_reused": True,
+                "target_id": target_id,
                 "reused_target_id": target_id,
-                "browser_page_count": page_gate.page_count,
+                "browser_page_count": page_count,
                 "browser_page_limit": BROWSER_PAGE_LIMIT,
                 "permission_boundary": "search.browser",
                 "mutates_product_state": False,
-                **idle_extra,
+                **_idle_extra_from_open_result(result),
             },
         )
-    opened, open_reason, target_id = _open_browser_page(browser_endpoint, target_url)
-    if not opened:
-        return _browser_open_failed(
-            context=context,
-            target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            reason=open_reason or "Chrome DevTools page open failed",
-        )
-    hint = page_gate.hint_text()
     effect_summary = "Opened the planned target URL in launcher-managed browser session without writing product objects."
-    try:
-        idle_extra, idle_summary = _refresh_browser_page_idle(
-            instance_root=context["instance_json"].parent,
-            target_id=target_id or "",
-            target_url=target_url,
-        )
-    except Exception as exc:
-        close_result: dict[str, Any] | None = None
-        close_error: str | None = None
-        if target_id:
-            try:
-                close_result = browser_lifecycle.close_page_target(browser_endpoint, target_id)
-            except Exception as close_exc:
-                close_error = str(close_exc)
-        return _browser_lifecycle_registration_failed(
-            context=context,
-            target_url=target_url,
-            browser_endpoint=browser_endpoint,
-            reason=str(exc),
-            page_reused=False,
-            target_id=target_id,
-            close_result=close_result,
-            close_error=close_error,
-            browser_page_count=page_gate.projected_page_count,
-        )
+    idle_summary = _idle_summary(result)
     if idle_summary:
         effect_summary = f"{effect_summary} {idle_summary}"
+    hint = _page_hint(result)
     if hint:
         effect_summary = f"{effect_summary} {hint}"
+    page_count = _broker_page_count(result)
+    target_id = _broker_target_id(result)
     return tool_results.success(
         tool="search",
         action="search.open_browser",
@@ -1032,11 +1043,13 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "query": query,
             "target_url": target_url,
             "page_opened": True,
-            "browser_page_count": page_gate.projected_page_count,
+            "target_id": target_id,
+            "created_target_id": target_id,
+            "browser_page_count": page_count,
             "browser_page_limit": BROWSER_PAGE_LIMIT,
             "permission_boundary": "search.browser",
             "mutates_product_state": False,
-            **idle_extra,
+            **_idle_extra_from_open_result(result),
         },
     )
 

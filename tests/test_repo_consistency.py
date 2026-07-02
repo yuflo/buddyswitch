@@ -33,6 +33,7 @@ _FORBIDDEN_RUNTIME_SURFACES = {
 _DOC_SPEC_CONTEXT_MARKERS = (
     "alignment",
     "appendix",
+    "browser-session-task",
     "code-implementation-plan",
     "completion-implementation-plan",
     "development-plan",
@@ -219,6 +220,53 @@ print(json.dumps({{
             )
             self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
             self.assertEqual(completed.stdout.strip(), "", msg=f"{token}\n{completed.stdout}")
+
+    def test_browser_control_plane_has_no_live_old_acquisition_residue(self) -> None:
+        forbidden_patterns = (
+            "_".join(("ensure", "browser", "url", "for", "instance")),
+            "BUDDYSWITCH_BROWSER_COCKPIT_" + "ENSURE_COMMAND",
+            'ROOT / "' + "buddyswitch-codex" + '"',
+            "env browser " + "ensure",
+            "env browser " + "release",
+        )
+        scan_targets = [
+            "scripts/env",
+            "scripts/runtime_kernel",
+            "tools/launcher",
+            "tests",
+        ]
+        allowed_files = {
+            "tests/test_buddyswitch_launcher.py",
+            "tests/test_browser_cockpit_launcher.py",
+            "tests/test_imessage_channel.py",
+            "tests/test_submit_turn.py",
+            "tests/test_web_management.py",
+        }
+        allowed_lines = (
+            "tools/launcher/browser_cockpit.sh:77:",
+            "tools/launcher/browser_cockpit.sh:78:",
+        )
+        hits: list[str] = []
+        for pattern in forbidden_patterns:
+            completed = subprocess.run(
+                ["rg", "-n", pattern, *scan_targets, "-S", "-g", "!**/__pycache__/**", "-g", "!**/*.pyc"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+            for line in completed.stdout.splitlines():
+                if not line.strip():
+                    continue
+                path = line.split(":", 1)[0]
+                if path in allowed_files:
+                    continue
+                if any(fragment in line for fragment in allowed_lines):
+                    continue
+                hits.append(line)
+
+        self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_env_store_module_is_runtime_root_compat_only(self) -> None:
         retired_api = (
@@ -514,6 +562,34 @@ print(json.dumps({{
                 self.assertNotIn("detach" + "-task", text)
                 self.assertNotIn("use explicit ids and env tools (`", text)
 
+    def test_live_browser_guidance_is_cockpit_first(self) -> None:
+        targets = [
+            ROOT / "tools" / "launcher" / "assets" / "roles",
+            ROOT / "framework" / "contracts",
+            ROOT / "buddyswitch" / "skills" / "market",
+            ROOT / "scripts" / "env" / "tools" / "search",
+        ]
+        forbidden_phrases = (
+            "Start discovery from native `search__open_browser`",
+            "use native `search__open_browser` with a focused query, then continue discovery",
+            "Use search.open_browser for browser-native discovery",
+            "Call search.open_browser to open the target in the instance browser",
+        )
+        violations: list[str] = []
+
+        for target in targets:
+            files = [target] if target.is_file() else sorted(target.rglob("*"))
+            for path in files:
+                if path.is_dir() or path.suffix not in {".md", ".py"}:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for line_number, line in enumerate(text.splitlines(), start=1):
+                    for phrase in forbidden_phrases:
+                        if phrase in line:
+                            violations.append(f"{path.relative_to(ROOT)}:{line_number}: {phrase}")
+
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
     def test_runtime_role_agents_are_short_role_bootstraps(self) -> None:
         required_by_role = {
             "design": (
@@ -532,7 +608,7 @@ print(json.dumps({{
                 "changed files, verification, durable report, and risk",
             ),
             "market": (
-                "start discovery through buddyswitch search/browser tools.",
+                "start browser discovery from `chrome-devtools-cockpit`",
                 "evidence is target-scoped and must not be fabricated.",
                 "draft market deliverables as artifacts before publishing",
                 "artifacts, buddybox files, evidence status, and blockers",
@@ -565,8 +641,8 @@ print(json.dumps({{
             "other roles cannot list/read/write/delete these local files.",
             "do not edit projected runtime storage paths directly; use env tools.",
             "artifact__get returned the full body",
-            "buddyswitch env search tools",
             "chrome-devtools-cockpit",
+            "search query url construction",
             "do not bypass runtime or broker boundaries.",
         )
         forbidden_fragments = (

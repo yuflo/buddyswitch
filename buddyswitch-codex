@@ -216,9 +216,8 @@ buddyswitch_start_failure_cleanup() {
     [[ -n "${stop_output}" ]] && echo "${stop_output}" >&2
   }
   buddyswitch_runtime_broker_stop || true
-  buddyswitch_browser_instance_stop "${actor_id}" || true
+  buddyswitch_browser_manager_stop_instance "${actor_id}" || true
   buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-  buddyswitch_instance_clear_browser_port "${actor_id}"
   buddyswitch_instance_record_failure "${actor_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}"
 }
 
@@ -354,7 +353,7 @@ PY
     echo "Daemon start failed for ${requested_actor_id}." >&2
     buddyswitch_app_server_stop || true
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${requested_actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${requested_actor_id}" || true
     buddyswitch_instance_clear_app_server "${requested_actor_id}" "inactive"
     return 1
   fi
@@ -375,7 +374,7 @@ instance_set_inactive_locked() {
   }
   buddyswitch_app_server_stop || true
   buddyswitch_runtime_broker_stop
-  buddyswitch_browser_instance_stop "${actor_id}" || true
+  buddyswitch_browser_manager_stop_instance "${actor_id}" || true
   buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
 }
 
@@ -954,7 +953,7 @@ PY
     echo "Thread bootstrap failed for ${new_thread_id}." >&2
     buddyswitch_app_server_stop || true
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
     buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
     return 1
   fi
@@ -962,7 +961,7 @@ PY
     echo "Daemon start failed for ${actor_id}." >&2
     buddyswitch_app_server_stop || true
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
     buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
     return 1
   fi
@@ -1141,7 +1140,7 @@ PY
 
   app_server_json="$(buddyswitch_app_server_ensure)" || {
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
     return 1
   }
 
@@ -1150,7 +1149,7 @@ PY
     [[ -n "${resume_json}" ]] && echo "${resume_json}" >&2
     buddyswitch_app_server_stop || true
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
     buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
     return 1
   }
@@ -1161,7 +1160,7 @@ PY
     echo "thread/resume returned invalid JSON for ${thread_id}" >&2
     buddyswitch_app_server_stop || true
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
     buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
     return 1
   }
@@ -1170,7 +1169,7 @@ PY
     echo "thread/resume returned unexpected thread id: ${resumed_thread_id}" >&2
     buddyswitch_app_server_stop || true
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
     buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
     return 1
   fi
@@ -1186,7 +1185,7 @@ PY
     echo "Daemon start failed for ${actor_id}." >&2
     buddyswitch_app_server_stop || true
     buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${actor_id}" || true
+    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
     buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
     return 1
   fi
@@ -1540,32 +1539,14 @@ instance_delete_locked() {
 }
 
 browser_ensure_locked() {
-  local actor_id="${BUDDYSWITCH_BROWSER_INSTANCE_ID:-}" browser_port explicit_port_requested=0 arg
+  local actor_id="${BUDDYSWITCH_BROWSER_INSTANCE_ID:-}"
   buddyswitch_require_runtime_lock
-  for arg in "$@"; do
-    if [[ "${arg}" == "--port" ]]; then
-      explicit_port_requested=1
-      break
-    fi
-  done
   if [[ -n "${actor_id}" ]]; then
     buddyswitch_validate_actor_id "${actor_id}" || return $?
     buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
     buddyswitch_env_bind_instance "${actor_id}" || return $?
-    if [[ "${explicit_port_requested}" -eq 0 ]]; then
-      buddyswitch_browser_prepare_instance_ensure_port "${actor_id}" || return $?
-    else
-      browser_port="$(buddyswitch_instance_record_field "${actor_id}" "browser_port" || true)"
-      if [[ -n "${browser_port}" ]]; then
-        export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
-      fi
-      buddyswitch_browser_init_defaults
-    fi
   fi
   buddyswitch_browser_main ensure "$@"
-  if [[ -n "${actor_id}" ]]; then
-    buddyswitch_instance_set_browser_port "${actor_id}" "${BUDDYSWITCH_BROWSER_PORT}"
-  fi
 }
 
 browser_release_locked() {
@@ -1578,7 +1559,6 @@ browser_release_locked() {
   buddyswitch_validate_actor_id "${actor_id}" || return $?
   buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
   buddyswitch_env_bind_instance "${actor_id}" || return $?
-  buddyswitch_browser_init_defaults
   buddyswitch_browser_main release
 }
 
