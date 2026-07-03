@@ -446,6 +446,8 @@ for raw_line in sys.stdin:
         message_delay_seconds: float = 0.0,
         exit_without_response_once: bool = False,
         unset_env: list[str] | None = None,
+        set_broker_socket_env: bool = True,
+        pass_broker_socket_arg: bool = False,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
         self._last_proxy_all_calls: list[dict[str, Any]] = []
         self._last_proxy_marker_snapshot: dict[str, Any] = {}
@@ -489,7 +491,10 @@ for raw_line in sys.stdin:
             env["BUDDYSWITCH_TEST_PROXY_ALL_CALLS"] = str(all_calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
             env["BUDDYSWITCH_TEST_PROXY_MARKER_SNAPSHOT"] = str(marker_snapshot_path)
-            env["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = str(broker_socket_path)
+            if set_broker_socket_env:
+                env["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = str(broker_socket_path)
+            else:
+                env.pop("BUDDYSWITCH_RUNTIME_BROKER_SOCKET", None)
             if instance_root is not None:
                 env["BUDDYSWITCH_TEST_PROXY_INSTANCE_ROOT"] = str(instance_root)
             if exit_without_response_once:
@@ -512,6 +517,8 @@ for raw_line in sys.stdin:
                 "--upstream-command",
                 f"{sys.executable} {upstream}",
             ]
+            if pass_broker_socket_arg:
+                command.extend(["--broker-socket", str(broker_socket_path)])
             if instance_root is not None:
                 command.append(f"--instance-root={instance_root}")
             proc = subprocess.Popen(
@@ -667,6 +674,28 @@ for raw_line in sys.stdin:
         self.assertNotIn("source_root", broker_params_text)
         self.assertNotIn("launcher_path", broker_params_text)
         self.assertNotIn("buddyswitch-" + "codex", broker_params_text)
+
+    def test_broker_socket_arg_sets_runtime_broker_socket_for_first_tools_call(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            responses, forwarded, upstream_argv, stderr = self._run_proxy(
+                [self._single_call("list_pages", {})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                initial_browser_port_missing=True,
+                set_broker_socket_env=False,
+                pass_broker_socket_arg=True,
+            )
+
+        self.assertEqual(stderr, "")
+        self.assertEqual(responses[0]["id"], 1)
+        self.assertFalse(responses[0].get("result", {}).get("isError", False), msg=responses[0])
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "list_pages")
+        self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+        self.assertEqual([call.get("method") for call in self._last_proxy_broker_calls], ["browser.acquire"])
 
     def test_invalid_json_before_upstream_does_not_start_upstream(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

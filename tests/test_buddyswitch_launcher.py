@@ -269,7 +269,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         else:
             self.assertNotIn(repo_root_resolved, config_text.replace(str(repo_git_common_dir), ""))
 
-    def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path) -> None:
+    def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path, *, broker_socket: str) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
         self.assertIn("--", argv)
         separator_index = argv.index("--")
@@ -279,6 +279,9 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         upstream_index = argv.index("--upstream-command")
         self.assertEqual(argv[upstream_index + 1], "npx chrome-devtools-mcp@1.1.1")
         self.assertIn(f"--instance-root={instance_root}", argv)
+        self.assertIn("--broker-socket", argv)
+        broker_index = argv.index("--broker-socket")
+        self.assertEqual(argv[broker_index + 1], broker_socket)
         self.assertFalse(any(str(item).startswith("--browser-url") for item in argv), msg=argv)
         self.assertNotIn("chrome-devtools-mcp@latest", argv)
 
@@ -2478,6 +2481,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
 
             for relative_path in (
@@ -3157,6 +3161,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
 
     def test_input_creates_task_sys_task_when_thread_idle(self) -> None:
@@ -6945,6 +6950,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", payload["config_toml"])
             self.assertNotIn("--browser-url", payload["config_toml"])
@@ -7082,6 +7088,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", payload["config_toml"])
             self.assertNotIn("--browser-url", payload["config_toml"])
@@ -7297,6 +7304,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 timeline[cockpit_mcp_index]["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertFalse(any(entry.get("path") == "Target.createTarget" for entry in timeline))
             self.assertFalse(
@@ -7378,6 +7386,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertFalse(any(call.get("path") == "Target.createTarget" for call in calls))
             self.assertFalse(any(call.get("path") == "/json/new" for call in calls))

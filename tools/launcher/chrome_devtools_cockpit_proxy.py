@@ -67,7 +67,14 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         help="Command used to start the upstream Chrome DevTools MCP server.",
     )
     parser.add_argument("--instance-root", help="BuddySwitch instance root for browser lifecycle state.")
+    parser.add_argument("--broker-socket", help="Runtime broker Unix socket path for product-mode browser acquisition.")
     return parser.parse_known_args(argv)
+
+
+def apply_broker_socket_arg(args: argparse.Namespace) -> None:
+    raw = getattr(args, "broker_socket", None)
+    if isinstance(raw, str) and raw.strip():
+        os.environ["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = raw.strip()
 
 
 def build_upstream_argv(args: argparse.Namespace, passthrough_args: list[str], browser_url: str) -> list[str]:
@@ -995,6 +1002,7 @@ def run_proxy(args: argparse.Namespace, passthrough_args: list[str], instance_ro
 
 def main(argv: list[str] | None = None) -> int:
     args, passthrough_args = parse_args(sys.argv[1:] if argv is None else argv)
+    apply_broker_socket_arg(args)
     return run_proxy(args, passthrough_args, args.instance_root)
 
 

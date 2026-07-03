@@ -335,6 +335,10 @@ buddyswitch_browser_mcp_upstream_command() {
   buddyswitch_browser_mcp_arg_value "$1" "--upstream-command"
 }
 
+buddyswitch_browser_mcp_broker_socket() {
+  buddyswitch_browser_mcp_arg_value "$1" "--broker-socket"
+}
+
 buddyswitch_browser_mcp_arg_value() {
   local server_name="$1"
   local flag="$2"
@@ -402,17 +406,24 @@ buddyswitch_browser_mcp_uses_cockpit_proxy() {
 }
 
 buddyswitch_browser_ensure_cockpit_mcp() {
-  local server_name expected_instance_root recorded_browser_url recorded_instance_root recorded_upstream_command upstream_command
+  local server_name expected_broker_socket expected_instance_root recorded_browser_url recorded_broker_socket recorded_instance_root recorded_upstream_command upstream_command
 
   server_name="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"
   expected_instance_root="$(buddyswitch_browser_instance_root)"
+  expected_broker_socket="${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}"
   upstream_command="npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}"
+  if [[ -z "${expected_broker_socket}" ]]; then
+    echo "Browser cockpit MCP registration requires BUDDYSWITCH_RUNTIME_BROKER_SOCKET." >&2
+    return 2
+  fi
 
   if buddyswitch_browser_has_mcp_server "${server_name}"; then
     recorded_browser_url="$(buddyswitch_browser_mcp_browser_url "${server_name}" || true)"
+    recorded_broker_socket="$(buddyswitch_browser_mcp_broker_socket "${server_name}" || true)"
     recorded_instance_root="$(buddyswitch_browser_mcp_instance_root "${server_name}" || true)"
     recorded_upstream_command="$(buddyswitch_browser_mcp_upstream_command "${server_name}" || true)"
     if [[ -z "${recorded_browser_url}" ]] \
+      && [[ "${recorded_broker_socket}" == "${expected_broker_socket}" ]] \
       && [[ "${recorded_instance_root}" == "${expected_instance_root}" ]] \
       && [[ "${recorded_upstream_command}" == "${upstream_command}" ]] \
       && buddyswitch_browser_mcp_uses_cockpit_proxy "${server_name}"; then
@@ -426,6 +437,7 @@ buddyswitch_browser_ensure_cockpit_mcp() {
     python3 \
     "${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" \
     --upstream-command "${upstream_command}" \
+    --broker-socket "${expected_broker_socket}" \
     --instance-root="${expected_instance_root}"
 }
 
