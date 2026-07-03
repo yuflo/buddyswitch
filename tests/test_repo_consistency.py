@@ -33,9 +33,11 @@ _FORBIDDEN_RUNTIME_SURFACES = {
 _DOC_SPEC_CONTEXT_MARKERS = (
     "alignment",
     "appendix",
+    "browser-cockpit-control-plane",
     "browser-session-task",
     "code-implementation-plan",
     "completion-implementation-plan",
+    "cockpit-browser-session-resource-lifecycle",
     "development-plan",
     "implementation-plan",
     "merge-plan",
@@ -43,6 +45,7 @@ _DOC_SPEC_CONTEXT_MARKERS = (
     "parallel-agent-execution-plan",
     "remove-" + "dash" + "board-and-skill-create",
     "scope",
+    "search-open-browser-cockpit-rebuild",
     "task-checkout-plan",
     "task-split",
     "test-plan",
@@ -639,12 +642,20 @@ print(json.dumps({{
             ROOT / "framework" / "contracts",
             ROOT / "buddyswitch" / "skills" / "market",
             ROOT / "scripts" / "env" / "tools" / "search",
+            ROOT / "tools" / "launcher" / "env.sh",
         ]
         forbidden_phrases = (
             "Start discovery from native `search__open_browser`",
             "use native `search__open_browser` with a focused query, then continue discovery",
             "Use search.open_browser for browser-native discovery",
             "Call search.open_browser to open the target in the instance browser",
+            "search__open_browser",
+            "search.open_browser",
+            "browser.open_url",
+            'request_runtime_broker("browser.open_url"',
+            "browser_client.open_url",
+            "search open_browser --query",
+            "search open-browser --query",
         )
         violations: list[str] = []
 
@@ -710,12 +721,14 @@ print(json.dumps({{
             "buddybox is the active role private file capability",
             "use artifact when content must become product-readable",
             "other roles cannot list/read/write/delete these local files.",
-            "do not edit projected runtime storage paths directly; use env tools.",
-            "artifact__get returned the full body",
-            "chrome-devtools-cockpit",
-            "search query url construction",
-            "do not bypass runtime or broker boundaries.",
-        )
+                "do not edit projected runtime storage paths directly; use env tools.",
+                "artifact__get returned the full body",
+                "chrome-devtools-cockpit",
+                "chrome-devtools-cockpit.search_page",
+                "search__request",
+                "search__status",
+                "do not bypass runtime or broker boundaries.",
+            )
         forbidden_fragments = (
             "## runtime boundary",
             "agents.md is guidance only and not the permission source.",
@@ -725,12 +738,14 @@ print(json.dumps({{
             "projects/app",
             "project.access=",
             "tool catalog dump",
-            "python3 scripts/env/client.py",
-            "context summarize --payload",
-            "search open-browser --payload",
-            "choose exactly one skill_id",
-            "use explicit ids and env tools (`",
-        )
+                "python3 scripts/env/client.py",
+                "context summarize --payload",
+                "search open-browser --payload",
+                "search__open_browser",
+                "search.open_browser",
+                "choose exactly one skill_id",
+                "use explicit ids and env tools (`",
+            )
 
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         role_ids = tuple(role["id"] for role in manifest["roles"])
@@ -842,6 +857,21 @@ print(json.dumps({{
         self.assertTrue(
             self._is_docs_spec_context_hit(
                 "docs/spec/browser-cockpit-lazy-release/phase-06-search-open-browser-ensure.md:1:tests/test_env_tool_response_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/2026-07-02-browser-cockpit-control-plane-phase-5-plan.md:1:tests/test_env_tool_response_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/2026-07-01-cockpit-browser-session-resource-lifecycle-phase-6-plan.md:1:tests/test_env_tool_response_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/2026-07-04-search-open-browser-cockpit-rebuild-phase-c-plan.md:1:tests/test_env_tool_response_contract.py"
             )
         )
         self.assertFalse(

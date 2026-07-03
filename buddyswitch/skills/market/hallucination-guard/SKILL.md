@@ -22,7 +22,7 @@ description: Use when a market deliverable needs a final claim audit for URLs, d
 - Draft artifact body, source rows, screenshots, notes, and supporting links.
 
 ## Execution Order
-1. Before forming external market claims, use `chrome-devtools-cockpit` to open, list, select, and inspect browser pages. Use `search__open_browser` only as a query-to-URL wrapper when the task specifically starts from a search query.
+1. Before forming external market claims, use `chrome-devtools-cockpit` to open, list, select, and inspect browser pages. Use `chrome-devtools-cockpit.search_page` for browser-native search page opening when starting from a query, then continue with cockpit evidence. Use `search__request` only for URL planning without opening and `search__status` for capability status.
 2. Re-open every source behind material claims.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when browser-native evidence is required.

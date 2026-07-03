@@ -14,14 +14,14 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='search',
         title='Search Boundary',
-        description='Expose search backend metadata, URL planning, and browser open actions.',
+        description='Expose search backend metadata and non-opening URL planning.',
         scope='runtime-visible search capability boundary',
         capability_boundary='Search actions remain inside configured profile backend and launcher browser boundaries.',
         object_model=(
-            'Search is a runtime-visible search/browser boundary. It exposes backend status, URL planning, and launcher-managed browser opening; it does not fetch, summarize, or persist search result content as product state.'
+            'Search is a runtime-visible search boundary. It exposes backend status and URL planning only; it does not fetch, summarize, open browser pages, or persist search result content as product state.'
         ),
         use_when=(
-            'You need runtime search boundary metadata or explicit browser search actions.',
+            'You need runtime search boundary metadata or explicit non-opening search URL planning.',
         ),
         do_not_use_when=(
             'You need durable product object mutation.',
@@ -145,7 +145,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need general browser discovery or page inspection; use chrome-devtools-cockpit.',
-                    'You need query-to-URL wrapping plus broker-managed browser open/reuse; use search.open_browser.',
+                    'You need to open a browser search page; use chrome-devtools-cockpit.search_page.',
                     'You want implicit backend auto selection instead of explicit backend payload.',
                 ),
                 risk_hints={
@@ -155,82 +155,6 @@ def _build_definition() -> ToolDefinition:
                     'open_world': True,
                     'requires_human_approval': False,
                     'external_effect': False,
-                },
-            ),
-            ActionDefinition(
-                name='open_browser',
-                title='search.open_browser',
-                description='Build a search URL and ask the broker browser capability to open or reuse it.',
-                input_schema={
-                    'type': 'object',
-                    'additionalProperties': False,
-                    'required': ['query'],
-                    'properties': {
-                        'query': {
-                            'type': 'string',
-                            'description': 'Non-empty search query text.',
-                        },
-                        'engine': {
-                            'type': 'string',
-                            'description': 'Optional search engine choice.',
-                            'enum': ['google', 'web', 'reddit', 'x'],
-                        },
-                    },
-                },
-                output_schema={
-                    '$ref': 'ToolResult',
-                },
-                kind='open',
-                mutates='browser_session',
-                task_requirement=TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED,
-                required_permission='none',
-                authority='profile.search_boundary',
-                visibility='broker browser search URL wrapper',
-                durability='transient',
-                result_content_level='search URL, broker browser result, and search-specific wording',
-                success_effect='Builds a search URL and delegates open/reuse/page-limit/idle handling to broker browser capability.',
-                failure_state_guarantee='Rejected wrapper calls do not bypass broker browser page limits and do not mutate product state.',
-                reads=(
-                    'search profile',
-                    'query payload',
-                    'broker browser result',
-                ),
-                writes=(
-                    'no direct browser writes; broker browser capability may open or reuse a managed page',
-                ),
-                does_not_write=(
-                    'product objects',
-                    'runtime files',
-                    'tokens',
-                    'fetched result summaries',
-                ),
-                preconditions=(
-                    'query is non-empty',
-                ),
-                returns=(
-                    'target_url',
-                    'backend',
-                    'engine',
-                    'page_opened',
-                    'browser_page_count',
-                    'browser_page_limit',
-                ),
-                use_when=(
-                    'You need search-specific query URL construction before broker browser capability opens or reuses a page.',
-                ),
-                do_not_use_when=(
-                    'You only need search metadata or URL planning without opening a page.',
-                    'You need general browsing; use chrome-devtools-cockpit directly.',
-                    'The browser page limit is already reached and the target URL is not already open; close or reuse pages through chrome-devtools-cockpit before retrying.',
-                    'You are trying to use legacy non-payload flags for query or engine; provide payload fields only.',
-                ),
-                risk_hints={
-                    'read_only': False,
-                    'destructive': False,
-                    'idempotent': False,
-                    'open_world': True,
-                    'requires_human_approval': False,
-                    'external_effect': True,
                 },
             ),
         ),

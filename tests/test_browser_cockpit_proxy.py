@@ -646,6 +646,27 @@ for raw_line in sys.stdin:
             self.assertIn("new_page", by_name)
             self.assertIn("BuddySwitch", json.dumps(by_name["new_page"], ensure_ascii=True))
 
+    def test_tools_list_includes_buddyswitch_search_page(self) -> None:
+        responses, _forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [{"jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": {}}]
+        )
+
+        tools = responses[0]["result"]["tools"]
+        by_name = {tool["name"]: tool for tool in tools}
+        self.assertIn("search_page", by_name)
+        search_page = by_name["search_page"]
+        self.assertIn("BuddySwitch", search_page.get("description", ""))
+        self.assertIn("browser-session", search_page.get("description", ""))
+        schema = search_page.get("inputSchema")
+        self.assertIsInstance(schema, dict, msg=search_page)
+        assert isinstance(schema, dict)
+        self.assertEqual(schema.get("required"), ["query"])
+        properties = schema.get("properties")
+        self.assertIsInstance(properties, dict, msg=schema)
+        assert isinstance(properties, dict)
+        self.assertIn("query", properties)
+        self.assertEqual(properties.get("engine", {}).get("enum"), ["google", "web", "reddit", "x"])
+
     def test_first_tools_call_uses_broker_acquire_not_ensure_subprocess(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
 
@@ -896,6 +917,130 @@ for raw_line in sys.stdin:
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-existing-local")
 
         self.assertEqual(cdp_state.get("rpc_requests", []), [])
+
+    def test_search_page_opens_locally_without_forwarding(self) -> None:
+        cdp_state: dict[str, object] = {
+            "requests": [],
+            "targets": _page_targets(1),
+            "create_target_id": "target-search-local",
+        }
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("search_page", {"query": "BuddySwitch browser resource lifecycle", "engine": "google"})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(forwarded, [])
+            self.assertEqual(upstream_argv, [])
+            response = responses[0]
+            self.assertFalse(response["result"].get("isError", False), msg=response)
+            text = response["result"]["content"][0]["text"]
+            self.assertIn("browser-session", text)
+            self.assertIn("search_page", text)
+            self.assertIn("google", text)
+            self.assertIn("https://www.google.com/search?q=BuddySwitch+browser+resource+lifecycle", text)
+            self.assertIn("target-search-local", text)
+            self.assertIn("300s", text)
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-search-local")
+
+        rpc_requests = cdp_state.get("rpc_requests")
+        self.assertIsInstance(rpc_requests, list, msg=cdp_state)
+        assert isinstance(rpc_requests, list)
+        self.assertEqual([request.get("method") for request in rpc_requests], ["Target.createTarget"])
+
+    def test_search_page_blank_query_is_rejected_locally(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("search_page", {"query": "   ", "engine": "google"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
+
+        self.assertEqual(forwarded, [])
+        self.assertEqual(upstream_argv, [])
+        response = responses[0]
+        self.assertTrue(response["result"].get("isError"), msg=response)
+        self.assertIn("query", response["result"]["content"][0]["text"])
+        self.assertEqual(cdp_state.get("requests"), [])
+
+    def test_search_page_rejects_unsupported_engine(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("search_page", {"query": "BuddySwitch", "engine": "unknown"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
+
+        self.assertEqual(forwarded, [])
+        self.assertEqual(upstream_argv, [])
+        response = responses[0]
+        self.assertTrue(response["result"].get("isError"), msg=response)
+        text = response["result"]["content"][0]["text"]
+        self.assertIn("engine", text)
+        self.assertIn("google", text)
+        self.assertEqual(cdp_state.get("requests"), [])
+
+    def test_search_page_builds_supported_engine_urls(self) -> None:
+        expected_urls = {
+            "google": "https://www.google.com/search?q=BuddySwitch+browser+resource+lifecycle",
+            "web": "https://www.google.com/search?q=BuddySwitch+browser+resource+lifecycle",
+            "reddit": "https://www.reddit.com/search/?q=BuddySwitch+browser+resource+lifecycle",
+            "x": "https://x.com/search?q=BuddySwitch+browser+resource+lifecycle&src=typed_query",
+        }
+        for engine, expected_url in expected_urls.items():
+            with self.subTest(engine=engine):
+                cdp_state: dict[str, object] = {
+                    "requests": [],
+                    "targets": _page_targets(1),
+                    "create_target_id": f"target-search-{engine}",
+                }
+                browser_url = self._start_cdp_list_server(cdp_state)
+
+                with tempfile.TemporaryDirectory() as temp_root:
+                    instance_root = Path(temp_root) / "instances" / f"act-dev-browser-{engine}"
+                    daemon_core, server, thread = self._start_mailbox(instance_root)
+
+                    responses, forwarded, upstream_argv, _stderr = self._run_proxy(
+                        [
+                            self._single_call(
+                                "search_page",
+                                {"query": "BuddySwitch browser resource lifecycle", "engine": engine},
+                            )
+                        ],
+                        browser_url=browser_url,
+                        instance_root=instance_root,
+                    )
+                    server.close()
+                    thread.join(timeout=2)
+
+                    self.assertEqual(forwarded, [])
+                    self.assertEqual(upstream_argv, [])
+                    response = responses[0]
+                    self.assertFalse(response["result"].get("isError", False), msg=response)
+                    text = response["result"]["content"][0]["text"]
+                    self.assertIn(engine, text)
+                    self.assertIn(expected_url, text)
+                    self.assertIn(f"target-search-{engine}", text)
+                    saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+                    self.assertEqual(
+                        saved["scheduled_triggers"]["schedule-1"]["schedule_key"],
+                        f"browser.page.idle:target-search-{engine}",
+                    )
 
     def test_new_page_blank_url_is_rejected_locally(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}

@@ -153,7 +153,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
     def setUp(self) -> None:
         super().setUp()
         self._browser_open_results: list[dict[str, object]] = []
-        original_browser_client = search_impl.browser_client
+        had_browser_client = hasattr(search_impl, "browser_client")
+        original_browser_client = getattr(search_impl, "browser_client", None)
 
         test_case = self
 
@@ -181,8 +182,9 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                     "durability": "runtime",
                 }
 
-        search_impl.browser_client = FakeBrowserClient
-        self.addCleanup(setattr, search_impl, "browser_client", original_browser_client)
+        if had_browser_client:
+            search_impl.browser_client = FakeBrowserClient
+            self.addCleanup(setattr, search_impl, "browser_client", original_browser_client)
 
     @staticmethod
     def _meaningful_text_entries(value: object) -> list[str]:
@@ -655,9 +657,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         self._assert_success_matches_declared_action_semantics("search.request", search_plan)
 
-        dev_payload["browser_port"] = 9222
-        dev_instance.write_text(json.dumps(dev_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-        browser_open = self._dispatch(
+        browser_open_removed = self._dispatch(
             instance_json=dev_instance,
             actor_id=f"{actor_id}-dev",
             role="dev",
@@ -665,65 +665,20 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             action="open_browser",
             args={"query": "BuddySwitch", "engine": "google"},
         )
-        self._assert_success_matches_declared_action_semantics("search.open_browser", browser_open)
-        self.assertFalse(browser_open.get("mutates_product_state"), msg=browser_open)
-        self.assertEqual(browser_open.get("page_opened"), True, msg=browser_open)
-        self.assertNotIn("browser_endpoint", json.dumps(browser_open, ensure_ascii=True))
-        self.assertNotIn("browser_url", json.dumps(browser_open, ensure_ascii=True))
+        self._assert_rejection_contract(browser_open_removed)
+        self.assertEqual((browser_open_removed.get("error") or {}).get("code"), "E_ENV_TOOL", msg=browser_open_removed)
+        self.assertEqual(browser_open_removed.get("permission_boundary"), "env.tool", msg=browser_open_removed)
+        self.assertIn("unsupported env.tool payload.action for search: open_browser", json.dumps(browser_open_removed, ensure_ascii=True))
+        self.assertNotIn("browser.open_url", json.dumps(browser_open_removed, ensure_ascii=True))
 
-        no_browser_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev-no-browser")
-        self._browser_open_results.append(
-            {
-                "ok": False,
-                "error": {
-                    "code": "E_BROWSER_MANAGER_UNAVAILABLE",
-                    "message": "browser manager unavailable",
-                },
-                "permission_boundary": "browser.open_url",
-                "state_changed": False,
-                "durability": "none",
-                "why_blocked": "browser manager unavailable",
-            }
-        )
-        browser_rejection = self._dispatch(
-            instance_json=no_browser_instance,
-            actor_id=f"{actor_id}-dev-no-browser",
-            role="dev",
-            tool="search",
-            action="open_browser",
-            args={"query": "BuddySwitch", "engine": "google"},
-        )
-        self._assert_rejection_contract(browser_rejection)
-        self.assertIn("browser", str(browser_rejection.get("why_blocked", "")).lower())
-
-    def test_search_open_browser_reuse_success_declares_no_browser_mutation(self) -> None:
-        actor_id = "act-dev-search-reuse-contract"
+    def test_search_open_browser_removed_action_returns_standard_rejection(self) -> None:
+        actor_id = "act-dev-search-open-removed-contract"
         dev_instance = self._instance_json(role="dev", actor_id=f"{actor_id}-dev")
-        target_url = "https://www.google.com/search?q=BuddySwitch"
-        self._browser_open_results.append(
-            {
-                "ok": True,
-                "kind": "reused",
-                "target_url": target_url,
-                "page_count": 1,
-                "projected_page_count": 1,
-                "browser_page_count": 1,
-                "target_id": "target-existing-contract",
-                "page_opened": False,
-                "page_reused": True,
-                "idle_refreshed": True,
-                "idle_seconds": 300,
-                "idle_expires_at": "2026-06-24T00:05:00Z",
-                "message": "reused",
-                "state_changed": False,
-                "durability": "runtime",
-            }
-        )
         dev_payload = json.loads(dev_instance.read_text(encoding="utf-8"))
         dev_payload["browser_port"] = 9222
         dev_instance.write_text(json.dumps(dev_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-        browser_reuse = self._dispatch(
+        response = self._dispatch(
             instance_json=dev_instance,
             actor_id=f"{actor_id}-dev",
             role="dev",
@@ -732,15 +687,14 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             args={"query": "BuddySwitch", "engine": "google"},
         )
 
-        self._assert_success_contract(browser_reuse)
-        self.assertEqual(browser_reuse.get("page_opened"), False, msg=browser_reuse)
-        self.assertEqual(browser_reuse.get("page_reused"), True, msg=browser_reuse)
-        self.assertEqual(browser_reuse.get("reused_target_id"), "target-existing-contract", msg=browser_reuse)
-        self.assertEqual(browser_reuse.get("state_changed"), False, msg=browser_reuse)
-        self.assertEqual(browser_reuse.get("durability"), "none", msg=browser_reuse)
-        self.assertEqual(browser_reuse.get("mutates_product_state"), False, msg=browser_reuse)
-        self.assertNotIn("browser_endpoint", json.dumps(browser_reuse, ensure_ascii=True))
-        self.assertNotIn("browser_url", json.dumps(browser_reuse, ensure_ascii=True))
+        self._assert_rejection_contract(response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL", msg=response)
+        self.assertEqual(response.get("permission_boundary"), "env.tool", msg=response)
+        response_text = json.dumps(response, ensure_ascii=True)
+        self.assertIn("unsupported env.tool payload.action for search: open_browser", response_text)
+        self.assertNotIn("browser.open_url", response_text)
+        self.assertNotIn("browser_endpoint", response_text)
+        self.assertNotIn("browser_url", response_text)
 
     def test_relation_success_responses_describe_object_mutations(self) -> None:
         actor_id = "act-pm-mutation-response"

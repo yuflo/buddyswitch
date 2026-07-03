@@ -219,7 +219,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.addCleanup(patcher_manager.stop)
         return calls
 
-    def test_browser_open_url_method_has_structured_contract(self) -> None:
+    def test_browser_open_url_method_is_removed(self) -> None:
         dispatcher = _require_module("runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)
         instance_json = self._instance_json()
@@ -233,15 +233,11 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
         )
 
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("target_url"), "https://example.com/search?q=contract")
-        self.assertEqual(response.get("page_opened"), True)
-        self.assertEqual(response.get("page_reused"), False)
-        self.assertEqual(response.get("target_id"), "target-broker-open")
-        self.assertEqual(response.get("browser_page_count"), 2)
-        self.assertEqual(response.get("state_changed"), True)
-        self.assertEqual(response.get("durability"), "runtime")
-        self.assertEqual([call["method"] for call in calls], ["acquire", "open_or_reuse_page"])
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_RUNTIME_BROKER_PROTOCOL")
+        self.assertEqual(self._error_boundary(response), "broker-protocol")
+        self.assertNotIn("browser.open_url", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
+        self.assertEqual(calls, [])
 
     def test_browser_acquire_method_has_structured_contract(self) -> None:
         dispatcher = _require_module("runtime_kernel.dispatcher")
@@ -298,11 +294,10 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json = self._instance_json()
 
         response = self._dispatch(
-            method="browser.open_url",
+            method="browser.acquire",
             params={
                 "actor_id": self._runtime_actor_id(role="pm", label="act-pm-other"),
-                "target_url": "https://example.com/search?q=contract",
-                "source_tool": "search.open_browser",
+                "reason": "chrome-devtools-cockpit",
             },
             instance_json=instance_json,
         )
@@ -311,7 +306,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_RUNTIME_BROKER_PERMISSION")
         self.assertEqual(self._error_boundary(response), "active-instance")
 
-    def test_browser_open_url_rejects_invalid_target_url(self) -> None:
+    def test_browser_open_url_is_rejected_before_url_validation(self) -> None:
         dispatcher = _require_module("runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)
         instance_json = self._instance_json()
@@ -323,8 +318,10 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_BROWSER_INVALID_URL")
-        self.assertEqual(self._error_boundary(response), "browser.open_url")
+        self.assertEqual(response.get("error", {}).get("code"), "E_RUNTIME_BROKER_PROTOCOL")
+        self.assertEqual(self._error_boundary(response), "broker-protocol")
+        self.assertNotIn("E_BROWSER_INVALID_URL", json.dumps(response, ensure_ascii=True))
+        self.assertNotIn("browser.open_url", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
         self.assertEqual(calls, [])
 
     def test_env_tool_requests_succeed_with_matching_identity(self) -> None:

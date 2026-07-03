@@ -23,7 +23,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
     "context": {"get", "list_sources", "summarize"},
     "evidence": {"approve_downgrade", "issue_browser"},
     "message": {"contacts", "conversation", "get", "list", "mark", "send"},
-    "search": {"open_browser", "request", "status"},
+    "search": {"request", "status"},
     "task_sys": {"list", "get", "close", "need_parent"},
     "track": {
         "add_comment",

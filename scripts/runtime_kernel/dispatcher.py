@@ -11,10 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import sys
 from typing import Any, Iterator
-from urllib.parse import urlsplit
 
 from env.repos import runtime_files
-from env import cdp_browser_session as browser_session
 from env.tool_runtime import results as tool_results
 from env.tool_runtime.registry import dispatch_env_tool_request
 from env_manifest import ManifestError, load_manifest
@@ -246,7 +244,7 @@ def _instance_root_from_record(*, instance_json_path: Path, instance_record: dic
 
 
 def _browser_allowed_actions() -> list[str]:
-    return _allowed("Use broker browser.acquire/status/open_url/release methods from the active runtime.")
+    return _allowed("Use broker browser.acquire/status/release methods from the active runtime.")
 
 
 def _browser_failure(
@@ -286,20 +284,6 @@ def _manager_error(result: dict[str, Any], *, boundary: str) -> dict[str, Any]:
         retriable=retriable,
         extra={"manager_result": result},
     )
-
-
-def _validate_browser_target_url(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    target_url = value.strip()
-    if not target_url:
-        return None
-    parsed = urlsplit(target_url)
-    if parsed.scheme not in {"http", "https"}:
-        return None
-    if not parsed.netloc:
-        return None
-    return target_url
 
 
 def _browser_acquire_dispatch(
@@ -348,94 +332,6 @@ def _browser_release_dispatch(
     return {"ok": True, **result}
 
 
-def _browser_open_result_payload(result: object) -> dict[str, Any]:
-    def field(name: str) -> Any:
-        return getattr(result, name, None)
-
-    projected_page_count = field("projected_page_count")
-    page_count = field("page_count")
-    browser_page_count = projected_page_count if isinstance(projected_page_count, int) else page_count
-    return {
-        "kind": field("kind"),
-        "target_url": field("target_url"),
-        "target_id": field("target_id"),
-        "page_opened": field("page_opened") is True,
-        "page_reused": field("page_reused") is True,
-        "browser_page_count": browser_page_count,
-        "page_count": page_count,
-        "projected_page_count": projected_page_count,
-        "idle_refreshed": field("idle_refreshed") is True,
-        "idle_seconds": field("idle_seconds"),
-        "idle_expires_at": field("idle_expires_at"),
-        "message": field("message"),
-    }
-
-
-def _browser_open_url_dispatch(
-    *,
-    manager: Any,
-    instance_json_path: Path,
-    instance_record: dict[str, Any],
-    params: dict[str, Any],
-) -> dict[str, Any]:
-    target_url = _validate_browser_target_url(params.get("target_url"))
-    if target_url is None:
-        return _browser_failure(
-            code="E_BROWSER_INVALID_URL",
-            message="browser.open_url requires an http(s) target_url",
-            boundary="browser.open_url",
-            extra={
-                "why_blocked": "invalid_target_url",
-                "state_changed": False,
-                "durability": "none",
-            },
-        )
-
-    actor_id = str(instance_record["actor_id"]).strip()
-    instance_root = _instance_root_from_record(instance_json_path=instance_json_path, instance_record=instance_record)
-    reason = params.get("source_tool") if isinstance(params.get("source_tool"), str) else "browser.open_url"
-    acquire = manager.acquire(instance_root=instance_root, actor_id=actor_id, reason=reason)
-    if acquire.get("ok") is not True:
-        return _manager_error(acquire, boundary="browser.open_url")
-    browser_url = acquire.get("browser_url")
-    if not isinstance(browser_url, str) or not browser_url.strip():
-        return _browser_failure(
-            code="E_BROWSER_RUNTIME_MANAGER",
-            message="browser runtime manager did not return browser_url",
-            boundary="browser.open_url",
-            extra={"manager_result": acquire},
-        )
-
-    result = browser_session.open_or_reuse_page(
-        instance_root=instance_root,
-        browser_url=browser_url.strip(),
-        target_url=target_url,
-    )
-    payload = _browser_open_result_payload(result)
-    if payload.get("kind") not in {"opened", "reused"}:
-        return _browser_failure(
-            code="E_BROWSER_OPEN_URL",
-            message=str(payload.get("message") or "browser.open_url did not open or reuse a page"),
-            boundary="browser.open_url",
-            extra={
-                **payload,
-                "why_blocked": payload.get("kind"),
-                "state_changed": bool(acquire.get("state_changed", False)),
-                "durability": acquire.get("durability", "runtime"),
-                "browser_url": browser_url,
-                "browser_port": acquire.get("browser_port"),
-            },
-        )
-    return {
-        "ok": True,
-        **payload,
-        "browser_url": browser_url,
-        "browser_port": acquire.get("browser_port"),
-        "state_changed": bool(acquire.get("state_changed", False)),
-        "durability": acquire.get("durability", "runtime"),
-    }
-
-
 def _browser_dispatch(
     *,
     method: str,
@@ -456,13 +352,6 @@ def _browser_dispatch(
         return _browser_status_dispatch(manager=manager, instance_json_path=instance_json_path, instance_record=instance_record)
     if method == "browser.release":
         return _browser_release_dispatch(
-            manager=manager,
-            instance_json_path=instance_json_path,
-            instance_record=instance_record,
-            params=params,
-        )
-    if method == "browser.open_url":
-        return _browser_open_url_dispatch(
             manager=manager,
             instance_json_path=instance_json_path,
             instance_record=instance_record,
@@ -557,7 +446,7 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
             f"unsupported method: {method}",
             boundary="broker-protocol",
             actions=_allowed(
-                "Use supported runtime methods: env.tool, ping, status, browser.acquire, browser.open_url, browser.status, browser.release."
+                "Use supported runtime methods: env.tool, ping, status, browser.acquire, browser.status, browser.release."
             ),
         )
     except (ValueError, OSError, json.JSONDecodeError, ManifestError) as exc:

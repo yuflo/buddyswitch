@@ -1740,14 +1740,16 @@ exec "$real_git" "$@"
                 (workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists()
             )
 
-    def test_search_open_browser_helper_stays_inside_runtime_sparse_surface(self) -> None:
+    def test_search_env_tool_does_not_project_browser_open_helper(self) -> None:
         workspace_text = (ROOT / "tools" / "launcher" / "workspace.sh").read_text(encoding="utf-8")
         search_text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
 
         self.assertRegex(workspace_text, r"(?m)^scripts/env/$")
         self.assertRegex(workspace_text, r"(?m)^tools$")
-        self.assertIn('request_runtime_broker("browser.open_url"', search_text)
-        self.assertIn("browser_client.open_url", search_text)
+        self.assertNotIn('request_runtime_broker("browser.open_url"', search_text)
+        self.assertNotIn("browser_client.open_url", search_text)
+        self.assertNotIn("def open_browser_for_active_instance", search_text)
+        self.assertNotIn("'open_browser': open_browser_for_active_instance", search_text)
         self.assertNotIn("from env import cdp_browser_" + "session as browser_session", search_text)
         self.assertNotIn("browser_session." + "open_or_reuse_page", search_text)
         self.assertNotIn("ensure_" + "browser_url_for_instance", search_text)
@@ -2043,9 +2045,11 @@ exec "$real_git" "$@"
 
             self.assertEqual(completed.returncode, 2, msg=completed.stderr)
             self.assertIn("Native Codex web_search is disabled in BuddySwitch product sessions.", completed.stderr)
-            self.assertIn("Use chrome-devtools-cockpit for browser-native discovery.", completed.stderr)
+            self.assertIn("Use chrome-devtools-cockpit.search_page for browser-native search page opening.", completed.stderr)
+            self.assertIn("Use search__request only for non-opening URL planning.", completed.stderr)
             self.assertIn("search__status", completed.stderr)
-            self.assertIn("Use search__open_browser only for search query URL construction.", completed.stderr)
+            self.assertNotIn("search__open_browser", completed.stderr)
+            self.assertNotIn("search.open_browser", completed.stderr)
             self.assertIn("python3 scripts/turn_runtime.py status", completed.stderr)
             self.assertNotIn("Use native BuddySwitch env MCP tool: search__open_browser", completed.stderr)
             self.assertNotIn("python3 scripts/env/client.py", completed.stderr)

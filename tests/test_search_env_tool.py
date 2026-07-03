@@ -277,12 +277,29 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 return
         self.fail(f"missing next action option {expected_native}: {response}")
 
+    def _assert_no_next_option(self, response: dict[str, object], *, tool: str, action: str) -> None:
+        options = response.get("allowed_next_action_options")
+        if options is None:
+            return
+        self.assertIsInstance(options, list, msg=response)
+        assert isinstance(options, list)
+        for option in options:
+            if isinstance(option, dict) and option.get("tool") == tool and option.get("action") == action:
+                self.fail(f"unexpected next action option {tool}.{action}: {response}")
+
+    def _assert_cockpit_search_page_guidance(self, response: dict[str, object]) -> None:
+        dumped = json.dumps(response, ensure_ascii=True)
+        self.assertIn("chrome-devtools-cockpit.search_page", dumped, msg=response)
+        self.assertNotIn("search.open_browser", dumped, msg=response)
+        self.assertNotIn("search__open_browser", dumped, msg=response)
+        self._assert_no_next_option(response, tool="search", action="open_browser")
+
     def _assert_no_browser_endpoint_leak(self, response: dict[str, object]) -> None:
         dumped = json.dumps(response, ensure_ascii=True)
         self.assertNotIn("browser_endpoint", dumped, msg=response)
         self.assertNotIn("browser_url", dumped, msg=response)
 
-    def test_search_cli_help_exposes_status_request_and_open_browser(self) -> None:
+    def test_search_cli_help_exposes_status_and_request_only(self) -> None:
         resource_help = subprocess.run(
             ["python3", "scripts/env/client.py", "search", "--help"],
             cwd=ROOT,
@@ -293,7 +310,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(resource_help.returncode, 0, msg=resource_help.stderr)
         self.assertIn("status", resource_help.stdout)
         self.assertIn("request", resource_help.stdout)
-        self.assertIn("open-browser", resource_help.stdout)
+        self.assertNotIn("open-browser", resource_help.stdout)
+        self.assertNotIn("open_browser", resource_help.stdout)
         self.assertNotIn("--query", resource_help.stdout)
         self.assertNotIn("--backend", resource_help.stdout)
         self.assertNotIn("--engine", resource_help.stdout)
@@ -308,7 +326,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(action_help.returncode, 0, msg=action_help.stderr)
         self.assertIn("--payload", action_help.stdout)
 
-    def test_search_cli_rejects_missing_backend_and_unknown_engine(self) -> None:
+    def test_search_cli_rejects_missing_backend_and_removed_open_browser_command(self) -> None:
         missing_backend = subprocess.run(
             ["python3", "scripts/env/client.py", "search", "request", "--payload", '{"query":"x"}'],
             cwd=ROOT,
@@ -321,7 +339,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(missing_backend_payload.get("ok"), msg=missing_backend_payload)
         self.assertEqual((missing_backend_payload.get("error") or {}).get("code"), "E_RUNTIME_BROKER_UNAVAILABLE")
 
-        unknown_engine = subprocess.run(
+        removed_open_browser = subprocess.run(
             [
                 "python3",
                 "scripts/env/client.py",
@@ -335,12 +353,12 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             capture_output=True,
             check=False,
         )
-        self.assertEqual(unknown_engine.returncode, 1)
-        unknown_engine_payload = json.loads(unknown_engine.stdout)
-        self.assertFalse(unknown_engine_payload.get("ok"), msg=unknown_engine_payload)
-        self.assertEqual((unknown_engine_payload.get("error") or {}).get("code"), "E_RUNTIME_BROKER_UNAVAILABLE")
+        self.assertEqual(removed_open_browser.returncode, 2)
+        self.assertEqual(removed_open_browser.stdout, "")
+        self.assertIn("invalid choice", removed_open_browser.stderr)
+        self.assertIn("open-browser", removed_open_browser.stderr)
 
-    def test_search_status_reports_market_profile_backend_and_native_search_boundary(self) -> None:
+    def test_search_status_reports_market_profile_backend_and_cockpit_search_boundary(self) -> None:
         instance_json = self._instance_json(role="market", browser_port=9222)
 
         response = self._dispatch(action="status", args={}, instance_json=instance_json, role="market")
@@ -369,7 +387,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("permission_boundary", response)
         self.assertIn("allowed_next_actions", response)
         self._assert_no_env_cli_hint(response)
-        self._assert_next_option(response, tool="search", action="open_browser")
+        self._assert_cockpit_search_page_guidance(response)
         self.assertNotIn("preferred_backend", response)
         self.assertNotIn("market_workflow", response)
 
@@ -403,9 +421,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("required_cockpit_tool"), "chrome-devtools-cockpit")
         self.assertEqual(response.get("page_opened"), False)
         self.assertNotIn("tool_evidence", response)
-        self.assertIn("search.open_browser", " ".join(response.get("allowed_next_actions", [])))
+        self._assert_cockpit_search_page_guidance(response)
         self._assert_no_env_cli_hint(response)
-        self._assert_next_option(response, tool="search", action="open_browser")
 
     def test_search_request_next_action_option_does_not_echo_raw_query(self) -> None:
         instance_json = self._instance_json(browser_port=9222)
@@ -417,10 +434,28 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(response.get("ok"), msg=response)
         self._assert_no_env_cli_hint(response)
-        self._assert_next_option(response, tool="search", action="open_browser")
+        self._assert_cockpit_search_page_guidance(response)
         options_text = json.dumps(response.get("allowed_next_action_options"), ensure_ascii=True)
         self.assertNotIn(query, options_text)
         self.assertNotIn("&&", options_text)
+
+    def test_search_open_browser_action_is_removed(self) -> None:
+        instance_json = self._instance_json(role="market", browser_port=9222)
+
+        response = self._dispatch(
+            action="open_browser",
+            args={"query": "creator analytics pain", "engine": "google"},
+            instance_json=instance_json,
+            role="market",
+        )
+
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_ENV_TOOL", msg=response)
+        self.assertEqual(response.get("permission_boundary"), "env.tool")
+        response_text = json.dumps(response, ensure_ascii=True)
+        self.assertIn("unsupported env.tool payload.action for search: open_browser", response_text)
+        self.assertFalse(response.get("state_changed", False), msg=response)
+        self.assertNotIn("browser.open_url", response_text, msg=response)
 
     def test_search_request_browser_builds_expected_url_for_supported_engines(self) -> None:
         instance_json = self._instance_json(browser_port=9222)
@@ -480,7 +515,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND_APPROVAL_REQUIRED")
         self.assertEqual(response.get("permission_boundary"), "search.search_api.user_approved_only")
         self._assert_no_env_cli_hint(response)
-        self._assert_next_option(response, tool="search", action="open_browser")
+        self._assert_cockpit_search_page_guidance(response)
 
     def test_search_request_search_api_returns_non_market_provider_unavailable(self) -> None:
         instance_json = self._instance_json(role="dev")
@@ -496,801 +531,22 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND_UNAVAILABLE")
         self.assertIn("No BuddySwitch-managed search API provider is configured", response.get("reason", ""))
         self._assert_no_env_cli_hint(response)
-        self._assert_next_option(response, tool="search", action="open_browser")
-
-    def _dispatch_with_broker_open_result(
-        self,
-        broker_response: dict[str, object],
-        *,
-        query: str = "creator analytics pain",
-        engine: str = "google",
-    ) -> tuple[dict[str, object], list[dict[str, object]]]:
-        broker_calls = self._install_broker_browser_client(broker_response)
-        self._forbid_runtime_browser_acquisition()
-        instance_json = self._instance_json(browser_port=None)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": query, "engine": engine},
-            instance_json=instance_json,
-        )
-        return response, broker_calls
-
-    def _install_broker_browser_client(self, broker_response: dict[str, object]) -> list[dict[str, object]]:
-        calls: list[dict[str, object]] = []
-
-        class FakeBrowserClient:
-            @staticmethod
-            def open_url(**kwargs: object) -> dict[str, object]:
-                calls.append(dict(kwargs))
-                return dict(broker_response)
-
-        had_browser_client = hasattr(search_impl, "browser_client")
-        original_browser_client = getattr(search_impl, "browser_client", None)
-        search_impl.browser_client = FakeBrowserClient
-        if had_browser_client:
-            self.addCleanup(setattr, search_impl, "browser_client", original_browser_client)
-        else:
-            self.addCleanup(delattr, search_impl, "browser_client")
-        return calls
-
-    def _forbid_runtime_browser_acquisition(self) -> None:
-        browser_session = getattr(search_impl, "browser_session", None)
-        if browser_session is None:
-            return
-        original_open = getattr(browser_session, "open_or_reuse_page", None)
-        if original_open is None:
-            return
-
-        def fail_open_or_reuse_page(**_kwargs: object) -> object:
-            raise AssertionError("search.open_browser must not call browser session data-plane directly")
-
-        setattr(browser_session, "open_or_reuse_page", fail_open_or_reuse_page)
-        self.addCleanup(setattr, browser_session, "open_or_reuse_page", original_open)
-
-    def test_search_open_browser_uses_broker_browser_open_url_when_browser_port_missing(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_calls = self._install_broker_browser_client(
-            {
-                "ok": True,
-                "target_url": target_url,
-                "page_opened": True,
-                "page_reused": False,
-                "target_id": "target-broker-open",
-                "browser_page_count": 3,
-                "idle_refreshed": True,
-                "idle_seconds": 300,
-                "idle_expires_at": "2026-07-02T00:05:00Z",
-                "state_changed": True,
-                "durability": "runtime",
-            }
-        )
-        self._forbid_runtime_browser_acquisition()
-        instance_json = self._instance_json(browser_port=None)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("target_url"), target_url)
-        self.assertEqual(response.get("page_opened"), True)
-        self.assertEqual(response.get("target_id"), "target-broker-open")
-        self.assertEqual(response.get("browser_page_count"), 3)
-        self.assertEqual(response.get("idle_refreshed"), True)
-        self.assertEqual(len(broker_calls), 1)
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-        self.assertEqual(broker_calls[0]["source_tool"], "search.open_browser")
-        self.assertNotIn("source_root", broker_calls[0])
-        self.assertNotIn("launcher_path", broker_calls[0])
-        self._assert_no_browser_endpoint_leak(response)
-        self._assert_no_env_cli_hint(response)
-
-    def test_search_open_browser_broker_failure_does_not_leak_launcher_path(self) -> None:
-        broker_calls = self._install_broker_browser_client(
-            {
-                "ok": False,
-                "error": {
-                    "code": "E_BROWSER_MANAGER_UNAVAILABLE",
-                    "message": "browser manager unavailable",
-                },
-                "permission_boundary": "browser.open_url",
-                "state_changed": False,
-                "durability": "none",
-                "why_blocked": "browser manager unavailable",
-                "allowed_next_action_options": [
-                    {
-                        "id": "inspect_browser_status",
-                        "tool": "browser",
-                        "action": "status",
-                        "reason": "Inspect broker-owned browser status.",
-                    }
-                ],
-            }
-        )
-        self._forbid_runtime_browser_acquisition()
-        instance_json = self._instance_json(browser_port=None)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_BROWSER_MANAGER_UNAVAILABLE")
-        self.assertEqual(response.get("permission_boundary"), "browser.open_url")
-        self.assertEqual(response.get("state_changed"), False)
-        self.assertEqual(len(broker_calls), 1)
-        response_text = json.dumps(response, ensure_ascii=True)
-        self.assertNotIn("workspace/" + "buddyswitch-codex", response_text)
-        self.assertNotIn("buddyswitch-codex env browser " + "ensure", response_text)
-        self.assertNotIn(str(ROOT), response_text)
-        self._assert_no_browser_endpoint_leak(response)
-        self._assert_no_env_cli_hint(response)
-
-    def test_search_open_browser_delegates_search_url_to_broker(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_result = {
-            "ok": True,
-            "kind": "opened",
-            "target_url": target_url,
-            "page_count": 2,
-            "projected_page_count": 3,
-            "browser_page_count": 3,
-            "target_id": "target-opened",
-            "page_opened": True,
-            "page_reused": False,
-            "idle_refreshed": True,
-            "idle_seconds": 300,
-            "idle_expires_at": "2026-07-01T00:05:00Z",
-            "state_changed": True,
-            "durability": "runtime",
-            "browser_url": "http://127.0.0.1:9222",
-        }
-
-        response, broker_calls = self._dispatch_with_broker_open_result(broker_result)
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), True)
-        self.assertEqual(response.get("target_url"), target_url)
-        self.assertEqual(response.get("browser_page_count"), 3)
-        self.assertEqual(response.get("idle_refreshed"), True)
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-        self.assertEqual(broker_calls[0]["source_tool"], "search.open_browser")
-        self._assert_no_browser_endpoint_leak(response)
-
-    def test_search_open_browser_maps_reused_broker_result(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_result = {
-            "ok": True,
-            "kind": "reused",
-            "target_url": target_url,
-            "page_count": 4,
-            "projected_page_count": 4,
-            "browser_page_count": 4,
-            "target_id": "target-existing",
-            "page_opened": False,
-            "page_reused": True,
-            "idle_refreshed": True,
-            "idle_seconds": 300,
-            "state_changed": False,
-            "durability": "runtime",
-        }
-
-        response, broker_calls = self._dispatch_with_broker_open_result(broker_result)
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), False)
-        self.assertEqual(response.get("page_reused"), True)
-        self.assertEqual(response.get("reused_target_id"), "target-existing")
-        self.assertEqual(response.get("browser_page_count"), 4)
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-
-    def test_search_open_browser_maps_blocked_broker_result(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_result = {
-            "ok": False,
-            "error": {"code": "E_BROWSER_OPEN_URL", "message": HARD_PAGE_BLOCK},
-            "permission_boundary": "browser.open_url",
-            "kind": "blocked",
-            "target_url": target_url,
-            "page_count": 10,
-            "projected_page_count": 10,
-            "browser_page_count": 10,
-            "page_opened": False,
-            "state_changed": False,
-            "durability": "runtime",
-            "message": HARD_PAGE_BLOCK,
-        }
-
-        response, broker_calls = self._dispatch_with_broker_open_result(broker_result)
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_LIMIT_REACHED")
-        self.assertEqual(response.get("browser_page_count"), 10)
-        self.assertEqual(response.get("page_opened"), False)
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-
-    def test_search_open_browser_maps_verification_failure_result(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_result = {
-            "ok": False,
-            "error": {"code": "E_BROWSER_OPEN_URL", "message": "Browser page-count verification failed: simulated list failure"},
-            "permission_boundary": "browser.open_url",
-            "kind": "verification_failed",
-            "target_url": target_url,
-            "page_count": None,
-            "page_opened": False,
-            "state_changed": False,
-            "durability": "runtime",
-            "message": "Browser page-count verification failed: simulated list failure",
-        }
-
-        response, broker_calls = self._dispatch_with_broker_open_result(broker_result)
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_COUNT_UNVERIFIED")
-        self.assertEqual(response.get("page_opened"), False)
-        self.assertIn("page-count", json.dumps(response, ensure_ascii=True).lower())
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-
-    def test_search_open_browser_appends_browser_session_page_hint(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_result = {
-            "ok": True,
-            "kind": "opened",
-            "target_url": target_url,
-            "page_count": 4,
-            "projected_page_count": 5,
-            "browser_page_count": 5,
-            "target_id": "target-opened",
-            "page_opened": True,
-            "page_reused": False,
-            "idle_refreshed": True,
-            "idle_seconds": 300,
-            "state_changed": True,
-            "durability": "runtime",
-        }
-
-        response, _broker_calls = self._dispatch_with_broker_open_result(broker_result)
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("browser_page_count"), 5)
-        self.assertIn(SOFT_PAGE_HINT_5, json.dumps(response, ensure_ascii=True))
-
-    def test_search_open_browser_maps_registration_failure_result(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_result = {
-            "ok": False,
-            "error": {"code": "E_BROWSER_OPEN_URL", "message": "daemon unavailable"},
-            "permission_boundary": "browser.open_url",
-            "kind": "registration_failed",
-            "target_url": target_url,
-            "page_count": 2,
-            "projected_page_count": 3,
-            "browser_page_count": 3,
-            "target_id": "target-created",
-            "page_opened": False,
-            "page_reused": False,
-            "state_changed": False,
-            "durability": "runtime",
-            "message": "daemon unavailable",
-        }
-
-        response, broker_calls = self._dispatch_with_broker_open_result(broker_result)
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_LIFECYCLE_REGISTRATION_FAILED")
-        self.assertEqual(response.get("page_opened"), False)
-        self.assertEqual(response.get("created_target_id"), "target-created")
-        self.assertIn("daemon unavailable", response.get("idle_refresh_error", ""))
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-
-    def test_search_open_browser_has_no_standalone_browser_stack(self) -> None:
-        text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
-        forbidden = [
-            "_ensure_browser_runtime",
-            "_browser_endpoint",
-            "_reload_instance_payload",
-            "_open_browser_page",
-            "BUDDYSWITCH_SEARCH_BROWSER_" + "ENSURE_COMMAND",
-            "ensure_" + "browser_url_for_instance",
-            "browser_url_from_" + "instance_payload",
-            "from env import cdp_browser_" + "session as browser_session",
-            "browser_session." + "open_or_reuse_page",
-            "cdp_background_page.py",
-            "Target.createTarget",
-            "refresh_page_idle(",
-            "close_page_target(",
-            "evaluate_page_open_gate(",
-        ]
-        for pattern in forbidden:
-            self.assertNotIn(pattern, text)
-        self.assertIn('request_runtime_broker("browser.open_url"', text)
-
-    @unittest.skip("search.open_browser delegates page creation to browser-session; direct CDP create is covered by browser-session tests")
-    def test_search_open_browser_creates_background_cdp_target(self) -> None:
-        state: dict[str, object] = {"requests": []}
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), True)
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        self.assertEqual(response.get("target_url"), target_url)
-        requests = state.get("requests")
-        self.assertIsInstance(requests, list, msg=state)
-        assert isinstance(requests, list)
-        self.assertFalse(any(urlparse(request["path"]).path == "/json/new" for request in requests))
-        rpc_requests = state.get("rpc_requests")
-        self.assertIsInstance(rpc_requests, list, msg=state)
-        assert isinstance(rpc_requests, list)
-        self.assertEqual(len(rpc_requests), 1)
-        rpc = rpc_requests[0]
-        self.assertEqual(rpc.get("method"), "Target.createTarget")
-        params = rpc.get("params")
-        self.assertIsInstance(params, dict, msg=rpc)
-        assert isinstance(params, dict)
-        self.assertEqual(params.get("url"), target_url)
-        self.assertIs(params.get("background"), True)
-
-    @unittest.skip("search.open_browser delegates idle registration to browser-session; wrapper result mapping is covered above")
-    def test_search_open_browser_refreshes_idle_after_new_target(self) -> None:
-        state: dict[str, object] = {"requests": []}
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-        idle_calls: list[dict[str, object]] = []
-        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
-
-        def fake_refresh_page_idle(**kwargs: object) -> dict[str, object]:
-            idle_calls.append(kwargs)
-            return {
-                "idle_refreshed": True,
-                "idle_seconds": 300,
-                "idle_expires_at": "2026-06-24T00:05:00Z",
-            }
-
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
-        search_impl.browser_lifecycle.refresh_page_idle = fake_refresh_page_idle
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), True)
-        self.assertEqual(response.get("idle_refreshed"), True)
-        self.assertEqual(response.get("idle_seconds"), 300)
-        self.assertEqual(response.get("idle_expires_at"), "2026-06-24T00:05:00Z")
-        self.assertNotIn("schedule", response)
-        self.assertNotIn("schedule_id", json.dumps(response, ensure_ascii=True))
-        self.assertIn("Browser page idle refreshed: 300s.", response.get("effect_summary", ""))
-        self.assertEqual(
-            idle_calls,
-            [
-                {
-                    "instance_root": instance_json.parent,
-                    "target_id": "target-search",
-                    "target_url": target_url,
-                }
-            ],
-        )
-
-    @unittest.skip("search.open_browser delegates registration cleanup to browser-session; cleanup is covered by browser-session tests")
-    def test_search_open_browser_closes_new_target_when_idle_registration_fails(self) -> None:
-        state: dict[str, object] = {"requests": []}
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
-
-        def failing_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
-            raise search_impl.browser_lifecycle.daemon_client.DaemonClientError(
-                "daemon_socket_unavailable",
-                "daemon socket unavailable",
-            )
-
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
-        search_impl.browser_lifecycle.refresh_page_idle = failing_refresh_page_idle
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_LIFECYCLE_REGISTRATION_FAILED")
-        self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertEqual(response.get("idle_refreshed"), False, msg=response)
-        self.assertIn("daemon socket unavailable", response.get("idle_refresh_error", ""))
-        self.assertNotIn("Browser page idle refreshed:", response.get("effect_summary", ""))
-        rpc_requests = state.get("rpc_requests", [])
-        self.assertEqual([request.get("method") for request in rpc_requests], ["Target.createTarget", "Target.closeTarget"])
-        self.assertEqual(rpc_requests[1].get("params"), {"targetId": "target-search"})
-        self.assertEqual(state.get("targets"), [], msg=state)
-
-    @unittest.skip("search.open_browser delegates reuse idle refresh to browser-session; wrapper reuse mapping is covered above")
-    def test_search_reuse_refreshes_idle_for_reused_target(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        state: dict[str, object] = {
-            "requests": [],
-            "targets": [{"id": "target-existing-search", "type": "page", "url": target_url}],
-        }
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-        idle_calls: list[dict[str, object]] = []
-        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
-
-        def fake_refresh_page_idle(**kwargs: object) -> dict[str, object]:
-            idle_calls.append(kwargs)
-            return {
-                "idle_refreshed": True,
-                "idle_seconds": 300,
-                "idle_expires_at": "2026-06-24T00:05:00Z",
-            }
-
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
-        search_impl.browser_lifecycle.refresh_page_idle = fake_refresh_page_idle
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertEqual(response.get("page_reused"), True, msg=response)
-        self.assertEqual(response.get("idle_refreshed"), True, msg=response)
-        self.assertEqual(
-            idle_calls,
-            [
-                {
-                    "instance_root": instance_json.parent,
-                    "target_id": "target-existing-search",
-                    "target_url": target_url,
-                }
-            ],
-        )
-        self.assertEqual(state.get("rpc_requests", []), [], msg=state)
-
-    @unittest.skip("search.open_browser delegates reuse registration failures to browser-session; wrapper failure mapping is covered above")
-    def test_search_open_browser_reuse_idle_registration_failure_returns_error_without_closing_existing_page(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        state: dict[str, object] = {
-            "requests": [],
-            "targets": [{"id": "target-existing-search", "type": "page", "url": target_url}],
-        }
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-        original_refresh = search_impl.browser_lifecycle.refresh_page_idle
-
-        def failing_refresh_page_idle(**_kwargs: object) -> dict[str, object]:
-            raise search_impl.browser_lifecycle.daemon_client.DaemonClientError(
-                "daemon_socket_unavailable",
-                "daemon socket unavailable",
-            )
-
-        self.addCleanup(setattr, search_impl.browser_lifecycle, "refresh_page_idle", original_refresh)
-        search_impl.browser_lifecycle.refresh_page_idle = failing_refresh_page_idle
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_LIFECYCLE_REGISTRATION_FAILED")
-        self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertEqual(response.get("page_reused"), True, msg=response)
-        self.assertEqual(response.get("idle_refreshed"), False, msg=response)
-        self.assertIn("daemon socket unavailable", response.get("idle_refresh_error", ""))
-        self.assertEqual(state.get("rpc_requests", []), [], msg=state)
-        self.assertEqual(state["targets"], [{"id": "target-existing-search", "type": "page", "url": target_url}])
-
-    @unittest.skip("search.open_browser no longer owns page-count/open behavior; wrapper hint behavior is covered above")
-    def test_search_open_browser_below_hint_threshold_opens_without_page_hint(self) -> None:
-        state: dict[str, object] = {"requests": [], "targets": _page_targets(3)}
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), True, msg=response)
-        self.assertEqual(response.get("state_changed"), True, msg=response)
-        self.assertEqual(response.get("browser_page_count"), 4, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
-        self.assertNotIn("Browser pages:", json.dumps(response, ensure_ascii=True))
-        rpc_requests = state.get("rpc_requests")
-        self.assertIsInstance(rpc_requests, list, msg=state)
-        assert isinstance(rpc_requests, list)
-        self.assertEqual(len(rpc_requests), 1)
-
-    @unittest.skip("search.open_browser no longer owns page-count/open behavior; wrapper hint behavior is covered above")
-    def test_search_open_browser_reaching_hint_threshold_opens_with_page_hint(self) -> None:
-        state: dict[str, object] = {"requests": [], "targets": _page_targets(4)}
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), True, msg=response)
-        self.assertEqual(response.get("browser_page_count"), 5, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
-        self.assertIn(SOFT_PAGE_HINT_5, json.dumps(response, ensure_ascii=True))
-        rpc_requests = state.get("rpc_requests")
-        self.assertIsInstance(rpc_requests, list, msg=state)
-        assert isinstance(rpc_requests, list)
-        self.assertEqual(len(rpc_requests), 1)
-
-    def test_search_open_browser_blocks_new_url_at_hard_page_limit_without_creating_target(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_calls = self._install_broker_browser_client(
-            {
-                "ok": False,
-                "error": {"code": "E_BROWSER_OPEN_URL", "message": HARD_PAGE_BLOCK},
-                "permission_boundary": "browser.open_url",
-                "kind": "blocked",
-                "target_url": target_url,
-                "page_count": 10,
-                "projected_page_count": 10,
-                "browser_page_count": 10,
-                "page_opened": False,
-                "state_changed": False,
-                "durability": "runtime",
-                "message": HARD_PAGE_BLOCK,
-            }
-        )
-        self._forbid_runtime_browser_acquisition()
-        instance_json = self._instance_json(browser_port=9222)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_LIMIT_REACHED")
-        self.assertEqual(response.get("error", {}).get("message"), HARD_PAGE_BLOCK)
-        self.assertEqual(response.get("state_changed"), False, msg=response)
-        self.assertEqual(response.get("durability"), "none", msg=response)
-        self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertEqual(response.get("browser_page_count"), 10, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
-        self.assertEqual(
-            response.get("retry_guidance"),
-            "Close or reuse existing browser pages, then retry opening this URL.",
-            msg=response,
-        )
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-
-    @unittest.skip("search.open_browser delegates exact URL reuse to browser-session; wrapper reuse mapping is covered above")
-    def test_search_open_browser_reuses_exact_url_at_hard_page_limit_without_creating_target(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        targets = _page_targets(9) + [{"id": "target-existing-search", "type": "page", "url": target_url}]
-        state: dict[str, object] = {"requests": [], "targets": targets}
-        _server, _thread, port = self._start_cdp_server(state)
-        instance_json = self._instance_json(browser_port=port)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertEqual(response.get("page_reused"), True, msg=response)
-        self.assertEqual(response.get("reused_target_id"), "target-existing-search", msg=response)
-        self.assertEqual(response.get("state_changed"), False, msg=response)
-        self.assertEqual(response.get("durability"), "none", msg=response)
-        self.assertEqual(response.get("browser_page_count"), 10, msg=response)
-        self.assertEqual(response.get("browser_page_limit"), 10, msg=response)
-        self.assertEqual(state.get("rpc_requests", []), [], msg=state)
-
-    def test_search_open_browser_reports_page_count_verification_failure_without_creating_target(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_calls = self._install_broker_browser_client(
-            {
-                "ok": False,
-                "error": {
-                    "code": "E_BROWSER_OPEN_URL",
-                    "message": "Browser page-count verification failed: simulated list failure",
-                },
-                "permission_boundary": "browser.open_url",
-                "kind": "verification_failed",
-                "target_url": target_url,
-                "page_count": None,
-                "page_opened": False,
-                "state_changed": False,
-                "durability": "runtime",
-                "message": "Browser page-count verification failed: simulated list failure",
-            }
-        )
-        self._forbid_runtime_browser_acquisition()
-        instance_json = self._instance_json(browser_port=9222)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_PAGE_COUNT_UNVERIFIED")
-        self.assertEqual(response.get("state_changed"), False, msg=response)
-        self.assertEqual(response.get("durability"), "none", msg=response)
-        self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertIn("page-count", json.dumps(response, ensure_ascii=True).lower())
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
-
-    def test_search_open_browser_encodes_queries_for_supported_engines(self) -> None:
-        cases = (
-            ("google", "a+b & c", "https://www.google.com/search?q=a%2Bb+%26+c"),
-            ("web", "creator analytics pain", "https://www.google.com/search?q=creator+analytics+pain"),
-            ("reddit", "a+b & c", "https://www.reddit.com/search/?q=a%2Bb+%26+c"),
-            ("x", "\u7528\u6237 \u8bbf\u8c08", "https://x.com/search?q=%E7%94%A8%E6%88%B7+%E8%AE%BF%E8%B0%88&src=typed_query"),
-        )
-        for engine, query, expected_target_url in cases:
-            with self.subTest(engine=engine, query=query):
-                response, broker_calls = self._dispatch_with_broker_open_result(
-                    {
-                        "ok": True,
-                        "kind": "opened",
-                        "target_url": expected_target_url,
-                        "page_count": 0,
-                        "projected_page_count": 1,
-                        "browser_page_count": 1,
-                        "target_id": "target-opened",
-                        "page_opened": True,
-                        "page_reused": False,
-                        "state_changed": True,
-                        "durability": "runtime",
-                    },
-                    query=query,
-                    engine=engine,
-                )
-                self.assertTrue(response.get("ok"), msg=response)
-                self.assertEqual(response.get("target_url"), expected_target_url)
-                self.assertEqual(broker_calls[0]["target_url"], expected_target_url)
-
-    def test_search_open_browser_reports_broker_failure_without_endpoint_leak(self) -> None:
-        broker_calls = self._install_broker_browser_client(
-            {
-                "ok": False,
-                "error": {
-                    "code": "E_BROWSER_MANAGER_UNAVAILABLE",
-                    "message": "browser manager unavailable",
-                },
-                "permission_boundary": "browser.open_url",
-                "state_changed": False,
-                "durability": "none",
-                "why_blocked": "browser manager unavailable",
-                "allowed_next_action_options": [
-                    {
-                        "id": "inspect_browser_status",
-                        "tool": "browser",
-                        "action": "status",
-                        "reason": "Inspect broker-owned browser status.",
-                    }
-                ],
-            }
-        )
-        self._forbid_runtime_browser_acquisition()
-        instance_json = self._instance_json(browser_port=None)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_BROWSER_MANAGER_UNAVAILABLE")
-        self.assertEqual(response.get("permission_boundary"), "browser.open_url")
-        self.assertEqual(response.get("state_changed"), False, msg=response)
-        self.assertEqual(response.get("page_opened"), False, msg=response)
-        self.assertEqual(len(broker_calls), 1)
-        self._assert_no_browser_endpoint_leak(response)
-        self._assert_no_env_cli_hint(response)
-        self._assert_next_option(response, tool="browser", action="status")
-
-    def test_search_open_browser_reports_cdp_open_failure_with_target_url(self) -> None:
-        target_url = "https://www.google.com/search?q=creator+analytics+pain"
-        broker_calls = self._install_broker_browser_client(
-            {
-                "ok": False,
-                "error": {"code": "E_BROWSER_OPEN_URL", "message": "simulated cdp create target failure"},
-                "permission_boundary": "browser.open_url",
-                "kind": "open_failed",
-                "target_url": target_url,
-                "page_opened": False,
-                "state_changed": False,
-                "durability": "runtime",
-                "message": "simulated cdp create target failure",
-            }
-        )
-        self._forbid_runtime_browser_acquisition()
-        instance_json = self._instance_json(browser_port=9222)
-
-        response = self._dispatch(
-            action="open_browser",
-            args={"query": "creator analytics pain", "engine": "google"},
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_OPEN_FAILED")
-        self.assertEqual(response.get("target_url"), "https://www.google.com/search?q=creator+analytics+pain")
-        self._assert_no_browser_endpoint_leak(response)
-        self._assert_no_env_cli_hint(response)
-        self._assert_next_option(response, tool="search", action="status")
-        self.assertEqual(broker_calls[0]["target_url"], target_url)
+        self._assert_cockpit_search_page_guidance(response)
 
     def test_search_source_has_no_direct_json_new_page_open(self) -> None:
         text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
         self.assertNotIn("/json/new", text)
         self.assertNotIn('"tools"', text)
         self.assertNotIn('"launcher"', text)
+        self.assertNotIn('request_runtime_broker("browser.open_url"', text)
+        self.assertNotIn("browser_client.open_url", text)
+        self.assertNotIn("def open_browser_for_active_instance", text)
+        self.assertNotIn("'open_browser': open_browser_for_active_instance", text)
         self.assertNotIn("tools" + "/launcher", text)
         self.assertNotIn("scripts/env/client.py", text)
         self.assertNotIn("cdp_background_page.py", text)
         self.assertNotIn("Target.createTarget", text)
         self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
-
-    def test_search_open_browser_delegates_even_when_recorded_browser_port_is_invalid(self) -> None:
-        for port in ("abc", 0, 70000):
-            with self.subTest(port=port):
-                broker_calls = self._install_broker_browser_client(
-                    {
-                        "ok": True,
-                        "kind": "opened",
-                        "target_url": "https://www.google.com/search?q=creator+analytics+pain",
-                        "page_count": 0,
-                        "projected_page_count": 1,
-                        "browser_page_count": 1,
-                        "target_id": "target-opened",
-                        "page_opened": True,
-                        "page_reused": False,
-                        "state_changed": True,
-                        "durability": "runtime",
-                    }
-                )
-                self._forbid_runtime_browser_acquisition()
-                instance_json = self._instance_json(browser_port=port)
-                response = self._dispatch(
-                    action="open_browser",
-                    args={"query": "creator analytics pain", "engine": "google"},
-                    instance_json=instance_json,
-                )
-                self.assertTrue(response.get("ok"), msg=response)
-                self.assertEqual(response.get("target_url"), "https://www.google.com/search?q=creator+analytics+pain")
-                self.assertEqual(len(broker_calls), 1)
-                self._assert_no_env_cli_hint(response)
 
     def test_search_rejects_empty_query_and_unknown_engine(self) -> None:
         instance_json = self._instance_json()
@@ -1310,8 +566,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for engine in ("", "bing"):
             with self.subTest(engine=engine):
                 response = self._dispatch(
-                    action="open_browser",
-                    args={"query": "x", "engine": engine},
+                    action="request",
+                    args={"query": "x", "backend": "browser", "engine": engine},
                     instance_json=instance_json,
                 )
                 self.assertFalse(response.get("ok"), msg=response)
@@ -1323,8 +579,6 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_browser_and_search_dependency_rejections_include_semantic_impact(self) -> None:
         self.test_search_request_search_api_returns_market_approval_required()
         self.test_search_request_search_api_returns_non_market_provider_unavailable()
-        self.test_search_open_browser_reports_broker_failure_without_endpoint_leak()
-        self.test_search_open_browser_reports_cdp_open_failure_with_target_url()
 
 
 if __name__ == "__main__":

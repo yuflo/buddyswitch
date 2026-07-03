@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 from typing import Any
+from urllib.parse import urlencode
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
@@ -54,6 +55,31 @@ BROWSER_SESSION_TOOL_DESCRIPTIONS = {
     "wait_for": "Page-scoped browser-session action; waiting refreshes managed browser idle state.",
     "fill": "Page-scoped browser-session action; form filling refreshes managed browser idle state.",
     "press_key": "Page-scoped browser-session action; keyboard input refreshes managed browser idle state.",
+}
+SEARCH_ENGINES = ("google", "web", "reddit", "x")
+SEARCH_PAGE_TOOL = {
+    "name": "search_page",
+    "description": (
+        "BuddySwitch chrome-devtools-cockpit.search_page builds a supported search URL, opens or reuses "
+        "a managed browser-session page locally, registers idle TTL, and does not forward search opening "
+        "to upstream Chrome DevTools MCP."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["query"],
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Non-empty search query text.",
+            },
+            "engine": {
+                "type": "string",
+                "description": "Optional search engine.",
+                "enum": list(SEARCH_ENGINES),
+            },
+        },
+    },
 }
 SELECTED_URL_RE = re.compile(r"(https?://\S+)\s+\[selected\]", re.IGNORECASE)
 LIFECYCLE_WARNING_PREFIX = "Browser lifecycle warning:"
@@ -181,11 +207,14 @@ def load_static_tools() -> list[dict[str, Any]]:
 
 
 def tools_list_response(request: dict[str, Any]) -> dict[str, Any]:
+    tools = load_static_tools()
+    if not any(tool.get("name") == SEARCH_PAGE_TOOL["name"] for tool in tools):
+        tools.append(copy.deepcopy(SEARCH_PAGE_TOOL))
     return patch_tool_list_message(
         {
             "jsonrpc": request.get("jsonrpc", "2.0"),
             "id": request.get("id"),
-            "result": {"tools": load_static_tools()},
+            "result": {"tools": tools},
         }
     )
 
@@ -281,6 +310,67 @@ def _browser_session_error_text(result: browser_session.BrowserSessionOpenResult
         lines.append(f"page_count: {result.page_count}")
     if result.message:
         lines.append(result.message)
+    return "\n".join(lines)
+
+
+def _normalize_search_query(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    query = value.strip()
+    return query or None
+
+
+def _normalize_search_engine(value: object) -> str | None:
+    if value is None:
+        return "google"
+    if not isinstance(value, str):
+        return None
+    engine = value.strip().lower()
+    if not engine:
+        return "google"
+    if engine not in SEARCH_ENGINES:
+        return None
+    return engine
+
+
+def _build_search_url(query: str, engine: str) -> str:
+    if engine in {"google", "web"}:
+        return f"https://www.google.com/search?{urlencode({'q': query})}"
+    if engine == "reddit":
+        return f"https://www.reddit.com/search/?{urlencode({'q': query})}"
+    if engine == "x":
+        return f"https://x.com/search?{urlencode({'q': query, 'src': 'typed_query'})}"
+    raise ValueError(f"unsupported search engine: {engine}")
+
+
+def _browser_search_open_text(
+    *,
+    query: str,
+    engine: str,
+    result: browser_session.BrowserSessionOpenResult,
+) -> str:
+    action = "opened" if result.kind == "opened" else "reused"
+    lines = [
+        f"BuddySwitch search_page {action} browser-session page.",
+        f"query: {query}",
+        f"engine: {engine}",
+        _browser_session_open_text(result),
+    ]
+    return "\n".join(lines)
+
+
+def _browser_search_error_text(
+    *,
+    query: str,
+    engine: str,
+    result: browser_session.BrowserSessionOpenResult,
+) -> str:
+    lines = [
+        "BuddySwitch search_page did not open a browser-session page.",
+        f"query: {query}",
+        f"engine: {engine}",
+        _browser_session_error_text(result),
+    ]
     return "\n".join(lines)
 
 
@@ -409,6 +499,42 @@ def mutate_tool_call(
         arguments = {}
     if not isinstance(arguments, dict):
         return message, None, None
+
+    if name == "search_page":
+        root = _instance_root_path(instance_root)
+        if root is None:
+            return None, tool_error_response(
+                message,
+                "BuddySwitch blocked search_page because chrome-devtools-cockpit requires --instance-root "
+                "to register browser lifecycle state before opening search pages.",
+            ), None
+        query = _normalize_search_query(arguments.get("query"))
+        if query is None:
+            return None, tool_error_response(
+                message,
+                "BuddySwitch blocked search_page because query must be a non-empty string.",
+            ), None
+        engine = _normalize_search_engine(arguments.get("engine"))
+        if engine is None:
+            return None, tool_error_response(
+                message,
+                f"BuddySwitch blocked search_page because engine must be one of: {', '.join(SEARCH_ENGINES)}.",
+            ), None
+        target_url = _build_search_url(query, engine)
+        result = browser_session.open_or_reuse_page(
+            instance_root=root,
+            browser_url=browser_url,
+            target_url=target_url,
+        )
+        if result.kind in {"opened", "reused"}:
+            return None, tool_success_response(
+                message,
+                _browser_search_open_text(query=query, engine=engine, result=result),
+            ), None
+        return None, tool_error_response(
+            message,
+            _browser_search_error_text(query=query, engine=engine, result=result),
+        ), None
 
     if name == "new_page":
         if "isolatedContext" in arguments:

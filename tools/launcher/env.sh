@@ -829,8 +829,9 @@ buddyswitch_arg_sets_native_web_search() {
 buddyswitch_print_native_search_rejection() {
   echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
   echo "Use chrome-devtools-cockpit for browser-native discovery." >&2
+  echo "Use chrome-devtools-cockpit.search_page for browser-native search page opening." >&2
+  echo "Use search__request only for non-opening URL planning." >&2
   echo "Use search__status for search capability status." >&2
-  echo "Use search__open_browser only for search query URL construction." >&2
   echo "Diagnostic: python3 scripts/turn_runtime.py status" >&2
 }
 
