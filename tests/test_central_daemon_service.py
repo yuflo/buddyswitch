@@ -47,7 +47,8 @@ class CentralDaemonServiceTests(unittest.TestCase):
         return service.handle(
             "daemon.register",
             {
-                "actor_address": {"role_id": role, "actor_id": actor_id},
+                "identity_id": actor_id,
+                "role_id": role,
                 "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": f"/tmp/{actor_id}.sock"},
                 "heartbeat": {"kind": "central_daemon_rpc", "interval_seconds": 5},
                 "status": status,
@@ -191,14 +192,16 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertFalse(thread.is_alive())
             self.assertFalse(paths.socket_path.exists())
 
-    def test_register_projects_actor_address_and_presence_fields(self) -> None:
+    def test_register_projects_identity_and_presence_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             service = self._service(temp_root)
 
             result = self._register(service)
 
             row = result["record"]
-            self.assertEqual(row["actor_address"], {"role_id": "dev", "actor_id": "act-dev-daemon"})
+            self.assertEqual(row["identity_id"], "act-dev-daemon")
+            self.assertEqual(row["identity"], {"id": "act-dev-daemon", "type": "actor"})
+            self.assertEqual(row["role_id"], "dev")
             self.assertEqual(row["status"], "online")
             self.assertIn("endpoint", row)
             self.assertIn("heartbeat", row)
@@ -206,8 +209,7 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertNotIn("role", row)
             self.assertNotIn("daemon_role", row)
             self.assertNotIn("target_role_instance", row)
-            self.assertNotIn("endpoint", row["actor_address"])
-            self.assertNotIn("status", row["actor_address"])
+            self.assertNotIn("actor_address", row)
 
             saved = json.loads(service.paths.registry_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["actors"], [row])
@@ -235,7 +237,8 @@ class CentralDaemonServiceTests(unittest.TestCase):
                     "request_id": "req-cleanup",
                     "method": "daemon.register",
                     "params": {
-                        "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                        "identity_id": "act-dev-daemon",
+                        "role_id": "dev",
                         "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": "/tmp/dev.sock"},
                     },
                 }
@@ -245,7 +248,7 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertEqual(result["error"]["code"], "test_runtime_cleanup_in_progress")
             self.assertFalse(service.paths.registry_path.exists())
 
-    def test_register_rejects_presence_fields_inside_actor_address(self) -> None:
+    def test_register_rejects_presence_fields_as_identity_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             service = self._service(temp_root)
 
@@ -254,18 +257,15 @@ class CentralDaemonServiceTests(unittest.TestCase):
                     "request_id": "req-bad-address",
                     "method": "daemon.register",
                     "params": {
-                        "actor_address": {
-                            "role_id": "dev",
-                            "actor_id": "act-dev-daemon",
-                            "status": "online",
-                        },
+                        "identity_id": {"id": "act-dev-daemon", "status": "online"},
+                        "role_id": "dev",
                         "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": "/tmp/dev.sock"},
                     },
                 }
             )
 
             self.assertFalse(result["ok"], msg=result)
-            self.assertEqual(result["error"]["code"], "invalid_actor_address")
+            self.assertEqual(result["error"]["code"], "invalid_identity_id")
 
     def test_unregister_marks_registered_offline_instead_of_deleting(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -274,7 +274,7 @@ class CentralDaemonServiceTests(unittest.TestCase):
 
             result = service.handle(
                 "daemon.unregister",
-                {"actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"}},
+                {"identity_id": "act-dev-daemon", "role_id": "dev"},
             )
 
             self.assertEqual(result["record"]["status"], "registered_offline")
@@ -286,25 +286,25 @@ class CentralDaemonServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             service = self._service(temp_root)
             self._register(service)
-            service.handle("daemon.unregister", {"actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"}})
+            service.handle("daemon.unregister", {"identity_id": "act-dev-daemon", "role_id": "dev"})
 
-            result = service.handle("daemon.heartbeat", {"actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"}})
+            result = service.handle("daemon.heartbeat", {"identity_id": "act-dev-daemon"})
 
             self.assertEqual(result["record"]["status"], "online")
             self.assertEqual(result["record"]["last_seen_at"], "2026-05-30T00:00:00Z")
 
-    def test_actor_directory_list_online_returns_only_online_actor_addresses(self) -> None:
+    def test_actor_directory_list_online_returns_only_online_identities(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             service = self._service(temp_root)
             self._register(service, role="dev", actor_id="act-dev-daemon")
             self._register(service, role="design", actor_id="act-design-daemon")
-            service.handle("daemon.unregister", {"actor_address": {"role_id": "design", "actor_id": "act-design-daemon"}})
+            service.handle("daemon.unregister", {"identity_id": "act-design-daemon", "role_id": "design"})
 
             result = service.handle("actor_directory.list_online", {})
 
             self.assertEqual(
-                [row["actor_address"] for row in result["actors"]],
-                [{"role_id": "dev", "actor_id": "act-dev-daemon"}],
+                [(row["identity_id"], row["role_id"]) for row in result["actors"]],
+                [("act-dev-daemon", "dev")],
             )
 
     def test_actor_directory_list_online_filters_by_role_without_resolving_message_targets(self) -> None:
@@ -316,24 +316,24 @@ class CentralDaemonServiceTests(unittest.TestCase):
             result = service.handle("actor_directory.list_online", {"role_id": "dev"})
 
             self.assertEqual(len(result["actors"]), 1)
-            self.assertEqual(result["actors"][0]["actor_address"]["role_id"], "dev")
+            self.assertEqual(result["actors"][0]["role_id"], "dev")
 
     def test_reachability_distinguishes_online_offline_never_registered_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             service = self._service(temp_root)
             self._register(service, role="dev", actor_id="act-dev-daemon")
             self._register(service, role="design", actor_id="act-design-daemon")
-            service.handle("daemon.unregister", {"actor_address": {"role_id": "design", "actor_id": "act-design-daemon"}})
+            service.handle("daemon.unregister", {"identity_id": "act-design-daemon", "role_id": "design"})
 
-            online = service.handle("actor.check_reachability", {"target_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"}})
-            offline = service.handle("actor.check_reachability", {"target_actor_address": {"role_id": "design", "actor_id": "act-design-daemon"}})
-            missing = service.handle("actor.check_reachability", {"target_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"}})
-            invalid = service.handle("actor.check_reachability", {"target_actor_address": {"role_id": "Dev", "actor_id": "act-Dev-daemon"}})
+            online = service.handle("actor.check_reachability", {"target_identity_id": "act-dev-daemon"})
+            offline = service.handle("actor.check_reachability", {"target_identity_id": "act-design-daemon"})
+            missing = service.handle("actor.check_reachability", {"target_identity_id": "act-pm-daemon"})
+            invalid = service.handle("actor.check_reachability", {"target_identity_id": "dev-daemon"})
 
             self.assertEqual(online["reachability_status"], "online")
             self.assertEqual(offline["reachability_status"], "registered_offline")
             self.assertEqual(missing["reachability_status"], "never_registered")
-            self.assertEqual(invalid["reachability_status"], "invalid_actor_address")
+            self.assertEqual(invalid["reachability_status"], "invalid_identity_id")
 
     def test_reachability_has_no_ambiguous_online_actor_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -341,8 +341,8 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self._register(service, role="dev", actor_id="act-dev-one")
             self._register(service, role="dev", actor_id="act-dev-two")
 
-            first = service.handle("actor.check_reachability", {"target_actor_address": {"role_id": "dev", "actor_id": "act-dev-one"}})
-            second = service.handle("actor.check_reachability", {"target_actor_address": {"role_id": "dev", "actor_id": "act-dev-two"}})
+            first = service.handle("actor.check_reachability", {"target_identity_id": "act-dev-one"})
+            second = service.handle("actor.check_reachability", {"target_identity_id": "act-dev-two"})
 
             self.assertEqual(first["reachability_status"], "online")
             self.assertEqual(second["reachability_status"], "online")

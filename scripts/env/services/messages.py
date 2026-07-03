@@ -9,6 +9,10 @@ import time
 import uuid
 from typing import Any
 
+from env.domain.identity import ACTOR_ID_PATTERN, IdentityRef, ROLE_ID_PATTERN
+from env.domain.identity import actor_identity
+from env.domain.identity import external_identity
+
 
 def _im_payload_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": message}}
@@ -17,15 +21,35 @@ def _im_payload_error(message: str) -> dict[str, Any]:
 _BLOCKED_ACTOR_CONTACT_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
 
 
-def _actor_address_from_runtime_row(row: Any) -> dict[str, str] | None:
-    if not isinstance(row, dict) or not isinstance(row.get("actor_address"), dict):
-        return None
-    from env.tool_runtime.actor_profile import ActorAddress
+def _identity_ref(value: Any, field: str = "identity") -> dict[str, str]:
+    if isinstance(value, dict):
+        if isinstance(value.get("identity"), dict):
+            return IdentityRef.from_payload(value["identity"]).to_payload()
+        if isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
+            return IdentityRef.from_payload(value).to_payload()
+    if isinstance(value, str) and value.strip():
+        identity_id = value.strip()
+        if identity_id.startswith("act-"):
+            return actor_identity(identity_id).to_payload()
+        if identity_id.startswith("ext-"):
+            return external_identity(identity_id).to_payload()
+    raise ValueError(f"{field} must be an identity payload or identity id")
 
-    try:
-        return ActorAddress.from_payload(row["actor_address"]).to_payload()
-    except ValueError:
+
+def _identity_id(value: Any, field: str = "identity") -> str:
+    return _identity_ref(value, field)["id"]
+
+
+def _actor_contact_from_runtime_row(row: Any) -> dict[str, str] | None:
+    if not isinstance(row, dict):
         return None
+    identity_id = row.get("identity_id")
+    role_id = row.get("role_id")
+    if not isinstance(identity_id, str) or ACTOR_ID_PATTERN.fullmatch(identity_id) is None:
+        return None
+    if not isinstance(role_id, str) or ROLE_ID_PATTERN.fullmatch(role_id) is None:
+        return None
+    return {"identity_id": identity_id, "role_id": role_id}
 
 
 def _actor_status_from_runtime_row(row: dict[str, Any]) -> str:
@@ -37,72 +61,78 @@ def list_im_actor_contacts(actor_rows: list[dict[str, Any]], role_id: str | None
     normalized_role = role_id.strip() if isinstance(role_id, str) and role_id.strip() else None
     actors: list[dict[str, Any]] = []
     for row in actor_rows:
-        actor_address = _actor_address_from_runtime_row(row)
-        if actor_address is None:
+        actor = _actor_contact_from_runtime_row(row)
+        if actor is None:
             continue
-        if normalized_role is not None and actor_address["role_id"] != normalized_role:
+        if normalized_role is not None and actor["role_id"] != normalized_role:
             continue
         status = _actor_status_from_runtime_row(row)
         if status in _BLOCKED_ACTOR_CONTACT_STATUSES:
             continue
         actors.append(
             {
-                "identity": {"id": actor_address["actor_id"], "type": "actor"},
-                "identity_id": actor_address["actor_id"],
-                "role_id": actor_address["role_id"],
+                "identity": {"id": actor["identity_id"], "type": "actor"},
+                "identity_id": actor["identity_id"],
+                "role_id": actor["role_id"],
                 "reachability_status": status,
             }
         )
     return {"ok": True, "actors": actors, "count": len(actors)}
 
 
-def actor_participant_for_current_send_target(
+def actor_identity_for_current_send_target(
     actor_rows: list[dict[str, Any]],
     target_identity_id: Any,
     *,
     field: str = "target_identity_id",
-    active_actor_id: str | None = None,
+    active_identity_id: str | None = None,
 ) -> dict[str, Any]:
     identity_id = target_identity_id.strip() if isinstance(target_identity_id, str) and target_identity_id.strip() else ""
     if not identity_id:
         return _im_payload_error(f"{field} is required")
-    if isinstance(active_actor_id, str) and active_actor_id.strip() and identity_id == active_actor_id.strip():
-        return _im_payload_error(f"{field} must not be the active actor identity")
+    if isinstance(active_identity_id, str) and active_identity_id.strip() and identity_id == active_identity_id.strip():
+        return _im_payload_error(f"{field} must not be the current actor identity")
     for row in actor_rows:
-        actor_address = _actor_address_from_runtime_row(row)
-        if actor_address is None:
+        actor = _actor_contact_from_runtime_row(row)
+        if actor is None:
             continue
         status = _actor_status_from_runtime_row(row)
         if status in _BLOCKED_ACTOR_CONTACT_STATUSES:
             continue
-        if actor_address["actor_id"] == identity_id:
-            return {"ok": True, "participant": {"kind": "actor", "actor_address": actor_address}}
+        if actor["identity_id"] == identity_id:
+            return {"ok": True, "identity": actor_identity(identity_id).to_payload(), "role_id": actor["role_id"]}
     return _im_payload_error(f"{field} is not a reachable actor identity: {identity_id}")
 
 
 def create_external_connection(*, display_name: str) -> dict[str, Any]:
+    from env.repos import identities as identity_repo
     from env.repos import messages as message_repo
 
     normalized_display_name = display_name.strip() if isinstance(display_name, str) else ""
     if not normalized_display_name:
         return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "display_name must be a non-empty string"}}
 
-    external_id = f"ext-{uuid.uuid4().hex[:12]}"
+    external_identity_id = f"ext-{uuid.uuid4().hex[:12]}"
     now = message_repo.runtime_files.now_iso()
-    participant = {
-        "kind": "external",
-        "external_id": external_id,
+    identity_repo.save_external_profile(
+        {
+            "identity": {"id": external_identity_id, "type": "external"},
+            "display_name": normalized_display_name,
+            "created_at": now,
+        }
+    )
+    external_connection = {
+        "external_identity_id": external_identity_id,
         "display_name": normalized_display_name,
         "created_at": now,
         "last_seen_at": now,
     }
     connection_key = f"imck-{secrets.token_hex(24)}"
     connection_key_hash = _im_connection_key_hash(connection_key)
-    message_repo.save_im_participant(participant)
     message_repo.save_im_connection(
         {
             "connection_key_hash": connection_key_hash,
-            "identity_id": external_id,
+            "identity_id": external_identity_id,
             "display_name": normalized_display_name,
             "last_event_id": message_repo.INITIAL_IM_EVENT_CURSOR,
             "created_at": now,
@@ -112,6 +142,8 @@ def create_external_connection(*, display_name: str) -> dict[str, Any]:
     return {
         "ok": True,
         "connection_key": connection_key,
+        "identity": {"id": external_identity_id, "type": "external"},
+        "external_connection": external_connection,
     }
 
 
@@ -127,26 +159,17 @@ def authenticate_external_connection_key(connection_key: str) -> dict[str, Any]:
     connection = message_repo.get_im_connection_by_key_hash(_im_connection_key_hash(connection_key.strip()))
     if connection is None:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection_key is invalid"}}
-    identity_id = connection.get("identity_id")
-    if not isinstance(identity_id, str) or not identity_id.strip():
-        participant = connection.get("participant")
-        if not isinstance(participant, dict):
-            return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection identity is invalid"}}
-        identity_id = str(participant.get("external_id") or "")
-    participant = {"kind": "external", "external_id": identity_id.strip()}
     try:
-        participant_ref = message_repo.im_participant_ref(participant)
+        identity = _identity_ref(connection.get("identity_id"), "connection.identity_id")
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     updated = dict(connection)
-    updated["identity_id"] = participant_ref["external_id"]
-    updated.pop("participant", None)
+    updated["identity_id"] = identity["id"]
     updated["last_used_at"] = message_repo.runtime_files.now_iso()
     saved = message_repo.save_im_connection(updated)
     return {
         "ok": True,
-        "identity": {"id": participant_ref["external_id"], "type": "external"},
-        "participant": participant_ref,
+        "identity": identity,
         "connection": saved,
     }
 
@@ -168,17 +191,7 @@ def _direct_conversation_identity_ids(message_repo: Any, conversation: dict[str,
             return [message_repo.im_identity_id_for_row(row, "conversation.identity_ids[]") for row in identity_ids]
         except ValueError:
             return None
-    participants = conversation.get("participants")
-    if isinstance(participants, list) and len(participants) == 2:
-        try:
-            return [message_repo.im_identity_id_for_row(row, "conversation.participants[]") for row in participants]
-        except ValueError:
-            return None
     return None
-
-
-def _external_participant_for_identity(message_repo: Any, identity_id: str) -> dict[str, Any] | None:
-    return message_repo.get_im_external_participant(identity_id)
 
 
 def _resolve_reply_conversation(
@@ -197,19 +210,17 @@ def _resolve_reply_conversation(
     identity_ids = _direct_conversation_identity_ids(message_repo, conversation)
     if identity_ids is None:
         return _im_reply_target_error("reply_to conversation is not a direct conversation")
-    sender_key = message_repo.im_participant_key(sender)
+    sender_key = _identity_id(sender)
     identity_set = set(identity_ids)
     if sender_key not in identity_set:
-        return _im_reply_target_error("active sender is not a participant in the reply_to conversation")
+        return _im_reply_target_error("active sender is not in the reply_to conversation")
     if target is None:
         other = [row for row in identity_ids if row != sender_key]
         if len(other) != 1:
             return _im_reply_target_error("reply target cannot be derived from the direct conversation")
-        target = _external_participant_for_identity(message_repo, other[0])
-        if target is None:
-            return _im_reply_target_error("reply target cannot be derived from identity projection")
+        target = _identity_ref(other[0], "reply target")
     else:
-        target_key = message_repo.im_participant_key(target)
+        target_key = _identity_id(target)
         if {sender_key, target_key} != identity_set:
             return _im_reply_target_error("reply_to must stay in the same direct conversation")
     return {
@@ -223,10 +234,10 @@ def _resolve_reply_conversation(
 def _mark_reply_source_replied(
     *,
     message_repo: Any,
-    participant: dict[str, Any],
+    identity: dict[str, Any],
     message_id: str,
 ) -> dict[str, Any] | None:
-    current = message_repo.get_im_message_state(message_id, participant)
+    current = message_repo.get_im_message_state(message_id, _identity_id(identity))
     if current is None:
         return None
     updated = dict(current)
@@ -238,8 +249,9 @@ def _mark_reply_source_replied(
 
 def send_im_message(
     *,
-    sender_participant: dict[str, Any],
+    sender_identity: dict[str, Any],
     to: dict[str, Any] | None,
+    target_role_id: str | None = None,
     content: str,
     reply_to: str | None = None,
     wake_actor: Any | None = None,
@@ -247,7 +259,7 @@ def send_im_message(
     from env.repos import messages as message_repo
 
     try:
-        sender = message_repo.im_participant_ref(sender_participant)
+        sender = _identity_ref(sender_identity, "sender_identity")
     except ValueError as exc:
         return _im_payload_error(str(exc))
     normalized_content = content.strip() if isinstance(content, str) else ""
@@ -257,7 +269,7 @@ def send_im_message(
         return _im_payload_error("reply_to must be a non-empty string")
     reply_to_id = reply_to.strip() if isinstance(reply_to, str) else None
     try:
-        target = message_repo.im_participant_ref(to) if isinstance(to, dict) and to else None
+        target = _identity_ref(to, "target_identity") if isinstance(to, dict) and to else None
     except ValueError as exc:
         return _im_payload_error(str(exc))
 
@@ -291,7 +303,7 @@ def send_im_message(
         {
             "id": conversation_id,
             "type": "direct",
-            "participants": [sender, target],
+            "identity_ids": [sender["id"], target["id"]],
             "created_at": created_at,
             "updated_at": now,
             "last_message_id": message_id,
@@ -302,8 +314,8 @@ def send_im_message(
         {
             "id": message_id,
             "conversation_id": conversation_id,
-            "from": sender,
-            "to": [target],
+            "sender_identity": sender,
+            "target_identity": target,
             "content": normalized_content,
             "reply_to": reply_to_id,
             "created_at": now,
@@ -313,23 +325,23 @@ def send_im_message(
     message_repo.save_im_message_state(
         {
             "message_id": message_id,
-            "participant": target,
+            "owner_identity_id": target["id"],
             "disposition": "unseen",
             "reason": None,
             "processed_by": None,
             "updated_at": now,
         }
     )
-    for participant in (sender, target):
+    for visible_identity in (sender, target):
         message_repo.save_im_event(
             {
                 "event_id": event_id,
                 "type": "message.created",
-                "participant": participant,
                 "message_id": message_id,
                 "conversation_id": conversation_id,
-                "from": sender,
-                "to": [target],
+                "sender_identity": sender,
+                "target_identity": target,
+                "visible_to_identity_id": visible_identity["id"],
                 "reply_to": reply_to_id,
                 "created_at": now,
                 "sequence": sequence,
@@ -339,16 +351,17 @@ def send_im_message(
     if reply_to_id is not None:
         original_reply_state = _mark_reply_source_replied(
             message_repo=message_repo,
-            participant=sender,
+            identity=sender,
             message_id=reply_to_id,
         )
 
     wake_status = "not_applicable"
-    if target.get("kind") == "actor":
+    if target.get("type") == "actor" and isinstance(target_role_id, str) and target_role_id.strip():
         wake_payload = {
             "type": "im.message.created",
             "wake_id": _new_im_id("imwake"),
-            "target_actor_address": target["actor_address"],
+            "target_identity_id": target["id"],
+            "target_role_id": target_role_id.strip(),
             "message_id": message_id,
             "conversation_id": conversation_id,
             "event_id": event_id,
@@ -385,16 +398,9 @@ def send_im_message(
     return response
 
 
-def _connection_participant_ref(connection: dict[str, Any]) -> dict[str, Any]:
-    from env.repos import messages as message_repo
-
+def _connection_identity_ref(connection: dict[str, Any]) -> dict[str, str]:
     identity_id = connection.get("identity_id")
-    if not isinstance(identity_id, str) or not identity_id.strip():
-        participant = connection.get("participant")
-        if not isinstance(participant, dict):
-            raise ValueError("connection.identity_id must be a non-empty string")
-        return message_repo.im_participant_ref(participant)
-    return {"kind": "external", "external_id": identity_id.strip()}
+    return _identity_ref(identity_id, "connection.identity_id")
 
 
 def _save_connection_last_event(connection: dict[str, Any], event_id: str) -> dict[str, Any]:
@@ -418,12 +424,13 @@ def send_external_connection_message(
     wake_actor: Any | None = None,
 ) -> dict[str, Any]:
     try:
-        sender = _connection_participant_ref(connection)
+        sender = _connection_identity_ref(connection)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     result = send_im_message(
-        sender_participant=sender,
+        sender_identity=sender,
         to=to,
+        target_role_id=to.get("role_id") if isinstance(to, dict) and isinstance(to.get("role_id"), str) else None,
         content=content,
         reply_to=reply_to,
         wake_actor=wake_actor,
@@ -442,7 +449,7 @@ def read_external_connection_events(
     from env.repos import messages as message_repo
 
     try:
-        participant = _connection_participant_ref(connection)
+        identity = _connection_identity_ref(connection)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     last_event_id = connection.get("last_event_id")
@@ -453,7 +460,7 @@ def read_external_connection_events(
     while True:
         events = _external_consumable_events_after_cursor(
             message_repo=message_repo,
-            participant=participant,
+            identity=identity,
             cursor=cursor,
             limit=normalized_limit,
         )
@@ -471,21 +478,22 @@ def ack_external_connection_event(
     from env.repos import messages as message_repo
 
     try:
-        participant = _connection_participant_ref(connection)
+        identity = _connection_identity_ref(connection)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     normalized_event_id = event_id.strip() if isinstance(event_id, str) else ""
     if not normalized_event_id:
         return _im_payload_error("event_id must be a non-empty string")
 
-    events = message_repo.list_im_events_for_participant(participant)
+    events = message_repo.list_im_events_for_identity(identity)
     visible_index_by_id = {str(event.get("event_id") or ""): index for index, event in enumerate(events)}
     event_index = visible_index_by_id.get(normalized_event_id)
     if event_index is None:
         return _im_scope_error("event is not visible to the connection")
     event = events[event_index]
-    participant_identity_id = message_repo.im_identity_id_for_participant(participant)
-    if event.get("from_identity_id") == participant_identity_id:
+    identity_id = identity["id"]
+    sender_identity = event.get("sender_identity") if isinstance(event.get("sender_identity"), dict) else {}
+    if sender_identity.get("id") == identity_id:
         return _im_scope_error("event is not consumable by the connection")
 
     last_event_id = connection.get("last_event_id")
@@ -501,7 +509,7 @@ def ack_external_connection_event(
 
     next_events = _external_consumable_events_after_cursor(
         message_repo=message_repo,
-        participant=participant,
+        identity=identity,
         cursor=cursor,
         limit=1,
     )
@@ -527,16 +535,17 @@ def ack_external_connection_event(
 def _external_consumable_events_after_cursor(
     *,
     message_repo: Any,
-    participant: dict[str, Any],
+    identity: dict[str, Any],
     cursor: str,
     limit: int,
 ) -> list[dict[str, Any]]:
-    participant_identity_id = message_repo.im_identity_id_for_participant(participant)
-    events = message_repo.list_im_events_for_participant(participant)
+    identity_id = _identity_id(identity)
+    events = message_repo.list_im_events_for_identity(identity)
     after_cursor = _events_after_cursor(events, cursor=cursor, initial_cursor=message_repo.INITIAL_IM_EVENT_CURSOR)
     consumable: list[dict[str, Any]] = []
     for event in after_cursor:
-        if event.get("from_identity_id") == participant_identity_id:
+        sender_identity = event.get("sender_identity") if isinstance(event.get("sender_identity"), dict) else {}
+        if sender_identity.get("id") == identity_id:
             continue
         consumable.append(event)
         if len(consumable) >= limit:
@@ -559,20 +568,20 @@ def _events_after_cursor(events: list[dict[str, Any]], *, cursor: str, initial_c
 
 def read_im_events(
     *,
-    participant: dict[str, Any],
+    identity: dict[str, Any],
     cursor: str,
     limit: int = 50,
     wait_ms: int = 0,
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    participant_ref = message_repo.im_participant_ref(participant)
+    identity_ref = _identity_ref(identity)
     normalized_cursor = cursor.strip() if isinstance(cursor, str) and cursor.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
     normalized_limit = limit if isinstance(limit, int) and limit > 0 else 50
     wait_seconds = min(wait_ms if isinstance(wait_ms, int) and wait_ms > 0 else 0, 30000) / 1000
     deadline = time.monotonic() + wait_seconds
     while True:
-        events = message_repo.list_im_events_for_participant(participant_ref)
+        events = message_repo.list_im_events_for_identity(identity_ref)
         if normalized_cursor == message_repo.INITIAL_IM_EVENT_CURSOR:
             visible = events[:normalized_limit]
         else:
@@ -596,7 +605,7 @@ def read_im_events(
         "ok": True,
         "events": visible,
         "next_cursor": next_cursor,
-        "participant": participant_ref,
+        "identity": identity_ref,
     }
 
 
@@ -608,44 +617,42 @@ def _im_not_found(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_NOT_FOUND", "message": message}}
 
 
-def _participant_can_see_message(message_repo: Any, participant: dict[str, Any], message: dict[str, Any]) -> bool:
+def _identity_can_see_message(message_repo: Any, identity: dict[str, Any], message: dict[str, Any]) -> bool:
     conversation = message_repo.get_im_conversation(str(message.get("conversation_id") or ""))
     if conversation is None:
         return False
-    participant_key = message_repo.im_participant_key(participant)
+    identity_id = _identity_id(identity)
     if isinstance(conversation.get("identity_ids"), list):
-        return participant_key in {
+        return identity_id in {
             message_repo.im_identity_id_for_row(row, "conversation.identity_ids[]")
             for row in conversation["identity_ids"]
         }
-    rows = conversation.get("participants")
-    if not isinstance(rows, list):
-        return False
-    return participant_key in {message_repo.im_participant_key(row) for row in rows if isinstance(row, dict)}
+    return False
 
 
-def get_im_message(*, participant: dict[str, Any], message_id: str) -> dict[str, Any]:
+def get_im_message(*, identity: dict[str, Any], message_id: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    participant_ref = message_repo.im_participant_ref(participant)
+    identity_ref = _identity_ref(identity)
     message = message_repo.get_im_message(message_id)
     if message is None:
         return _im_not_found(f"message not found: {message_id}")
-    if not _participant_can_see_message(message_repo, participant_ref, message):
-        return _im_scope_error("participant is not in the message conversation")
+    if not _identity_can_see_message(message_repo, identity_ref, message):
+        return _im_scope_error("identity is not in the message conversation")
     return {"ok": True, "message": message}
 
 
-def list_im_replies(*, participant: dict[str, Any], message_id: str) -> dict[str, Any]:
+def list_im_replies(*, identity: dict[str, Any], message_id: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    root_response = get_im_message(participant=participant, message_id=message_id)
+    identity_ref = _identity_ref(identity)
+    root_response = get_im_message(identity=identity_ref, message_id=message_id)
     if root_response.get("ok") is not True:
         return root_response
     replies = [
         row
         for row in message_repo.list_im_messages()
-        if row.get("reply_to") == message_id and _participant_can_see_message(message_repo, participant, row)
+        if row.get("reply_to") == message_id and _identity_can_see_message(message_repo, identity_ref, row)
     ]
     return {
         "ok": True,
@@ -657,22 +664,22 @@ def list_im_replies(*, participant: dict[str, Any], message_id: str) -> dict[str
 
 def get_im_direct_conversation(
     *,
-    participant: dict[str, Any],
+    identity: dict[str, Any],
     target: dict[str, Any],
     limit: int = 20,
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    participant_ref = message_repo.im_participant_ref(participant)
-    target_ref = message_repo.im_participant_ref(target)
-    conversation = message_repo.find_im_direct_conversation([participant_ref, target_ref])
+    identity_ref = _identity_ref(identity)
+    target_ref = _identity_ref(target)
+    conversation = message_repo.find_im_direct_conversation([identity_ref, target_ref])
     if conversation is None:
         return _im_not_found("direct conversation not found")
     messages = [
         row
         for row in message_repo.list_im_messages()
         if row.get("conversation_id") == conversation.get("id")
-        and _participant_can_see_message(message_repo, participant_ref, row)
+        and _identity_can_see_message(message_repo, identity_ref, row)
     ]
     normalized_limit = limit if isinstance(limit, int) and limit > 0 else 20
     return {
@@ -685,22 +692,22 @@ def get_im_direct_conversation(
 
 def update_im_disposition(
     *,
-    participant: dict[str, Any],
+    identity: dict[str, Any],
     message_id: str,
     disposition: str,
     reason: str | None = None,
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    participant_ref = message_repo.im_participant_ref(participant)
-    message_response = get_im_message(participant=participant_ref, message_id=message_id)
+    identity_ref = _identity_ref(identity)
+    message_response = get_im_message(identity=identity_ref, message_id=message_id)
     if message_response.get("ok") is not True:
         return message_response
     if disposition not in {"absorbed", "replied", "needs_parent"}:
         return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "invalid disposition"}}
-    current = message_repo.get_im_message_state(message_id, participant_ref)
+    current = message_repo.get_im_message_state(message_id, identity_ref["id"])
     if current is None:
-        return _im_scope_error("participant has no state for this message")
+        return _im_scope_error("identity has no state for this message")
     previous = current.get("disposition")
     updated = dict(current)
     updated["disposition"] = disposition
@@ -710,7 +717,7 @@ def update_im_disposition(
     return {
         "ok": True,
         "message_id": message_id,
-        "participant": participant_ref,
+        "identity": identity_ref,
         "disposition": disposition,
         "state_changed": previous != disposition or current.get("reason") != updated["reason"],
     }

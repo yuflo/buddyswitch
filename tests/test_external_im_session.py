@@ -17,17 +17,14 @@ if str(ROOT) in sys.path:
 sys.path.insert(0, str(ROOT))
 
 from env.services import messages as message_service  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 from tools.launcher import external_im_session  # noqa: E402
 
 
 class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _actor_address(self, *, role: str = "market", label: str = "target") -> dict[str, str]:
-        return ActorAddress(
-            role_id=role,
-            actor_id=self._runtime_actor_id(role=role, label=label),
-        ).to_payload()
+    def _actor_identity(self, *, role: str = "market", label: str = "target") -> dict[str, str]:
+        identity_id = self._runtime_actor_id(role=role, label=label)
+        return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": role}
 
     def _session(
         self,
@@ -38,7 +35,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         def list_actors(role_id: str | None) -> list[dict[str, Any]]:
             if role_id is None:
                 return actor_rows
-            return [row for row in actor_rows if (row.get("actor_address") or {}).get("role_id") == role_id]
+            return [row for row in actor_rows if row.get("role_id") == role_id]
 
         def wake_actor(payload: dict[str, Any]) -> dict[str, Any]:
             if wake_calls is not None:
@@ -56,30 +53,30 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         auth = session.authenticate(key)
         self.assertTrue(auth.get("ok"), msg=auth)
         connection = auth.get("connection")
-        participant = auth.get("participant")
+        identity = auth.get("identity")
         self.assertIsInstance(connection, dict, msg=auth)
-        self.assertIsInstance(participant, dict, msg=auth)
+        self.assertIsInstance(identity, dict, msg=auth)
         assert isinstance(connection, dict)
-        assert isinstance(participant, dict)
-        return key, connection, participant
+        assert isinstance(identity, dict)
+        return key, connection, identity
 
     def test_session_create_auth_send_event_conversation_and_disposition_flow(self) -> None:
-        actor_address = self._actor_address()
+        actor_identity = self._actor_identity()
         wake_calls: list[dict[str, Any]] = []
         session = self._session(
-            [{"actor_address": actor_address, "status": "online"}],
+            [{**actor_identity, "status": "online"}],
             wake_calls=wake_calls,
         )
-        _key, connection, participant = self._connection(session)
+        _key, connection, identity = self._connection(session)
 
         actors = session.list_actors(role_id="market")
         self.assertEqual(actors["count"], 1)
-        self.assertEqual(actors["actors"][0]["identity"], {"id": actor_address["actor_id"], "type": "actor"})
+        self.assertEqual(actors["actors"][0]["identity"], actor_identity["identity"])
         self.assertNotIn("actor_address", actors["actors"][0])
 
         sent = session.send_message(
             connection=connection,
-            target_identity_id=actor_address["actor_id"],
+            target_identity_id=actor_identity["identity_id"],
             content="ping",
             reply_to=None,
         )
@@ -93,8 +90,8 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(fetched["message"]["content"], "ping")
 
         actor_reply = message_service.send_im_message(
-            sender_participant={"kind": "actor", "actor_address": actor_address},
-            to=participant,
+            sender_identity=actor_identity,
+            to=identity,
             content="pong",
             reply_to=message_id,
             wake_actor=lambda _payload: {"wake_status": "not_applicable"},
@@ -122,20 +119,20 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         conversation = session.get_direct_conversation(
             connection=connection,
-            identity_id=actor_address["actor_id"],
+            identity_id=actor_identity["identity_id"],
             limit=20,
         )
         self.assertTrue(conversation.get("ok"), msg=conversation)
         self.assertEqual([row["id"] for row in conversation["messages"]], [message_id, reply_id])
 
     def test_session_list_actors_returns_identity_projection_and_ignores_invalid_rows(self) -> None:
-        market = self._actor_address(role="market", label="valid")
-        dev = self._actor_address(role="dev", label="valid")
+        market = self._actor_identity(role="market", label="valid")
+        dev = self._actor_identity(role="dev", label="valid")
         session = self._session(
             [
-                {"actor_address": market, "status": "online"},
-                {"actor_address": dev, "status": "idle"},
-                {"actor_address": {"actor_id": "", "role_id": "bad"}, "status": "online"},
+                {**market, "status": "online"},
+                {**dev, "status": "idle"},
+                {"identity_id": "", "role_id": "bad", "status": "online"},
                 {"status": "online"},
             ]
         )
@@ -145,14 +142,14 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(actors["count"], 2)
         self.assertEqual(
             [row["identity_id"] for row in actors["actors"]],
-            [market["actor_id"], dev["actor_id"]],
+            [market["identity_id"], dev["identity_id"]],
         )
         self.assertEqual(actors["actors"][1]["reachability_status"], "idle")
         self.assertTrue(all("actor_address" not in row for row in actors["actors"]))
 
     def test_session_rejects_missing_or_unreachable_actor_identity(self) -> None:
         session = self._session([])
-        _key, connection, _participant = self._connection(session)
+        _key, connection, _identity = self._connection(session)
 
         missing = session.send_message(
             connection=connection,
@@ -175,14 +172,14 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("not a reachable actor identity", unreachable["error"]["message"])
 
     def test_session_list_and_send_reject_offline_actor_rows(self) -> None:
-        offline_actor = self._actor_address(role="market", label="offline")
-        session = self._session([{"actor_address": offline_actor, "status": "offline"}])
-        _key, connection, _participant = self._connection(session)
+        offline_actor = self._actor_identity(role="market", label="offline")
+        session = self._session([{**offline_actor, "status": "offline"}])
+        _key, connection, _identity = self._connection(session)
 
         actors = session.list_actors(role_id=None)
         sent = session.send_message(
             connection=connection,
-            target_identity_id=offline_actor["actor_id"],
+            target_identity_id=offline_actor["identity_id"],
             content="ping",
             reply_to=None,
         )
@@ -193,21 +190,21 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("not a reachable actor identity", sent["error"]["message"])
 
     def test_session_reads_actor_reply_once_without_client_cursor(self) -> None:
-        actor_address = self._actor_address()
-        session = self._session([{"actor_address": actor_address, "status": "online"}])
-        _key, connection, participant = self._connection(session)
+        actor_identity = self._actor_identity()
+        session = self._session([{**actor_identity, "status": "online"}])
+        _key, connection, identity = self._connection(session)
         initial_cursor = connection["last_event_id"]
         sent = session.send_message(
             connection=connection,
-            target_identity_id=actor_address["actor_id"],
+            target_identity_id=actor_identity["identity_id"],
             content="ping",
             reply_to=None,
         )
         self.assertTrue(sent.get("ok"), msg=sent)
         self.assertEqual(connection["last_event_id"], initial_cursor)
         actor_reply = message_service.send_im_message(
-            sender_participant={"kind": "actor", "actor_address": actor_address},
-            to=participant,
+            sender_identity=actor_identity,
+            to=identity,
             content="pong",
             reply_to=sent["message"]["id"],
             wake_actor=lambda _payload: {"wake_status": "not_applicable"},

@@ -24,18 +24,16 @@ from tools.launcher import im_http_router  # noqa: E402
 from tools.launcher import im_wake_handler  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 from env.tool_runtime import im_client as im_client_module  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
 class _ActorContext(dict[str, Any]):
-    def __init__(self, actor_address: ActorAddress, daemon: Any) -> None:
+    def __init__(self, *, identity_id: str, role_id: str, daemon: Any) -> None:
         super().__init__(
-            active_actor=actor_address.to_payload(),
-            active_role=actor_address.role_id,
-            manifest={"roles": [{"id": actor_address.role_id}]},
+            current_identity={"id": identity_id, "type": "actor"},
+            active_role=role_id,
+            manifest={"roles": [{"id": role_id}]},
         )
-        self.actor_address = actor_address
         self.daemon = daemon
 
 
@@ -63,8 +61,9 @@ class _RecordingTriggerDispatcher:
 
 
 class _Runtime:
-    def __init__(self, actor_address: ActorAddress) -> None:
-        self.actor_address = actor_address
+    def __init__(self, *, identity_id: str, role_id: str) -> None:
+        self.identity_id = identity_id
+        self.role_id = role_id
         self.parent_prompts: list[dict[str, Any]] = []
         self.task_sys_instructions: list[dict[str, Any]] = []
 
@@ -75,16 +74,17 @@ class _Runtime:
         self.parent_prompts.append({"prompt": prompt, **kwargs})
 
     def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
-        if instruction.get("actor_target") != self.actor_address.to_payload():
+        expected = {"actor_id": self.identity_id, "role_id": self.role_id}
+        if instruction.get("actor_target") != expected:
             raise AssertionError(f"wrong task sys target: {instruction.get('actor_target')!r}")
         self.task_sys_instructions.append(instruction)
         return {"action": instruction["type"], "task_id": instruction["task_id"]}
 
 
 class _WakeHandlerDispatcher:
-    def __init__(self, actor_address: ActorAddress) -> None:
-        self.context = type("Context", (), {"actor_address": actor_address})()
-        self.runtime = _Runtime(actor_address)
+    def __init__(self, *, identity_id: str, role_id: str) -> None:
+        self.context = type("Context", (), {"actor_id": identity_id, "role": role_id})()
+        self.runtime = _Runtime(identity_id=identity_id, role_id=role_id)
         self.handler = im_wake_handler.ImMessageCreatedHandler()
         self.triggers: list[Any] = []
         self.task_sys_instructions = self.runtime.task_sys_instructions
@@ -115,13 +115,17 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return str(created["connection_key"])
 
     def test_external_send_actor_reply_to_external_visible_once_without_cursor(self) -> None:
-        actor_address = ActorAddress(
-            role_id="market",
-            actor_id=self._runtime_actor_id(role="market", label="reply-loop"),
-        )
+        actor_identity_id = self._runtime_actor_id(role="market", label="reply-loop")
         daemon = _WakeDaemon()
         router = im_http_router.ImHttpRouter(
-            actor_lister=lambda _role_id: [{"actor_address": actor_address.to_payload(), "status": "online"}],
+            actor_lister=lambda _role_id: [
+                {
+                    "identity_id": actor_identity_id,
+                    "identity": {"id": actor_identity_id, "type": "actor"},
+                    "role_id": "market",
+                    "status": "online",
+                }
+            ],
             wake_actor=daemon.wake_im_actor,
         )
         key = self._create_connection(router)
@@ -131,7 +135,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "/api/im/messages",
             json.dumps(
                 {
-                    "target_identity_id": actor_address.actor_id,
+                    "target_identity_id": actor_identity_id,
                     "content": "ping",
                 }
             ).encode("utf-8"),
@@ -144,7 +148,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(len(daemon.wake_calls), 1)
         original_message_id = sent["message"]["id"]
 
-        actor_client = im_client_module.ActorImClient(_ActorContext(actor_address, daemon))
+        actor_client = im_client_module.ActorImClient(_ActorContext(identity_id=actor_identity_id, role_id="market", daemon=daemon))
         reply = actor_client.send({"content": "pong", "reply_to": original_message_id})
 
         self.assertTrue(reply.get("ok"), msg=reply)
@@ -199,17 +203,19 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(fetched["message"]["reply_to"], original_message_id)
 
     def test_wake_bridge_submits_local_im_trigger_to_target_mailbox(self) -> None:
-        target = {"role_id": "market", "actor_id": "act-market-wake"}
+        target_identity_id = "act-market-wake"
+        target_role_id = "market"
         mailbox_calls: list[dict[str, Any]] = []
 
-        def fake_check_reachability(*, target_actor_address: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
-            self.assertEqual(target_actor_address, target)
+        def fake_check_reachability(*, target_identity_id: str, socket_path: Path | None = None) -> dict[str, Any]:
+            self.assertEqual(target_identity_id, "act-market-wake")
             self.assertIsNone(socket_path)
             return {
                 "reachability_status": "online",
-                "target_actor_address": target,
+                "target_identity_id": target_identity_id,
                 "record": {
-                    "actor_address": target,
+                    "identity_id": target_identity_id,
+                    "role_id": target_role_id,
                     "endpoint": {
                         "kind": "daemon_mailbox_socket",
                         "socket_path": "/tmp/buddyswitch-test-mailbox.sock",
@@ -226,7 +232,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {
                 "type": "im.message.created",
                 "wake_id": "imwake-1",
-                "target_actor_address": target,
+                "target_identity_id": target_identity_id,
+                "target_role_id": target_role_id,
                 "message_id": "msg-1",
                 "conversation_id": "conv-1",
                 "event_id": "imev-1",
@@ -242,7 +249,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(
             mailbox_calls[0]["params"],
             {
-                "actor_address": target,
+                "identity_id": target_identity_id,
+                "role_id": target_role_id,
                 "type": "im.message.created",
                 "payload": {"message_id": "msg-1", "conversation_id": "conv-1", "event_id": "imev-1"},
                 "origin_id": "msg-1",
@@ -252,13 +260,15 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
     def test_wake_bridge_reaches_real_mailbox_socket_and_im_handler(self) -> None:
-        target = {"role_id": "market", "actor_id": "act-market-wake"}
+        target_identity_id = "act-market-wake"
+        target_role_id = "market"
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = Path(temp_root) / "mailbox.sock"
-            dispatcher = _WakeHandlerDispatcher(ActorAddress.from_payload(target))
+            dispatcher = _WakeHandlerDispatcher(identity_id=target_identity_id, role_id=target_role_id)
             server = daemon_mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address=target,
+                local_identity_id=target_identity_id,
+                local_role_id=target_role_id,
                 handlers=[],
                 trigger_dispatcher=dispatcher,
             )
@@ -271,7 +281,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 {
                     "type": "im.message.created",
                     "wake_id": "imwake-socket",
-                    "target_actor_address": target,
+                    "target_identity_id": target_identity_id,
+                    "target_role_id": target_role_id,
                     "message_id": "msg-socket",
                     "conversation_id": "conv-socket",
                     "event_id": "imev-socket",
@@ -279,7 +290,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 check_reachability_fn=lambda **_kwargs: {
                     "reachability_status": "online",
                     "record": {
-                        "actor_address": target,
+                        "identity_id": target_identity_id,
+                        "role_id": target_role_id,
                         "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": str(socket_path)},
                     },
                 },
@@ -300,7 +312,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(len(dispatcher.task_sys_instructions), 1)
         instruction = dispatcher.task_sys_instructions[0]
         self.assertEqual(instruction["type"], "start_side")
-        self.assertEqual(instruction["actor_target"], target)
+        self.assertEqual(instruction["actor_target"], {"actor_id": target_identity_id, "role_id": target_role_id})
         frame = instruction["frame"]
         self.assertEqual(frame["kind"], "task_sys.side_frame")
         self.assertEqual(frame["source"]["type"], "im.message.created")
@@ -316,7 +328,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {
                 "type": "im.message.created",
                 "wake_id": "imwake-1",
-                "target_actor_address": {"role_id": "market", "actor_id": "act-market-offline"},
+                "target_identity_id": "act-market-offline",
+                "target_role_id": "market",
                 "message_id": "msg-1",
                 "conversation_id": "conv-1",
                 "event_id": "imev-1",

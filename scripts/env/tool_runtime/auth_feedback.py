@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from env.tool_runtime.actor_profile import Actor
 from env.tool_runtime import results as tool_results
 from env.tool_runtime import role_auth
 
@@ -19,7 +18,8 @@ def role_auth_rejection(
     *,
     tool: str,
     action: str,
-    active_actor: Actor,
+    current_identity: dict[str, Any],
+    active_role: str,
     decision: role_auth.AuthDecision,
 ) -> dict[str, Any]:
     allowed_roles = list(decision.allowed_roles)
@@ -27,8 +27,8 @@ def role_auth_rejection(
     return tool_results.rejection(
         tool=tool,
         action=_semantic_action(tool=tool, action=action),
-        active_actor=active_actor.to_payload(),
-        active_role=active_actor.role_id,
+        current_identity=current_identity,
+        active_role=active_role,
         code="E_TOOL_ROLE_AUTH",
         message="active role is not allowed to run this tool action",
         permission_boundary="tool.role_authority",

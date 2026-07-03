@@ -131,7 +131,8 @@ def ingest_track_comment(
     track_id: str,
     comment_id: str,
     thread_id: str,
-    source_actor_address: Mapping[str, Any],
+    source_identity_id: str,
+    source_role_id: str,
 ) -> dict[str, Any]:
     source_ref = {
         "track_id": _require_text(track_id, "track_id"),
@@ -146,7 +147,8 @@ def ingest_track_comment(
         "actor_target": _actor_target(actor_id=actor_id, role_id=role_id),
         "context": {
             **source_ref,
-            "source_actor_address": dict(source_actor_address),
+            "source_identity_id": _require_text(source_identity_id, "source_identity_id"),
+            "source_role_id": _require_text(source_role_id, "source_role_id"),
         },
     }
     return _result_payload(

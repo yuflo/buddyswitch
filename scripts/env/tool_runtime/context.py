@@ -18,7 +18,9 @@ from env.domain import source_refs as _source_ref_domain
 from env.domain import task_sys as _task_sys_domain
 from env.domain import track_comments as _track_comment_domain
 from env.domain import track_artifact_relations as _track_artifact_relations_domain
+from env.domain.identity import ActorIdentityProfile
 from env.domain.identity import IdentityRef
+from env.domain.identity import actor_identity
 import env_profiles
 from env_manifest import DEFAULT_MANIFEST
 from env.repos import artifacts as _artifact_repo
@@ -27,14 +29,12 @@ from env.repos import messages as _message_repo
 from env.repos import runtime_files
 from env.repos import track_comments as _track_comment_repo
 from env.repos import tracks as _track_repo
-from env.tool_runtime.actor_profile import Actor
-from env.tool_runtime.actor_profile import ActorAddress
-from env.tool_runtime.actor_profile import ActorProfile
-from env.tool_runtime.actor_profile import AuthSubject
-from env.tool_runtime.actor_profile import Role
-from env.tool_runtime.actor_profile import actor_identity_to_address
 from env.tool_runtime import daemon_client
 from env.tool_runtime import role_auth as _role_auth
+import re
+
+
+ROLE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
 def _load_registry_module():
@@ -49,12 +49,12 @@ class RuntimeObjectAccess:
     def list_tracks(self) -> list[dict[str, Any]]:
         return _track_repo.list_tracks()
 
-    def create_track(self, track_id: str, title: str, outcome: str, owner_actor: dict[str, Any], now: dict[str, Any]) -> dict[str, Any]:
+    def create_track(self, track_id: str, title: str, outcome: str, owner_identity: dict[str, Any], now: dict[str, Any]) -> dict[str, Any]:
         return _track_repo.create_track(
             track_id,
             title,
             outcome=outcome,
-            owner_actor=owner_actor,
+            owner_identity=owner_identity,
             now=now,
         )
 
@@ -69,7 +69,7 @@ class RuntimeObjectAccess:
             track_id=track_id,
             artifact_id=artifact_id,
             label=label,
-            from_actor={"actor_id": "act-pm-system", "role_id": "pm"},
+            from_identity={"id": "act-pm-system", "type": "actor"},
             summary=summary,
         )
         return result["track"], result["artifact"]
@@ -77,7 +77,7 @@ class RuntimeObjectAccess:
     def add_track_update(self, track_id: str, summary: str, kind: str, refs: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
         return _track_repo.append_track_update(
             track_id=track_id,
-            by_actor={"actor_id": "act-pm-system", "role_id": "pm"},
+            by_identity={"id": "act-pm-system", "type": "actor"},
             kind=kind,
             summary=summary,
             refs=refs,
@@ -88,7 +88,7 @@ class RuntimeObjectAccess:
             track_id=track_id,
             artifact_id=artifact_id,
             label=label,
-            from_actor={"actor_id": "act-pm-system", "role_id": "pm"},
+            from_identity={"id": "act-pm-system", "type": "actor"},
             summary=summary,
         )
         return result["track"], result["artifact"]
@@ -116,7 +116,7 @@ class RuntimeObjectAccess:
         return _artifact_repo.create_artifact_revision(
             artifact_id=artifact_id,
             title=title,
-            created_by_actor={"actor_id": "act-pm-system", "role_id": "pm"},
+            created_by_identity={"id": "act-pm-system", "type": "actor"},
             body=body,
             template=template,
             summary=summary,
@@ -156,10 +156,10 @@ class RuntimeObjectAccess:
     ) -> dict[str, Any]:
         return _track_comment_repo.create_track_comment(
             track_id=track_id,
-            by_actor={"actor_id": "act-pm-system", "role_id": "pm"},
+            by_identity={"id": "act-pm-system", "type": "actor"},
             content=content,
             reply_to=reply_to,
-            mentioned_actors=mentioned_actors,
+            mentioned_identities=mentioned_actors,
         )
 
     def list_track_comments(self, track_id: str, status: str | None) -> list[dict[str, Any]]:
@@ -180,11 +180,11 @@ class RuntimeObjectAccess:
 
 
 class ActorPrivateAccess:
-    """Active actor actor_private operations."""
+    """Current identity private file operations."""
 
-    def __init__(self, *, active_actor: dict[str, Any], active_role: str, manifest: dict[str, Any], instance_payload: dict[str, Any]) -> None:
-        self._active_actor = dict(active_actor)
-        self._active_role = active_role
+    def __init__(self, *, current_identity: IdentityRef, role_id: str, manifest: dict[str, Any], instance_payload: dict[str, Any]) -> None:
+        self._current_identity = current_identity
+        self._active_role = role_id
         self._manifest = manifest
         self._instance_payload = instance_payload
 
@@ -194,7 +194,7 @@ class ActorPrivateAccess:
         return ids
 
     def _root(self) -> Path:
-        return _actor_private_repo.ensure_active_actor_private_root(
+        return _actor_private_repo.ensure_current_identity_private_root(
             active_role=self._active_role,
             instance_payload=self._instance_payload,
         )
@@ -202,7 +202,7 @@ class ActorPrivateAccess:
     def describe(self) -> dict[str, Any]:
         return _actor_private_workspace_domain.build_actor_private_desc(
             self._active_role,
-            active_actor=self._active_actor,
+            current_identity=self._current_identity.to_payload(),
             instance_payload=self._instance_payload,
         )
 
@@ -215,7 +215,7 @@ class ActorPrivateAccess:
         max_rows = int(limit) if isinstance(limit, int) and limit > 0 else 100
         return _actor_private_repo.list_private_file_summaries(
             root=self._root(),
-            owner_actor=self._active_actor,
+            owner_identity=self._current_identity.to_payload(),
             recursive=bool(recursive),
             limit=max_rows,
             logical_prefix=prefix,
@@ -338,10 +338,15 @@ class RegistryCatalogAccess:
         return _load_registry_module().tool_catalog_errors()
 
 
-def _actor_address_payload(value: ActorAddress | dict[str, Any]) -> dict[str, Any]:
-    if isinstance(value, ActorAddress):
-        return value.to_payload()
-    return ActorAddress.from_payload(value).to_payload()
+def _actor_identity_id(value: Any, field: str) -> str:
+    return actor_identity(value).id
+
+
+def _role_id(value: Any, field: str) -> str:
+    role_id = str(value or "").strip()
+    if ROLE_ID_PATTERN.fullmatch(role_id) is None:
+        raise ValueError(f"{field} must match /^[a-z][a-z0-9-]*$/")
+    return role_id
 
 
 class DaemonAccess:
@@ -349,29 +354,32 @@ class DaemonAccess:
 
     def __init__(self, *, current_identity: IdentityRef, role_id: str, instance_json: Path) -> None:
         self.current_identity = current_identity
-        self._actor_address = actor_identity_to_address(current_identity, role_id=role_id)
+        self._role_id = role_id
         self._instance_json = instance_json
 
     def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
         return daemon_client.list_online_actors(role_id=role_id)
 
-    def check_reachability(self, *, target_actor_address: ActorAddress | dict[str, Any]) -> dict[str, Any]:
+    def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
         return daemon_client.check_reachability(
-            target_actor_address=_actor_address_payload(target_actor_address),
+            target_identity_id=_actor_identity_id(target_identity_id, "target_identity_id"),
         )
 
     def deliver_signal(
         self,
         *,
         signal_type: str,
-        target_actor_address: ActorAddress | dict[str, Any],
+        target_identity_id: str,
+        target_role_id: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         signal = {
             "signal_id": f"sig-{uuid.uuid4().hex}",
             "type": signal_type,
-            "source_actor_address": self._actor_address.to_payload(),
-            "target_actor_address": _actor_address_payload(target_actor_address),
+            "source_identity_id": self.current_identity.id,
+            "source_role_id": self._role_id,
+            "target_identity_id": _actor_identity_id(target_identity_id, "target_identity_id"),
+            "target_role_id": _role_id(target_role_id, "target_role_id"),
             "payload": dict(payload),
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
@@ -383,11 +391,13 @@ class DaemonAccess:
         track_id: str,
         comment_id: str,
         thread_id: str,
-        target_actor_address: ActorAddress | dict[str, Any],
+        target_identity_id: str,
+        target_role_id: str,
     ) -> dict[str, Any]:
         return self.deliver_signal(
             signal_type="track.comment.added",
-            target_actor_address=target_actor_address,
+            target_identity_id=target_identity_id,
+            target_role_id=target_role_id,
             payload={"track_id": track_id, "comment_id": comment_id, "thread_id": thread_id},
         )
 
@@ -437,12 +447,8 @@ class ToolContext(Mapping[str, Any]):
     """Host-owned runtime context object passed to each tool invoke."""
 
     current_identity: IdentityRef
-    active_actor: Actor
-    active_role: Role
-    actor_id: str
+    current_actor_identity_profile: ActorIdentityProfile
     role_id: str
-    actor_address: ActorAddress
-    auth_subject: AuthSubject
     instance_json: Path
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
@@ -457,8 +463,8 @@ class ToolContext(Mapping[str, Any]):
             self,
             "actor_private",
             ActorPrivateAccess(
-                active_actor=self.active_actor.to_payload(),
-                active_role=self.role_id,
+                current_identity=self.current_identity,
+                role_id=self.role_id,
                 manifest=self.manifest,
                 instance_payload=self.instance_payload,
             ),
@@ -483,23 +489,19 @@ class ToolContext(Mapping[str, Any]):
         )
 
     @classmethod
-    def from_actor_profile(
+    def from_identity_profile(
         cls,
         *,
-        actor_profile: ActorProfile,
+        actor_identity_profile: ActorIdentityProfile,
         instance_json: Path,
         instance_payload: dict[str, Any],
         manifest: dict[str, Any],
         manifest_path: Path | None = None,
     ) -> "ToolContext":
         return cls(
-            current_identity=actor_profile.current_identity,
-            active_actor=actor_profile.active_actor,
-            active_role=actor_profile.active_role,
-            actor_id=actor_profile.actor_id,
-            role_id=actor_profile.role_id,
-            actor_address=actor_profile.actor_address,
-            auth_subject=actor_profile.auth_subject,
+            current_identity=actor_identity_profile.identity,
+            current_actor_identity_profile=actor_identity_profile,
+            role_id=actor_identity_profile.role_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
             manifest=manifest,
@@ -509,7 +511,7 @@ class ToolContext(Mapping[str, Any]):
     def runtime_policy_preview(self, operation_semantics: dict[str, dict[str, Any]]) -> dict[str, Any]:
         from env.tool_runtime import role_auth
 
-        return role_auth.role_action_summary(self.auth_subject, self.manifest, operation_semantics)
+        return role_auth.role_action_summary(self.role_id, self.manifest, operation_semantics)
 
     def now(self) -> str:
         return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -521,12 +523,8 @@ class ToolContext(Mapping[str, Any]):
     def __getitem__(self, key: str) -> Any:
         if key == "current_identity":
             return self.current_identity.to_payload()
-        if key == "active_actor":
-            return self.active_actor.to_payload()
         if key == "active_role":
-            return self.active_role.role_id
-        if key == "actor_id":
-            return self.actor_id
+            return self.role_id
         if key == "role_id":
             return self.role_id
         if key == "instance_json":
@@ -541,9 +539,7 @@ class ToolContext(Mapping[str, Any]):
 
     def __iter__(self) -> Iterator[str]:
         yield "current_identity"
-        yield "active_actor"
         yield "active_role"
-        yield "actor_id"
         yield "role_id"
         yield "instance_json"
         yield "instance_payload"
@@ -551,7 +547,7 @@ class ToolContext(Mapping[str, Any]):
         yield "manifest_path"
 
     def __len__(self) -> int:
-        return 9
+        return 7
 
     def get(self, key: str, default: Any = None) -> Any:
         try:

@@ -99,7 +99,8 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         return self.triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.page.expired",
-            target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
+            target_identity_id=(target_actor_address or {"actor_id": "act-dev-browser"})["actor_id"],
+            target_role_id=(target_actor_address or {"role_id": "dev"})["role_id"],
             origin_id="schedule-1",
             correlation_id=None,
             payload={"target_id": "target-idle-1"},
@@ -472,7 +473,7 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wrong target actor", result.message)
+        self.assertIn("wrong target identity", result.message)
 
 
 class BrowserReleaseHandlerTests(unittest.TestCase):
@@ -487,7 +488,8 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         return self.triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.cockpit.release",
-            target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
+            target_identity_id=(target_actor_address or {"actor_id": "act-dev-browser"})["actor_id"],
+            target_role_id=(target_actor_address or {"role_id": "dev"})["role_id"],
             origin_id="schedule-release",
             correlation_id=None,
             payload={"reason": reason},
@@ -724,7 +726,7 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
             )
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wrong target actor", result.message)
+        self.assertIn("wrong target identity", result.message)
 
 
 if __name__ == "__main__":

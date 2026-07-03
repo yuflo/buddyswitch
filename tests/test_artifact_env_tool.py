@@ -183,8 +183,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "revision": 1,
                 "is_current": True,
                 "supersedes_artifact_id": None,
-                "created_by_actor": {"actor_id": "act-pm-artifact-normalize", "role_id": "pm"},
-                "author_actors": [{"actor_id": "act-pm-artifact-normalize", "role_id": "pm"}],
+                "created_by_identity_id": "act-pm-artifact-normalize",
+                "author_identity_ids": ["act-pm-artifact-normalize"],
                 "source_refs": None,
                 "created_at": "2026-05-22T10:00:00+08:00",
                 "updated_at": "2026-05-22T10:00:00+08:00",
@@ -202,16 +202,16 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "revision": 1,
             "is_current": True,
             "supersedes_artifact_id": None,
-            "created_by_actor": {"actor_id": "act-pm-artifact-invalid", "role_id": "pm"},
-            "author_actors": [{"actor_id": "act-pm-artifact-invalid", "role_id": "pm"}],
+            "created_by_identity_id": "act-pm-artifact-invalid",
+            "author_identity_ids": ["act-pm-artifact-invalid"],
             "source_refs": None,
             "created_at": "2026-05-22T10:00:00+08:00",
             "updated_at": "2026-05-22T10:00:00+08:00",
         }
         invalid_rows = (
-            {"attachment_id": "att-unsafe", "filename": "../escape.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_actor": {"actor_id": "act-pm-attachment", "role_id": "pm"}, "created_at": "2026-05-22T10:00:00+08:00"},
-            {"attachment_id": "att-missing-hash", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "created_by_actor": {"actor_id": "act-pm-attachment", "role_id": "pm"}, "created_at": "2026-05-22T10:00:00+08:00"},
-            {"attachment_id": "att-bad-route", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_actor": {"actor_id": "act-attachment", "role_id": ""}, "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-unsafe", "filename": "../escape.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_identity_id": "act-pm-attachment", "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-missing-hash", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "created_by_identity_id": "act-pm-attachment", "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-bad-route", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by_identity_id": "", "created_at": "2026-05-22T10:00:00+08:00"},
         )
         for row in invalid_rows:
             with self.subTest(row=row):
@@ -357,8 +357,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     expected_identity_id = self._runtime_actor_id(role=role, label=actor_id)
                     self.assertEqual(stored.get("created_by_identity_id"), expected_identity_id)
                     self.assertEqual(stored.get("author_identity_ids"), [expected_identity_id])
-                    self.assertNotIn("created_by_actor", stored)
-                    self.assertNotIn("author_actors", stored)
+                    self.assertNotIn("created_by_identity", stored)
+                    self.assertNotIn("author_identities", stored)
                     self.assertNotIn("created_by", stored)
                     self.assertNotIn("authors", stored)
 
@@ -468,14 +468,14 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(non_owner.get("permission_boundary"), "artifact.relation_scope")
 
     def test_same_role_different_actor_cannot_access_private_draft_surfaces(self) -> None:
-        owner_actor = "act-pm-draft-owner"
+        owner_identity = "act-pm-draft-owner"
         other_actor = "act-pm-draft-other"
-        owner_instance = self._instance_json(actor_id=owner_actor, role="pm")
+        owner_instance = self._instance_json(actor_id=owner_identity, role="pm")
         other_instance = self._instance_json(actor_id=other_actor, role="pm")
 
         created = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="pm",
             tool="artifact",
             action="create_revision",
@@ -494,7 +494,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         source.write_text("attachment body", encoding="utf-8")
         attached = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="pm",
             tool="artifact",
             action="attach_file",
@@ -511,7 +511,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         owner_list = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="pm",
             tool="artifact",
             action="list",
@@ -527,7 +527,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         owner_attachment = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="pm",
             tool="artifact",
             action="get_attachment",
@@ -623,7 +623,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         owner_supersede = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="pm",
             tool="artifact",
             action="create_revision",
@@ -1091,7 +1091,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = env_store.create_track(
             "track-art-revision-archived",
             "Archived Revision",
-            owner_actor={"actor_id": "act-pm-system", "role_id": "pm"},
+            owner_identity="act-pm-system",
             outcome="Archived revision outcome",
             now={"next": "seed", "blocker": None},
         )

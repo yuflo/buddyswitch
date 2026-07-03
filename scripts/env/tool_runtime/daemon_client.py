@@ -20,7 +20,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from runtime_kernel import protocol  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
+from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 
 
 CENTRAL_DAEMON_PROTOCOL = "buddyswitch-central-daemon/v1"
@@ -340,7 +340,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def register_actor(
     *,
-    actor_address: dict[str, Any],
+    identity_id: str,
+    role_id: str,
     endpoint: dict[str, Any],
     heartbeat: dict[str, Any] | None = None,
     status: str = "online",
@@ -349,7 +350,8 @@ def register_actor(
     return request_central_daemon(
         "daemon.register",
         {
-            "actor_address": actor_address,
+            "identity_id": identity_id,
+            "role_id": role_id,
             "endpoint": endpoint,
             "heartbeat": heartbeat or {"kind": "central_daemon_rpc"},
             "status": status,
@@ -358,12 +360,12 @@ def register_actor(
     )
 
 
-def unregister_actor(*, actor_address: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
-    return request_central_daemon("daemon.unregister", {"actor_address": actor_address}, socket_path=socket_path)
+def unregister_actor(*, identity_id: str, role_id: str, socket_path: Path | None = None) -> dict[str, Any]:
+    return request_central_daemon("daemon.unregister", {"identity_id": identity_id, "role_id": role_id}, socket_path=socket_path)
 
 
-def heartbeat_actor(*, actor_address: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
-    return request_central_daemon("daemon.heartbeat", {"actor_address": actor_address}, socket_path=socket_path)
+def heartbeat_actor(*, identity_id: str, socket_path: Path | None = None) -> dict[str, Any]:
+    return request_central_daemon("daemon.heartbeat", {"identity_id": identity_id}, socket_path=socket_path)
 
 
 def list_online_actors(*, role_id: str | None = None, socket_path: Path | None = None) -> dict[str, Any]:
@@ -373,10 +375,10 @@ def list_online_actors(*, role_id: str | None = None, socket_path: Path | None =
     return request_central_daemon("actor_directory.list_online", params, socket_path=socket_path)
 
 
-def check_reachability(*, target_actor_address: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
+def check_reachability(*, target_identity_id: str, socket_path: Path | None = None) -> dict[str, Any]:
     return request_central_daemon(
         "actor.check_reachability",
-        {"target_actor_address": target_actor_address},
+        {"target_identity_id": target_identity_id},
         socket_path=socket_path,
     )
 
@@ -384,6 +386,18 @@ def check_reachability(*, target_actor_address: dict[str, Any], socket_path: Pat
 def _non_empty_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
+    return value.strip()
+
+
+def _actor_identity_id(value: Any, field: str) -> str:
+    if not isinstance(value, str) or ACTOR_ID_PATTERN.fullmatch(value.strip()) is None:
+        raise ValueError(f"{field} must be a valid actor identity id")
+    return value.strip()
+
+
+def _role_id(value: Any, field: str) -> str:
+    if not isinstance(value, str) or ROLE_ID_PATTERN.fullmatch(value.strip()) is None:
+        raise ValueError(f"{field} must be a valid role id")
     return value.strip()
 
 
@@ -401,7 +415,8 @@ def wake_im_actor(
             raise ValueError("wake payload must be an object")
         if payload.get("type") != "im.message.created":
             return {"wake_status": "not_applicable", "runtime_target": "none", "error": "unsupported IM wake type"}
-        target_actor_address = ActorAddress.from_payload(payload.get("target_actor_address")).to_payload()
+        target_identity_id = _actor_identity_id(payload.get("target_identity_id"), "target_identity_id")
+        target_role_id = _role_id(payload.get("target_role_id"), "target_role_id")
         message_id = _non_empty_text(payload.get("message_id"), "message_id")
         conversation_id = _non_empty_text(payload.get("conversation_id"), "conversation_id")
         event_id = _non_empty_text(payload.get("event_id"), "event_id")
@@ -413,7 +428,7 @@ def wake_im_actor(
     mailbox_call = request_mailbox_fn or request_mailbox
     try:
         reachability = reachability_call(
-            target_actor_address=target_actor_address,
+            target_identity_id=target_identity_id,
             socket_path=socket_path,
         )
     except Exception as exc:
@@ -425,7 +440,7 @@ def wake_im_actor(
         return {
             "wake_status": "target_not_online",
             "runtime_target": "none",
-            "error": f"target actor is not online: {status}",
+            "error": f"target identity is not online: {status}",
             "reachability_status": status,
         }
 
@@ -441,7 +456,8 @@ def wake_im_actor(
         envelope = mailbox_call(
             "mailbox.local_trigger",
             {
-                "actor_address": target_actor_address,
+                "identity_id": target_identity_id,
+                "role_id": target_role_id,
                 "type": "im.message.created",
                 "payload": {
                     "message_id": message_id,

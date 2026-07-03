@@ -7,24 +7,12 @@ from typing import Any
 
 from env.services import messages as message_service
 from env.tool_runtime import results as tool_results
-from env.tool_runtime.actor_profile import ActorAddress
 
 
 class ActorImClient:
     def __init__(self, context: Any) -> None:
         self._context = context
-        self._actor = self._actor_participant()
-
-    def _actor_participant(self) -> dict[str, Any]:
-        value = getattr(self._context, "actor_address", None)
-        if isinstance(value, ActorAddress):
-            actor_address = value.to_payload()
-        elif isinstance(value, dict):
-            actor_address = ActorAddress.from_payload(value).to_payload()
-        else:
-            actor_payload = self._context.get("active_actor") if isinstance(self._context, dict) else None
-            actor_address = ActorAddress.from_payload(actor_payload).to_payload()
-        return {"kind": "actor", "actor_address": actor_address}
+        self._identity = self._current_identity_payload()
 
     def contacts(self, args: dict[str, Any]) -> dict[str, Any]:
         role = args.get("role")
@@ -49,18 +37,21 @@ class ActorImClient:
         target_identity_id = args.get("target_identity_id")
         reply_to = args.get("reply_to") if isinstance(args.get("reply_to"), str) else None
         if isinstance(target_identity_id, str) and target_identity_id.strip():
-            target_response = self._send_target_participant(target_identity_id)
+            target_response = self._send_target_identity(target_identity_id)
             if target_response.get("ok") is not True:
                 return target_response
-            target = target_response["participant"]
+            target = target_response["identity"]
+            target_role_id = target_response.get("role_id")
         elif reply_to is not None:
             target = None
+            target_role_id = None
         else:
-            target_response = self._send_target_participant(target_identity_id)
+            target_response = self._send_target_identity(target_identity_id)
             return target_response
         return message_service.send_im_message(
-            sender_participant=self._actor,
+            sender_identity=self._identity,
             to=target if isinstance(target, dict) else None,
+            target_role_id=target_role_id if isinstance(target_role_id, str) else None,
             content=str(args.get("content") or ""),
             reply_to=reply_to,
             wake_actor=self._wake_actor,
@@ -68,25 +59,25 @@ class ActorImClient:
 
     def get(self, args: dict[str, Any]) -> dict[str, Any]:
         return message_service.get_im_message(
-            participant=self._actor,
+            identity=self._identity,
             message_id=str(args.get("message_id") or ""),
         )
 
     def list(self, args: dict[str, Any]) -> dict[str, Any]:
         return message_service.read_im_events(
-            participant=self._actor,
+            identity=self._identity,
             cursor=str(args.get("cursor") or "imev-000000000000"),
             limit=args.get("limit") if isinstance(args.get("limit"), int) else 20,
             wait_ms=0,
         )
 
     def conversation(self, args: dict[str, Any]) -> dict[str, Any]:
-        target_response = self._conversation_target_participant(args.get("target_identity_id"))
+        target_response = self._conversation_target_identity(args.get("target_identity_id"))
         if target_response.get("ok") is not True:
             return target_response
         return message_service.get_im_direct_conversation(
-            participant=self._actor,
-            target=target_response["participant"],
+            identity=self._identity,
+            target=target_response["identity"],
             limit=args.get("limit") if isinstance(args.get("limit"), int) else 20,
         )
 
@@ -97,7 +88,7 @@ class ActorImClient:
                 correctable_fields=["disposition"],
             )
         return message_service.update_im_disposition(
-            participant=self._actor,
+            identity=self._identity,
             message_id=str(args.get("message_id") or ""),
             disposition=str(args.get("disposition") or ""),
             reason=args.get("reason") if isinstance(args.get("reason"), str) else None,
@@ -109,30 +100,36 @@ class ActorImClient:
             return wake(payload)
         return {"wake_status": "submitted", "runtime_target": "parent", "error": None}
 
-    def _send_target_participant(self, value: Any) -> dict[str, Any]:
-        return message_service.actor_participant_for_current_send_target(
+    def _send_target_identity(self, value: Any) -> dict[str, Any]:
+        identity_id = value.strip() if isinstance(value, str) and value.strip() else ""
+        if identity_id.startswith("ext-"):
+            return {
+                "ok": False,
+                "error": {
+                    "code": "E_IM_PAYLOAD",
+                    "message": "external target_identity_id requires reply_to conversation routing context",
+                },
+            }
+        return message_service.actor_identity_for_current_send_target(
             self._online_actor_rows(role_id=None),
             value,
             field="target_identity_id",
-            active_actor_id=self._active_actor_payload().get("actor_id"),
+            active_identity_id=self._current_identity_payload().get("id"),
         )
 
-    def _conversation_target_participant(self, value: Any) -> dict[str, Any]:
+    def _conversation_target_identity(self, value: Any) -> dict[str, Any]:
         identity_id = value.strip() if isinstance(value, str) and value.strip() else ""
         if not identity_id:
             return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "target_identity_id is required"}}
-        if identity_id == self._active_actor_payload().get("actor_id"):
+        if identity_id == self._current_identity_payload().get("id"):
             return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "target_identity_id must not be the active actor identity"}}
-        from env.repos import messages as message_repo
-
-        external = message_repo.get_im_external_participant(identity_id)
-        if external is not None:
-            return {"ok": True, "participant": external}
-        return message_service.actor_participant_for_current_send_target(
+        if identity_id.startswith("ext-"):
+            return {"ok": True, "identity": {"id": identity_id, "type": "external"}}
+        return message_service.actor_identity_for_current_send_target(
             self._online_actor_rows(role_id=None),
             identity_id,
             field="target_identity_id",
-            active_actor_id=self._active_actor_payload().get("actor_id"),
+            active_identity_id=self._current_identity_payload().get("id"),
         )
 
     def _online_actor_rows(self, *, role_id: str | None) -> list[dict[str, Any]]:
@@ -149,7 +146,7 @@ class ActorImClient:
         return tool_results.rejection(
             tool="message",
             action="message.mark",
-            active_actor=self._active_actor_payload(),
+            current_identity=self._current_identity_payload(),
             active_role=self._active_role(),
             code="E_MESSAGE_PAYLOAD",
             message=message,
@@ -166,18 +163,19 @@ class ActorImClient:
             correctable_fields=correctable_fields,
         )
 
-    def _active_actor_payload(self) -> dict[str, Any]:
-        actor_address = self._actor.get("actor_address")
-        if isinstance(actor_address, dict):
-            return dict(actor_address)
-        active_actor = self._context.get("active_actor") if isinstance(self._context, dict) else None
-        if isinstance(active_actor, dict):
-            return dict(active_actor)
-        raise ValueError("active actor address is unavailable")
+    def _current_identity_payload(self) -> dict[str, Any]:
+        value = self._context.get("current_identity") if hasattr(self._context, "get") else getattr(self._context, "current_identity", None)
+        if isinstance(value, dict) and isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
+            return {"id": value["id"], "type": value["type"]}
+        to_payload = getattr(value, "to_payload", None)
+        if callable(to_payload):
+            payload = to_payload()
+            if isinstance(payload, dict) and isinstance(payload.get("id"), str) and isinstance(payload.get("type"), str):
+                return {"id": payload["id"], "type": payload["type"]}
+        raise ValueError("current identity is unavailable")
 
     def _active_role(self) -> str:
-        active_actor = self._active_actor_payload()
-        role_id = active_actor.get("role_id")
+        role_id = self._context.get("active_role") if hasattr(self._context, "get") else getattr(self._context, "role_id", None)
         if isinstance(role_id, str) and role_id.strip():
             return role_id
         raise ValueError("active role is unavailable")

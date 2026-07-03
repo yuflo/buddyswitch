@@ -8,7 +8,7 @@ from typing import Any
 from env.repos import actor_private_files as actor_private_repo
 
 ACTOR_PRIVATE_PRIVACY_MESSAGE = (
-    "This is the active actor's private file capability. "
+    "This is the current identity's private file capability. "
     "Other actors cannot list, read, write, or delete these files. "
     "Use artifact when content must become product-readable."
 )
@@ -17,16 +17,16 @@ ACTOR_PRIVATE_PRIVACY_MESSAGE = (
 def build_actor_private_desc(
     active_role: str,
     *,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     instance_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    root = actor_private_repo.ensure_active_actor_private_root(active_role=active_role, instance_payload=instance_payload)
+    root = actor_private_repo.ensure_current_identity_private_root(active_role=active_role, instance_payload=instance_payload)
     return {
         "capability": "private_file_workspace",
-        "owner_scope": "active_actor",
-        "owner_actor": dict(active_actor),
+        "owner_scope": "current_identity",
+        "owner_identity": dict(current_identity),
         "lifetime_scope": "active_instance_workspace",
-        "visibility": "active_actor_private",
+        "visibility": "current_identity_private",
         "product_readable": False,
         "cross_actor_readable": False,
         "mutates_product_state": False,

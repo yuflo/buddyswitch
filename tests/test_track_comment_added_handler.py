@@ -158,7 +158,8 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         context_payload = (
             {
                 "signal_id": "sig-track-comment",
-                "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-track-source"},
+                "source_identity_id": "act-pm-track-source",
+                "source_role_id": "pm",
                 "created_at": "2026-06-10T00:00:00Z",
             }
             if source_context is None
@@ -167,7 +168,8 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         return self.daemon_core.daemon_triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal" if trigger_type == "track.comment.added" else "mailbox_local_trigger",
             type=trigger_type,
-            target_actor_address={"role_id": to_role, "actor_id": to_actor_id},
+            target_identity_id=to_actor_id,
+            target_role_id=to_role,
             origin_id="sig-track-comment",
             correlation_id=None,
             payload=payload if payload is not None else {},
@@ -178,7 +180,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         track = track_repo.create_track(
             track_id,
             f"Track {track_id}",
-            owner_actor={"actor_id": "act-pm-track-source", "role_id": "pm"},
+            owner_identity={"id": "act-pm-track-source", "type": "actor"},
             outcome="Track comment handler outcome",
             now={"next": "test", "blocker": None},
         )
@@ -190,26 +192,26 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self,
         *,
         track_id: str = "track-comment-handler",
-        by_actor: dict[str, str] | None = None,
-        mentioned_actors: list[dict[str, str]] | None = None,
+        by_identity: dict[str, str] | None = None,
+        mentioned_identities: list[dict[str, str]] | None = None,
         reply_to: str | None = None,
     ) -> dict[str, Any]:
         if track_repo.get_track(track_id) is None:
             self._seed_track(track_id)
-        author = by_actor or {"actor_id": "act-pm-track-source", "role_id": "pm"}
+        author = by_identity or {"id": "act-pm-track-source", "type": "actor"}
         if reply_to is not None:
             return comment_repo.reply_to_track_comment(
                 track_id=track_id,
                 reply_to=reply_to,
-                by_actor=author,
+                by_identity=author,
                 content="Reply Track comment",
-                mentioned_actors=mentioned_actors,
+                mentioned_identities=mentioned_identities,
             )
         return comment_repo.create_track_comment(
             track_id=track_id,
-            by_actor=author,
+            by_identity=author,
             content="Track comment",
-            mentioned_actors=mentioned_actors,
+            mentioned_identities=mentioned_identities,
         )
 
     def _payload_for(self, comment: dict[str, Any], *, track_id: str | None = None, thread_id: str | None = None) -> dict[str, str]:
@@ -243,7 +245,8 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertEqual(record["inbound_context"]["track_id"], str(comment["track_id"]))
         self.assertEqual(record["inbound_context"]["comment_id"], str(comment["id"]))
         self.assertEqual(record["inbound_context"]["thread_id"], str(comment["thread_id"]))
-        self.assertEqual(record["inbound_context"]["source_actor_address"], {"actor_id": "act-pm-track-source", "role_id": "pm"})
+        self.assertEqual(record["inbound_context"]["source_identity_id"], "act-pm-track-source")
+        self.assertEqual(record["inbound_context"]["source_role_id"], "pm")
         self.assertEqual(record["status"], "side_processing")
         self.assertEqual(record["active_processor"], "side")
         execute_calls = [call for call in runtime.calls if call["method"] == "execute_task_sys_instruction"]
@@ -263,10 +266,10 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "ignored")
         self.assertEqual(runtime.calls, [])
 
-    def test_track_comment_handler_rejects_trigger_for_other_actor_address(self) -> None:
+    def test_track_comment_handler_rejects_trigger_for_other_identity(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime()
-        comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         result = self.handler.handle(
             instance["context"],
@@ -276,7 +279,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wrong target actor", result.message)
+        self.assertIn("wrong target identity", result.message)
         self.assertEqual(runtime.calls, [])
 
     def test_track_comment_handler_rejects_missing_payload_ids(self) -> None:
@@ -292,7 +295,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
     def test_track_comment_handler_rejects_comment_from_wrong_track(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime()
-        comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
         self._seed_track("track-comment-other")
 
         result = self.handler.handle(
@@ -309,7 +312,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
     def test_track_comment_handler_rejects_wrong_thread_payload(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime()
-        comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         result = self.handler.handle(
             instance["context"],
@@ -325,7 +328,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
     def test_track_comment_handler_rejects_unintended_target_actor(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime()
-        comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-design-track-handler", "role_id": "design"}])
+        comment = self._seed_comment(mentioned_identities=["act-design-track-handler"])
 
         result = self.handler.handle(
             instance["context"],
@@ -344,7 +347,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self._seed_track("track-comment-archived", archived=True)
         comment = self._seed_comment(
             track_id="track-comment-archived",
-            mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}],
+            mentioned_identities=["act-dev-track-handler"],
         )
 
         result = self.handler.handle(
@@ -399,7 +402,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
             self._seed_track(track_id)
             comment = self._seed_comment(
                 track_id=track_id,
-                mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}],
+                mentioned_identities=["act-dev-track-handler"],
             )
             comment_path = (
                 state_root
@@ -432,7 +435,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
     def test_track_comment_handler_ingests_task_without_parent_prompt(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "idle", "active_turn_id": None})
-        comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         self.assertTrue(self.handler.handles(self._trigger(payload=self._payload_for(comment))))
         result = self.handler.handle(
@@ -448,7 +451,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
     def test_track_comment_handler_ignores_parent_activity_when_ingesting_task(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "running", "active_turn_id": "turn-main-1"})
-        comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         result = self.handler.handle(
             instance["context"],
@@ -464,10 +467,10 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         instance = self._instance()
         runtime = FakeDaemonRuntime()
         parent = self._seed_comment(
-            by_actor={"actor_id": "act-dev-track-handler", "role_id": "dev"},
+            by_identity={"id": "act-dev-track-handler", "type": "actor"},
         )
         reply = self._seed_comment(
-            by_actor={"actor_id": "act-pm-track-source", "role_id": "pm"},
+            by_identity={"id": "act-pm-track-source", "type": "actor"},
             reply_to=parent["id"],
         )
 
@@ -484,7 +487,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
     def test_track_comment_handler_ingests_task_when_parent_activity_is_unavailable(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "unavailable", "error": "app-server down"})
-        comment = self._seed_comment(mentioned_actors=[{"actor_id": "act-dev-track-handler", "role_id": "dev"}])
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         result = self.handler.handle(
             instance["context"],

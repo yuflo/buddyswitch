@@ -17,17 +17,16 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import daemon_core  # noqa: E402
 import task_sys_ingress  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
 
 IM_MESSAGE_CREATED_EVENT_TYPE = "im.message.created"
 
 
-def _context_actor_address(context: Any) -> ActorAddress:
-    value = getattr(context, "actor_address", None)
-    if isinstance(value, ActorAddress):
-        return value
-    return daemon_core.actor_address_for_context(context)
+def _context_identity_route(context: Any) -> dict[str, str]:
+    return {
+        "identity_id": runtime_files.require_id(getattr(context, "actor_id", ""), "context.actor_id"),
+        "role_id": runtime_files.require_id(getattr(context, "role", ""), "context.role"),
+    }
 
 
 def _payload_id(trigger: Any, field: str) -> str:
@@ -54,16 +53,19 @@ class ImMessageCreatedHandler:
         if not self.handles(trigger):
             return daemon_core.HandlerResult.ignored()
         try:
-            local_actor = _context_actor_address(context)
-            target_actor = ActorAddress.from_payload(getattr(trigger, "target_actor_address", None))
-            if target_actor != local_actor:
-                raise PermissionError("wrong target actor for IM wake")
+            local_route = _context_identity_route(context)
+            target_route = {
+                "identity_id": runtime_files.require_id(getattr(trigger, "target_identity_id", ""), "trigger.target_identity_id"),
+                "role_id": runtime_files.require_id(getattr(trigger, "target_role_id", ""), "trigger.target_role_id"),
+            }
+            if target_route != local_route:
+                raise PermissionError("wrong target identity for IM wake")
             message_id = _payload_id(trigger, "message_id")
             conversation_id = _payload_id(trigger, "conversation_id")
             event_id = _payload_id(trigger, "event_id")
             result = task_sys_ingress.ingest_im_message(
-                actor_id=target_actor.actor_id,
-                role_id=target_actor.role_id,
+                actor_id=target_route["identity_id"],
+                role_id=target_route["role_id"],
                 message_id=message_id,
                 conversation_id=conversation_id,
                 event_id=event_id,

@@ -720,7 +720,8 @@ for raw_line in sys.stdin:
         )
         server = daemon_mailbox.DaemonMailboxServer(
             socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
-            local_actor_address={"role_id": "dev", "actor_id": "act-dev-browser"},
+            local_identity_id="act-dev-browser",
+            local_role_id="dev",
             handlers=[],
             state=state,
             now=lambda: now,

@@ -530,11 +530,11 @@ class ImessageChannelController:
         choices = _pending_choices(contact)
         selected = choices.get(str(int(content)))
         if not selected:
-            if not _active_actor_id(contact):
+            if not _active_identity_id(contact):
                 self.imsg.send(route=route, text=DEFAULT_NO_ACTOR_PROMPT)
                 return {"ok": True, "status": "needs_actor"}
             return {"ok": True, "status": "ignored_invalid_choice"}
-        contact["active_actor_id"] = selected
+        contact["active_identity_id"] = selected
         self.state_store.save(state)
         self.imsg.send(route=route, text=selected)
         return {"ok": True, "status": "actor_selected", "actor_id": selected}
@@ -550,8 +550,8 @@ class ImessageChannelController:
         content: str,
         route: dict[str, Any],
     ) -> dict[str, Any]:
-        active_actor_id = _active_actor_id(contact)
-        if not active_actor_id:
+        active_identity_id = _active_identity_id(contact)
+        if not active_identity_id:
             self.state_store.save(state)
             self.imsg.send(route=route, text=DEFAULT_NO_ACTOR_PROMPT)
             return {"ok": True, "status": "needs_actor"}
@@ -561,7 +561,7 @@ class ImessageChannelController:
             return {"ok": True, "status": "duplicate"}
         response = self.api.send_message(
             connection_key=connection_key,
-            target_identity_id=active_actor_id,
+            target_identity_id=active_identity_id,
             content=content,
             reply_to=None,
         )
@@ -663,9 +663,9 @@ def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
     connection_key = payload.get("connection_key")
     if isinstance(connection_key, str) and connection_key.strip():
         contact["connection_key"] = connection_key.strip()
-    active_actor_id = payload.get("active_actor_id")
-    if isinstance(active_actor_id, str) and active_actor_id.strip():
-        contact["active_actor_id"] = active_actor_id.strip()
+    active_identity_id = payload.get("active_identity_id")
+    if isinstance(active_identity_id, str) and active_identity_id.strip():
+        contact["active_identity_id"] = active_identity_id.strip()
     contact["pending_actor_choices"] = _string_dict(payload.get("pending_actor_choices"))
     contact["seen_inbound_keys"] = _string_list(payload.get("seen_inbound_keys"))
     contact["sent_outbound_event_ids"] = _string_list(payload.get("sent_outbound_event_ids"))
@@ -759,8 +759,8 @@ def _pending_choices(contact: dict[str, Any]) -> dict[str, str]:
     return {str(key): str(value) for key, value in choices.items() if isinstance(key, (str, int)) and isinstance(value, str)}
 
 
-def _active_actor_id(contact: dict[str, Any]) -> str:
-    value = contact.get("active_actor_id")
+def _active_identity_id(contact: dict[str, Any]) -> str:
+    value = contact.get("active_identity_id")
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 

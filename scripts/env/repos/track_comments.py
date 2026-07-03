@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from env.tool_runtime.actor_profile import ActorAddress
+from env.domain.identity import IdentityRef
 from . import runtime_files
 
 _COMMENT_STATUSES = {"open", "resolved"}
@@ -29,21 +29,15 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def _normalize_actor(value: Any, field: str) -> dict[str, str]:
-    try:
-        return ActorAddress.from_payload(value).to_payload()
-    except ValueError as exc:
-        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
-
-
-def _actor_identity_id(value: Any, field: str) -> str:
-    return _normalize_actor(value, field)["actor_id"]
-
-
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
         return runtime_files.require_id(value.strip(), field)
-    return _actor_identity_id(value, field)
+    if isinstance(value, dict):
+        if isinstance(value.get("identity"), dict):
+            return IdentityRef.from_payload(value["identity"]).id
+        if isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
+            return IdentityRef.from_payload(value).id
+    raise ValueError(f"{field} must be an identity id or identity payload")
 
 
 def track_comment_file(track_id: str, comment_id: str) -> Path:
@@ -66,7 +60,7 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
     comment_id = runtime_files.require_id(comment.get("id", ""), "comment.id")
     track_id = runtime_files.require_id(comment.get("track_id"), "comment.track_id")
     by_identity_id = _identity_id(
-        comment.get("by_identity_id", comment.get("by_actor")),
+        comment.get("by_identity_id"),
         "comment.by_identity_id",
     )
     content = _require_non_empty_text(comment.get("content"), "comment.content")
@@ -88,7 +82,7 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if status not in _COMMENT_STATUSES:
         raise ValueError("comment.status must be one of open|resolved")
 
-    resolved_by_identity_id = comment.get("resolved_by_identity_id", comment.get("resolved_by_actor"))
+    resolved_by_identity_id = comment.get("resolved_by_identity_id")
     resolved_at = comment.get("resolved_at")
     resolution_summary = comment.get("resolution_summary")
     if status == "resolved":
@@ -101,7 +95,7 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
         resolution_summary = None
 
     mentioned_identity_ids = _normalize_mentioned_identity_ids(
-        comment.get("mentioned_identity_ids", comment.get("mentioned_actors", [])),
+        comment.get("mentioned_identity_ids", []),
         field="comment.mentioned_identity_ids",
     )
 
@@ -202,15 +196,15 @@ def _normalize_mentioned_identity_ids(
 def create_track_comment(
     *,
     track_id: str,
-    by_actor: dict[str, Any],
+    by_identity: dict[str, Any] | str,
     content: str,
     reply_to: str | None = None,
-    mentioned_actors: list[dict[str, Any]] | None = None,
+    mentioned_identities: list[dict[str, Any] | str] | None = None,
     thread_id: str | None = None,
     status: str = "open",
 ) -> dict[str, Any]:
     normalized_track_id = runtime_files.require_id(track_id, "track_id")
-    author_identity_id = _actor_identity_id(by_actor, "by_actor")
+    author_identity_id = _identity_id(by_identity, "by_identity")
     content_text = _require_non_empty_text(content, "content")
     if reply_to is not None:
         runtime_files.require_id(reply_to, "reply_to")
@@ -229,7 +223,7 @@ def create_track_comment(
             "by_identity_id": author_identity_id,
             "content": content_text,
             "reply_to": reply_to,
-            "mentioned_identity_ids": _normalize_mentioned_identity_ids(mentioned_actors),
+            "mentioned_identity_ids": _normalize_mentioned_identity_ids(mentioned_identities),
             "status": status,
             "created_at": runtime_files.now_iso(),
             "resolved_by_identity_id": None,
@@ -243,9 +237,9 @@ def reply_to_track_comment(
     *,
     track_id: str,
     reply_to: str,
-    by_actor: dict[str, Any],
+    by_identity: dict[str, Any] | str,
     content: str,
-    mentioned_actors: list[dict[str, Any]] | None = None,
+    mentioned_identities: list[dict[str, Any] | str] | None = None,
 ) -> dict[str, Any]:
     normalized_track_id = runtime_files.require_id(track_id, "track_id")
     normalized_reply_to = runtime_files.require_id(reply_to, "reply_to")
@@ -257,10 +251,10 @@ def reply_to_track_comment(
     parent_thread_id = _require_non_empty_text(parent.get("thread_id"), "comment.thread_id")
     return create_track_comment(
         track_id=normalized_track_id,
-        by_actor=by_actor,
+        by_identity=by_identity,
         content=content,
         reply_to=normalized_reply_to,
-        mentioned_actors=mentioned_actors,
+        mentioned_identities=mentioned_identities,
         thread_id=parent_thread_id,
     )
 
@@ -269,12 +263,12 @@ def resolve_track_comment_thread(
     *,
     track_id: str,
     comment_id: str,
-    resolved_by_actor: dict[str, Any],
+    resolved_by_identity: dict[str, Any] | str,
     resolution_summary: str,
 ) -> list[dict[str, Any]]:
     normalized_track_id = runtime_files.require_id(track_id, "track_id")
     normalized_comment_id = runtime_files.require_id(comment_id, "comment_id")
-    normalized_resolved_by_identity_id = _actor_identity_id(resolved_by_actor, "resolved_by_actor")
+    normalized_resolved_by_identity_id = _identity_id(resolved_by_identity, "resolved_by_identity")
     normalized_summary = _require_non_empty_text(resolution_summary, "resolution_summary")
 
     seed = get_track_comment(normalized_track_id, normalized_comment_id)

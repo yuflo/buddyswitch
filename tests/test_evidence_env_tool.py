@@ -110,8 +110,8 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 body="market",
                 template="brief",
                 supersedes_artifact_id=None,
-                created_by_actor=actor,
-                author_actors=[actor],
+                created_by_identity=actor,
+                author_identities=[actor],
                 source_refs=[{"type": "note", "label": "seed"}],
             )
             return artifact["id"]
@@ -148,7 +148,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(evidence.get("target_type"), "artifact")
         self.assertEqual(evidence.get("target_id"), artifact_id)
         self.assertEqual(evidence.get("issued_by_identity_id"), self._runtime_actor_id(role="market", label="act-market-evidence"))
-        self.assertNotIn("issued_by_actor", evidence)
+        self.assertNotIn("issued_by_identity", evidence)
         self.assertNotIn("active_role", evidence)
         self.assertNotIn("run_id", evidence)
 
@@ -192,7 +192,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(evidence.get("target_type"), "artifact")
         self.assertEqual(evidence.get("target_id"), artifact_id)
         self.assertEqual(evidence.get("issued_by_identity_id"), self._runtime_actor_id(role="market", label="act-market-downgrade"))
-        self.assertNotIn("issued_by_actor", evidence)
+        self.assertNotIn("issued_by_identity", evidence)
         self.assertNotIn("active_role", evidence)
         self.assertEqual(evidence.get("reason"), "Manual fallback approved.")
 
@@ -230,7 +230,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-market-readable",
             "Readable Market Track",
-            owner_actor={"actor_id": "act-market-readable", "role_id": "market"},
+            owner_identity="act-market-readable",
             outcome="Readable market outcome",
             now={"next": "seed", "blocker": None},
         )

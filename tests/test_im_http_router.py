@@ -16,26 +16,23 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 from tools.launcher import im_http_router  # noqa: E402
 
 
 class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _actor_address(self) -> dict[str, str]:
-        return ActorAddress(
-            role_id="market",
-            actor_id=self._runtime_actor_id(role="market", label="target"),
-        ).to_payload()
+    def _actor_identity(self) -> dict[str, str]:
+        identity_id = self._runtime_actor_id(role="market", label="target")
+        return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": "market"}
 
     def test_external_http_contract_send_events_get_and_mark(self) -> None:
-        actor_address = self._actor_address()
+        actor_identity = self._actor_identity()
         wake_calls: list[dict[str, object]] = []
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda role_id: [
                 {
-                    "actor_address": actor_address,
+                    **actor_identity,
                     "status": "online",
                     "last_seen_at": "2026-06-25T00:00:00Z",
                 }
@@ -89,8 +86,8 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(actors["count"], 1)
-        self.assertEqual(actors["actors"][0]["identity"], {"id": actor_address["actor_id"], "type": "actor"})
-        self.assertEqual(actors["actors"][0]["identity_id"], actor_address["actor_id"])
+        self.assertEqual(actors["actors"][0]["identity"], actor_identity["identity"])
+        self.assertEqual(actors["actors"][0]["identity_id"], actor_identity["identity_id"])
         self.assertEqual(actors["actors"][0]["role_id"], "market")
         self.assertNotIn("participant", actors["actors"][0])
         self.assertNotIn("actor_address", actors["actors"][0])
@@ -100,7 +97,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "/api/im/messages",
             json.dumps(
                 {
-                    "target_identity_id": actor_address["actor_id"],
+                    "target_identity_id": actor_identity["identity_id"],
                     "content": "ping",
                     "reply_to": None,
                 }
@@ -155,8 +152,8 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(message["message"]["content"], "ping")
 
         actor_reply = message_service.send_im_message(
-            sender_participant={"kind": "actor", "actor_address": actor_address},
-            to=auth["participant"],
+            sender_identity=actor_identity,
+            to=auth["identity"],
             content="pong",
             reply_to=message_id,
             wake_actor=lambda _payload: {"wake_status": "not_applicable"},
@@ -210,7 +207,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         status, conversation = router.handle(
             "GET",
-            f"/api/im/conversations/direct?identity_id={actor_address['actor_id']}&limit=20",
+            f"/api/im/conversations/direct?identity_id={actor_identity['identity_id']}&limit=20",
             b"",
             {"Authorization": f"Bearer {key}"},
         )

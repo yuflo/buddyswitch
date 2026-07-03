@@ -9,11 +9,11 @@ from env.repos import artifacts as artifact_repo
 from env.repos import tracks as track_repo
 
 
-def _active_actor_id(active_actor: dict[str, Any]) -> str | None:
-    if not isinstance(active_actor, dict):
+def _current_identity_id(current_identity: dict[str, Any]) -> str | None:
+    if not isinstance(current_identity, dict):
         return None
-    actor_id = active_actor.get("actor_id")
-    return actor_id if isinstance(actor_id, str) and actor_id else None
+    identity_id = current_identity.get("id")
+    return identity_id if isinstance(identity_id, str) and identity_id else None
 
 
 def _actor_payload_identity_id(value: Any) -> str | None:
@@ -27,14 +27,14 @@ def _artifact_creator_identity_id(artifact: dict[str, Any]) -> str | None:
     identity_id = artifact.get("created_by_identity_id")
     if isinstance(identity_id, str) and identity_id:
         return identity_id
-    return _actor_payload_identity_id(artifact.get("created_by_actor"))
+    return _actor_payload_identity_id(artifact.get("created_by_identity"))
 
 
 def _artifact_author_identity_ids(artifact: dict[str, Any]) -> list[str]:
     raw = artifact.get("author_identity_ids")
     if isinstance(raw, list):
         return [row for row in raw if isinstance(row, str) and row]
-    legacy = artifact.get("author_actors")
+    legacy = artifact.get("author_identities")
     if not isinstance(legacy, list):
         return []
     rows: list[str] = []
@@ -74,25 +74,25 @@ def _track_relation_ref(track: dict[str, Any], artifact_id: str) -> dict[str, An
 def assert_supersedes_target_for_revision(
     *,
     supersedes_artifact_id: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
 ) -> dict[str, Any]:
     artifact = artifact_repo.get_artifact(supersedes_artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {supersedes_artifact_id}")
     if not bool(artifact.get("is_current")):
         raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
-    decision = artifact_read_decision(artifact, active_actor)
+    decision = artifact_read_decision(artifact, current_identity)
     if not bool(decision.get("allowed")):
         raise ValueError("supersedes_artifact_id must reference a current readable artifact")
     return artifact
 
 
-def artifact_read_decision(artifact: dict[str, Any], active_actor: dict[str, Any]) -> dict[str, Any]:
+def artifact_read_decision(artifact: dict[str, Any], current_identity: dict[str, Any]) -> dict[str, Any]:
     artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
-    owner_actor_id = _artifact_creator_identity_id(artifact)
-    active_actor_id = _active_actor_id(active_actor)
+    owner_identity_id = _artifact_creator_identity_id(artifact)
+    current_identity_id = _current_identity_id(current_identity)
 
-    if isinstance(owner_actor_id, str) and owner_actor_id == active_actor_id:
+    if isinstance(owner_identity_id, str) and owner_identity_id == current_identity_id:
         return {
             "allowed": True,
             "artifact_id": artifact_id,
@@ -162,11 +162,11 @@ def artifact_read_decision(artifact: dict[str, Any], active_actor: dict[str, Any
 
 def artifact_read_decision_for_track(
     artifact: dict[str, Any],
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     *,
     track_id: str,
 ) -> dict[str, Any]:
-    del active_actor
+    del current_identity
     artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
     track = track_repo.get_track(track_id)
     if not isinstance(track, dict):
@@ -215,9 +215,9 @@ def artifact_read_decision_for_track(
 
 def artifact_summary_row(
     artifact: dict[str, Any],
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
 ) -> dict[str, Any]:
-    decision = artifact_read_decision(artifact, active_actor)
+    decision = artifact_read_decision(artifact, current_identity)
     relation, currentness = _relation_and_currentness_for_decision(artifact=artifact, decision=decision)
     return {
         "id": artifact.get("id"),
@@ -235,7 +235,7 @@ def artifact_summary_row(
         "attachments": attachment_summary_rows(artifact),
         "revision": artifact.get("revision"),
         "currentness": currentness,
-        "readable_by_active_actor": bool(decision.get("allowed")),
+        "readable_by_current_identity": bool(decision.get("allowed")),
         "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
         "updated_at": artifact.get("updated_at"),
         "created_at": artifact.get("created_at"),
@@ -274,7 +274,7 @@ def attachment_summary_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
                 "content_type": row.get("content_type"),
                 "size_bytes": row.get("size_bytes"),
                 "sha256": row.get("sha256"),
-                "created_by_identity_id": row.get("created_by_identity_id") or _actor_payload_identity_id(row.get("created_by_actor")),
+                "created_by_identity_id": row.get("created_by_identity_id") or _actor_payload_identity_id(row.get("created_by_identity")),
                 "created_at": row.get("created_at"),
             }
         )
@@ -283,14 +283,14 @@ def attachment_summary_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
 
 def artifact_list_row(
     artifact: dict[str, Any],
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     *,
     comment_counts: dict[str, int] | None = None,
     relation_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     from env.domain import source_refs as source_refs_domain
 
-    decision = artifact_read_decision(artifact, active_actor)
+    decision = artifact_read_decision(artifact, current_identity)
     relation, currentness = _relation_and_currentness_for_decision(artifact=artifact, decision=decision)
     counts = comment_counts or {}
     backlinks = relation_counts or {}
@@ -317,7 +317,7 @@ def artifact_list_row(
     }
 
 
-def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[dict[str, Any]]:
+def current_material_rows_for_track(track_id: str, current_identity: dict[str, Any]) -> list[dict[str, Any]]:
     track = track_repo.get_track(track_id)
     if not isinstance(track, dict) or track.get("archived_at") is not None:
         return []
@@ -332,7 +332,7 @@ def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any])
         if not isinstance(artifact_id, str) or not artifact_id:
             continue
         artifact = artifact_repo.get_artifact(artifact_id)
-        decision = artifact_read_decision(artifact, active_actor) if isinstance(artifact, dict) else {"allowed": False}
+        decision = artifact_read_decision(artifact, current_identity) if isinstance(artifact, dict) else {"allowed": False}
         rows.append(
             {
                 "artifact_id": artifact_id,
@@ -342,7 +342,7 @@ def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any])
                 "summary": ref.get("summary", ""),
                 "currentness": "current",
                 "created_at": ref.get("created_at"),
-                "readable_by_active_actor": bool(decision.get("allowed")),
+                "readable_by_current_identity": bool(decision.get("allowed")),
                 "relation": "track_material" if bool(decision.get("allowed")) else "none",
             }
         )
@@ -351,7 +351,7 @@ def current_material_rows_for_track(track_id: str, active_actor: dict[str, Any])
     return rows
 
 
-def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[dict[str, Any]]:
+def proof_rows_for_track(track_id: str, current_identity: dict[str, Any]) -> list[dict[str, Any]]:
     track = track_repo.get_track(track_id)
     if not isinstance(track, dict) or track.get("archived_at") is not None:
         return []
@@ -366,7 +366,7 @@ def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[di
         if not isinstance(artifact_id, str) or not artifact_id:
             continue
         artifact = artifact_repo.get_artifact(artifact_id)
-        decision = artifact_read_decision(artifact, active_actor) if isinstance(artifact, dict) else {"allowed": False}
+        decision = artifact_read_decision(artifact, current_identity) if isinstance(artifact, dict) else {"allowed": False}
         rows.append(
             {
                 "artifact_id": artifact_id,
@@ -376,7 +376,7 @@ def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[di
                 "summary": ref.get("summary", ""),
                 "currentness": "proof",
                 "created_at": ref.get("created_at"),
-                "readable_by_active_actor": bool(decision.get("allowed")),
+                "readable_by_current_identity": bool(decision.get("allowed")),
                 "relation": "track_proof" if bool(decision.get("allowed")) else "none",
             }
         )
@@ -388,7 +388,7 @@ def proof_rows_for_track(track_id: str, active_actor: dict[str, Any]) -> list[di
 def artifact_ref_decision_for_track_update(
     *,
     artifact_id: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     track_id: str,
 ) -> dict[str, Any]:
     artifact = artifact_repo.get_artifact(artifact_id)
@@ -398,7 +398,7 @@ def artifact_ref_decision_for_track_update(
             "message": f"artifact not found: {artifact_id}",
         }
 
-    decision = artifact_read_decision(artifact, active_actor)
+    decision = artifact_read_decision(artifact, current_identity)
     if not bool(decision.get("allowed")):
         why = str(decision.get("why") or "artifact is not readable for track updates")
         return {

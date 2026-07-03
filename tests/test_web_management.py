@@ -415,7 +415,8 @@ class WebManagementUnitTests(unittest.TestCase):
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
         payload = {
             "type": "im.message.created",
-            "target_actor_address": {"role_id": "pm", "actor_id": "act-pm-demo"},
+            "target_identity_id": "act-pm-demo",
+            "target_role_id": "pm",
             "message_id": "msg-1",
             "conversation_id": "conv-1",
             "event_id": "imev-1",
@@ -1093,9 +1094,9 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
     def _identity_path(self) -> Path:
         return self.runtime_state_root / "buddyswitch" / "local" / "web-management" / "im-session.json"
 
-    def _participant_files(self) -> list[Path]:
-        participants_dir = self.runtime_state_root / "im" / "participants"
-        return sorted(participants_dir.glob("*.json")) if participants_dir.is_dir() else []
+    def _external_identity_files(self) -> list[Path]:
+        identities_dir = self.runtime_state_root / "buddyswitch" / "objects" / "identities" / "externals"
+        return sorted(identities_dir.glob("*.json")) if identities_dir.is_dir() else []
 
     @staticmethod
     def _instance_list_for_actor_addresses(actor_addresses: list[dict[str, str]]) -> dict[str, object]:
@@ -1151,7 +1152,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertNotIn("connection_key", second_payload)
         self.assertNotIn("event_cursor", first_payload)
         self.assertNotIn("event_cursor", second_payload)
-        self.assertEqual(len(self._participant_files()), 1)
+        self.assertEqual(len(self._external_identity_files()), 1)
         identity = json.loads(self._identity_path().read_text(encoding="utf-8"))
         self.assertEqual(identity["client_kind"], "web-management")
         self.assertEqual(identity["display_name"], "BuddySwitch Web")
@@ -1180,7 +1181,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(reused_status, 200)
         self.assertNotEqual(replaced_payload["identity"]["id"], first_external_id)
         self.assertEqual(replaced_payload["identity"], reused_payload["identity"])
-        self.assertEqual(len(self._participant_files()), 2)
+        self.assertEqual(len(self._external_identity_files()), 2)
 
     def test_browser_style_im_routes_send_read_fetch_ack_and_restore_history_without_browser_token(self) -> None:
         """Browser-style Web request sends actor-directed IM through /api/im/messages, actor reply becomes visible through /api/im/events, browser fetches the reply through /api/im/messages/<id>, browser acks through /api/im/events/ack, and direct conversation shows both messages without exposing connection_key."""
@@ -1193,7 +1194,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         service = self._service(runner)
         status, session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(status, 200)
-        web_participant = {"kind": "external", "external_id": session["identity"]["id"]}
+        web_identity = session["identity"]
 
         with mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
@@ -1220,8 +1221,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         sent_message_id = sent["message"]["id"]
 
         reply = message_service.send_im_message(
-            sender_participant={"kind": "actor", "actor_address": actor_address},
-            to=web_participant,
+            sender_identity={"id": actor_address["actor_id"], "type": "actor"},
+            to=web_identity,
             content="pong",
             reply_to=sent_message_id,
             wake_actor=lambda _payload: {"wake_status": "not_applicable"},
@@ -1295,7 +1296,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         service = self._service(runner)
         session_status, session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(session_status, 200)
-        web_participant = {"kind": "external", "external_id": session["identity"]["id"]}
+        web_identity = session["identity"]
         sent_by_actor: dict[str, dict[str, object]] = {}
         for actor_address, content in (
             (market_actor, "market ping"),
@@ -1321,8 +1322,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             (dev_actor, "dev pong"),
         ):
             reply = message_service.send_im_message(
-                sender_participant={"kind": "actor", "actor_address": actor_address},
-                to=web_participant,
+                sender_identity={"id": actor_address["actor_id"], "type": "actor"},
+                to=web_identity,
                 content=content,
                 reply_to=sent_by_actor[actor_address["actor_id"]]["message"]["id"],
                 wake_actor=lambda _payload: {"wake_status": "not_applicable"},
@@ -1338,7 +1339,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         self.assertEqual(status, 200, msg=events)
         self.assertEqual(
-            [event["from_identity_id"] for event in events["events"]],
+            [event["sender_identity"]["id"] for event in events["events"]],
             [market_actor["actor_id"], dev_actor["actor_id"]],
         )
         self.assertNotIn("messages", events)
@@ -1346,7 +1347,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         status, repeated = service.handle_api("GET", "/api/im/events?wait_ms=0&limit=50", b"", {})
         self.assertEqual(status, 200, msg=repeated)
         self.assertEqual(
-            [event["from_identity_id"] for event in repeated["events"]],
+            [event["sender_identity"]["id"] for event in repeated["events"]],
             [market_actor["actor_id"], dev_actor["actor_id"]],
         )
 
@@ -1437,12 +1438,13 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         from env.repos import tracks as track_repo
 
         actor = {"role_id": "pm", "actor_id": "act-pm-demo"}
+        actor_id = actor["actor_id"]
         track_repo.save_track(
             {
                 "id": "track-alpha",
                 "title": "Actor console",
                 "outcome": "Ship actor-centered Web management.",
-                "owner_actor": actor,
+                "owner_identity_id": actor_id,
                 "state": "active",
                 "now": {"next": "Implement Web DTOs.", "blocker": None},
                 "acceptance_criteria": ["Actor is the primary object."],
@@ -1455,7 +1457,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                         "role": "material",
                         "label": "Brief",
                         "template": "markdown",
-                        "from_actor": actor,
+                        "from_identity_id": actor_id,
                         "summary": "Source brief.",
                         "current": True,
                         "created_at": "2026-06-26T09:00:00Z",
@@ -1467,7 +1469,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                         "role": "proof",
                         "label": "Plan",
                         "template": "markdown",
-                        "from_actor": actor,
+                        "from_identity_id": actor_id,
                         "summary": "Implementation plan.",
                         "current": True,
                         "created_at": "2026-06-26T09:10:00Z",
@@ -1476,7 +1478,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "updates": [
                     {
                         "id": "upd-plan",
-                        "by_actor": actor,
+                        "by_identity_id": actor_id,
                         "summary": "Phase two boundary confirmed.",
                         "kind": "decision",
                         "refs": [{"type": "artifact", "id": "artifact-proof"}],
@@ -1493,7 +1495,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "id": "track-archived",
                 "title": "Archived work",
                 "outcome": "Do not show archived Track pages.",
-                "owner_actor": actor,
+                "owner_identity_id": actor_id,
                 "state": "active",
                 "now": {"next": "Archived.", "blocker": None},
                 "acceptance_criteria": [],
@@ -1510,13 +1512,13 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "id": "comment-root",
                 "track_id": "track-alpha",
                 "thread_id": "thread-open",
-                "by_actor": {"role_id": "dev", "actor_id": "act-dev-demo"},
+                "by_identity_id": "act-dev-demo",
                 "content": "Need Track detail to include comments.",
                 "reply_to": None,
-                "mentioned_actors": [actor],
+                "mentioned_identity_ids": [actor_id],
                 "status": "open",
                 "created_at": "2026-06-26T10:01:00Z",
-                "resolved_by_actor": None,
+                "resolved_by_identity_id": None,
                 "resolved_at": None,
                 "resolution_summary": None,
             }
@@ -1526,13 +1528,13 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "id": "comment-reply",
                 "track_id": "track-alpha",
                 "thread_id": "thread-open",
-                "by_actor": actor,
+                "by_identity_id": actor_id,
                 "content": "Comments stay inside Track detail for phase two.",
                 "reply_to": "comment-root",
-                "mentioned_actors": [],
+                "mentioned_identity_ids": [],
                 "status": "open",
                 "created_at": "2026-06-26T10:02:00Z",
-                "resolved_by_actor": None,
+                "resolved_by_identity_id": None,
                 "resolved_at": None,
                 "resolution_summary": None,
             }
@@ -1542,13 +1544,13 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "id": "comment-resolved",
                 "track_id": "track-alpha",
                 "thread_id": "thread-resolved",
-                "by_actor": actor,
+                "by_identity_id": actor_id,
                 "content": "Resolved discussion.",
                 "reply_to": None,
-                "mentioned_actors": [],
+                "mentioned_identity_ids": [],
                 "status": "resolved",
                 "created_at": "2026-06-26T10:03:00Z",
-                "resolved_by_actor": actor,
+                "resolved_by_identity_id": actor_id,
                 "resolved_at": "2026-06-26T10:04:00Z",
                 "resolution_summary": "Closed.",
             }
@@ -1607,10 +1609,8 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         self.assertEqual(status, 200, msg=payload)
         wake_im_actor.assert_called_once()
-        self.assertEqual(
-            wake_im_actor.call_args.args[0]["target_actor_address"],
-            {"actor_id": target_identity_id, "role_id": "market"},
-        )
+        self.assertEqual(wake_im_actor.call_args.args[0]["target_identity_id"], target_identity_id)
+        self.assertEqual(wake_im_actor.call_args.args[0]["target_role_id"], "market")
 
     def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
         from env.domain import task_sys

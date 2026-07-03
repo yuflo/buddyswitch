@@ -89,12 +89,12 @@ def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context
     if not unknown:
         return None
     message = f"unsupported payload fields: {', '.join(unknown)}"
-    active_actor = context.get("active_actor") if isinstance(context.get("active_actor"), dict) else {}
+    current_identity = context.get("current_identity") if isinstance(context.get("current_identity"), dict) else {}
     active_role = context.get("active_role") if isinstance(context.get("active_role"), str) else ""
     return tool_results.rejection(
         tool="message",
         action=f"message.{action}",
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_MESSAGE_PAYLOAD",
         message=message,

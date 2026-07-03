@@ -12,7 +12,7 @@ from env.repos import runtime_files
 from env.repos import tracks as track_repo
 from env.repos import track_comments as track_comment_repo
 from env.domain import track_artifact_relations as track_artifact_relations_domain
-from env.tool_runtime.actor_profile import ActorAddress
+from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN
 
 VALID_TRACK_STATE = ("active", "blocked", "done")
 VALID_UPDATE_KIND = ("progress", "decision", "blocker")
@@ -273,17 +273,24 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
 
 def _actor_address_for_role(role_id: str) -> dict[str, str]:
     normalized_role = _require_non_empty_text(role_id, "role_id")
-    return ActorAddress(
-        role_id=normalized_role,
-        actor_id=f"act-{normalized_role}-legacy",
-    ).to_payload()
+    if ROLE_ID_PATTERN.fullmatch(normalized_role) is None:
+        raise ValueError("role_id must match /^[a-z][a-z0-9-]*$/")
+    return {"actor_id": f"act-{normalized_role}-legacy", "role_id": normalized_role}
 
 
 def _message_actor_payload(value: Any, field: str) -> dict[str, str]:
-    try:
-        return ActorAddress.from_payload(value).to_payload()
-    except Exception as exc:
-        raise ValueError(f"{field} must be a valid ActorAddress: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} must be an actor address object")
+    extra_keys = set(value) - {"actor_id", "role_id"}
+    if extra_keys:
+        raise ValueError(f"{field} contains unsupported fields: {sorted(extra_keys)}")
+    actor_id = value.get("actor_id")
+    role_id = value.get("role_id")
+    if not isinstance(actor_id, str) or ACTOR_ID_PATTERN.fullmatch(actor_id.strip()) is None:
+        raise ValueError(f"{field}.actor_id must be a valid actor identity id")
+    if not isinstance(role_id, str) or ROLE_ID_PATTERN.fullmatch(role_id.strip()) is None:
+        raise ValueError(f"{field}.role_id must be a valid role id")
+    return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
 
 
 def validate_message(message: dict[str, Any]) -> dict[str, Any]:
@@ -428,7 +435,7 @@ def create_track(
     track_id: str,
     title: str,
     *,
-    owner_actor: dict[str, Any],
+    owner_identity: dict[str, Any] | str,
     outcome: str,
     now: dict[str, Any],
     acceptance_criteria: list[str] | None = None,
@@ -438,7 +445,7 @@ def create_track(
         track_id,
         title,
         outcome=outcome,
-        owner_actor=owner_actor,
+        owner_identity=owner_identity,
         now=now,
         acceptance_criteria=acceptance_criteria,
         non_goals=non_goals,
@@ -466,24 +473,24 @@ def create_artifact_revision(
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
     if created_by not in _KNOWN_ROLE_IDS:
         raise ValueError("created_by must be one of known role ids")
-    creator_actor = _actor_address_for_role(created_by)
-    author_rows: list[dict[str, str]] = [creator_actor]
+    creator_identity_id = _actor_address_for_role(created_by)["actor_id"]
+    author_rows: list[str] = [creator_identity_id]
     if isinstance(authors, list):
         for row in authors:
             if isinstance(row, str) and row in _KNOWN_ROLE_IDS:
-                actor = _actor_address_for_role(row)
-                if actor not in author_rows:
-                    author_rows.append(actor)
+                identity_id = _actor_address_for_role(row)["actor_id"]
+                if identity_id not in author_rows:
+                    author_rows.append(identity_id)
     return artifact_repo.create_artifact_revision(
         artifact_id=artifact_id,
         title=title,
-        created_by_actor=creator_actor,
+        created_by_identity=creator_identity_id,
         body=body,
         template=template,
         summary=summary,
         source_refs=source_refs,
         supersedes_artifact_id=supersedes_artifact_id,
-        author_actors=author_rows,
+        author_identities=author_rows,
     )
 
 
@@ -503,7 +510,7 @@ def publish_track_material(
         track_id=track_id,
         artifact_id=artifact_id,
         label=label,
-        from_actor=_actor_address_for_role(from_role),
+        from_identity=_actor_address_for_role(from_role)["actor_id"],
         summary=summary,
     )
     return result["track"], result["artifact"], result["superseded_artifact_id"]
@@ -521,7 +528,7 @@ def publish_track_proof(
         track_id=track_id,
         artifact_id=artifact_id,
         label=label,
-        from_actor=_actor_address_for_role(from_role),
+        from_identity=_actor_address_for_role(from_role)["actor_id"],
         summary=summary,
     )
     return result["track"], result["artifact"], result["superseded_artifact_id"]
@@ -626,8 +633,8 @@ def save_message(message: dict[str, Any]) -> dict[str, Any]:
 
 def create_message(
     *,
-    from_actor_address: dict[str, Any] | ActorAddress | None = None,
-    to_actor_address: dict[str, Any] | ActorAddress | None = None,
+    from_actor_address: dict[str, Any] | None = None,
+    to_actor_address: dict[str, Any] | None = None,
     from_role: str | None = None,
     to_role: str | None = None,
     content: str,
@@ -698,7 +705,7 @@ def create_track_comment(
     else:
         author = by_role if isinstance(by_role, str) and by_role.strip() else author_role
         if not isinstance(author, str) or not author.strip():
-            raise ValueError("by_actor must be an ActorAddress payload")
+            raise ValueError("by_actor must be an actor address payload")
         author_actor = _actor_address_for_role(author)
     if isinstance(reply_to, str) and reply_to.strip():
         return track_comment_repo.reply_to_track_comment(

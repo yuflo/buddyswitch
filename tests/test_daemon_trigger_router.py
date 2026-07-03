@@ -106,14 +106,15 @@ class DaemonTriggerRouterTests(unittest.TestCase):
         )
         return {"context": context, "state": state}
 
-    def _actor_address(self) -> dict[str, str]:
-        return {"role_id": "dev", "actor_id": "act-dev-daemon"}
+    def _identity_route(self) -> dict[str, str]:
+        return {"identity_id": "act-dev-daemon", "role_id": "dev"}
 
     def _trigger(self, *, trigger_type: str = "example.ready") -> Any:
         return self.triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal",
             type=trigger_type,
-            target_actor_address=self._actor_address(),
+            target_identity_id="act-dev-daemon",
+            target_role_id="dev",
             origin_id="sig-readable",
             correlation_id="corr-readable",
             payload={"message_id": "msg-readable"},
@@ -125,7 +126,8 @@ class DaemonTriggerRouterTests(unittest.TestCase):
 
         self.assertEqual(trigger.source, "mailbox_cross_actor_signal")
         self.assertEqual(trigger.type, "example.ready")
-        self.assertEqual(trigger.target_actor_address, self._actor_address())
+        self.assertEqual(trigger.target_identity_id, "act-dev-daemon")
+        self.assertEqual(trigger.target_role_id, "dev")
         self.assertEqual(trigger.origin_id, "sig-readable")
         self.assertEqual(trigger.correlation_id, "corr-readable")
         self.assertEqual(trigger.payload, {"message_id": "msg-readable"})
@@ -142,12 +144,14 @@ class DaemonTriggerRouterTests(unittest.TestCase):
 
         trigger = self.triggers.normalize_app_server_notification(
             notification,
-            target_actor_address=self._actor_address(),
+            target_identity_id="act-dev-daemon",
+            target_role_id="dev",
         )
 
         self.assertEqual(trigger.source, "app_server_notification")
         self.assertEqual(trigger.type, "app_server.turn_completed")
-        self.assertEqual(trigger.target_actor_address, self._actor_address())
+        self.assertEqual(trigger.target_identity_id, "act-dev-daemon")
+        self.assertEqual(trigger.target_role_id, "dev")
         self.assertEqual(trigger.origin_id, "turn-user-1")
         self.assertEqual(trigger.payload, notification["params"])
         self.assertEqual(
@@ -164,8 +168,10 @@ class DaemonTriggerRouterTests(unittest.TestCase):
         signal = {
             "signal_id": "sig-readable",
             "type": "example.ready",
-            "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
-            "target_actor_address": self._actor_address(),
+            "source_identity_id": "act-pm-daemon",
+            "source_role_id": "pm",
+            "target_identity_id": "act-dev-daemon",
+            "target_role_id": "dev",
             "payload": {"message_id": "msg-readable"},
             "created_at": "2026-05-30T00:00:00Z",
         }
@@ -174,14 +180,16 @@ class DaemonTriggerRouterTests(unittest.TestCase):
 
         self.assertEqual(trigger.source, "mailbox_cross_actor_signal")
         self.assertEqual(trigger.type, "example.ready")
-        self.assertEqual(trigger.target_actor_address, self._actor_address())
+        self.assertEqual(trigger.target_identity_id, "act-dev-daemon")
+        self.assertEqual(trigger.target_role_id, "dev")
         self.assertEqual(trigger.origin_id, "sig-readable")
         self.assertEqual(trigger.payload, {"message_id": "msg-readable"})
         self.assertEqual(
             trigger.source_context,
             {
                 "signal_id": "sig-readable",
-                "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
+                "source_identity_id": "act-pm-daemon",
+                "source_role_id": "pm",
                 "created_at": "2026-05-30T00:00:00Z",
             },
         )

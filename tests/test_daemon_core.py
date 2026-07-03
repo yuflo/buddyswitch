@@ -72,7 +72,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
         root.mkdir(parents=True, exist_ok=True)
         return root
 
-    def test_daemon_registration_projects_actor_address_and_registry_facts(self) -> None:
+    def test_daemon_registration_projects_identity_route_and_registry_facts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = self._instance_root(temp_root)
             workspace_dir = instance_root / "workspace"
@@ -94,29 +94,33 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 encoding="utf-8",
             )
             context = self.core.load_daemon_context(instance_json)
-            actor_address = self.core.actor_address_for_context(context)
+            identity_route = self.core.identity_route_for_context(context)
             calls: list[dict[str, Any]] = []
             original_register = self.core.daemon_client.register_actor
 
             def fake_register_actor(**kwargs: Any) -> dict[str, Any]:
                 calls.append(kwargs)
-                return {"record": {"actor_address": kwargs["actor_address"], "endpoint": kwargs["endpoint"]}}
+                return {
+                    "record": {
+                        "identity_id": kwargs["identity_id"],
+                        "role_id": kwargs["role_id"],
+                        "endpoint": kwargs["endpoint"],
+                    }
+                }
 
             self.addCleanup(setattr, self.core.daemon_client, "register_actor", original_register)
             self.core.daemon_client.register_actor = fake_register_actor
 
-            row = self.core.register_daemon_actor(context, actor_address)["record"]
+            row = self.core.register_daemon_actor(context, identity_route)["record"]
 
-            self.assertEqual(
-                row["actor_address"],
-                {"role_id": "dev", "actor_id": "act-dev-daed00000001"},
-            )
+            self.assertEqual(row["identity_id"], "act-dev-daed00000001")
+            self.assertEqual(row["role_id"], "dev")
             self.assertEqual(row["endpoint"]["kind"], "daemon_mailbox_socket")
             self.assertEqual(row["endpoint"]["socket_path"], str(self.core.daemon_mailbox.mailbox_socket_path(context.instance_root)))
             self.assertEqual(calls[0]["heartbeat"], {"kind": "central_daemon_rpc"})
             self.assertEqual(calls[0]["socket_path"], self.core.central_daemon_socket_path(context))
 
-    def test_daemon_reachability_client_uses_explicit_actor_address(self) -> None:
+    def test_daemon_reachability_client_uses_explicit_identity_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = self._instance_root(temp_root)
             workspace_dir = instance_root / "workspace"
@@ -138,9 +142,9 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 encoding="utf-8",
             )
             context = self.core.load_daemon_context(instance_json)
-            actor_address = self.core.actor_address_for_context(context)
+            identity_route = self.core.identity_route_for_context(context)
 
-            self.assertEqual(actor_address.to_payload(), {"role_id": "dev", "actor_id": "act-dev-daed00000001"})
+            self.assertEqual(identity_route, {"identity_id": "act-dev-daed00000001", "role_id": "dev"})
             self.assertNotIn("to_role", self.core.register_daemon_actor.__code__.co_varnames)
 
     def test_missing_state_initializes_empty_valid_state(self) -> None:
@@ -662,15 +666,15 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.addCleanup(setattr, self.core, "_terminate_pid", original_terminate)
             self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
             self.core._terminate_pid = lambda pid: terminated.append(pid) or True
-            self.core.unregister_daemon_actor = lambda context, actor_address: unregistered.append(
-                {"context": context, "actor_address": actor_address.to_payload()}
-            ) or {"record": {"actor_address": actor_address.to_payload()}}
+            self.core.unregister_daemon_actor = lambda context, identity_route: unregistered.append(
+                {"context": context, "identity_route": dict(identity_route)}
+            ) or {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
             payload = self.core.stop_daemon(instance["instance_json"])
 
             self.assertTrue(payload["terminated"])
             self.assertEqual(terminated, [4321])
-            self.assertEqual(unregistered[0]["actor_address"], {"role_id": "dev", "actor_id": "act-dev-daed00000001"})
+            self.assertEqual(unregistered[0]["identity_route"], {"identity_id": "act-dev-daed00000001", "role_id": "dev"})
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
 
     def test_stop_daemon_does_not_fail_when_central_unregister_is_unavailable(self) -> None:
@@ -970,17 +974,17 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             calls["mailbox_started"].append(kwargs)
             return FakeMailbox()
 
-        def fake_register(context: object, actor_address: object) -> dict[str, object]:
-            calls["registered"].append(getattr(actor_address, "to_payload")())
-            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+        def fake_register(context: object, identity_route: dict[str, str]) -> dict[str, object]:
+            calls["registered"].append(dict(identity_route))
+            return {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
-        def fake_heartbeat(context: object, actor_address: object) -> dict[str, object]:
-            calls["heartbeat"].append(getattr(actor_address, "to_payload")())
-            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+        def fake_heartbeat(context: object, identity_route: dict[str, str]) -> dict[str, object]:
+            calls["heartbeat"].append(dict(identity_route))
+            return {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
-        def fake_unregister(context: object, actor_address: object) -> dict[str, object]:
-            calls["unregistered"].append(getattr(actor_address, "to_payload")())
-            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+        def fake_unregister(context: object, identity_route: dict[str, str]) -> dict[str, object]:
+            calls["unregistered"].append(dict(identity_route))
+            return {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
         self.addCleanup(setattr, self.core, "start_daemon_mailbox", original_start_mailbox)
         self.addCleanup(setattr, self.core, "register_daemon_actor", original_register)

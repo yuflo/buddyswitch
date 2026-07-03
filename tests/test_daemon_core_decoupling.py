@@ -172,9 +172,15 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         self.addCleanup(setattr, daemon_core, "heartbeat_daemon_actor", original_heartbeat)
         self.addCleanup(setattr, daemon_core, "unregister_daemon_actor", original_unregister)
         daemon_core.start_daemon_mailbox = lambda **_kwargs: FakeMailbox()
-        daemon_core.register_daemon_actor = lambda _context, actor_address: {"record": {"actor_address": actor_address.to_payload()}}
-        daemon_core.heartbeat_daemon_actor = lambda _context, actor_address: {"record": {"actor_address": actor_address.to_payload()}}
-        daemon_core.unregister_daemon_actor = lambda _context, actor_address: {"record": {"actor_address": actor_address.to_payload()}}
+        daemon_core.register_daemon_actor = lambda _context, identity_route: {
+            "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
+        }
+        daemon_core.heartbeat_daemon_actor = lambda _context, identity_route: {
+            "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
+        }
+        daemon_core.unregister_daemon_actor = lambda _context, identity_route: {
+            "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
+        }
 
     def test_daemon_core_imports_without_task_domain_modules(self) -> None:
         module = _load_module(DAEMON_CORE_PATH, block_task_imports=True)
@@ -226,29 +232,31 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             daemon_core = _load_module(DAEMON_CORE_PATH)
             instance = self._instance(temp_root)
             context = daemon_core.load_daemon_context(instance["instance_json"])
-            actor_address = daemon_core.actor_address_for_context(context)
+            identity_route = daemon_core.identity_route_for_context(context)
             recorded: dict[str, object] = {}
             original_register_actor = daemon_core.daemon_client.register_actor
 
             def fake_register_actor(
                 *,
-                actor_address: dict[str, str],
+                identity_id: str,
+                role_id: str,
                 endpoint: dict[str, object],
                 heartbeat: dict[str, object],
                 socket_path: Path,
             ) -> dict[str, object]:
-                recorded["actor_address"] = actor_address
+                recorded["identity_id"] = identity_id
+                recorded["role_id"] = role_id
                 recorded["endpoint"] = endpoint
                 recorded["heartbeat"] = heartbeat
                 recorded["socket_path"] = socket_path
-                return {"record": {"actor_address": actor_address, "endpoint": endpoint}}
+                return {"record": {"identity_id": identity_id, "role_id": role_id, "endpoint": endpoint}}
 
             self.addCleanup(setattr, daemon_core.daemon_client, "register_actor", original_register_actor)
             daemon_core.daemon_client.register_actor = fake_register_actor
 
             result = daemon_core.register_daemon_actor(
                 context,
-                actor_address,
+                identity_route,
                 notify_subscriptions=["example.ready", "example.ready", " "],
             )
 

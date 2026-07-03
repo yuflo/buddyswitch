@@ -17,7 +17,6 @@ if str(SCRIPTS) not in sys.path:
 from env.tools.message import _impl as message_impl  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import im_client as im_client_module  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
@@ -70,13 +69,11 @@ class _FakeImClient:
 
 class _Context(dict[str, Any]):
     def __init__(self, client: _FakeImClient) -> None:
-        actor_address = ActorAddress(role_id="market", actor_id="act-market-tool")
         super().__init__(
-            active_actor=actor_address.to_payload(),
+            current_identity={"id": "act-market-tool", "type": "actor"},
             active_role="market",
             manifest={"roles": [{"id": "market"}, {"id": "pm"}]},
         )
-        self.actor_address = actor_address
         self.im_client = client
         self.repos = _Repos()
         self.daemon = _ExplodingDaemon()
@@ -84,13 +81,12 @@ class _Context(dict[str, Any]):
 
 
 class _RealImContext(dict[str, Any]):
-    def __init__(self, *, actor_address: ActorAddress, daemon: Any) -> None:
+    def __init__(self, *, identity_id: str, role_id: str, daemon: Any) -> None:
         super().__init__(
-            active_actor=actor_address.to_payload(),
-            active_role=actor_address.role_id,
-            manifest={"roles": [{"id": actor_address.role_id}, {"id": "pm"}]},
+            current_identity={"id": identity_id, "type": "actor"},
+            active_role=role_id,
+            manifest={"roles": [{"id": role_id}, {"id": "pm"}]},
         )
-        self.actor_address = actor_address
         self.daemon = daemon
 
 
@@ -132,11 +128,8 @@ class MessageToolImClientTests(unittest.TestCase):
 
 class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_send_with_invalid_target_identity_id_returns_payload_error(self) -> None:
-        actor = ActorAddress(
-            role_id="dev",
-            actor_id=self._runtime_actor_id(role="dev", label="act-dev-invalid-target"),
-        )
-        client = im_client_module.ActorImClient(_RealImContext(actor_address=actor, daemon=_RecordingWakeDaemon()))
+        actor_id = self._runtime_actor_id(role="dev", label="act-dev-invalid-target")
+        client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=_RecordingWakeDaemon()))
 
         response = client.send(
             {
@@ -150,22 +143,20 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("target_identity_id", response.get("error", {}).get("message", ""))
 
     def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
-        actor = ActorAddress(
-            role_id="dev",
-            actor_id=self._runtime_actor_id(role="dev", label="act-dev-im-reply"),
-        )
+        actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-reply")
         created = message_service.create_external_connection(display_name="local smoke")
         self.assertTrue(created.get("ok"), msg=created)
         auth = message_service.authenticate_external_connection_key(str(created["connection_key"]))
         self.assertTrue(auth.get("ok"), msg=auth)
         root = message_service.send_im_message(
-            sender_participant=auth["participant"],
-            to={"kind": "actor", "actor_address": actor.to_payload()},
+            sender_identity=auth["identity"],
+            to={"id": actor_id, "type": "actor"},
+            target_role_id="dev",
             content="ping",
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         daemon = _RecordingWakeDaemon()
-        client = im_client_module.ActorImClient(_RealImContext(actor_address=actor, daemon=daemon))
+        client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=daemon))
 
         reply = client.send({"content": "pong", "reply_to": root["message"]["id"]})
 
@@ -181,30 +172,25 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.runtime_state_root
             / "im"
             / "message_states"
-            / f"{root['message']['id']}--{actor.actor_id}.json"
+            / f"{root['message']['id']}--{actor_id}.json"
         )
         persisted = json.loads(state_path.read_text(encoding="utf-8"))
-        self.assertEqual(persisted["owner_identity_id"], actor.actor_id)
+        self.assertEqual(persisted["owner_identity_id"], actor_id)
         self.assertEqual(persisted["disposition"], "replied")
 
     def test_mark_needs_parent_is_rejected_without_parent_submit(self) -> None:
-        active_actor = ActorAddress(
-            role_id="dev",
-            actor_id=self._runtime_actor_id(role="dev", label="act-dev-im-parent-fail"),
-        )
-        sender_actor = ActorAddress(
-            role_id="pm",
-            actor_id=self._runtime_actor_id(role="pm", label="act-pm-im-parent-fail"),
-        )
+        active_actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-parent-fail")
+        sender_actor_id = self._runtime_actor_id(role="pm", label="act-pm-im-parent-fail")
         incoming = message_service.send_im_message(
-            sender_participant={"kind": "actor", "actor_address": sender_actor.to_payload()},
-            to={"kind": "actor", "actor_address": active_actor.to_payload()},
+            sender_identity={"id": sender_actor_id, "type": "actor"},
+            to={"id": active_actor_id, "type": "actor"},
+            target_role_id="dev",
             content="This needs parent handling.",
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         message_id = incoming["message"]["id"]
         daemon = _RecordingParentDaemon()
-        client = im_client_module.ActorImClient(_RealImContext(actor_address=active_actor, daemon=daemon))
+        client = im_client_module.ActorImClient(_RealImContext(identity_id=active_actor_id, role_id="dev", daemon=daemon))
 
         response = client.mark(
             {
@@ -223,10 +209,10 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.runtime_state_root
             / "im"
             / "message_states"
-            / f"{message_id}--{active_actor.actor_id}.json"
+            / f"{message_id}--{active_actor_id}.json"
         )
         persisted = json.loads(state_path.read_text(encoding="utf-8"))
-        self.assertEqual(persisted["owner_identity_id"], active_actor.actor_id)
+        self.assertEqual(persisted["owner_identity_id"], active_actor_id)
         self.assertEqual(persisted["disposition"], "unseen")
 
 
