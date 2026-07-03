@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -325,6 +326,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("parent prompt first", mark_contract_text)
         self.assertIn("identity", str(message_contacts_action.description).lower())
         self.assertIn("self", str(message_contacts_action.description).lower())
+        message_contacts_contract = json.dumps(asdict(message_contacts_action), ensure_ascii=True, sort_keys=True).lower()
+        self.assertIn("actor runtime presence", message_contacts_contract)
 
         self.assertEqual(message_conversation_action.kind, "read")
         self.assertEqual(message_conversation_action.mutates, "none")

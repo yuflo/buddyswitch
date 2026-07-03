@@ -432,14 +432,14 @@ def _actor_routes_for_mentions(*, context: Any, active_actor: dict[str, Any]) ->
         routes[active_route["actor_id"]] = active_route
 
     daemon = getattr(context, "daemon", None)
-    list_contacts = getattr(daemon, "list_contacts", None)
-    if not callable(list_contacts):
+    list_online_actors = getattr(daemon, "list_online_actors", None)
+    if not callable(list_online_actors):
         return routes
     try:
-        raw = list_contacts(role_id=None)
+        raw = list_online_actors(role_id=None)
     except Exception:
         return routes
-    rows = raw.get("contacts") if isinstance(raw, dict) and isinstance(raw.get("contacts"), list) else []
+    rows = raw.get("actors") if isinstance(raw, dict) and isinstance(raw.get("actors"), list) else []
     for row in rows:
         actor_address = row.get("actor_address") if isinstance(row, dict) else None
         if not isinstance(actor_address, dict):

@@ -179,8 +179,8 @@ class CentralDaemonService:
                 return self._heartbeat(params)
             if method == "daemon.registry":
                 return self._load_registry()
-            if method == "contacts.list":
-                return self._contacts(params)
+            if method == "actor_directory.list_online":
+                return self._list_online_actors(params)
             if method == "actor.check_reachability":
                 return self._reachability(params)
             if method == "signal.deliver":
@@ -263,18 +263,18 @@ class CentralDaemonService:
         row = dict(row, status="online", last_seen_at=self.now())
         return {"record": self._upsert_actor(row)}
 
-    def _contacts(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _list_online_actors(self, params: dict[str, Any]) -> dict[str, Any]:
         role_filter = params.get("role_id")
         normalized_role = _require_role_id(role_filter) if isinstance(role_filter, str) and role_filter.strip() else None
-        contacts: list[dict[str, Any]] = []
+        actors: list[dict[str, Any]] = []
         for row in self._load_registry()["actors"]:
             if row.get("status") != "online":
                 continue
             address = ActorAddress.from_payload(row["actor_address"])
             if normalized_role is not None and address.role_id != normalized_role:
                 continue
-            contacts.append(dict(row))
-        return {"contacts": contacts, "count": len(contacts)}
+            actors.append(dict(row))
+        return {"actors": actors, "count": len(actors)}
 
     def _reachability(self, params: dict[str, Any]) -> dict[str, Any]:
         try:

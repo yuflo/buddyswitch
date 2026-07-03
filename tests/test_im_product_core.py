@@ -99,6 +99,75 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(str(connection_row["connection_key_hash"]).startswith("sha256:"))
         self.assertEqual(auth["identity"], {"id": external_id, "type": "external"})
 
+    def test_list_im_actor_contacts_projects_online_runtime_rows_without_actor_address(self) -> None:
+        market = ActorAddress(
+            role_id="market",
+            actor_id=self._runtime_actor_id(role="market", label="act-market-contact"),
+        ).to_payload()
+        dev = ActorAddress(
+            role_id="dev",
+            actor_id=self._runtime_actor_id(role="dev", label="act-dev-contact"),
+        ).to_payload()
+
+        response = message_service.list_im_actor_contacts(
+            [
+                {"actor_address": market, "status": "online"},
+                {"actor_address": dev, "status": "idle"},
+                {"actor_address": {"actor_id": "", "role_id": "bad"}, "status": "online"},
+                {"actor_address": market, "status": "offline"},
+                {"status": "online"},
+            ],
+            role_id=None,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(
+            response,
+            {
+                "ok": True,
+                "actors": [
+                    {
+                        "identity": {"id": market["actor_id"], "type": "actor"},
+                        "identity_id": market["actor_id"],
+                        "role_id": "market",
+                        "reachability_status": "online",
+                    },
+                    {
+                        "identity": {"id": dev["actor_id"], "type": "actor"},
+                        "identity_id": dev["actor_id"],
+                        "role_id": "dev",
+                        "reachability_status": "idle",
+                    },
+                ],
+                "count": 2,
+            },
+        )
+        self.assertTrue(all("actor_address" not in row for row in response["actors"]))
+
+    def test_actor_directed_target_rejects_external_identity_without_mutating_state(self) -> None:
+        _created, _connection, external = self._external_connection()
+        external_id = str(external["external_id"])
+        before = {
+            name: sorted(path.name for path in (self.runtime_state_root / "im" / name).glob("*.json"))
+            for name in ("conversations", "messages", "events", "message_states")
+        }
+
+        response = message_service.actor_participant_for_current_send_target(
+            [],
+            external_id,
+            field="target_identity_id",
+            active_actor_id=self._runtime_actor_id(role="dev", label="act-dev-active"),
+        )
+
+        after = {
+            name: sorted(path.name for path in (self.runtime_state_root / "im" / name).glob("*.json"))
+            for name in ("conversations", "messages", "events", "message_states")
+        }
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("error", {}).get("code"), "E_IM_PAYLOAD")
+        self.assertIn("not a reachable actor identity", response.get("error", {}).get("message", ""))
+        self.assertEqual(after, before)
+
     def test_send_im_message_persists_durable_objects_when_wake_fails(self) -> None:
         _created, _connection, sender = self._external_connection()
         sender_ref = {"kind": "external", "external_id": sender["external_id"]}

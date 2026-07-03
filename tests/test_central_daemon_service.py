@@ -293,30 +293,30 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertEqual(result["record"]["status"], "online")
             self.assertEqual(result["record"]["last_seen_at"], "2026-05-30T00:00:00Z")
 
-    def test_contacts_list_returns_only_online_actor_addresses(self) -> None:
+    def test_actor_directory_list_online_returns_only_online_actor_addresses(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             service = self._service(temp_root)
             self._register(service, role="dev", actor_id="act-dev-daemon")
             self._register(service, role="design", actor_id="act-design-daemon")
             service.handle("daemon.unregister", {"actor_address": {"role_id": "design", "actor_id": "act-design-daemon"}})
 
-            result = service.handle("contacts.list", {})
+            result = service.handle("actor_directory.list_online", {})
 
             self.assertEqual(
-                [row["actor_address"] for row in result["contacts"]],
+                [row["actor_address"] for row in result["actors"]],
                 [{"role_id": "dev", "actor_id": "act-dev-daemon"}],
             )
 
-    def test_contacts_list_filters_by_role_id_without_resolving_send_target(self) -> None:
+    def test_actor_directory_list_online_filters_by_role_without_resolving_message_targets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             service = self._service(temp_root)
             self._register(service, role="dev", actor_id="act-dev-daemon")
             self._register(service, role="pm", actor_id="act-pm-daemon")
 
-            result = service.handle("contacts.list", {"role_id": "dev"})
+            result = service.handle("actor_directory.list_online", {"role_id": "dev"})
 
-            self.assertEqual(len(result["contacts"]), 1)
-            self.assertEqual(result["contacts"][0]["actor_address"]["role_id"], "dev")
+            self.assertEqual(len(result["actors"]), 1)
+            self.assertEqual(result["actors"][0]["actor_address"]["role_id"], "dev")
 
     def test_reachability_distinguishes_online_offline_never_registered_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

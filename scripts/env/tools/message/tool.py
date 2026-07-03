@@ -14,7 +14,7 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
         title='Central IM Messages',
-        description='Message tools cover online actor contact discovery, Central IM sends, exact processable inbound reads, replies, conversation context, and disposition marking.',
+        description='Message tools cover online actor contact discovery through IM actor contact projection backed by actor runtime presence, Central IM sends, exact processable inbound reads, replies, conversation context, and disposition marking.',
         scope='Central IM identity messaging for the active actor',
         capability_boundary='Messages use identity-addressed Central IM conversations, messages, events, and per-identity dispositions. External identities are valid conversation peers but are not actor contacts.',
         object_model=(
@@ -30,7 +30,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='contacts',
                 title='message.contacts',
-                description='List online actor identity contacts for direct sends; the active actor identity is not sendable as self.',
+                description='List IM actor identity contacts for direct sends, backed by actor runtime presence; the active actor identity is not sendable as self.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -38,7 +38,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'role': {
                             'type': 'string',
-                            'description': 'Optional manifest role id filter for online actor contacts.',
+                            'description': 'Optional manifest role id filter for IM actor contacts backed by actor runtime presence.',
                         },
                     },
                 },
@@ -53,10 +53,10 @@ def _build_definition() -> ToolDefinition:
                 visibility='online actor contact summary',
                 durability='none',
                 result_content_level='actor identity contact rows',
-                success_effect='Returns online actor identities discovered through central daemon contacts.',
+                success_effect='Returns IM actor identities projected from actor runtime presence.',
                 failure_state_guarantee='Rejected contact reads do not mutate runtime state.',
                 reads=(
-                    'central daemon online contacts',
+                    'actor runtime presence',
                 ),
                 writes=(),
                 does_not_write=(
@@ -71,11 +71,11 @@ def _build_definition() -> ToolDefinition:
                     'env.tool role-action policy allows this action for the active role',
                 ),
                 returns=(
-                    'contacts',
+                    'actors',
                     'count',
                 ),
                 use_when=(
-                    'You need contact discovery for a target actor identity before message.send.',
+                    'You need IM actor contact discovery for a target actor identity before message.send.',
                 ),
                 do_not_use_when=(
                     'You already have a target identity id or need to read Central IM events.',
@@ -133,7 +133,7 @@ def _build_definition() -> ToolDefinition:
                 failure_state_guarantee='Reachability and payload rejections do not mutate state; delivery failures clean up the created message or report delivery cleanup uncertainty; reply disposition save failure can leave the delivered reply durable while the original remains in its previous disposition.',
                 reads=(
                     'Central IM direct conversation when reply_to is provided',
-                    'central daemon actor reachability for actor targets',
+                    'actor runtime reachability for actor targets',
                 ),
                 writes=(
                     'Central IM message',

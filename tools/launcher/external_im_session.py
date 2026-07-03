@@ -7,16 +7,10 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 from env.services import messages as message_service
-from env.tool_runtime.actor_profile import ActorAddress
 
 
 ActorLister = Callable[[Optional[str]], list[dict[str, Any]]]
 WakeActor = Callable[[dict[str, Any]], dict[str, Any]]
-BLOCKED_ACTOR_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
-
-
-def _payload_error(message: str) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": message}}
 
 
 def _auth_error(message: str) -> dict[str, Any]:
@@ -52,27 +46,7 @@ class ExternalImSession:
         return message_service.authenticate_external_connection_key(connection_key)
 
     def list_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
-        actors: list[dict[str, Any]] = []
-        for row in self._actor_lister(role_id):
-            actor_address = row.get("actor_address") if isinstance(row, dict) else None
-            if not isinstance(actor_address, dict):
-                continue
-            try:
-                normalized_address = ActorAddress.from_payload(actor_address).to_payload()
-            except ValueError:
-                continue
-            status = row.get("status") if isinstance(row.get("status"), str) else "online"
-            if status in BLOCKED_ACTOR_STATUSES:
-                continue
-            actors.append(
-                {
-                    "identity": {"id": normalized_address["actor_id"], "type": "actor"},
-                    "identity_id": normalized_address["actor_id"],
-                    "role_id": normalized_address["role_id"],
-                    "reachability_status": status,
-                }
-            )
-        return {"ok": True, "actors": actors, "count": len(actors)}
+        return message_service.list_im_actor_contacts(self._actor_lister(role_id), role_id=role_id)
 
     def send_message(
         self,
@@ -82,7 +56,7 @@ class ExternalImSession:
         content: str,
         reply_to: Any = None,
     ) -> dict[str, Any]:
-        target_response = self._actor_participant_for_identity(target_identity_id, field="target_identity_id")
+        target_response = self._actor_target_participant(target_identity_id, field="target_identity_id")
         if target_response.get("ok") is not True:
             return target_response
         return message_service.send_external_connection_message(
@@ -116,7 +90,7 @@ class ExternalImSession:
         participant_response = _external_participant_from_connection(connection)
         if participant_response.get("ok") is not True:
             return participant_response
-        target_response = self._actor_participant_for_identity(identity_id, field="identity_id")
+        target_response = self._actor_target_participant(identity_id, field="identity_id")
         if target_response.get("ok") is not True:
             return target_response
         return message_service.get_im_direct_conversation(
@@ -161,21 +135,9 @@ class ExternalImSession:
             reason=reason,
         )
 
-    def _actor_participant_for_identity(self, value: Any, *, field: str) -> dict[str, Any]:
-        identity_id = value.strip() if isinstance(value, str) and value.strip() else ""
-        if not identity_id:
-            return _payload_error(f"{field} is required")
-        for row in self._actor_lister(None):
-            actor_address = row.get("actor_address") if isinstance(row, dict) else None
-            if not isinstance(actor_address, dict):
-                continue
-            try:
-                normalized_address = ActorAddress.from_payload(actor_address).to_payload()
-            except ValueError:
-                continue
-            status = row.get("status") if isinstance(row.get("status"), str) else "online"
-            if status in BLOCKED_ACTOR_STATUSES:
-                continue
-            if normalized_address["actor_id"] == identity_id:
-                return {"ok": True, "participant": {"kind": "actor", "actor_address": normalized_address}}
-        return _payload_error(f"{field} is not a reachable actor identity: {identity_id}")
+    def _actor_target_participant(self, value: Any, *, field: str) -> dict[str, Any]:
+        return message_service.actor_participant_for_current_send_target(
+            self._actor_lister(None),
+            value,
+            field=field,
+        )

@@ -162,25 +162,25 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self.addCleanup(restore)
         return calls
 
-    def _patch_daemon_contacts(self, contacts: list[dict[str, Any]]) -> None:
-        original_list_contacts = runtime_context.daemon_client.list_contacts
+    def _patch_online_actors(self, actor_rows: list[dict[str, Any]]) -> None:
+        original_list_online_actors = runtime_context.daemon_client.list_online_actors
 
-        def fake_list_contacts(*, role_id: str | None = None, socket_path: Path | None = None) -> dict[str, object]:
+        def fake_list_online_actors(*, role_id: str | None = None, socket_path: Path | None = None) -> dict[str, object]:
             del socket_path
             rows = []
-            for row in contacts:
+            for row in actor_rows:
                 actor_address = row.get("actor_address") if isinstance(row, dict) else None
                 if not isinstance(actor_address, dict):
                     continue
                 if role_id is not None and actor_address.get("role_id") != role_id:
                     continue
                 rows.append(dict(row))
-            return {"contacts": rows, "count": len(rows)}
+            return {"actors": rows, "count": len(rows)}
 
         def restore() -> None:
-            runtime_context.daemon_client.list_contacts = original_list_contacts
+            runtime_context.daemon_client.list_online_actors = original_list_online_actors
 
-        runtime_context.daemon_client.list_contacts = fake_list_contacts
+        runtime_context.daemon_client.list_online_actors = fake_list_online_actors
         self.addCleanup(restore)
 
     def _seed_track(self, track_id: str) -> dict[str, object]:
@@ -200,7 +200,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             "role_id": "dev",
         }
         target_pm = {"actor_id": "act-route-track-mentioned", "role_id": "pm"}
-        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
+        self._patch_online_actors([{"actor_address": target_pm, "status": "online"}])
 
         response = self._dispatch(
             actor_id="act-dev-track-delivery",
@@ -266,7 +266,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             "actor_id": self._runtime_actor_id(role="dev", label="act-dev-track-reply-source"),
             "role_id": "dev",
         }
-        self._patch_daemon_contacts([{"actor_address": root_author, "status": "online"}])
+        self._patch_online_actors([{"actor_address": root_author, "status": "online"}])
 
         reply = self._dispatch(
             actor_id="act-pm-track-reply-author",
@@ -305,7 +305,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self._seed_track("track-comment-delivery-address-dedupe")
         calls = self._patch_daemon_delivery()
         target_pm = {"actor_id": "act-pm-shared-track-target", "role_id": "pm"}
-        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
+        self._patch_online_actors([{"actor_address": target_pm, "status": "online"}])
 
         response = self._dispatch(
             actor_id="act-dev-track-address-dedupe",
@@ -357,7 +357,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
     def test_add_comment_delivery_failure_keeps_comment_and_reports_status(self) -> None:
         self._seed_track("track-comment-delivery-failed")
         target_pm = {"actor_id": "act-pm-track-offline", "role_id": "pm"}
-        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "offline"}])
+        self._patch_online_actors([{"actor_address": target_pm, "status": "offline"}])
         self._patch_daemon_delivery(
             delivery={
                 "delivery_status": "target_not_online",
@@ -398,7 +398,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
     def test_add_comment_delivery_exception_keeps_comment_and_reports_signal_error(self) -> None:
         self._seed_track("track-comment-delivery-exception")
         target_pm = {"actor_id": "act-pm-track-exception", "role_id": "pm"}
-        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
+        self._patch_online_actors([{"actor_address": target_pm, "status": "online"}])
         self._patch_daemon_delivery(exc=RuntimeError("socket gone"))
 
         response = self._dispatch(
@@ -430,7 +430,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         self._seed_track("track-comment-a")
         self._seed_track("track-comment-b")
         target_pm = {"actor_id": "act-pm-mentioned", "role_id": "pm"}
-        self._patch_daemon_contacts([{"actor_address": target_pm, "status": "online"}])
+        self._patch_online_actors([{"actor_address": target_pm, "status": "online"}])
 
         root = self._dispatch(
             actor_id="act-dev-track-comment",

@@ -14,6 +14,72 @@ def _im_payload_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": message}}
 
 
+_BLOCKED_ACTOR_CONTACT_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
+
+
+def _actor_address_from_runtime_row(row: Any) -> dict[str, str] | None:
+    if not isinstance(row, dict) or not isinstance(row.get("actor_address"), dict):
+        return None
+    from env.tool_runtime.actor_profile import ActorAddress
+
+    try:
+        return ActorAddress.from_payload(row["actor_address"]).to_payload()
+    except ValueError:
+        return None
+
+
+def _actor_status_from_runtime_row(row: dict[str, Any]) -> str:
+    status = row.get("status")
+    return status if isinstance(status, str) and status.strip() else "online"
+
+
+def list_im_actor_contacts(actor_rows: list[dict[str, Any]], role_id: str | None = None) -> dict[str, Any]:
+    normalized_role = role_id.strip() if isinstance(role_id, str) and role_id.strip() else None
+    actors: list[dict[str, Any]] = []
+    for row in actor_rows:
+        actor_address = _actor_address_from_runtime_row(row)
+        if actor_address is None:
+            continue
+        if normalized_role is not None and actor_address["role_id"] != normalized_role:
+            continue
+        status = _actor_status_from_runtime_row(row)
+        if status in _BLOCKED_ACTOR_CONTACT_STATUSES:
+            continue
+        actors.append(
+            {
+                "identity": {"id": actor_address["actor_id"], "type": "actor"},
+                "identity_id": actor_address["actor_id"],
+                "role_id": actor_address["role_id"],
+                "reachability_status": status,
+            }
+        )
+    return {"ok": True, "actors": actors, "count": len(actors)}
+
+
+def actor_participant_for_current_send_target(
+    actor_rows: list[dict[str, Any]],
+    target_identity_id: Any,
+    *,
+    field: str = "target_identity_id",
+    active_actor_id: str | None = None,
+) -> dict[str, Any]:
+    identity_id = target_identity_id.strip() if isinstance(target_identity_id, str) and target_identity_id.strip() else ""
+    if not identity_id:
+        return _im_payload_error(f"{field} is required")
+    if isinstance(active_actor_id, str) and active_actor_id.strip() and identity_id == active_actor_id.strip():
+        return _im_payload_error(f"{field} must not be the active actor identity")
+    for row in actor_rows:
+        actor_address = _actor_address_from_runtime_row(row)
+        if actor_address is None:
+            continue
+        status = _actor_status_from_runtime_row(row)
+        if status in _BLOCKED_ACTOR_CONTACT_STATUSES:
+            continue
+        if actor_address["actor_id"] == identity_id:
+            return {"ok": True, "participant": {"kind": "actor", "actor_address": actor_address}}
+    return _im_payload_error(f"{field} is not a reachable actor identity: {identity_id}")
+
+
 def create_external_connection(*, display_name: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 

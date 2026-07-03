@@ -454,6 +454,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "message.send(reply_to=...)",
             "generic disposition editor",
             "target_identity_id",
+            "actor runtime presence",
         )
         for token in required:
             with self.subTest(required=token):

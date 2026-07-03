@@ -366,11 +366,11 @@ def heartbeat_actor(*, actor_address: dict[str, Any], socket_path: Path | None =
     return request_central_daemon("daemon.heartbeat", {"actor_address": actor_address}, socket_path=socket_path)
 
 
-def list_contacts(*, role_id: str | None = None, socket_path: Path | None = None) -> dict[str, Any]:
+def list_online_actors(*, role_id: str | None = None, socket_path: Path | None = None) -> dict[str, Any]:
     params: dict[str, Any] = {}
     if isinstance(role_id, str) and role_id.strip():
         params["role_id"] = role_id.strip()
-    return request_central_daemon("contacts.list", params, socket_path=socket_path)
+    return request_central_daemon("actor_directory.list_online", params, socket_path=socket_path)
 
 
 def check_reachability(*, target_actor_address: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:

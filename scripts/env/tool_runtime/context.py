@@ -352,8 +352,8 @@ class DaemonAccess:
         self._actor_address = actor_identity_to_address(current_identity, role_id=role_id)
         self._instance_json = instance_json
 
-    def list_contacts(self, *, role_id: str | None = None) -> dict[str, Any]:
-        return daemon_client.list_contacts(role_id=role_id)
+    def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
+        return daemon_client.list_online_actors(role_id=role_id)
 
     def check_reachability(self, *, target_actor_address: ActorAddress | dict[str, Any]) -> dict[str, Any]:
         return daemon_client.check_reachability(

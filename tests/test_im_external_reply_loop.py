@@ -19,13 +19,13 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
+from tools.launcher import daemon_mailbox  # noqa: E402
+from tools.launcher import im_http_router  # noqa: E402
+from tools.launcher import im_wake_handler  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 from env.tool_runtime import im_client as im_client_module  # noqa: E402
 from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
-from tools.launcher import daemon_mailbox  # noqa: E402
-from tools.launcher import im_http_router  # noqa: E402
-from tools.launcher import im_wake_handler  # noqa: E402
 
 
 class _ActorContext(dict[str, Any]):

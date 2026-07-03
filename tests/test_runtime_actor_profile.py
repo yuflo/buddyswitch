@@ -324,13 +324,13 @@ class ActorProfileTests(unittest.TestCase):
         )
         calls: list[tuple[str, dict[str, object]]] = []
 
-        original_list_contacts = runtime_context.daemon_client.list_contacts
+        original_list_online_actors = runtime_context.daemon_client.list_online_actors
         original_check_reachability = runtime_context.daemon_client.check_reachability
         original_deliver_signal = runtime_context.daemon_client.deliver_signal
 
-        def fake_list_contacts(*, role_id: str | None = None) -> dict[str, object]:
-            calls.append(("contacts", {"role_id": role_id}))
-            return {"contacts": [], "count": 0}
+        def fake_list_online_actors(*, role_id: str | None = None) -> dict[str, object]:
+            calls.append(("actors", {"role_id": role_id}))
+            return {"actors": [], "count": 0}
 
         def fake_check_reachability(*, target_actor_address: dict[str, object]) -> dict[str, object]:
             calls.append(("reachability", {"target_actor_address": target_actor_address}))
@@ -341,11 +341,11 @@ class ActorProfileTests(unittest.TestCase):
             return {"delivery_status": "delivered", "signal": signal}
 
         try:
-            runtime_context.daemon_client.list_contacts = fake_list_contacts
+            runtime_context.daemon_client.list_online_actors = fake_list_online_actors
             runtime_context.daemon_client.check_reachability = fake_check_reachability
             runtime_context.daemon_client.deliver_signal = fake_deliver_signal
 
-            context.daemon.list_contacts(role_id="dev")
+            context.daemon.list_online_actors(role_id="dev")
             context.daemon.check_reachability(
                 target_actor_address={"actor_id": "act-dev-daemon", "role_id": "dev"}
             )
@@ -356,11 +356,11 @@ class ActorProfileTests(unittest.TestCase):
                 target_actor_address={"actor_id": "act-dev-daemon", "role_id": "dev"},
             )
         finally:
-            runtime_context.daemon_client.list_contacts = original_list_contacts
+            runtime_context.daemon_client.list_online_actors = original_list_online_actors
             runtime_context.daemon_client.check_reachability = original_check_reachability
             runtime_context.daemon_client.deliver_signal = original_deliver_signal
 
-        self.assertEqual(calls[0], ("contacts", {"role_id": "dev"}))
+        self.assertEqual(calls[0], ("actors", {"role_id": "dev"}))
         self.assertEqual(
             calls[1],
             (
