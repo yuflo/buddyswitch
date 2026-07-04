@@ -185,6 +185,80 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(status["schedules"]["items"][failed["schedule_id"]]["last_error"], "close failed")
             self.assertEqual(status["schedules"]["items"][canceled["schedule_id"]]["status"], "canceled")
 
+    def test_cancel_pending_schedules_by_source_owner_cancels_only_matching_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            state = self._state(instance["instance_root"])
+            browser_pending = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-pending"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:00Z",
+            )
+            browser_release_pending = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.cockpit.release",
+                payload={"reason": "idle_empty"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:01Z",
+            )
+            task_pending = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="task.example",
+                payload={"task_id": "task-1"},
+                source_context={"owner": "task"},
+                now="2026-07-04T00:00:02Z",
+            )
+            browser_delivered = state.create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-delivered"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:03Z",
+            )
+            browser_failed = state.create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-failed"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:04Z",
+            )
+            browser_canceled = state.create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-canceled"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:05Z",
+            )
+            state.mark_schedule_delivered(
+                browser_delivered["schedule_id"],
+                dispatch_result={"handling_status": "handled"},
+                now="2026-07-04T00:00:06Z",
+            )
+            state.mark_schedule_failed(
+                browser_failed["schedule_id"],
+                message="close failed",
+                now="2026-07-04T00:00:07Z",
+            )
+            state.cancel_schedule(browser_canceled["schedule_id"], now="2026-07-04T00:00:08Z")
+
+            canceled = state.cancel_pending_schedules_by_source_owner("browser", now="2026-07-04T00:00:10Z")
+
+            self.assertEqual(
+                [row["schedule_id"] for row in canceled],
+                [browser_pending["schedule_id"], browser_release_pending["schedule_id"]],
+            )
+            saved = self._saved_state(instance["instance_root"])
+            self.assertEqual(saved["scheduled_triggers"][browser_pending["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][browser_pending["schedule_id"]]["updated_at"], "2026-07-04T00:00:10Z")
+            self.assertEqual(saved["scheduled_triggers"][browser_pending["schedule_id"]]["canceled_at"], "2026-07-04T00:00:10Z")
+            self.assertEqual(saved["scheduled_triggers"][browser_release_pending["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][task_pending["schedule_id"]]["status"], "pending")
+            self.assertEqual(saved["scheduled_triggers"][browser_delivered["schedule_id"]]["status"], "delivered")
+            self.assertEqual(saved["scheduled_triggers"][browser_failed["schedule_id"]]["status"], "failed")
+            self.assertEqual(saved["scheduled_triggers"][browser_canceled["schedule_id"]]["status"], "canceled")
+
     def test_daemon_status_includes_task_sys_active_projection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)

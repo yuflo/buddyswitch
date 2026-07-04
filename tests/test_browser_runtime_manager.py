@@ -16,6 +16,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.launcher import browser_runtime_manager as manager  # noqa: E402
+from tools.launcher import daemon_core  # noqa: E402
 
 
 def free_port() -> int:
@@ -87,6 +89,16 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             encoding="utf-8",
         )
         return instance_json
+
+    def _daemon_state(self, instance_root: Path, actor_id: str = "act-dev-browser") -> Any:
+        return daemon_core.DaemonState.load(
+            instance_root=instance_root,
+            actor_id=actor_id,
+            main_thread_id="thr-main",
+        )
+
+    def _saved_daemon_state(self, instance_root: Path) -> dict[str, Any]:
+        return json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
 
     def _write_fake_chrome(self, path: Path, argv_path: Path) -> None:
         path.write_text(
@@ -276,6 +288,82 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
             self.assertIsNone(instance_payload["browser_port"])
 
+    def test_release_cancels_browser_owned_pending_schedules_after_runtime_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            instance_root = temp_root_path / "instances" / "act-dev-browser"
+            port = free_port()
+            instance_json = self._write_instance(instance_root, browser_port=port)
+            runtime_browser_dir = instance_root / "runtime" / "browser"
+            runtime_browser_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_browser_dir / "page_idle.json").write_text("{}", encoding="utf-8")
+            (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
+            state = self._daemon_state(instance_root)
+            page_expired = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:00Z",
+            )
+            cockpit_release = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.cockpit.release",
+                payload={"reason": "idle_empty"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:01Z",
+            )
+            task_schedule = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="task.example",
+                payload={"task_id": "task-1"},
+                source_context={"owner": "task"},
+                now="2026-07-04T00:00:02Z",
+            )
+
+            result = manager.release(instance_root=instance_root, actor_id="act-dev-browser", reason="page_idle_empty")
+
+            self.assertTrue(result.get("ok"), msg=result)
+            self.assertEqual(result.get("canceled_browser_schedule_ids"), [page_expired["schedule_id"], cockpit_release["schedule_id"]])
+            self.assertEqual(result.get("canceled_browser_schedule_count"), 2)
+            self.assertFalse((runtime_browser_dir / "page_idle.json").exists())
+            self.assertFalse((runtime_browser_dir / "page_idle.lock").exists())
+            instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            self.assertIsNone(instance_payload["browser_port"])
+            saved = self._saved_daemon_state(instance_root)
+            self.assertEqual(saved["scheduled_triggers"][page_expired["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][cockpit_release["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][task_schedule["schedule_id"]]["status"], "pending")
+
+    def test_stop_cancels_browser_owned_pending_schedules_when_runtime_is_inactive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_instance(instance_root, browser_port=None)
+            state = self._daemon_state(instance_root)
+            page_expired = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:00Z",
+            )
+            task_schedule = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="task.example",
+                payload={"task_id": "task-1"},
+                source_context={"owner": "task"},
+                now="2026-07-04T00:00:01Z",
+            )
+
+            result = manager.stop(instance_root=instance_root, actor_id="act-dev-browser")
+
+            self.assertTrue(result.get("ok"), msg=result)
+            self.assertEqual(result.get("canceled_browser_schedule_ids"), [page_expired["schedule_id"]])
+            self.assertEqual(result.get("canceled_browser_schedule_count"), 1)
+            saved = self._saved_daemon_state(instance_root)
+            self.assertEqual(saved["scheduled_triggers"][page_expired["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][task_schedule["schedule_id"]]["status"], "pending")
+
     def test_release_cleans_owned_profile_listener_when_pid_marker_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
@@ -413,6 +501,14 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             page_idle_file = runtime_browser_dir / "page_idle.json"
             pid_file.write_text(f"{chrome_proc.pid}\n", encoding="utf-8")
             page_idle_file.write_text('{"targets": {}}\n', encoding="utf-8")
+            state = self._daemon_state(instance_root)
+            browser_schedule = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:00Z",
+            )
 
             with (
                 mock.patch.object(manager, "_terminate_pid", lambda _pid: None),
@@ -426,6 +522,8 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             self.assertTrue(page_idle_file.exists(), "failed release must preserve page idle state for diagnosis")
             instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
             self.assertEqual(instance_payload["browser_port"], port)
+            saved = self._saved_daemon_state(instance_root)
+            self.assertEqual(saved["scheduled_triggers"][browser_schedule["schedule_id"]]["status"], "pending")
 
     def test_status_reports_orphaned_owned_browser_process(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

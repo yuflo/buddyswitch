@@ -5414,6 +5414,86 @@ exec "$real_git" "$@"
             stored = json.loads(instance_json.read_text(encoding="utf-8"))
             self.assertIsNone(stored["browser_port"])
 
+    def test_stop_json_cancels_browser_owned_pending_schedules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_root = Path(str(ctx["instance_root"]))
+            daemon_state_path = instance_root / "runtime" / "daemon" / "state.json"
+            daemon_state = json.loads(daemon_state_path.read_text(encoding="utf-8"))
+            daemon_state["scheduled_trigger_ids"] = ["schedule-1", "schedule-2", "schedule-3"]
+            daemon_state["scheduled_triggers"] = {
+                "schedule-1": {
+                    "schedule_id": "schedule-1",
+                    "type": "browser.page.expired",
+                    "payload": {"target_id": "target-1"},
+                    "source_context": {"owner": "browser"},
+                    "status": "pending",
+                    "created_at": "2026-07-04T00:00:00Z",
+                    "updated_at": "2026-07-04T00:00:00Z",
+                    "due_at": "2026-07-04T00:10:00Z",
+                    "delivered_at": None,
+                    "canceled_at": None,
+                    "last_error": None,
+                    "dispatch_result": None,
+                },
+                "schedule-2": {
+                    "schedule_id": "schedule-2",
+                    "type": "browser.cockpit.release",
+                    "payload": {"reason": "idle_empty"},
+                    "source_context": {"owner": "browser"},
+                    "status": "pending",
+                    "created_at": "2026-07-04T00:00:01Z",
+                    "updated_at": "2026-07-04T00:00:01Z",
+                    "due_at": "2026-07-04T00:10:01Z",
+                    "delivered_at": None,
+                    "canceled_at": None,
+                    "last_error": None,
+                    "dispatch_result": None,
+                },
+                "schedule-3": {
+                    "schedule_id": "schedule-3",
+                    "type": "task.example",
+                    "payload": {"task_id": "task-1"},
+                    "source_context": {"owner": "task"},
+                    "status": "pending",
+                    "created_at": "2026-07-04T00:00:02Z",
+                    "updated_at": "2026-07-04T00:00:02Z",
+                    "due_at": "2026-07-04T00:10:02Z",
+                    "delivered_at": None,
+                    "canceled_at": None,
+                    "last_error": None,
+                    "dispatch_result": None,
+                },
+            }
+            daemon_state_path.write_text(json.dumps(daemon_state, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", str(ctx["actor_id"]), "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(json.loads(stop_result.stdout), {"actor_id": ctx["actor_id"], "status": "inactive"})
+            saved = json.loads(daemon_state_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"]["schedule-2"]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"]["schedule-3"]["status"], "pending")
+            self.assertFalse(
+                [
+                    row
+                    for row in saved["scheduled_triggers"].values()
+                    if row.get("status") == "pending" and row.get("source_context", {}).get("owner") == "browser"
+                ]
+            )
+
     def test_stop_json_marks_instance_inactive_after_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))

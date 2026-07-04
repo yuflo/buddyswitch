@@ -21,10 +21,14 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_ENV = ROOT / "scripts" / "env"
+LAUNCHER_DIR = ROOT / "tools" / "launcher"
 if str(SCRIPTS_ENV) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ENV))
+if str(LAUNCHER_DIR) not in sys.path:
+    sys.path.insert(0, str(LAUNCHER_DIR))
 
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
+import daemon_core  # noqa: E402
 
 
 PORT_START = 9222
@@ -846,6 +850,22 @@ def _clear_release_state(instance_root: Path, actor_id: str) -> bool:
     return _clear_browser_port(instance_root, actor_id) or changed
 
 
+def _cancel_browser_owned_pending_schedules(instance_root: Path, actor_id: str) -> list[dict[str, Any]]:
+    payload = _read_instance_payload(instance_root, actor_id)
+    thread_id = payload.get("thread_id")
+    if not isinstance(thread_id, str) or not thread_id:
+        raise BrowserRuntimeManagerError("instance record has no thread id for daemon schedule cleanup")
+    state_path = daemon_core.daemon_state_file(instance_root)
+    if not state_path.exists():
+        return []
+    state = daemon_core.DaemonState.load(
+        instance_root=instance_root,
+        actor_id=actor_id,
+        main_thread_id=thread_id,
+    )
+    return state.cancel_pending_schedules_by_source_owner("browser")
+
+
 def _release_engine(
     *,
     instance_root: Path,
@@ -857,13 +877,17 @@ def _release_engine(
     mode = _release_mode(reason, force=force)
     ownership = snapshot.ownership
     if ownership == "inactive":
+        canceled_schedules = _cancel_browser_owned_pending_schedules(instance_root, actor_id)
+        canceled_ids = [row["schedule_id"] for row in canceled_schedules]
         return _success(
-            handled=False,
+            handled=bool(canceled_schedules),
             skip_reason="inactive",
             ownership=ownership,
             release_mode=mode,
-            state_changed=False,
-            durability="none",
+            canceled_browser_schedule_ids=canceled_ids,
+            canceled_browser_schedule_count=len(canceled_ids),
+            state_changed=bool(canceled_schedules),
+            durability="runtime" if canceled_schedules else "none",
             message=f"Browser cockpit release skipped: no browser resources recorded for {actor_id}",
         )
 
@@ -895,6 +919,8 @@ def _release_engine(
         }
 
     changed = _clear_release_state(instance_root, actor_id)
+    canceled_schedules = _cancel_browser_owned_pending_schedules(instance_root, actor_id)
+    canceled_ids = [row["schedule_id"] for row in canceled_schedules]
     return _success(
         handled=True,
         skip_reason=None,
@@ -902,8 +928,16 @@ def _release_engine(
         release_mode=mode,
         terminated_upstream_pids=upstream_pids,
         terminated_chrome_pids=chrome_pids,
+        canceled_browser_schedule_ids=canceled_ids,
+        canceled_browser_schedule_count=len(canceled_ids),
         verification={"upstream_gone": upstream_ok, "owned_chrome_gone": chrome_ok},
-        state_changed=changed or bool(upstream_pids) or bool(chrome_pids) or ownership in {"owned", "orphaned_owned", "stale_state"},
+        state_changed=(
+            changed
+            or bool(upstream_pids)
+            or bool(chrome_pids)
+            or bool(canceled_schedules)
+            or ownership in {"owned", "orphaned_owned", "stale_state"}
+        ),
         durability="runtime",
         message=f"Browser cockpit released: {actor_id}",
     )
