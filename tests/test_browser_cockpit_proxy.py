@@ -871,7 +871,7 @@ for raw_line in sys.stdin:
             self.assertIn("opened", text)
             self.assertIn("https://example.com/new", text)
             self.assertIn("target-new-local", text)
-            self.assertIn("300s", text)
+            self.assertIn("40s", text)
             self.assertIn("2026-", text)
             saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-new-local")
@@ -912,7 +912,7 @@ for raw_line in sys.stdin:
             self.assertIn("reused", text)
             self.assertIn(target_url, text)
             self.assertIn("target-existing-local", text)
-            self.assertIn("300s", text)
+            self.assertIn("40s", text)
             saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-existing-local")
 
@@ -948,7 +948,7 @@ for raw_line in sys.stdin:
             self.assertIn("google", text)
             self.assertIn("https://www.google.com/search?q=BuddySwitch+browser+resource+lifecycle", text)
             self.assertIn("target-search-local", text)
-            self.assertIn("300s", text)
+            self.assertIn("40s", text)
             saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-search-local")
 
@@ -1108,7 +1108,7 @@ for raw_line in sys.stdin:
         self.assertIn("title: Current Title", text)
         self.assertIn("url: https://example.com/current", text)
         self.assertIn("current: true", text)
-        self.assertIn("idle_expires_at: 2026-07-01T00:05:00Z", text)
+        self.assertIn("idle_expires_at: 2026-07-01T00:00:40Z", text)
         self.assertNotIn("Browser lifecycle warning:", text)
 
     def test_list_pages_with_no_tracked_pages_schedules_release(self) -> None:
@@ -1233,7 +1233,7 @@ for raw_line in sys.stdin:
             thread.join(timeout=2)
 
             self.assertEqual(forwarded, [])
-            self.assertIn("Browser page idle refreshed: 300s", json.dumps(responses, ensure_ascii=True))
+            self.assertIn("Browser page idle refreshed: 40s", json.dumps(responses, ensure_ascii=True))
             self.assertNotIn("TTL", json.dumps(responses, ensure_ascii=True))
             saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]

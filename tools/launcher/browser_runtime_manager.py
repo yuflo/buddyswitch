@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import socket
 import subprocess
@@ -34,6 +35,58 @@ DEFAULT_READY_DELAY_SECONDS = 0.1
 
 class BrowserRuntimeManagerError(RuntimeError):
     pass
+
+
+class ProcessInfo:
+    __slots__ = ("pid", "pgid", "command_line")
+
+    def __init__(self, *, pid: int, pgid: int | None, command_line: str) -> None:
+        self.pid = pid
+        self.pgid = pgid
+        self.command_line = command_line
+
+
+class BrowserResourceSnapshot:
+    __slots__ = (
+        "instance_root",
+        "profile_dir",
+        "recorded_port",
+        "marker_pid",
+        "marker_pgid",
+        "upstream_pid",
+        "upstream_pgid",
+        "port_listener_pids",
+        "profile_owned_processes",
+        "page_idle_target_count",
+        "ownership",
+    )
+
+    def __init__(
+        self,
+        *,
+        instance_root: Path,
+        profile_dir: Path,
+        recorded_port: int | None,
+        marker_pid: int | None,
+        marker_pgid: int | None,
+        upstream_pid: int | None,
+        upstream_pgid: int | None,
+        port_listener_pids: tuple[int, ...],
+        profile_owned_processes: tuple[ProcessInfo, ...],
+        page_idle_target_count: int,
+        ownership: str,
+    ) -> None:
+        self.instance_root = instance_root
+        self.profile_dir = profile_dir
+        self.recorded_port = recorded_port
+        self.marker_pid = marker_pid
+        self.marker_pgid = marker_pgid
+        self.upstream_pid = upstream_pid
+        self.upstream_pgid = upstream_pgid
+        self.port_listener_pids = port_listener_pids
+        self.profile_owned_processes = profile_owned_processes
+        self.page_idle_target_count = page_idle_target_count
+        self.ownership = ownership
 
 
 def _utc_now() -> str:
@@ -218,7 +271,7 @@ def _pid_alive(pid: int | None) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    return not _pid_is_zombie(pid)
 
 
 def _reap_child_pid(pid: int) -> bool:
@@ -227,6 +280,19 @@ def _reap_child_pid(pid: int) -> bool:
     except ChildProcessError:
         return False
     return waited_pid == pid
+
+
+def _pid_is_zombie(pid: int) -> bool:
+    completed = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "stat="],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return False
+    stat = completed.stdout.strip()
+    return stat.startswith("Z")
 
 
 def _wait_pid_gone(pid: int, timeout_seconds: float = 1.0) -> bool:
@@ -249,7 +315,25 @@ def _pgid_alive(pgid: int | None) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    return _pgid_has_live_process(pgid)
+
+
+def _pgid_has_live_process(pgid: int) -> bool:
+    completed = subprocess.run(
+        ["ps", "-axo", "pgid=,stat="],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return True
+    for raw_line in completed.stdout.splitlines():
+        parts = raw_line.strip().split(None, 1)
+        if len(parts) != 2 or not parts[0].lstrip("-").isdigit():
+            continue
+        if int(parts[0]) == pgid and not parts[1].startswith("Z"):
+            return True
+    return False
 
 
 def _wait_pgid_gone(pgid: int, timeout_seconds: float = 1.0) -> bool:
@@ -315,6 +399,82 @@ def _process_command_line(pid: int) -> str:
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
+def _process_pgid(pid: int | None) -> int | None:
+    if pid is None:
+        return None
+    if not _pid_alive(pid):
+        return None
+    try:
+        return os.getpgid(pid)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        return None
+
+
+def _all_processes() -> list[ProcessInfo]:
+    completed = subprocess.run(
+        ["ps", "-axo", "pid=,pgid=,command="],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return []
+    processes: list[ProcessInfo] = []
+    for raw_line in completed.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].lstrip("-").isdigit():
+            continue
+        command_line = parts[2] if len(parts) > 2 else ""
+        processes.append(ProcessInfo(pid=int(parts[0]), pgid=int(parts[1]), command_line=command_line))
+    return processes
+
+
+def _user_data_dir_arg(profile_dir: Path) -> str:
+    return f"--user-data-dir={profile_dir}"
+
+
+def _has_user_data_dir(command_line: str) -> bool:
+    return "--user-data-dir=" in command_line
+
+
+def _canonical_path_text(path: Path | str) -> str:
+    return str(Path(path).expanduser().resolve(strict=False))
+
+
+def _user_data_dir_values(command_line: str) -> list[str]:
+    values: list[str] = []
+    for match in re.finditer(r"--user-data-dir=(\"[^\"]+\"|'[^']+'|\S+)", command_line):
+        value = match.group(1).strip()
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            value = value[1:-1]
+        if value:
+            values.append(value)
+    return values
+
+
+def _is_profile_owned_process(command_line: str, profile_dir: Path) -> bool:
+    expected = str(profile_dir)
+    expected_canonical = _canonical_path_text(profile_dir)
+    for value in _user_data_dir_values(command_line):
+        if value == expected or _canonical_path_text(value) == expected_canonical:
+            return True
+    return False
+
+
+
+def _profile_owned_processes(profile_dir: Path) -> list[ProcessInfo]:
+    return [
+        process
+        for process in _all_processes()
+        if process.pid != os.getpid() and _pid_alive(process.pid) and _is_profile_owned_process(process.command_line, profile_dir)
+    ]
+
+
 def _port_listener_pids(port: int) -> list[int]:
     completed = subprocess.run(
         ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
@@ -332,29 +492,82 @@ def _port_listener_pids(port: int) -> list[int]:
     return pids
 
 
-def ownership_state(instance_root: Path, actor_id: str) -> str:
-    port = _recorded_port(instance_root, actor_id)
-    if port is None:
-        return "inactive"
-    if not _endpoint_ready(port):
-        return "inactive"
-    marker_pid = _read_numeric_file(_pid_file(instance_root))
-    if _pid_alive(marker_pid):
-        return "owned"
-    if marker_pid is not None:
-        _pid_file(instance_root).unlink(missing_ok=True)
+def _page_idle_target_count(instance_root: Path) -> int:
+    state = browser_lifecycle._read_page_idle_state(instance_root)
+    targets = state.get("targets")
+    return len(targets) if isinstance(targets, dict) else 0
 
-    target_profile = str(_default_profile_dir(instance_root))
-    found_foreign = False
-    for pid in _port_listener_pids(port):
-        command_line = _process_command_line(pid)
-        if f"--user-data-dir={target_profile}" in command_line:
-            return "owned"
-        if "--user-data-dir=" in command_line:
-            found_foreign = True
-    if found_foreign:
-        return "foreign"
-    return "unknown"
+
+def _classify_snapshot(
+    *,
+    recorded_port: int | None,
+    marker_pid: int | None,
+    marker_pgid: int | None,
+    port_listener_pids: list[int],
+    profile_owned_processes: list[ProcessInfo],
+    profile_dir: Path,
+) -> str:
+    del marker_pgid
+    endpoint_ready = recorded_port is not None and _endpoint_ready(recorded_port)
+    if profile_owned_processes:
+        return "owned" if endpoint_ready else "orphaned_owned"
+    if endpoint_ready:
+        found_foreign = False
+        for pid in port_listener_pids:
+            command_line = _process_command_line(pid)
+            if _is_profile_owned_process(command_line, profile_dir):
+                return "owned"
+            if _has_user_data_dir(command_line):
+                found_foreign = True
+        if found_foreign:
+            return "foreign"
+        return "unknown"
+    if recorded_port is not None or marker_pid is not None:
+        return "stale_state"
+    return "inactive"
+
+
+def _discover_resources(
+    *,
+    instance_root: Path,
+    actor_id: str,
+    profile_dir: Path | None = None,
+) -> BrowserResourceSnapshot:
+    _read_instance_payload(instance_root, actor_id)
+    effective_profile_dir = profile_dir if profile_dir is not None else _default_profile_dir(instance_root)
+    recorded_port = _recorded_port(instance_root, actor_id)
+    marker_pid = _read_numeric_file(_pid_file(instance_root))
+    marker_pgid = _process_pgid(marker_pid)
+    runtime_dir = _runtime_browser_dir(instance_root)
+    upstream_pid = _read_numeric_file(runtime_dir / "cockpit-upstream.pid")
+    upstream_pgid = _read_numeric_file(runtime_dir / "cockpit-upstream.pgid")
+    port_listener_pids = _port_listener_pids(recorded_port) if recorded_port is not None else []
+    profile_processes = _profile_owned_processes(effective_profile_dir)
+    ownership = _classify_snapshot(
+        recorded_port=recorded_port,
+        marker_pid=marker_pid,
+        marker_pgid=marker_pgid,
+        port_listener_pids=port_listener_pids,
+        profile_owned_processes=profile_processes,
+        profile_dir=effective_profile_dir,
+    )
+    return BrowserResourceSnapshot(
+        instance_root=instance_root,
+        profile_dir=effective_profile_dir,
+        recorded_port=recorded_port,
+        marker_pid=marker_pid,
+        marker_pgid=marker_pgid,
+        upstream_pid=upstream_pid,
+        upstream_pgid=upstream_pgid,
+        port_listener_pids=tuple(port_listener_pids),
+        profile_owned_processes=tuple(profile_processes),
+        page_idle_target_count=_page_idle_target_count(instance_root),
+        ownership=ownership,
+    )
+
+
+def ownership_state(instance_root: Path, actor_id: str) -> str:
+    return _discover_resources(instance_root=Path(instance_root), actor_id=actor_id).ownership
 
 
 def _find_chrome_bin(chrome_bin: Path | str | None) -> Path:
@@ -384,7 +597,7 @@ def _choose_port(instance_root: Path, actor_id: str, requested_port: int | None)
         state = ownership_state(instance_root, actor_id)
         if state == "owned":
             return recorded
-        if state == "inactive" and _port_available(recorded):
+        if state in {"inactive", "stale_state"} and _port_available(recorded):
             return recorded
     return _allocate_port()
 
@@ -503,16 +716,18 @@ def status(
 ) -> dict[str, object]:
     root = Path(instance_root)
     try:
-        _read_instance_payload(root, actor_id)
         effective_profile_dir = Path(profile_dir) if profile_dir is not None else _default_profile_dir(root)
-        port = _validate_port(requested_port) if requested_port is not None else _recorded_port(root, actor_id)
+        snapshot = _discover_resources(instance_root=root, actor_id=actor_id, profile_dir=effective_profile_dir)
+        port = _validate_port(requested_port) if requested_port is not None else snapshot.recorded_port
         if port is None:
             return _success(
                 ready=False,
                 browser_port=None,
                 browser_url=None,
                 profile_dir=str(effective_profile_dir),
-                ownership="inactive",
+                ownership=snapshot.ownership,
+                profile_owned_pids=[process.pid for process in snapshot.profile_owned_processes],
+                page_idle_target_count=snapshot.page_idle_target_count,
                 state_changed=False,
                 durability="none",
                 message="Browser cockpit not ready: no browser port recorded",
@@ -523,7 +738,10 @@ def status(
             browser_port=port,
             browser_url=_browser_url(port),
             profile_dir=str(effective_profile_dir),
-            ownership=ownership_state(root, actor_id),
+            ownership=snapshot.ownership,
+            profile_owned_pids=[process.pid for process in snapshot.profile_owned_processes],
+            port_listener_pids=list(snapshot.port_listener_pids),
+            page_idle_target_count=snapshot.page_idle_target_count,
             state_changed=False,
             durability="runtime" if ready else "none",
             message=(
@@ -536,80 +754,173 @@ def status(
         return _failure(exc)
 
 
-def _stop_upstream(instance_root: Path) -> None:
-    runtime_dir = _runtime_browser_dir(instance_root)
-    pid_file = runtime_dir / "cockpit-upstream.pid"
-    pgid_file = runtime_dir / "cockpit-upstream.pgid"
-    marker_pid = _read_numeric_file(pid_file)
-    marker_pgid = _read_numeric_file(pgid_file)
-    if not _terminate_pgid(marker_pgid):
-        _terminate_pid(marker_pid)
-    pid_file.unlink(missing_ok=True)
-    pgid_file.unlink(missing_ok=True)
+def _release_mode(reason: str | None, *, force: bool = False) -> str:
+    if force:
+        return "explicit_cleanup"
+    normalized = reason.strip() if isinstance(reason, str) else ""
+    if normalized in {"page_idle_empty", "browser.cockpit.release"}:
+        return "automatic_idle"
+    if normalized == "orphan_repair":
+        return "orphan_repair"
+    return "explicit_cleanup"
 
 
-def _clear_page_idle_state(instance_root: Path) -> None:
+def _stop_upstream_processes(snapshot: BrowserResourceSnapshot) -> list[int]:
+    terminated: list[int] = []
+    if snapshot.upstream_pgid is not None:
+        _terminate_pgid(snapshot.upstream_pgid)
+    if snapshot.upstream_pid is not None:
+        _terminate_pid(snapshot.upstream_pid)
+        terminated.append(snapshot.upstream_pid)
+    return terminated
+
+
+def _marker_matches_profile(snapshot: BrowserResourceSnapshot) -> bool:
+    if snapshot.marker_pid is None or not _pid_alive(snapshot.marker_pid):
+        return False
+    command_line = _process_command_line(snapshot.marker_pid)
+    return _is_profile_owned_process(command_line, snapshot.profile_dir)
+
+
+def _stop_owned_chrome_processes(snapshot: BrowserResourceSnapshot) -> list[int]:
+    terminated: list[int] = []
+    attempted_pids: set[int] = set()
+    if _marker_matches_profile(snapshot):
+        if snapshot.marker_pgid is not None:
+            _terminate_pgid(snapshot.marker_pgid)
+        assert snapshot.marker_pid is not None
+        _terminate_pid(snapshot.marker_pid)
+        attempted_pids.add(snapshot.marker_pid)
+        terminated.append(snapshot.marker_pid)
+    attempted_pgids: set[int] = {snapshot.marker_pgid} if snapshot.marker_pgid is not None else set()
+    for process in snapshot.profile_owned_processes:
+        if process.pid in attempted_pids:
+            continue
+        if process.pgid is not None and process.pgid not in attempted_pgids:
+            _terminate_pgid(process.pgid)
+            attempted_pgids.add(process.pgid)
+        if _pid_alive(process.pid):
+            _terminate_pid(process.pid)
+        attempted_pids.add(process.pid)
+        terminated.append(process.pid)
+    return terminated
+
+
+def _owned_listener_pids(port: int | None, profile_dir: Path) -> list[int]:
+    if port is None:
+        return []
+    owned: list[int] = []
+    for pid in _port_listener_pids(port):
+        if _is_profile_owned_process(_process_command_line(pid), profile_dir):
+            owned.append(pid)
+    return owned
+
+
+def _verify_owned_chrome_gone(snapshot: BrowserResourceSnapshot) -> tuple[bool, list[int]]:
+    owned_processes = _profile_owned_processes(snapshot.profile_dir)
+    owned_listener_pids = _owned_listener_pids(snapshot.recorded_port, snapshot.profile_dir)
+    remaining = sorted({process.pid for process in owned_processes}.union(owned_listener_pids))
+    return not remaining, remaining
+
+
+def _verify_upstream_gone(snapshot: BrowserResourceSnapshot) -> tuple[bool, list[int]]:
+    remaining: list[int] = []
+    if snapshot.upstream_pid is not None and _pid_alive(snapshot.upstream_pid):
+        remaining.append(snapshot.upstream_pid)
+    return not remaining, remaining
+
+
+def _clear_release_state(instance_root: Path, actor_id: str) -> bool:
     runtime_dir = _runtime_browser_dir(instance_root)
-    (runtime_dir / "page_idle.json").unlink(missing_ok=True)
-    (runtime_dir / "page_idle.lock").unlink(missing_ok=True)
+    changed = False
+    for path in (
+        _pid_file(instance_root),
+        runtime_dir / "cockpit-upstream.pid",
+        runtime_dir / "cockpit-upstream.pgid",
+        runtime_dir / "page_idle.json",
+        runtime_dir / "page_idle.lock",
+    ):
+        if path.exists():
+            changed = True
+        path.unlink(missing_ok=True)
+    return _clear_browser_port(instance_root, actor_id) or changed
+
+
+def _release_engine(
+    *,
+    instance_root: Path,
+    actor_id: str,
+    reason: str | None,
+    force: bool = False,
+) -> dict[str, object]:
+    snapshot = _discover_resources(instance_root=instance_root, actor_id=actor_id)
+    mode = _release_mode(reason, force=force)
+    ownership = snapshot.ownership
+    if ownership == "inactive":
+        return _success(
+            handled=False,
+            skip_reason="inactive",
+            ownership=ownership,
+            release_mode=mode,
+            state_changed=False,
+            durability="none",
+            message=f"Browser cockpit release skipped: no browser resources recorded for {actor_id}",
+        )
+
+    upstream_pids = _stop_upstream_processes(snapshot)
+    chrome_pids: list[int] = []
+    if ownership in {"owned", "orphaned_owned"}:
+        chrome_pids = _stop_owned_chrome_processes(snapshot)
+
+    upstream_ok, upstream_remaining = _verify_upstream_gone(snapshot)
+    chrome_ok = True
+    chrome_remaining: list[int] = []
+    if ownership in {"owned", "orphaned_owned"}:
+        chrome_ok, chrome_remaining = _verify_owned_chrome_gone(snapshot)
+    if not upstream_ok or not chrome_ok:
+        return _failure(
+            BrowserRuntimeManagerError(
+                "browser release verification failed"
+                f"; remaining_upstream={upstream_remaining}"
+                f"; remaining_owned_chrome={chrome_remaining}"
+            )
+        ) | {
+            "handled": False,
+            "ownership": ownership,
+            "release_mode": mode,
+            "remaining_upstream_pids": upstream_remaining,
+            "remaining_owned_chrome_pids": chrome_remaining,
+            "terminated_upstream_pids": upstream_pids,
+            "terminated_chrome_pids": chrome_pids,
+        }
+
+    changed = _clear_release_state(instance_root, actor_id)
+    return _success(
+        handled=True,
+        skip_reason=None,
+        ownership=ownership,
+        release_mode=mode,
+        terminated_upstream_pids=upstream_pids,
+        terminated_chrome_pids=chrome_pids,
+        verification={"upstream_gone": upstream_ok, "owned_chrome_gone": chrome_ok},
+        state_changed=changed or bool(upstream_pids) or bool(chrome_pids) or ownership in {"owned", "orphaned_owned", "stale_state"},
+        durability="runtime",
+        message=f"Browser cockpit released: {actor_id}",
+    )
 
 
 def stop(*, instance_root: Path | str, actor_id: str) -> dict[str, object]:
     root = Path(instance_root)
     try:
-        _read_instance_payload(root, actor_id)
-        _stop_upstream(root)
-        marker = _pid_file(root)
-        _terminate_pid(_read_numeric_file(marker))
-        marker.unlink(missing_ok=True)
-        _clear_page_idle_state(root)
-        changed = _clear_browser_port(root, actor_id)
-        return _success(
-            handled=True,
-            state_changed=changed,
-            durability="runtime",
-            message=f"Browser cockpit stopped: {actor_id}",
-        )
+        return _release_engine(instance_root=root, actor_id=actor_id, reason="manual_stop", force=True)
     except Exception as exc:
         return _failure(exc)
 
 
 def release(*, instance_root: Path | str, actor_id: str, reason: str | None = None) -> dict[str, object]:
-    del reason
     root = Path(instance_root)
     try:
-        port = _recorded_port(root, actor_id)
-        if port is None:
-            return _success(
-                handled=False,
-                skip_reason="browser_port_missing",
-                ownership="inactive",
-                state_changed=False,
-                durability="none",
-                message=f"Browser cockpit release skipped: no browser port recorded for {actor_id}",
-            )
-        ownership = ownership_state(root, actor_id)
-        if ownership in {"owned", "inactive"}:
-            stopped = stop(instance_root=root, actor_id=actor_id)
-            if stopped.get("ok") is not True:
-                return stopped
-            return _success(
-                handled=True,
-                skip_reason=None,
-                ownership=ownership,
-                state_changed=True,
-                durability="runtime",
-                message=f"Browser cockpit released: {actor_id}",
-            )
-        changed = _clear_browser_port(root, actor_id)
-        return _success(
-            handled=True,
-            skip_reason=None,
-            ownership=ownership,
-            state_changed=changed,
-            durability="runtime",
-            message=f"Browser cockpit release skipped: {ownership} endpoint on {port}; cleared stale browser_port for {actor_id}",
-        )
+        return _release_engine(instance_root=root, actor_id=actor_id, reason=reason)
     except Exception as exc:
         return _failure(exc)
 

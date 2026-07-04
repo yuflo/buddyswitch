@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
 import tempfile
+import textwrap
 import unittest
 import contextlib
 import importlib
@@ -32,6 +34,44 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
+
+
+def free_port() -> int:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+    finally:
+        sock.close()
+
+
+def wait_until(predicate: object, *, timeout: float = 3.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():  # type: ignore[operator]
+            return True
+        time.sleep(0.05)
+    return bool(predicate())  # type: ignore[operator]
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def port_accepts(port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(0.2)
+        sock.connect(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
 
 
 def _require_module(name: str):
@@ -145,6 +185,87 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
+    def _write_fake_chrome(self, path: Path, argv_path: Path) -> None:
+        path.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/usr/bin/env python3
+                from http.server import BaseHTTPRequestHandler, HTTPServer
+                import json
+                import sys
+
+                argv_path = {str(argv_path)!r}
+                port = None
+                for arg in sys.argv[1:]:
+                    if arg.startswith("--remote-debugging-port="):
+                        port = int(arg.split("=", 1)[1])
+                if port is None:
+                    raise SystemExit("missing remote debugging port")
+                with open(argv_path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(sys.argv[1:], ensure_ascii=True) + "\\n")
+
+                class Handler(BaseHTTPRequestHandler):
+                    def log_message(self, *_args):
+                        return
+
+                    def do_GET(self):
+                        if self.path == "/json/version":
+                            payload = {{
+                                "Browser": "fake",
+                                "webSocketDebuggerUrl": f"ws://127.0.0.1:{{port}}/devtools/browser/fake",
+                            }}
+                        elif self.path == "/json/list":
+                            payload = [{{"id": "ready", "type": "page", "url": "about:blank"}}]
+                        else:
+                            self.send_response(404)
+                            self.end_headers()
+                            return
+                        body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+
+                server = HTTPServer(("127.0.0.1", port), Handler)
+                server.serve_forever()
+                """
+            ),
+            encoding="utf-8",
+        )
+        path.chmod(path.stat().st_mode | 0o700)
+
+    def _terminate_process(self, pid: int) -> None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        if not wait_until(lambda: not pid_alive(pid), timeout=2.0):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return
+
+    def _start_fake_chrome(self, chrome_bin: Path, *, port: int, profile_dir: Path, log_file: Path) -> subprocess.Popen[str]:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.Popen(
+            [
+                str(chrome_bin),
+                f"--remote-debugging-port={port}",
+                f"--user-data-dir={profile_dir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "about:blank",
+            ],
+            stdout=log_file.open("a", encoding="utf-8"),
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        self.addCleanup(self._terminate_process, proc.pid)
+        self.assertTrue(wait_until(lambda: port_accepts(port)), "fake Chrome endpoint did not become ready")
+        return proc
+
     def _install_browser_contract_fakes(self, dispatcher: object) -> list[dict[str, object]]:
         calls: list[dict[str, object]] = []
 
@@ -196,8 +317,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     page_opened=True,
                     page_reused=False,
                     idle_refreshed=True,
-                    idle_seconds=300,
-                    idle_expires_at="2026-07-02T00:05:00Z",
+                    idle_seconds=40,
+                    idle_expires_at="2026-07-02T00:00:40Z",
                     message=None,
                 )
 
@@ -289,6 +410,38 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("state_changed"), True)
         self.assertEqual(response.get("durability"), "runtime")
         self.assertEqual([call["method"] for call in calls], ["release"])
+
+    def test_broker_browser_release_cleans_owned_missing_marker_runtime(self) -> None:
+        actor_label = "act-pm-broker-browser-release"
+        instance_json = self._instance_json(actor_id=actor_label, role="pm")
+        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+        instance_root = Path(str(instance_payload["instance_root"]))
+        port = free_port()
+        instance_payload["browser_port"] = port
+        instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        chrome_bin = self.runtime_root / "fake-chrome.py"
+        chrome_argv = self.runtime_root / "fake-chrome-argv.jsonl"
+        self._write_fake_chrome(chrome_bin, chrome_argv)
+        chrome_proc = self._start_fake_chrome(
+            chrome_bin,
+            port=port,
+            profile_dir=instance_root / "browser" / "profile",
+            log_file=instance_root / "browser" / "chrome.log",
+        )
+        (instance_root / "browser" / "chrome.pid").unlink(missing_ok=True)
+
+        response = self._dispatch(
+            method="browser.release",
+            params={"reason": "test_cleanup"},
+            actor_id=actor_label,
+            role="pm",
+            instance_json=instance_json,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("handled"), True)
+        self.assertEqual(response.get("ownership"), "owned")
+        self.assertTrue(wait_until(lambda: not pid_alive(chrome_proc.pid)), "broker browser.release must stop owned Chrome without a pid marker")
 
     def test_browser_method_rejects_actor_mismatch(self) -> None:
         instance_json = self._instance_json()

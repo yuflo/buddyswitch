@@ -146,6 +146,81 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertEqual(rows[0]["shared_root"], str(paths.shared_root))
             self.assertEqual(rows[0]["pid_file"], str(paths.pid_file))
 
+    def test_ping_rejects_daemon_without_actor_address_protocol(self) -> None:
+        cli = load_module(CENTRAL_CLI_PATH)
+        original_request = cli.daemon_client.request_central_daemon
+        calls: list[dict[str, Any]] = []
+
+        def fake_request(method: str, params: dict[str, Any], *, socket_path: Path) -> dict[str, Any]:
+            calls.append({"method": method, "params": params, "socket_path": socket_path})
+            if method == "daemon.ping":
+                return {"ok": True, "pid": 1111, "socket_path": str(socket_path)}
+            if method == "actor.check_reachability":
+                return {"reachability_status": "invalid_identity_id", "target_identity_id": None}
+            raise AssertionError(f"unexpected central daemon method: {method}")
+
+        self.addCleanup(setattr, cli.daemon_client, "request_central_daemon", original_request)
+        cli.daemon_client.request_central_daemon = fake_request
+
+        with self.assertRaises(RuntimeError) as raised:
+            cli.ping_central_daemon(socket_path=Path("/tmp/central.sock"))
+
+        self.assertIn("actor-address protocol", str(raised.exception))
+        self.assertEqual([row["method"] for row in calls], ["daemon.ping", "actor.check_reachability"])
+
+    def test_start_daemon_restarts_live_process_without_actor_address_protocol(self) -> None:
+        cli = load_module(CENTRAL_CLI_PATH)
+        with tempfile.TemporaryDirectory() as temp_root:
+            paths = self._paths(temp_root)
+            paths.pid_file.parent.mkdir(parents=True, exist_ok=True)
+            paths.pid_file.write_text("1111\n", encoding="utf-8")
+            commands: list[list[str]] = []
+            terminated: list[int] = []
+            original_popen = cli.subprocess.Popen
+            original_ping = cli.ping_central_daemon
+            original_pid_is_live = cli.pid_is_live
+            original_terminate = cli.terminate_pid
+            original_cleanup = cli.cleanup_runtime_files
+
+            class FakeProcess:
+                pid = 2222
+
+                def poll(self) -> None:
+                    return None
+
+            def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+                del kwargs
+                commands.append(command)
+                return FakeProcess()
+
+            def fake_ping(*, socket_path: Path) -> dict[str, Any]:
+                self.assertEqual(socket_path, paths.socket_path)
+                if not commands:
+                    raise RuntimeError("central daemon does not support actor-address protocol")
+                return {"ok": True, "pid": 2222, "socket_path": str(socket_path)}
+
+            def fake_terminate(pid: int) -> bool:
+                terminated.append(pid)
+                return True
+
+            self.addCleanup(setattr, cli.subprocess, "Popen", original_popen)
+            self.addCleanup(setattr, cli, "ping_central_daemon", original_ping)
+            self.addCleanup(setattr, cli, "pid_is_live", original_pid_is_live)
+            self.addCleanup(setattr, cli, "terminate_pid", original_terminate)
+            self.addCleanup(setattr, cli, "cleanup_runtime_files", original_cleanup)
+            cli.subprocess.Popen = fake_popen
+            cli.ping_central_daemon = fake_ping
+            cli.pid_is_live = lambda pid: pid in {1111, 2222}
+            cli.terminate_pid = fake_terminate
+            cli.cleanup_runtime_files = lambda _paths: None
+
+            payload = cli.start_central_daemon(paths)
+
+            self.assertTrue(payload["started"])
+            self.assertEqual(payload["pid"], 2222)
+            self.assertEqual(terminated, [1111])
+            self.assertEqual(len(commands), 1)
+
     def test_stop_daemon_terminates_process_and_cleans_runtime_files(self) -> None:
         cli = load_module(CENTRAL_CLI_PATH)
         with tempfile.TemporaryDirectory() as temp_root:

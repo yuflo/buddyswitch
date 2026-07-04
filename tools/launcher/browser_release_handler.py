@@ -140,9 +140,7 @@ class BrowserReleaseHandler:
             if not isinstance(actor_id, str) or not actor_id.strip():
                 actor_id = local_actor["actor_id"]
             endpoint = _browser_endpoint(instance_payload)
-            if endpoint is None:
-                return _skip("browser_port_missing")
-            if _has_real_user_page(endpoint):
+            if endpoint is not None and _has_real_user_page(endpoint):
                 return _skip("real_user_page_present")
             result = browser_runtime_manager.release(
                 instance_root=root,

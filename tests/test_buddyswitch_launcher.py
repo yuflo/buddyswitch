@@ -10031,11 +10031,8 @@ exit 0
 
     def test_env_browser_release_cleans_owned_runtime_state(self) -> None:
         upstream_proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
-        chrome_proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
         upstream_pgid = os.getpgid(upstream_proc.pid)
-        chrome_pgid = os.getpgid(chrome_proc.pid)
         self.addCleanup(self._terminate_registered_process, upstream_proc.pid, upstream_pgid)
-        self.addCleanup(self._terminate_registered_process, chrome_proc.pid, chrome_pgid)
 
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -10043,6 +10040,19 @@ exit 0
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser-release"
             instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9333)
+            profile_dir = instance_root / "browser" / "profile"
+            chrome_proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(60)",
+                    "--remote-debugging-port=9333",
+                    f"--user-data-dir={profile_dir}",
+                ],
+                start_new_session=True,
+            )
+            chrome_pgid = os.getpgid(chrome_proc.pid)
+            self.addCleanup(self._terminate_registered_process, chrome_proc.pid, chrome_pgid)
             browser_dir = instance_root / "browser"
             runtime_browser_dir = instance_root / "runtime" / "browser"
             browser_dir.mkdir(parents=True, exist_ok=True)

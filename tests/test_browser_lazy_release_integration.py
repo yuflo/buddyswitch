@@ -363,6 +363,7 @@ state_file = Path(os.environ["BUDDYSWITCH_TEST_FAKE_CHROME_STATE"])
 server_script = Path(os.environ["BUDDYSWITCH_TEST_FAKE_CHROME_SERVER"])
 calls_path = Path(os.environ["BUDDYSWITCH_TEST_BROWSER_ENSURE_CALLS"])
 marker = instance_root / "browser" / "chrome.pid"
+profile_dir = instance_root / "browser" / "profile"
 
 existing_pid = None
 try:
@@ -379,6 +380,7 @@ if pid is None or not pid_alive(pid) or not endpoint_ready(port):
         except OSError:
             pass
     marker.parent.mkdir(parents=True, exist_ok=True)
+    profile_dir.mkdir(parents=True, exist_ok=True)
     state_file.parent.mkdir(parents=True, exist_ok=True)
     if not state_file.exists():
         state_file.write_text(json.dumps({"targets": []}, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
@@ -388,7 +390,12 @@ if pid is None or not pid_alive(pid) or not endpoint_ready(port):
     devnull_in = open(os.devnull, "rb")
     devnull_out = open(os.devnull, "ab")
     proc = subprocess.Popen(
-        [sys.executable, str(server_script)],
+        [
+            sys.executable,
+            str(server_script),
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={profile_dir}",
+        ],
         stdin=devnull_in,
         stdout=devnull_out,
         stderr=devnull_out,

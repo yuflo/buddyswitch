@@ -359,7 +359,7 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
 
         def fake_refresh_current_page_idle(**kwargs: object) -> dict[str, object]:
             refresh_calls.append(kwargs)
-            return {"idle_refreshed": True, "idle_seconds": 300}
+            return {"idle_refreshed": True, "idle_seconds": 40}
 
         def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
             close_calls.append({"browser_url": browser_url, "target_id": target_id})
@@ -614,7 +614,7 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "handled")
         self.assertEqual(calls, [])
 
-    def test_release_noops_when_browser_port_missing(self) -> None:
+    def test_release_handler_calls_manager_when_browser_port_missing(self) -> None:
         calls = self._install_manager_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
             context = self._context(Path(temp_root) / "instances" / "act-dev-browser", browser_port=None)
@@ -624,7 +624,9 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
             result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
 
         self.assertEqual(result.status, "handled")
-        self.assertEqual(calls, [])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["actor_id"], "act-dev-browser")
+        self.assertEqual(calls[0]["reason"], "page_idle_empty")
 
     def test_release_noops_when_cdp_has_real_user_page(self) -> None:
         calls = self._install_manager_recorder()

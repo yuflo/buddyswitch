@@ -30,7 +30,7 @@ from cdp_background_page import (  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 
 
-BROWSER_PAGE_IDLE_SECONDS = 300
+BROWSER_PAGE_IDLE_SECONDS = 40
 BROWSER_PAGE_EXPIRED_TRIGGER = "browser.page.expired"
 BROWSER_COCKPIT_RELEASE_DELAY_SECONDS = 10
 BROWSER_COCKPIT_RELEASE_TRIGGER = "browser.cockpit.release"

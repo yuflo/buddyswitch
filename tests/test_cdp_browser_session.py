@@ -203,8 +203,8 @@ class CdpBrowserSessionTests(unittest.TestCase):
             calls.append(kwargs)
             return {
                 "idle_refreshed": True,
-                "idle_seconds": 300,
-                "idle_expires_at": "2026-07-01T00:05:00Z",
+                "idle_seconds": 40,
+                "idle_expires_at": "2026-07-01T00:00:40Z",
             }
 
         self.session.browser_lifecycle.refresh_current_page_idle = fake_refresh_current_page_idle
@@ -242,7 +242,7 @@ class CdpBrowserSessionTests(unittest.TestCase):
         self.assertFalse(result.page_opened)
         self.assertTrue(result.page_reused)
         self.assertTrue(result.idle_refreshed)
-        self.assertEqual(result.idle_seconds, 300)
+        self.assertEqual(result.idle_seconds, 40)
         self.assertEqual(create_calls, [])
         self.assertEqual(idle_calls[0]["target_id"], "target-existing")
         self.assertEqual(idle_calls[0]["target_url"], target_url)
@@ -277,7 +277,7 @@ class CdpBrowserSessionTests(unittest.TestCase):
         self.assertTrue(result.page_opened)
         self.assertFalse(result.page_reused)
         self.assertTrue(result.idle_refreshed)
-        self.assertEqual(result.idle_expires_at, "2026-07-01T00:05:00Z")
+        self.assertEqual(result.idle_expires_at, "2026-07-01T00:00:40Z")
         self.assertEqual(create_calls, [{"browser_url": browser_url, "target_url": target_url}])
         self.assertEqual(idle_calls[0]["target_id"], "target-new")
         self.assertNotIn(browser_url, repr(result))
@@ -516,8 +516,8 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
                 result,
                 {
                     "idle_refreshed": True,
-                    "idle_seconds": 300,
-                    "idle_expires_at": "2026-06-24T00:05:00Z",
+                    "idle_seconds": 40,
+                    "idle_expires_at": "2026-06-24T00:00:40Z",
                 },
             )
             self.assertEqual(
@@ -525,7 +525,7 @@ class CdpBrowserLifecycleTests(unittest.TestCase):
                 [
                     {
                         "instance_root": instance_root,
-                        "delay_seconds": 300,
+                        "delay_seconds": 40,
                         "trigger_type": "browser.page.expired",
                         "payload": {"target_id": "target-idle-1"},
                         "source_context": {"owner": "browser"},
