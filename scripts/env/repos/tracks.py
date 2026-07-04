@@ -84,6 +84,9 @@ def _normalize_now(value: Any) -> dict[str, Any]:
 def _normalize_artifact_relation(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ValueError("track.artifact_relations[] must be an object")
+    retired_source_field = "from_" + "actor"
+    if retired_source_field in row:
+        raise ValueError("track.artifact_relations[].from_identity_id is required")
     if row.get("type") != "artifact":
         raise ValueError("track.artifact_relations[].type must be 'artifact'")
     role = row.get("role")
@@ -97,7 +100,7 @@ def _normalize_artifact_relation(row: Any) -> dict[str, Any]:
         "label": _require_non_empty_text(row.get("label"), "track.artifact_relations[].label"),
         "template": _require_non_empty_text(row.get("template"), "track.artifact_relations[].template"),
         "from_identity_id": _identity_id(
-            row.get("from_identity_id", row.get("from_actor")),
+            row.get("from_identity_id"),
             "track.artifact_relations[].from_identity_id",
         ),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 import unittest
@@ -241,7 +242,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-task-hint",
             "Task Hint",
-            owner_actor={"actor_id": "act-pm-task-hint", "role_id": "pm"},
+            owner_identity="act-pm-task-hint",
             outcome="Task hint outcome",
             now={"next": "seed", "blocker": None},
         )
@@ -296,7 +297,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = env_store.create_track(
             "track-relation-shape",
             "Relation Shape",
-            owner_actor={"actor_id": "act-pm-relation", "role_id": "pm"},
+            owner_identity="act-pm-relation",
             outcome="Relation outcome",
             now={"next": "seed", "blocker": None},
         )
@@ -318,7 +319,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "id": "track-reject-publication-slots",
             "title": "Reject publication slots",
             "outcome": "outcome",
-            "owner_actor": {"actor_id": "act-pm-reject-track", "role_id": "pm"},
+            "owner_identity_id": "act-pm-reject-track",
             "state": "active",
             "now": {"next": "next", "blocker": None},
             "artifact_relations": [],
@@ -340,7 +341,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "id": "track-relation-normalize",
                 "title": "Relation Normalize",
                 "outcome": "outcome",
-                "owner_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+                "owner_identity_id": "act-pm-relation",
                 "state": "active",
                 "now": {"next": "next", "blocker": None},
                 "artifact_relations": [
@@ -351,7 +352,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         "role": "material",
                         "label": "Brief",
                         "template": "brief",
-                        "from_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+                        "from_identity_id": "act-pm-relation",
                         "summary": "Shared brief",
                         "current": True,
                         "created_at": "2026-05-18T10:00:00+08:00",
@@ -375,7 +376,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "id": "track-relation-invalid-role",
             "title": "Relation Invalid",
             "outcome": "outcome",
-            "owner_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+            "owner_identity_id": "act-pm-relation",
             "state": "active",
             "now": {"next": "next", "blocker": None},
             "artifact_relations": [
@@ -386,7 +387,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "role": "publication",
                     "label": "Invalid",
                     "template": "brief",
-                    "from_actor": {"actor_id": "act-pm-relation", "role_id": "pm"},
+                    "from_identity_id": "act-pm-relation",
                     "summary": "Invalid",
                     "current": True,
                     "created_at": "2026-05-18T10:00:00+08:00",
@@ -414,8 +415,43 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             env_store.validate_track(payload)
 
 
+class MessageStoreRetirementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_legacy_message_object_apis_are_retired(self) -> None:
+        legacy_rejection_payload = {
+            "id": "msg-retired-object",
+            "from_role": "pm",
+            "to_role": "dev",
+            "content": "retired object message",
+            "created_at": "2026-07-04T00:00:00+08:00",
+        }
+
+        cases = [
+            ("validate_message", lambda: env_store.validate_message(legacy_rejection_payload)),
+            ("save_message", lambda: env_store.save_message(legacy_rejection_payload)),
+            ("list_messages", env_store.list_messages),
+            ("get_message", lambda: env_store.get_message("msg-retired-object")),
+            (
+                "create_message",
+                lambda: env_store.create_message(from_role="pm", to_role="dev", content="retired object message"),
+            ),
+        ]
+
+        for name, call in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(RuntimeError, "identity-first IM"):
+                    call()
+
+    def test_runtime_env_store_message_api_guidance_points_to_identity_im(self) -> None:
+        runtime_env_store = importlib.import_module("env_store")
+
+        for name in ("validate_message", "list_messages", "get_message", "save_message", "create_message"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(AttributeError, "env.services.messages|env.repos.messages"):
+                    getattr(runtime_env_store, name)
+
+
 class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_track_comment_helper_normalizes_role_author_to_actor_address(self) -> None:
+    def test_track_comment_helper_normalizes_role_author_to_identity(self) -> None:
         created = env_store.create_track_comment(
             track_id="track-helper-comments",
             by_role="pm",

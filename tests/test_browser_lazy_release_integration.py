@@ -678,7 +678,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
             pass
 
         context = Context()
-        context.actor_address = {"role_id": role, "actor_id": actor_id}
         context.actor_id = actor_id
         context.role = role
         context.instance_root = instance_root

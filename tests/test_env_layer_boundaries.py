@@ -38,6 +38,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         "tasks",
         "source_refs",
         "actor_private_workspace",
+        "identity",
     }
     _SHIPPED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "message", "search"}
 

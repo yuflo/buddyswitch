@@ -599,11 +599,21 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertEqual(row.get("to_identity_id"), dev["actor_id"])
-            self.assertIn(row.get("from_identity_id"), [pm["actor_id"], design["actor_id"]])
+            target_identity = row.get("target_identity")
+            sender_identity = row.get("sender_identity")
+            self.assertIsInstance(target_identity, dict)
+            self.assertIsInstance(sender_identity, dict)
+            assert isinstance(target_identity, dict)
+            assert isinstance(sender_identity, dict)
+            self.assertEqual(target_identity.get("id"), dev["actor_id"])
+            self.assertEqual(target_identity.get("type"), "actor")
+            self.assertIn(sender_identity.get("id"), [pm["actor_id"], design["actor_id"]])
+            self.assertEqual(sender_identity.get("type"), "actor")
             self.assertEqual(row.get("visible_to_identity_id"), dev["actor_id"])
             self.assertNotIn("from_actor_address", row)
             self.assertNotIn("to_actor_address", row)
+            self.assertNotIn("from_identity_id", row)
+            self.assertNotIn("to_identity_id", row)
             self.assertNotIn("content", row)
         self.assertGreaterEqual(cues.get("count", 0), 2)
         message_source = payload.get("context_sources", {}).get("messages", {})

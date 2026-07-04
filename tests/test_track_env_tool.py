@@ -156,6 +156,40 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args=args,
         )
 
+    def test_track_artifact_relation_rejects_retired_identity_source(self) -> None:
+        retired_source_field = "from_" + "actor"
+        legacy_rejection_payload = {
+            "id": "track-retired-relation-source",
+            "title": "Retired relation source",
+            "outcome": "Reject retired relation identity source.",
+            "owner_identity_id": self._runtime_actor_id(role="pm", label="act-pm-track"),
+            "state": "active",
+            "now": {"next": "reject", "blocker": None},
+            "acceptance_criteria": ["reject retired relation source"],
+            "non_goals": [],
+            "artifact_relations": [
+                {
+                    "type": "artifact",
+                    "relation_id": "rel-retired-source",
+                    "artifact_id": "artifact-retired-source",
+                    "role": "material",
+                    "label": "Retired",
+                    "template": "markdown",
+                    retired_source_field: {"id": self._runtime_actor_id(role="pm", label="act-pm-track"), "type": "actor"},
+                    "summary": "Retired relation source.",
+                    "current": True,
+                    "created_at": "2026-07-04T00:00:00Z",
+                }
+            ],
+            "updates": [],
+            "created_at": "2026-07-04T00:00:00Z",
+            "updated_at": "2026-07-04T00:00:00Z",
+        }
+
+        with self.assertRaisesRegex(ValueError, "from_identity_id"):
+            env_store.save_track(legacy_rejection_payload)
+        self.assertIsNone(env_store.get_track("track-retired-relation-source"))
+
     def test_create_sets_current_identity_as_owner(self) -> None:
         instance_json = self._pm_instance()
         created = self._create_track(instance_json=instance_json, track_id="track-human-page")

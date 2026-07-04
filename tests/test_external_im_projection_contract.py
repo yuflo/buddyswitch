@@ -25,7 +25,6 @@ class _FakeExternalImSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.connection = {"identity_id": "ext-fake"}
-        self.participant = {"kind": "external", "external_id": "ext-fake"}
 
     def create_connection(self, *, display_name: str) -> dict[str, Any]:
         self.calls.append(("create_connection", {"display_name": display_name}))
@@ -36,7 +35,6 @@ class _FakeExternalImSession:
         return {
             "ok": True,
             "identity": {"id": "ext-fake", "type": "external"},
-            "participant": self.participant,
             "connection": self.connection,
         }
 
@@ -313,8 +311,8 @@ class ExternalImProjectionContractTests(unittest.TestCase):
                     {
                         "event_id": "imev-reply",
                         "message_id": "msg-reply",
-                        "from_identity_id": "act-market-demo",
-                        "to_identity_id": "ext-fake",
+                        "sender_identity": {"id": "act-market-demo", "type": "actor"},
+                        "target_identity": {"id": "ext-fake", "type": "external"},
                     }
                 ],
             }

@@ -1099,20 +1099,20 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         return sorted(identities_dir.glob("*.json")) if identities_dir.is_dir() else []
 
     @staticmethod
-    def _instance_list_for_actor_addresses(actor_addresses: list[dict[str, str]]) -> dict[str, object]:
+    def _instance_list_for_identity_routes(identity_routes: list[dict[str, str]]) -> dict[str, object]:
         return {
             "instances": [
                 {
-                    "actor_id": actor["actor_id"],
-                    "role": actor["role_id"],
+                    "actor_id": route["actor_id"],
+                    "role": route["role_id"],
                     "status": "active",
                     "app_server_health": "healthy",
                     "thread_id": f"thread-{index}",
                     "browser_port": None,
                     "updated_at": "2026-06-26T10:10:00Z",
-                    "workspace_dir": f"/tmp/buddyswitch/instances/{actor['actor_id']}/workspace",
+                    "workspace_dir": f"/tmp/buddyswitch/instances/{route['actor_id']}/workspace",
                 }
-                for index, actor in enumerate(actor_addresses)
+                for index, route in enumerate(identity_routes)
             ]
         }
 
@@ -1185,12 +1185,12 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
     def test_browser_style_im_routes_send_read_fetch_ack_and_restore_history_without_browser_token(self) -> None:
         """Browser-style Web request sends actor-directed IM through /api/im/messages, actor reply becomes visible through /api/im/events, browser fetches the reply through /api/im/messages/<id>, browser acks through /api/im/events/ack, and direct conversation shows both messages without exposing connection_key."""
-        actor_address = {
+        actor_route = {
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-history"),
         }
         runner = FakeRunner()
-        runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_actor_addresses([actor_address])))
+        runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_identity_routes([actor_route])))
         service = self._service(runner)
         status, session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(status, 200)
@@ -1206,7 +1206,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                 "/api/im/messages",
                 json.dumps(
                     {
-                        "target_identity_id": actor_address["actor_id"],
+                        "target_identity_id": actor_route["actor_id"],
                         "content": "ping",
                         "reply_to": None,
                     }
@@ -1221,7 +1221,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         sent_message_id = sent["message"]["id"]
 
         reply = message_service.send_im_message(
-            sender_identity={"id": actor_address["actor_id"], "type": "actor"},
+            sender_identity={"id": actor_route["actor_id"], "type": "actor"},
             to=web_identity,
             content="pong",
             reply_to=sent_message_id,
@@ -1274,7 +1274,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         status, history = service.handle_api(
             "GET",
-            f"/api/im/conversations/direct?identity_id={actor_address['actor_id']}&limit=20",
+            f"/api/im/conversations/direct?identity_id={actor_route['actor_id']}&limit=20",
             b"",
             {},
         )
@@ -1292,13 +1292,13 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             "actor_id": self._runtime_actor_id(role="dev", label="web-im-dev"),
         }
         runner = FakeRunner()
-        runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_actor_addresses([market_actor, dev_actor])))
+        runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_identity_routes([market_actor, dev_actor])))
         service = self._service(runner)
         session_status, session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(session_status, 200)
         web_identity = session["identity"]
         sent_by_actor: dict[str, dict[str, object]] = {}
-        for actor_address, content in (
+        for actor_route, content in (
             (market_actor, "market ping"),
             (dev_actor, "dev ping"),
         ):
@@ -1307,7 +1307,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                 "/api/im/messages",
                 json.dumps(
                     {
-                        "target_identity_id": actor_address["actor_id"],
+                        "target_identity_id": actor_route["actor_id"],
                         "content": content,
                         "reply_to": None,
                     }
@@ -1315,17 +1315,17 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                 {},
             )
             self.assertEqual(status, 200, msg=payload)
-            sent_by_actor[actor_address["actor_id"]] = payload
+            sent_by_actor[actor_route["actor_id"]] = payload
 
-        for actor_address, content in (
+        for actor_route, content in (
             (market_actor, "market pong"),
             (dev_actor, "dev pong"),
         ):
             reply = message_service.send_im_message(
-                sender_identity={"id": actor_address["actor_id"], "type": "actor"},
+                sender_identity={"id": actor_route["actor_id"], "type": "actor"},
                 to=web_identity,
                 content=content,
-                reply_to=sent_by_actor[actor_address["actor_id"]]["message"]["id"],
+                reply_to=sent_by_actor[actor_route["actor_id"]]["message"]["id"],
                 wake_actor=lambda _payload: {"wake_status": "not_applicable"},
             )
             self.assertTrue(reply["ok"], msg=reply)

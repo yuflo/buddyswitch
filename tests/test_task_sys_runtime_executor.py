@@ -416,8 +416,17 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
 
         self.assertIn("When the source task is complete, call task_sys.close(task_id=..., summary=...).", text)
         self.assertIn("Do not rely on parent turn completion to close this Task Sys task.", text)
-        self.assertIn("Allowed parent frame operation:", text)
+        self.assertIn("Allowed parent frame operations:", text)
         self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
+
+    def test_render_parent_frame_allows_user_input_parent_communication_before_close(self) -> None:
+        text = self.module.render_parent_frame(self._parent_instruction()["frame"])
+
+        self.assertIn("For a user.input source:", text)
+        self.assertIn("message.send(target_identity_id=..., content=...)", text)
+        self.assertIn("After required parent work is complete, call task_sys.close.", text)
+        self.assertNotIn("For an IM source message:", text)
+        self.assertNotIn("Only after the source-bound IM action succeeds", text)
 
     def test_render_parent_frame_names_im_closure_order(self) -> None:
         instruction = self._parent_instruction()
@@ -430,6 +439,7 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("first call message.mark(message_id=source_message_id, disposition=absorbed)", text)
         self.assertIn("Only after the source-bound IM action succeeds, call task_sys.close.", text)
         self.assertIn("If the IM action succeeds but task_sys.close fails, retry task_sys.close and do not send a duplicate reply.", text)
+        self.assertNotIn("message.send(target_identity_id=..., content=...)", text)
 
     def test_render_parent_frame_does_not_mention_checkpoint_update(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])

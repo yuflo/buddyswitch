@@ -145,7 +145,8 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
         return self.daemon_core.daemon_triggers.DaemonTrigger(
             source="app_server_notification",
             type=trigger_type,
-            target_actor_address={"role_id": "dev", "actor_id": "act-dev-daed00000001"},
+            target_identity_id="act-dev-daed00000001",
+            target_role_id="dev",
             origin_id=turn_id,
             correlation_id=None,
             payload=params,

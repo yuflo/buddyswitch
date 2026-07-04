@@ -157,6 +157,149 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("not a reachable actor identity", response.get("error", {}).get("message", ""))
         self.assertEqual(after, before)
 
+    def test_im_repository_rejects_retired_row_fields_without_writing_files(self) -> None:
+        sender = {"id": "act-pm-repo", "type": "actor"}
+        target = {"id": "act-dev-repo", "type": "actor"}
+        retired_participants = "partici" + "pants"
+        retired_participant = "partici" + "pant"
+        retired_from_identity = "from_" + "identity_id"
+        retired_to_identity = "to_" + "identity_id"
+        retired_visible_identity = "visible_to_" + "identity"
+
+        def snapshot() -> list[str]:
+            im_root = self.runtime_state_root / "im"
+            if not im_root.exists():
+                return []
+            return sorted(str(path.relative_to(im_root)) for path in im_root.rglob("*.json"))
+
+        cases = [
+            (
+                "conversation",
+                lambda: message_repo.save_im_conversation(
+                    {
+                        "id": "conv-retired",
+                        "type": "direct",
+                        "identity_ids": [sender["id"], target["id"]],
+                        retired_participants: [sender, target],
+                    }
+                ),
+            ),
+            (
+                "message_from",
+                lambda: message_repo.save_im_message(
+                    {
+                        "id": "msg-retired-from",
+                        "conversation_id": "conv-retired",
+                        "sender_identity": sender,
+                        "target_identity": target,
+                        "from": sender,
+                        "content": "bad",
+                    }
+                ),
+            ),
+            (
+                "message_to",
+                lambda: message_repo.save_im_message(
+                    {
+                        "id": "msg-retired-to",
+                        "conversation_id": "conv-retired",
+                        "sender_identity": sender,
+                        "target_identity": target,
+                        "to": target,
+                        "content": "bad",
+                    }
+                ),
+            ),
+            (
+                "message_from_identity",
+                lambda: message_repo.save_im_message(
+                    {
+                        "id": "msg-retired-from-identity",
+                        "conversation_id": "conv-retired",
+                        "sender_identity": sender,
+                        "target_identity": target,
+                        retired_from_identity: sender["id"],
+                        "content": "bad",
+                    }
+                ),
+            ),
+            (
+                "message_to_identity",
+                lambda: message_repo.save_im_message(
+                    {
+                        "id": "msg-retired-to-identity",
+                        "conversation_id": "conv-retired",
+                        "sender_identity": sender,
+                        "target_identity": target,
+                        retired_to_identity: target["id"],
+                        "content": "bad",
+                    }
+                ),
+            ),
+            (
+                "state",
+                lambda: message_repo.save_im_message_state(
+                    {
+                        "message_id": "msg-retired-state",
+                        "owner_identity_id": target["id"],
+                        retired_participant: target,
+                        "disposition": "unseen",
+                    }
+                ),
+            ),
+            (
+                "event_visible_alias",
+                lambda: message_repo.save_im_event(
+                    {
+                        "event_id": "imev-retired-visible",
+                        "type": "message.created",
+                        "message_id": "msg-retired-event",
+                        "conversation_id": "conv-retired",
+                        "sender_identity": sender,
+                        "target_identity": target,
+                        retired_visible_identity: target,
+                    }
+                ),
+            ),
+            (
+                "event_from_identity",
+                lambda: message_repo.save_im_event(
+                    {
+                        "event_id": "imev-retired-from",
+                        "type": "message.created",
+                        "message_id": "msg-retired-event",
+                        "conversation_id": "conv-retired",
+                        "sender_identity": sender,
+                        "target_identity": target,
+                        "visible_to_identity_id": target["id"],
+                        retired_from_identity: sender["id"],
+                    }
+                ),
+            ),
+            (
+                "event_to_identity",
+                lambda: message_repo.save_im_event(
+                    {
+                        "event_id": "imev-retired-to",
+                        "type": "message.created",
+                        "message_id": "msg-retired-event",
+                        "conversation_id": "conv-retired",
+                        "sender_identity": sender,
+                        "target_identity": target,
+                        "visible_to_identity_id": target["id"],
+                        retired_to_identity: target["id"],
+                    }
+                ),
+            ),
+        ]
+
+        for name, call in cases:
+            with self.subTest(name=name):
+                before = snapshot()
+                with self.assertRaisesRegex(ValueError, "retired IM field"):
+                    call()
+                self.assertEqual(snapshot(), before)
+
     def test_send_im_message_persists_durable_objects_when_wake_fails(self) -> None:
         _created, _connection, sender = self._external_connection()
         sender_ref = sender
@@ -256,7 +399,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         initial_cursor = connection["last_event_id"]
         send_response = message_service.send_external_connection_message(
             connection=connection,
-            to=actor,
+            target_identity=actor["identity"],
+            target_role_id=str(actor["role_id"]),
             content="ping",
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
@@ -305,6 +449,42 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(connection["last_event_id"], actor_reply["event_id"])
         self.assertEqual(third_read["events"], [])
 
+    def test_external_connection_send_requires_canonical_target_identity_and_role(self) -> None:
+        _created, connection, _sender = self._external_connection()
+        actor = self._actor_identity()
+
+        response = message_service.send_external_connection_message(
+            connection=connection,
+            target_identity=actor["identity"],
+            target_role_id=str(actor["role_id"]),
+            content="ping",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        with self.assertRaises(TypeError):
+            message_service.send_external_connection_message(
+                connection=connection,
+                to=actor,
+                content="old shape",
+            )
+
+        role_inside_identity = {
+            "id": actor["identity_id"],
+            "type": "actor",
+            "role_id": actor["role_id"],
+        }
+        missing_route = message_service.send_external_connection_message(
+            connection=connection,
+            target_identity=role_inside_identity,
+            target_role_id="",
+            content="missing route",
+            wake_actor=lambda _payload: {"wake_status": "submitted"},
+        )
+        self.assertFalse(missing_route.get("ok"), msg=missing_route)
+        self.assertEqual(missing_route.get("error", {}).get("code"), "E_IM_PAYLOAD")
+        self.assertIn("target_role_id", missing_route.get("error", {}).get("message", ""))
+
     def test_external_connection_ack_rejects_non_visible_event_without_advancing_cursor(self) -> None:
         _created_a, connection_a, _sender_a = self._external_connection(display_name="sender a")
         _created_b, _connection_b, sender_b = self._external_connection(display_name="sender b")
@@ -333,7 +513,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         actor = self._actor_identity()
         root = message_service.send_external_connection_message(
             connection=connection,
-            to=actor,
+            target_identity=actor["identity"],
+            target_role_id=str(actor["role_id"]),
             content="ping",
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
@@ -373,7 +554,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         target = self._actor_identity()
         root = message_service.send_external_connection_message(
             connection=connection,
-            to=target,
+            target_identity=target["identity"],
+            target_role_id=str(target["role_id"]),
             content="ping before wait",
             wake_actor=lambda _payload: {"wake_status": "submitted"},
         )

@@ -19,6 +19,10 @@ VALID_UPDATE_KIND = ("progress", "decision", "blocker")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 VALID_MESSAGE_DISPOSITIONS = ("unseen", "absorbed", "replied", "needs_parent")
+_RETIRED_MESSAGE_API_ERROR = (
+    "legacy message object APIs are retired; use identity-first IM APIs in "
+    "env.services.messages and env.repos.messages"
+)
 
 _LEGACY_TASK_RUN_IDS = "run" + "_ids"
 _LEGACY_TASK_LATEST_RUN = "latest" + "_run_id"
@@ -219,7 +223,10 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
     created_at = _require_non_empty_text(row.get("created_at"), "track.updates[].created_at")
     return {
         "id": _require_non_empty_text(row.get("id"), "track.updates[].id"),
-        "by_actor": _message_actor_payload(row.get("by_actor"), "track.updates[].by_actor"),
+        "by_identity_id": _identity_id_for_route_payload(
+            row.get("by_identity_id", row.get("by_actor")),
+            "track.updates[].by_identity_id",
+        ),
         "summary": _require_non_empty_text(row.get("summary"), "track.updates[].summary"),
         "kind": kind,
         "refs": [_normalize_update_ref(item) for item in refs],
@@ -271,74 +278,48 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     return artifact_repo.validate_artifact(artifact)
 
 
-def _actor_address_for_role(role_id: str) -> dict[str, str]:
+def _identity_id_for_role(role_id: str) -> str:
     normalized_role = _require_non_empty_text(role_id, "role_id")
     if ROLE_ID_PATTERN.fullmatch(normalized_role) is None:
         raise ValueError("role_id must match /^[a-z][a-z0-9-]*$/")
-    return {"actor_id": f"act-{normalized_role}-legacy", "role_id": normalized_role}
+    return f"act-{normalized_role}-legacy"
 
 
-def _message_actor_payload(value: Any, field: str) -> dict[str, str]:
+def _identity_id_for_route_payload(value: Any, field: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return require_id(value.strip(), field)
     if not isinstance(value, dict):
-        raise ValueError(f"{field} must be an actor address object")
-    extra_keys = set(value) - {"actor_id", "role_id"}
-    if extra_keys:
-        raise ValueError(f"{field} contains unsupported fields: {sorted(extra_keys)}")
-    actor_id = value.get("actor_id")
+        raise ValueError(f"{field} must be an identity id or identity route payload")
+    if isinstance(value.get("identity_id"), str) and value["identity_id"].strip():
+        identity_id = value["identity_id"].strip()
+    elif isinstance(value.get("actor_id"), str) and value["actor_id"].strip():
+        identity_id = value["actor_id"].strip()
+    elif isinstance(value.get("identity"), dict) and isinstance(value["identity"].get("id"), str):
+        identity_id = value["identity"]["id"].strip()
+    else:
+        raise ValueError(f"{field}.identity_id must be a valid actor identity id")
     role_id = value.get("role_id")
-    if not isinstance(actor_id, str) or ACTOR_ID_PATTERN.fullmatch(actor_id.strip()) is None:
-        raise ValueError(f"{field}.actor_id must be a valid actor identity id")
-    if not isinstance(role_id, str) or ROLE_ID_PATTERN.fullmatch(role_id.strip()) is None:
+    if role_id is not None and (not isinstance(role_id, str) or ROLE_ID_PATTERN.fullmatch(role_id.strip()) is None):
         raise ValueError(f"{field}.role_id must be a valid role id")
-    return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
+    if ACTOR_ID_PATTERN.fullmatch(identity_id) is None:
+        raise ValueError(f"{field}.identity_id must be a valid actor identity id")
+    return identity_id
+
+
+def _identity_ids_for_route_payloads(values: list[Any] | None, field: str) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError(f"{field} must be a list")
+    return [_identity_id_for_route_payload(value, f"{field}[]") for value in values]
+
+
+def _raise_retired_message_api(name: str) -> None:
+    raise RuntimeError(f"env_legacy_store.{name} is retired. {_RETIRED_MESSAGE_API_ERROR}")
 
 
 def validate_message(message: dict[str, Any]) -> dict[str, Any]:
-    forbidden_fields = {"status", "read_at", "track_id", "task_id", "artifact_id", "recipients", "broadcast"}
-    forbidden = sorted(key for key in message if key in forbidden_fields)
-    if forbidden:
-        raise ValueError(f"unsupported message fields: {', '.join(forbidden)}")
-
-    msg_id = require_id(message.get("id", ""), "message.id")
-    if "from_actor_address" in message or "to_actor_address" in message:
-        from_actor_address = _message_actor_payload(message.get("from_actor_address"), "message.from_actor_address")
-        to_actor_address = _message_actor_payload(message.get("to_actor_address"), "message.to_actor_address")
-    else:
-        from_actor_address = _actor_address_for_role(_require_non_empty_text(message.get("from_role"), "message.from_role"))
-        to_actor_address = _actor_address_for_role(_require_non_empty_text(message.get("to_role"), "message.to_role"))
-    content = _require_non_empty_text(message.get("content"), "message.content")
-    reply_to = message.get("reply_to")
-    if reply_to is not None:
-        require_id(reply_to, "message.reply_to")
-    created_at = _require_non_empty_text(message.get("created_at"), "message.created_at")
-    disposition = message.get("disposition", "unseen")
-    if disposition not in VALID_MESSAGE_DISPOSITIONS:
-        raise ValueError("message.disposition must be one of absorbed, needs_parent, replied, unseen")
-    disposition_reason = message.get("disposition_reason")
-    if disposition_reason is not None:
-        disposition_reason = _require_non_empty_text(disposition_reason, "message.disposition_reason")
-    disposition_updated_at = message.get("disposition_updated_at")
-    if disposition_updated_at is not None:
-        disposition_updated_at = _require_non_empty_text(disposition_updated_at, "message.disposition_updated_at")
-    processed_by_actor_address = message.get("processed_by_actor_address")
-    if processed_by_actor_address is not None:
-        processed_by_actor_address = _message_actor_payload(
-            processed_by_actor_address,
-            "message.processed_by_actor_address",
-        )
-
-    return {
-        "id": msg_id,
-        "from_actor_address": from_actor_address,
-        "to_actor_address": to_actor_address,
-        "content": content,
-        "reply_to": reply_to,
-        "created_at": created_at,
-        "disposition": disposition,
-        "disposition_reason": disposition_reason,
-        "disposition_updated_at": disposition_updated_at,
-        "processed_by_actor_address": processed_by_actor_address,
-    }
+    _raise_retired_message_api("validate_message")
 
 
 def list_tracks() -> list[dict[str, Any]]:
@@ -473,12 +454,12 @@ def create_artifact_revision(
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
     if created_by not in _KNOWN_ROLE_IDS:
         raise ValueError("created_by must be one of known role ids")
-    creator_identity_id = _actor_address_for_role(created_by)["actor_id"]
+    creator_identity_id = _identity_id_for_role(created_by)
     author_rows: list[str] = [creator_identity_id]
     if isinstance(authors, list):
         for row in authors:
             if isinstance(row, str) and row in _KNOWN_ROLE_IDS:
-                identity_id = _actor_address_for_role(row)["actor_id"]
+                identity_id = _identity_id_for_role(row)
                 if identity_id not in author_rows:
                     author_rows.append(identity_id)
     return artifact_repo.create_artifact_revision(
@@ -510,7 +491,7 @@ def publish_track_material(
         track_id=track_id,
         artifact_id=artifact_id,
         label=label,
-        from_identity=_actor_address_for_role(from_role)["actor_id"],
+        from_identity=_identity_id_for_role(from_role),
         summary=summary,
     )
     return result["track"], result["artifact"], result["superseded_artifact_id"]
@@ -528,7 +509,7 @@ def publish_track_proof(
         track_id=track_id,
         artifact_id=artifact_id,
         label=label,
-        from_identity=_actor_address_for_role(from_role)["actor_id"],
+        from_identity=_identity_id_for_role(from_role),
         summary=summary,
     )
     return result["track"], result["artifact"], result["superseded_artifact_id"]
@@ -543,26 +524,14 @@ def append_track_update(
     refs: list[dict[str, Any]] | None = None,
     update_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    track = get_track(track_id)
-    if track is None:
-        raise ValueError(f"track not found: {track_id}")
-    if kind not in VALID_UPDATE_KIND:
-        raise ValueError(f"kind must be one of {', '.join(VALID_UPDATE_KIND)}")
-
-    row = {
-        "id": update_id or f"upd-{uuid.uuid4().hex[:8]}",
-        "by_actor": _actor_address_for_role(by_role),
-        "summary": summary,
-        "kind": kind,
-        "refs": refs or [],
-        "created_at": now_iso(),
-    }
-    updates = [entry for entry in track.get("updates", []) if isinstance(entry, dict)]
-    updates.append(row)
-    track["updates"] = updates
-    track["updated_at"] = now_iso()
-    track = save_track(track)
-    return track, row
+    return track_repo.append_track_update(
+        track_id=track_id,
+        by_identity=_identity_id_for_role(by_role),
+        kind=kind,
+        summary=summary,
+        refs=refs,
+        update_id=update_id,
+    )
 
 
 def delete_artifact(artifact_id: str) -> dict[str, Any]:
@@ -609,69 +578,25 @@ def delete_all_artifacts(*, dry_run: bool = False) -> list[dict[str, Any]]:
 
 
 def list_messages() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    if MESSAGES_DIR.is_dir():
-        for path in MESSAGES_DIR.glob("*.json"):
-            rows.append(validate_message(_read_json(path)))
-    rows.sort(key=lambda row: (row.get("created_at", ""), row["id"]))
-    return rows
+    _raise_retired_message_api("list_messages")
 
 
 def get_message(message_id: str) -> dict[str, Any] | None:
-    path = message_file(message_id)
-    if not path.exists():
-        return None
-    return validate_message(_read_json(path))
+    _raise_retired_message_api("get_message")
 
 
 def save_message(message: dict[str, Any]) -> dict[str, Any]:
-    normalized_message = validate_message(message)
-    ensure_runtime_dirs()
-    _write_json(message_file(normalized_message["id"]), normalized_message)
-    return normalized_message
+    _raise_retired_message_api("save_message")
 
 
 def create_message(
     *,
-    from_actor_address: dict[str, Any] | None = None,
-    to_actor_address: dict[str, Any] | None = None,
     from_role: str | None = None,
     to_role: str | None = None,
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:
-    if from_actor_address is None:
-        if not isinstance(from_role, str) or not from_role.strip():
-            raise ValueError("from_actor_address or from_role must be provided")
-        normalized_from = _actor_address_for_role(from_role)
-    else:
-        normalized_from = _message_actor_payload(from_actor_address, "from_actor_address")
-    if to_actor_address is None:
-        if not isinstance(to_role, str) or not to_role.strip():
-            raise ValueError("to_actor_address or to_role must be provided")
-        normalized_to = _actor_address_for_role(to_role)
-    else:
-        normalized_to = _message_actor_payload(to_actor_address, "to_actor_address")
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError("content must be a non-empty string")
-    if reply_to is not None:
-        require_id(reply_to, "reply_to")
-
-    message_id = f"msg-{uuid.uuid4().hex[:12]}"
-    require_id(message_id, "message id")
-    message = {
-        "id": message_id,
-        "from_actor_address": normalized_from,
-        "to_actor_address": normalized_to,
-        "content": content.strip(),
-        "reply_to": reply_to,
-        "created_at": now_iso(),
-        "disposition": "unseen",
-        "disposition_reason": None,
-        "disposition_updated_at": None,
-        "processed_by_actor_address": None,
-    }
-    return save_message(message)
+    _raise_retired_message_api("create_message")
 
 
 # ---------------------------------------------------------------------------
@@ -701,25 +626,26 @@ def create_track_comment(
     status: str = "open",
 ) -> dict[str, Any]:
     if isinstance(by_actor, dict):
-        author_actor = _message_actor_payload(by_actor, "by_actor")
+        author_identity = _identity_id_for_route_payload(by_actor, "by_identity")
     else:
         author = by_role if isinstance(by_role, str) and by_role.strip() else author_role
         if not isinstance(author, str) or not author.strip():
-            raise ValueError("by_actor must be an actor address payload")
-        author_actor = _actor_address_for_role(author)
+            raise ValueError("by_identity must be an identity id or role id")
+        author_identity = _identity_id_for_role(author)
+    mentioned_identities = _identity_ids_for_route_payloads(mentioned_actors, "mentioned_identities")
     if isinstance(reply_to, str) and reply_to.strip():
         return track_comment_repo.reply_to_track_comment(
             track_id=track_id,
             reply_to=reply_to.strip(),
-            by_actor=author_actor,
+            by_identity=author_identity,
             content=content,
-            mentioned_actors=mentioned_actors,
+            mentioned_identities=mentioned_identities,
         )
     return track_comment_repo.create_track_comment(
         track_id=track_id,
-        by_actor=author_actor,
+        by_identity=author_identity,
         content=content,
-        mentioned_actors=mentioned_actors,
+        mentioned_identities=mentioned_identities,
         thread_id=thread_id,
         status=status,
     )

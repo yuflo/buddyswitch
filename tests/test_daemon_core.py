@@ -690,7 +690,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
             self.core._terminate_pid = lambda pid: terminated.append(pid) or True
 
-            def fail_unregister(_context: object, _actor_address: object) -> dict[str, object]:
+            def fail_unregister(_context: object, _identity_route: object) -> dict[str, object]:
                 raise RuntimeError("central daemon unavailable")
 
             self.core.unregister_daemon_actor = fail_unregister

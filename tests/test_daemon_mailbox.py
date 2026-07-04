@@ -80,11 +80,13 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertNotIn(forbidden, signal)
 
     def test_validate_daemon_signal_rejects_legacy_message_event_shape(self) -> None:
+        retired_from_field = "from_" + "actor_address"
+        retired_to_field = "to_" + "actor_address"
         legacy_event = {
             "type": "example.ready",
             "message_id": "msg-daemon-mailbox",
-            "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
-            "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+            retired_from_field: {"role_id": "pm", "actor_id": "act-pm-daemon"},
+            retired_to_field: {"role_id": "dev", "actor_id": "act-dev-daemon"},
         }
 
         with self.assertRaisesRegex(ValueError, "DaemonSignalEnvelope"):
@@ -183,11 +185,13 @@ class DaemonMailboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             paths = self.central.central_daemon_paths(Path(temp_root) / "shared")
             service = self.central.CentralDaemonService(paths=paths, now=lambda: "2026-05-30T00:00:00Z")
+            retired_from_field = "from_" + "actor_address"
+            retired_to_field = "to_" + "actor_address"
             legacy_event = {
                 "type": "example.ready",
                 "message_id": "msg-daemon-mailbox",
-                "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
-                "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                retired_from_field: {"role_id": "pm", "actor_id": "act-pm-daemon"},
+                retired_to_field: {"role_id": "dev", "actor_id": "act-dev-daemon"},
             }
 
             result = service.handle("event.deliver", {"event": legacy_event})

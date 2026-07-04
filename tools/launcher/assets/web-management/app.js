@@ -442,15 +442,16 @@
     if (!message || typeof message !== 'object') {
       return false;
     }
-    const fromIdentityId = typeof message.from_identity_id === 'string' ? message.from_identity_id : '';
-    if (!fromIdentityId) {
+    const senderIdentity = message.sender_identity && typeof message.sender_identity === 'object' ? message.sender_identity : {};
+    const senderIdentityId = typeof senderIdentity.id === 'string' ? senderIdentity.id : '';
+    if (!senderIdentityId) {
       return false;
     }
-    const sent = fromIdentityId.indexOf('ext-') === 0;
+    const sent = senderIdentityId.indexOf('ext-') === 0;
     return rememberImEntry(state, {
       id: typeof message.id === 'string' ? message.id : '',
       direction: sent ? 'sent' : 'reply',
-      sender: sent ? 'you' : identityLabel(fromIdentityId),
+      sender: sent ? 'you' : identityLabel(senderIdentityId),
       content: typeof message.content === 'string' ? message.content : '',
       deliveryStatus: '',
       wakeStatus: '',
@@ -462,7 +463,9 @@
     if (!message || typeof message !== 'object' || typeof identityId !== 'string' || !identityId) {
       return false;
     }
-    return message.from_identity_id === identityId || message.to_identity_id === identityId;
+    const senderIdentity = message.sender_identity && typeof message.sender_identity === 'object' ? message.sender_identity : {};
+    const targetIdentity = message.target_identity && typeof message.target_identity === 'object' ? message.target_identity : {};
+    return senderIdentity.id === identityId || targetIdentity.id === identityId;
   }
 
   function applyImConversationPayload(state, payload, identityId) {

@@ -171,7 +171,7 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     source_refs.normalize_source_refs(
                         [{"type": ref_type, "id": "old"}],
                         active_role="pm",
-                        active_actor={"actor_id": "act-pm-source-ref", "role_id": "pm"},
+                        current_identity={"id": "act-pm-source-ref", "type": "actor"},
                     )
 
     def test_cleanup_ignores_old_memory_files(self) -> None:

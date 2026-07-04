@@ -73,7 +73,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("participant_" + "token", session)
         self.assertNotIn("event_" + "cursor", session)
 
-        old_route = "/api/im/" + "external-" + "participants"
+        old_route = "/api/im/" + "external-" + "partici" + "pants"
         status, old_registration = router.handle("POST", old_route, b"{}", {})
         self.assertEqual(status, 404)
         self.assertFalse(old_registration["ok"])

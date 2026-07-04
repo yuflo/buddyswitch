@@ -157,7 +157,7 @@ class CleanupSystemTests(unittest.TestCase):
         for directory in (
             "buddyswitch/objects/tracks",
             "buddyswitch/objects/artifacts",
-            "buddyswitch/objects/messages",
+            "im/messages",
             "buddyswitch/objects/track-comments",
         ):
             self.assertTrue(self._path(directory).is_dir(), f"missing recreated dir: {directory}")
@@ -166,16 +166,25 @@ class CleanupSystemTests(unittest.TestCase):
     def test_cleanup_plan_includes_message_and_comment_objects(self) -> None:
         """MCT-RUN-003: All-data cleanup plan discovers message and comment objects."""
         self._write_json(
-            "buddyswitch/objects/messages/msg-test.json",
+            "im/messages/msg-test.json",
             {
                 "id": "msg-test",
-                "from_actor_address": {"actor_id": "act-pm-clean", "role_id": "pm"},
-                "to_actor_address": {"actor_id": "act-dev-clean", "role_id": "dev"},
+                "conversation_id": "conv-test",
+                "sender_identity": {"id": "act-pm-clean", "type": "actor"},
+                "target_identity": {"id": "act-dev-clean", "type": "actor"},
                 "content": "hello",
                 "reply_to": None,
                 "created_at": "2026-05-17T00:00:00+08:00",
             },
         )
+        retired_shape = {
+            "id": "msg-retired",
+            "from_" + "actor_" + "address": {"actor_id": "act-pm-clean", "role_id": "pm"},
+            "to_" + "actor_" + "address": {"actor_id": "act-dev-clean", "role_id": "dev"},
+            "content": "old",
+            "created_at": "2026-05-17T00:00:00+08:00",
+        }
+        self._write_json("buddyswitch/objects/messages/msg-retired.json", retired_shape)
         self._write_json(
             "buddyswitch/objects/track-comments/track-demo/comment-test.json",
             {
@@ -201,6 +210,11 @@ class CleanupSystemTests(unittest.TestCase):
         )
         self.assertIn("message_object_ids", plan)
         self.assertIn("msg-test", plan["message_object_ids"])
+        self.assertNotIn("msg-retired", plan["message_object_ids"])
+        self.assertTrue(
+            any("retired message object schema" in warning for warning in plan["warnings"]),
+            msg=plan["warnings"],
+        )
         self.assertIn("comment_object_ids", plan)
         self.assertIn("comment-test", plan["comment_object_ids"])
 

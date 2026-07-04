@@ -801,8 +801,9 @@ def _actor_is_reachable(actor: dict[str, Any]) -> bool:
 
 def _actor_id_for_reply(event: dict[str, Any], message: dict[str, Any]) -> str:
     for payload in (event, message):
-        for field in ("from_identity_id", "sender_identity_id"):
-            value = payload.get(field)
+        sender_identity = payload.get("sender_identity")
+        if isinstance(sender_identity, dict):
+            value = sender_identity.get("id")
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return ""

@@ -106,6 +106,14 @@ class RepoConsistencyTests(unittest.TestCase):
             return True
         if path_text.startswith("docs/spec/im-api-unified-rebuild-forward/"):
             return True
+        if path_text.startswith("docs/spec/im-product-boundary-convergence-2026-07-03/"):
+            return True
+        if path_text.startswith("docs/spec/identity-communication-cutover-2026-07-04/"):
+            return True
+        if path_text.startswith("docs/spec/identity-communication-full-pass-2026-07-04/"):
+            return True
+        if path_text.startswith("docs/spec/2026-07-03-identity-first-communication-task-brief/evidence-"):
+            return True
         if path_text.startswith("docs/spec/task-sys-im-completion-status-observability/"):
             return True
         if path_text.startswith("docs/spec/task-sys-proactive-rebuild/"):
@@ -472,6 +480,120 @@ print(json.dumps({{
 
         self.assertEqual(hits, [], msg="\n".join(hits))
 
+    def test_communication_identity_live_surfaces_have_no_retired_shapes(self) -> None:
+        high_signal_targets = [
+            "scripts/env/repos/messages.py",
+            "scripts/env/services/messages.py",
+            "scripts/env/tools/message",
+            "scripts/env/tool_runtime/im_client.py",
+            "scripts/env/tools/context/_impl.py",
+            "scripts/env_cleanup.py",
+            "scripts/env_legacy_store.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "tools/launcher/assets/web-management/app.js",
+            "tools/launcher/imessage_channel.py",
+            "tools/launcher/web_im_identity.py",
+            "tools/launcher/task_sys_" + "runtime.py",
+            "tools/launcher/assets/roles",
+            "buddyswitch/skills/shared/message-tool",
+            "buddyswitch/skills/shared/track-tool",
+            "tests/test_communication_identity_cutover.py",
+            "tests/test_im_product_core.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/test_web_management.py",
+            "tests/web_management_ui_state.test.js",
+            "tests/web_management_ui_contract.test.js",
+            "tests/test_im_web_management_projection.py",
+            "tests/test_imessage_channel.py",
+            "tests/test_context_binding_env_tool.py",
+            "tests/test_cleanup_system.py",
+            "tests/test_env_store_v2.py",
+            "tests/test_runtime_broker.py",
+            "tests/test_browser_page_expired_handler.py",
+            "tests/test_notification_center.py",
+            "tests/test_task_checkout_handler.py",
+            "tests/test_daemon_mailbox.py",
+            "tests/test_track_env_tool.py",
+            "tests/test_artifact_env_tool.py",
+            "tests/test_track_comment_env_tool.py",
+            "tests/test_artifact_selection.py",
+            "tests/test_track_comment_added_handler.py",
+            "tests/test_task_sys_runtime_executor.py",
+        ]
+        flattened_im_targets = [
+            "scripts/env/repos/messages.py",
+            "scripts/env/tools/context/_impl.py",
+            "tools/launcher/assets/web-management/app.js",
+            "tools/launcher/imessage_channel.py",
+            "tests/test_communication_identity_cutover.py",
+            "tests/test_im_product_core.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/web_management_ui_state.test.js",
+            "tests/test_imessage_channel.py",
+            "tests/test_context_binding_env_tool.py",
+            "tests/test_runtime_broker.py",
+        ]
+        participant_field_targets = [
+            "scripts/env/repos/messages.py",
+            "tools/launcher/web_im_identity.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/test_im_http_router.py",
+            "tests/test_im_product_core.py",
+            "tests/test_web_management.py",
+            "tests/test_context_binding_env_tool.py",
+            "tests/test_runtime_broker.py",
+        ]
+        track_artifact_targets = [
+            "scripts/env/repos/tracks.py",
+            "scripts/env/domain/artifact_visibility.py",
+            "tests/test_track_env_tool.py",
+            "tests/test_artifact_env_tool.py",
+            "tests/test_artifact_selection.py",
+        ]
+
+        scans = [
+            (
+                r"ActorAddress|actor_address|from_actor_address|to_actor_address|processed_by_actor_address"
+                r"|source_actor_address|target_actor_address|identity_from_im_participant"
+                r"|participant\.actor_address|participant\.external_id"
+                r"|\"kind\"\s*:\s*\"actor\"|\"kind\"\s*:\s*\"external\"",
+                high_signal_targets,
+            ),
+            (r"\bfrom_identity_id\b|\bto_identity_id\b|\bvisible_to_identity\b", flattened_im_targets),
+            (r"['\"]participants['\"]|['\"]participant['\"]", participant_field_targets),
+            (r"\bfrom_actor\b", track_artifact_targets),
+        ]
+
+        def is_allowed_hit(line: str) -> bool:
+            parts = line.split(":", 2)
+            path = parts[0] if parts else ""
+            content = parts[2] if len(parts) == 3 else line
+            lowered = content.lower()
+            if path.startswith("tests/"):
+                if "assertNotIn(" in content or "assertNotRegex(" in content or "assertFalse(" in content:
+                    return True
+                if " not in " in content and ("assertTrue(" in content or "assertEqual(" in content):
+                    return True
+                if "for forbidden in" in content:
+                    return True
+                if any(fragment in lowered for fragment in ("legacy", "does_not", "without_actor_address", "no_retired", "retired")):
+                    return True
+            if "retired_shape" in content or "legacy_rejection_payload" in content:
+                return True
+            return False
+
+        disallowed: list[str] = []
+        for pattern, targets in scans:
+            for line in self._scan_targets(pattern, targets):
+                if not is_allowed_hit(line):
+                    disallowed.append(line)
+
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
     def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:
         desc = tool_catalog.env_tools_description()
         operation_semantics = tool_catalog.operation_semantics()
@@ -827,6 +949,16 @@ print(json.dumps({{
         self.assertTrue(
             self._is_docs_spec_context_hit(
                 "docs/spec/im-api-unified-rebuild-forward/phase-01-unified-auth-context.md:1:tests/test_external_im_projection_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/identity-communication-full-pass-2026-07-04/phase-11-final-acceptance-plan.md:1:tests/test_external_im_projection_contract.py"
+            )
+        )
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/2026-07-03-identity-first-communication-task-brief/evidence-2026-07-04-live-user-simulation/run/scripts/live_identity_full_pass_probe.py:1:track.get"
             )
         )
         self.assertTrue(

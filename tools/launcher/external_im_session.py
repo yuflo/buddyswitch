@@ -56,7 +56,8 @@ class ExternalImSession:
             return target_response
         return message_service.send_external_connection_message(
             connection=connection,
-            to=target_response,
+            target_identity=target_response["identity"],
+            target_role_id=str(target_response["role_id"]),
             content=content,
             reply_to=reply_to if reply_to is not None else None,
             wake_actor=self._wake_actor,

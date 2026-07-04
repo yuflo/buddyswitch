@@ -1521,14 +1521,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 (im_root / child).mkdir(parents=True, exist_ok=True)
             message_id = "msg-live-projected-root"
             conversation_id = "conv-live-projected-root"
-            sender_participant = {
-                "kind": "actor",
-                "actor_address": {"actor_id": "act-dev-bbbbbbbbbbbb", "role_id": "dev"},
-            }
-            target_participant = {
-                "kind": "actor",
-                "actor_address": {"actor_id": "act-pm-aaaaaaaaaaaa", "role_id": "pm"},
-            }
+            sender_identity = {"id": "act-dev-bbbbbbbbbbbb", "type": "actor"}
+            target_identity = {"id": "act-pm-aaaaaaaaaaaa", "type": "actor"}
             state_path = im_root / "message_states" / f"{message_id}--act-pm-aaaaaaaaaaaa.json"
             (im_root / "conversations" / f"{conversation_id}.json").write_text(
                 json.dumps(
@@ -1536,7 +1530,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                         "id": conversation_id,
                         "type": "direct",
                         "identity_ids": ["act-dev-bbbbbbbbbbbb", "act-pm-aaaaaaaaaaaa"],
-                        "participants": [sender_participant, target_participant],
                         "created_at": "2026-06-04T00:00:00Z",
                         "updated_at": "2026-06-04T00:00:00Z",
                         "last_message_id": message_id,
@@ -1553,10 +1546,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     {
                         "id": message_id,
                         "conversation_id": conversation_id,
-                        "from_identity_id": "act-dev-bbbbbbbbbbbb",
-                        "to_identity_id": "act-pm-aaaaaaaaaaaa",
-                        "from": sender_participant,
-                        "to": [target_participant],
+                        "sender_identity": sender_identity,
+                        "target_identity": target_identity,
                         "content": "This changes the active parent-thread objective.",
                         "reply_to": None,
                         "created_at": "2026-06-04T00:00:00Z",
@@ -1573,7 +1564,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     {
                         "message_id": message_id,
                         "owner_identity_id": "act-pm-aaaaaaaaaaaa",
-                        "participant": target_participant,
                         "disposition": "unseen",
                         "reason": None,
                         "processed_by": None,

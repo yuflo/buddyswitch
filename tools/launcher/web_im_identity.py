@@ -50,10 +50,17 @@ class WebImIdentityProvider:
             record = self._read_existing()
             authenticated = self._authenticate_record(record) if record is not None else None
             if record is not None and authenticated is not None:
-                updated = dict(record)
-                updated["identity"] = authenticated["identity"]
-                updated.pop("participant", None)
-                updated["updated_at"] = runtime_files.now_iso()
+                now = runtime_files.now_iso()
+                created_at = record.get("created_at")
+                updated = {
+                    "schema_version": SCHEMA_VERSION,
+                    "client_kind": CLIENT_KIND,
+                    "display_name": DISPLAY_NAME,
+                    "identity": authenticated["identity"],
+                    "connection_key": str(record["connection_key"]).strip(),
+                    "created_at": created_at if isinstance(created_at, str) and created_at.strip() else now,
+                    "updated_at": now,
+                }
                 self._write(updated)
                 updated["connection"] = authenticated["connection"]
                 return updated

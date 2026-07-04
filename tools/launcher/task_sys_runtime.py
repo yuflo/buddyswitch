@@ -240,22 +240,10 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
 def render_parent_frame(frame: Mapping[str, Any]) -> str:
     payload = _require_mapping(frame, "frame")
     task_id = _require_text(payload.get("task_id"), "frame.task_id")
-    return "\n\n".join(
-        (
-            "task_sys.parent_frame",
-            f"Task id: {task_id}",
-            "Task Sys source:",
-            _json_block(_require_mapping(payload.get("source"), "frame.source")),
-            "Inbound context:",
-            _json_block(_require_mapping(payload.get("inbound_context"), "frame.inbound_context")),
-            "Side result:",
-            _json_block(_require_mapping(payload.get("side_result"), "frame.side_result")),
-            "Parent handoff params:",
-            _json_block(_require_mapping(payload.get("parent_handoff_params"), "frame.parent_handoff_params")),
-            "Required action:",
-            "Process this Task Sys parent frame. Use source refs and task context; do not assume raw inbound outside this frame.",
-            "When the source task is complete, call task_sys.close(task_id=..., summary=...).",
-            "Do not rely on parent turn completion to close this Task Sys task.",
+    source = _require_mapping(payload.get("source"), "frame.source")
+    source_type = source.get("type")
+    if source_type == "im.message.created":
+        source_guidance = (
             "For an IM source message:",
             "\n".join(
                 (
@@ -268,8 +256,62 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
                     ),
                 )
             ),
-            "Allowed parent frame operation:",
+            "Allowed parent frame operations:",
+            "\n".join(
+                (
+                    "- message.send(reply_to=source_message_id, content=...) for a source-bound reply.",
+                    "- message.mark(message_id=source_message_id, disposition=absorbed) when no reply is needed.",
+                    "- task_sys.close(task_id=..., summary=...)",
+                )
+            ),
+        )
+    elif source_type == "user.input":
+        source_guidance = (
+            "For a user.input source:",
+            "\n".join(
+                (
+                    "- Perform the parent work requested by parent_handoff_params.",
+                    "- If parent work requires outbound communication, use message.send(target_identity_id=..., content=...).",
+                    "- After required parent work is complete, call task_sys.close.",
+                )
+            ),
+            "Allowed parent frame operations:",
+            "\n".join(
+                (
+                    "- message.send(target_identity_id=..., content=...) when parent_handoff_params requires outbound communication.",
+                    "- task_sys.close(task_id=..., summary=...)",
+                )
+            ),
+        )
+    else:
+        source_guidance = (
+            "For this parent source:",
+            "\n".join(
+                (
+                    "- Perform the parent work requested by parent_handoff_params.",
+                    "- After required parent work is complete, call task_sys.close.",
+                )
+            ),
+            "Allowed parent frame operations:",
             "- task_sys.close(task_id=..., summary=...)",
+        )
+    return "\n\n".join(
+        (
+            "task_sys.parent_frame",
+            f"Task id: {task_id}",
+            "Task Sys source:",
+            _json_block(source),
+            "Inbound context:",
+            _json_block(_require_mapping(payload.get("inbound_context"), "frame.inbound_context")),
+            "Side result:",
+            _json_block(_require_mapping(payload.get("side_result"), "frame.side_result")),
+            "Parent handoff params:",
+            _json_block(_require_mapping(payload.get("parent_handoff_params"), "frame.parent_handoff_params")),
+            "Required action:",
+            "Process this Task Sys parent frame. Use source refs and task context; do not assume raw inbound outside this frame.",
+            "When the source task is complete, call task_sys.close(task_id=..., summary=...).",
+            "Do not rely on parent turn completion to close this Task Sys task.",
+            *source_guidance,
         )
     )
 

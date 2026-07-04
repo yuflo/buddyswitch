@@ -418,7 +418,8 @@ def _save_connection_last_event(connection: dict[str, Any], event_id: str) -> di
 def send_external_connection_message(
     *,
     connection: dict[str, Any],
-    to: dict[str, Any],
+    target_identity: dict[str, Any],
+    target_role_id: str,
     content: str,
     reply_to: str | None = None,
     wake_actor: Any | None = None,
@@ -427,10 +428,23 @@ def send_external_connection_message(
         sender = _connection_identity_ref(connection)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
+    normalized_target_role_id = target_role_id.strip() if isinstance(target_role_id, str) else ""
+    if (
+        isinstance(target_identity, dict)
+        and target_identity.get("type") == "actor"
+        and not normalized_target_role_id
+    ):
+        return _im_payload_error("target_role_id is required for actor target_identity")
+    try:
+        target = _identity_ref(target_identity, "target_identity")
+    except ValueError as exc:
+        return _im_payload_error(str(exc))
+    if target["type"] == "actor" and not normalized_target_role_id:
+        return _im_payload_error("target_role_id is required for actor target_identity")
     result = send_im_message(
         sender_identity=sender,
-        to=to,
-        target_role_id=to.get("role_id") if isinstance(to, dict) and isinstance(to.get("role_id"), str) else None,
+        to=target,
+        target_role_id=normalized_target_role_id or None,
         content=content,
         reply_to=reply_to,
         wake_actor=wake_actor,

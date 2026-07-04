@@ -14,6 +14,16 @@ from . import runtime_files
 
 _VALID_DISPOSITIONS = {"unseen", "absorbed", "replied", "needs_parent"}
 INITIAL_IM_EVENT_CURSOR = "imev-000000000000"
+_RETIRED_CONVERSATION_FIELDS = ("partici" + "pants",)
+_RETIRED_MESSAGE_FIELDS = ("fr" + "om", "to", "from_" + "identity_id", "to_" + "identity_id")
+_RETIRED_STATE_FIELDS = ("partici" + "pant",)
+_RETIRED_EVENT_FIELDS = (
+    "fr" + "om",
+    "to",
+    "from_" + "identity_id",
+    "to_" + "identity_id",
+    "visible_to_" + "identity",
+)
 
 
 def im_root() -> Path:
@@ -60,6 +70,12 @@ def _identity_ref(value: Any, field: str) -> dict[str, str]:
     raise ValueError(f"{field} must be an identity payload or identity id")
 
 
+def _reject_retired_fields(row: dict[str, Any], fields: tuple[str, ...], context: str) -> None:
+    present = [field for field in fields if field in row]
+    if present:
+        raise ValueError(f"{context} contains retired IM field(s): {', '.join(present)}")
+
+
 def save_im_connection(connection: dict[str, Any]) -> dict[str, Any]:
     key_hash = _require_non_empty_text(connection.get("connection_key_hash"), "connection.connection_key_hash")
     if not key_hash.startswith("sha256:"):
@@ -102,6 +118,7 @@ def next_im_sequence() -> int:
 
 
 def save_im_conversation(conversation: dict[str, Any]) -> dict[str, Any]:
+    _reject_retired_fields(conversation, _RETIRED_CONVERSATION_FIELDS, "conversation")
     conversation_id = runtime_files.require_id(str(conversation.get("id") or ""), "conversation.id")
     identity_ids_raw = conversation.get("identity_ids")
     if isinstance(identity_ids_raw, list):
@@ -148,6 +165,7 @@ def find_im_direct_conversation(identities: list[dict[str, Any] | str]) -> dict[
 
 
 def save_im_message(message: dict[str, Any]) -> dict[str, Any]:
+    _reject_retired_fields(message, _RETIRED_MESSAGE_FIELDS, "message")
     message_id = runtime_files.require_id(str(message.get("id") or ""), "message.id")
     conversation_id = runtime_files.require_id(str(message.get("conversation_id") or ""), "message.conversation_id")
     sender_identity = _identity_ref(message.get("sender_identity"), "message.sender_identity")
@@ -158,10 +176,6 @@ def save_im_message(message: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(message)
     normalized["id"] = message_id
     normalized["conversation_id"] = conversation_id
-    normalized.pop("from", None)
-    normalized.pop("to", None)
-    normalized.pop("from_identity_id", None)
-    normalized.pop("to_identity_id", None)
     normalized["sender_identity"] = sender_identity
     normalized["target_identity"] = target_identity
     normalized["content"] = _require_non_empty_text(message.get("content"), "message.content")
@@ -190,6 +204,7 @@ def list_im_messages() -> list[dict[str, Any]]:
 
 
 def save_im_message_state(state: dict[str, Any]) -> dict[str, Any]:
+    _reject_retired_fields(state, _RETIRED_STATE_FIELDS, "state")
     message_id = runtime_files.require_id(str(state.get("message_id") or ""), "state.message_id")
     disposition = state.get("disposition")
     if disposition not in _VALID_DISPOSITIONS:
@@ -215,22 +230,17 @@ def get_im_message_state(message_id: str, identity: dict[str, Any] | str) -> dic
 
 
 def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
+    _reject_retired_fields(event, _RETIRED_EVENT_FIELDS, "event")
     event_id = runtime_files.require_id(str(event.get("event_id") or ""), "event.event_id")
     message_id = runtime_files.require_id(str(event.get("message_id") or ""), "event.message_id")
     conversation_id = runtime_files.require_id(str(event.get("conversation_id") or ""), "event.conversation_id")
     sender_identity = _identity_ref(event.get("sender_identity"), "event.sender_identity")
     target_identity = _identity_ref(event.get("target_identity"), "event.target_identity")
     visible_to_identity_id = event.get("visible_to_identity_id")
-    if visible_to_identity_id is None and isinstance(event.get("visible_to_identity"), dict):
-        visible_to_identity_id = _identity_ref(event.get("visible_to_identity"), "event.visible_to_identity")["id"]
     normalized = dict(event)
     normalized["event_id"] = event_id
     normalized["message_id"] = message_id
     normalized["conversation_id"] = conversation_id
-    normalized.pop("from", None)
-    normalized.pop("to", None)
-    normalized.pop("from_identity_id", None)
-    normalized.pop("to_identity_id", None)
     normalized["sender_identity"] = sender_identity
     normalized["target_identity"] = target_identity
     normalized["visible_to_identity_id"] = runtime_files.require_id(

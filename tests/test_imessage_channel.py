@@ -186,6 +186,10 @@ def _actor(role_id: str, identity_id: str, *, status: str = "online") -> dict[st
     }
 
 
+def _actor_reply_identity(identity_id: str = "act-market-demo") -> dict[str, Any]:
+    return {"sender_identity": {"id": identity_id, "type": "actor"}}
+
+
 def _row(
     *,
     sender: str = "user-a@example.com",
@@ -264,8 +268,8 @@ class ImessageChannelTests(unittest.TestCase):
         self.assertEqual(prompted["status"], "needs_actor")
         self.assertEqual(duplicate["status"], "duplicate")
         self.assertEqual(api.sent[0]["connection_key"], "imck-1")
-        self.assertEqual(state["contacts"]["sender:a@example.com"]["active_actor_id"], "act-market-demo")
-        self.assertNotIn("active_actor_id", state["contacts"]["sender:b@example.com"])
+        self.assertEqual(state["contacts"]["sender:a@example.com"]["active_identity_id"], "act-market-demo")
+        self.assertNotIn("active_identity_id", state["contacts"]["sender:b@example.com"])
         self.assertIn("msg-in-1", state["contacts"]["sender:a@example.com"]["routes"])
         self.assertEqual(state["contacts"]["sender:b@example.com"]["routes"], {})
         self.assertEqual(imsg.sent[-1]["route"], {"chat_id": "2", "sender": "b@example.com"})
@@ -301,7 +305,7 @@ class ImessageChannelTests(unittest.TestCase):
             state = controller.state_store.load()
 
         self.assertEqual(result["status"], "actor_selected")
-        self.assertEqual(state["contacts"]["sender:user-a@example.com"]["active_actor_id"], "act-dev-second")
+        self.assertEqual(state["contacts"]["sender:user-a@example.com"]["active_identity_id"], "act-dev-second")
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent[-1]["text"], "act-dev-second")
 
@@ -348,14 +352,14 @@ class ImessageChannelTests(unittest.TestCase):
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             first = controller.poll_outbound_once(wait_ms=0)
@@ -381,14 +385,14 @@ class ImessageChannelTests(unittest.TestCase):
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             with self.assertRaises(imessage_channel.ChannelError):
@@ -409,14 +413,14 @@ class ImessageChannelTests(unittest.TestCase):
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
             api.ack_failures["imev-reply-1"] = [
                 {"ok": False, "error": {"code": "E_ACK", "message": "temporary ack failure"}}
@@ -450,14 +454,14 @@ class ImessageChannelTests(unittest.TestCase):
                     "event_id": "imev-unrouteable",
                     "message_id": "msg-unrouteable",
                     "reply_to": "msg-missing",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-unrouteable"] = {
                 "id": "msg-unrouteable",
                 "content": "orphan pong",
                 "reply_to": "msg-missing",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             result = controller.poll_outbound_once(wait_ms=0)
@@ -478,7 +482,7 @@ class ImessageChannelTests(unittest.TestCase):
                     "event_id": "imev-missing-message",
                     "message_id": "msg-missing",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
 
@@ -534,14 +538,14 @@ class ImessageChannelTests(unittest.TestCase):
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             self.assertTrue(
@@ -585,14 +589,14 @@ class ImessageChannelTests(unittest.TestCase):
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
             api.release_read.set()
 
