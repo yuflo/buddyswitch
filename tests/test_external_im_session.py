@@ -44,21 +44,21 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         return external_im_session.ExternalImSession(actor_lister=list_actors, actor_delivery_handler=handle_actor)
 
-    def _connection(self, session: external_im_session.ExternalImSession) -> tuple[str, dict[str, Any], dict[str, Any]]:
-        created = session.create_connection(display_name="local smoke")
+    def _external_session(self, session: external_im_session.ExternalImSession) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        created = session.create_external_session(display_name="local smoke")
         self.assertTrue(created.get("ok"), msg=created)
-        key = created.get("connection_key")
-        self.assertIsInstance(key, str, msg=created)
-        assert isinstance(key, str)
-        auth = session.authenticate(key)
+        external_session_key = created.get("external_session_key")
+        self.assertIsInstance(external_session_key, str, msg=created)
+        assert isinstance(external_session_key, str)
+        auth = session.authenticate_external_session_key(external_session_key)
         self.assertTrue(auth.get("ok"), msg=auth)
-        connection = auth.get("connection")
+        external_session = auth.get("external_session")
         identity = auth.get("identity")
-        self.assertIsInstance(connection, dict, msg=auth)
+        self.assertIsInstance(external_session, dict, msg=auth)
         self.assertIsInstance(identity, dict, msg=auth)
-        assert isinstance(connection, dict)
+        assert isinstance(external_session, dict)
         assert isinstance(identity, dict)
-        return key, connection, identity
+        return external_session_key, external_session, identity
 
     def test_session_create_auth_send_event_conversation_and_disposition_flow(self) -> None:
         actor_identity = self._actor_identity()
@@ -67,7 +67,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             [{**actor_identity, "status": "online"}],
             handling_calls=handling_calls,
         )
-        _key, connection, identity = self._connection(session)
+        _key, external_session, identity = self._external_session(session)
 
         actors = session.list_actors(role_id="market")
         self.assertEqual(actors["count"], 1)
@@ -75,7 +75,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("actor_address", actors["actors"][0])
 
         sent = session.send_message(
-            connection=connection,
+            external_session=external_session,
             target_identity_id=actor_identity["identity_id"],
             content="ping",
             reply_to=None,
@@ -97,7 +97,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         message_id = sent["message"]["id"]
 
-        fetched = session.get_message(connection=connection, message_id=message_id)
+        fetched = session.get_message(external_session=external_session, message_id=message_id)
         self.assertTrue(fetched.get("ok"), msg=fetched)
         self.assertEqual(fetched["message"]["content"], "ping")
 
@@ -110,17 +110,17 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(actor_reply.get("ok"), msg=actor_reply)
         reply_id = actor_reply["message"]["id"]
 
-        events = session.read_events(connection=connection, limit=50, wait_ms=0)
+        events = session.read_events(external_session=external_session, limit=50, wait_ms=0)
         self.assertTrue(events.get("ok"), msg=events)
         self.assertEqual([event["message_id"] for event in events["events"]], [reply_id])
         self.assertNotIn("next_cursor", events)
 
-        replies = session.list_replies(connection=connection, message_id=message_id)
+        replies = session.list_replies(external_session=external_session, message_id=message_id)
         self.assertTrue(replies.get("ok"), msg=replies)
         self.assertEqual([row["id"] for row in replies["replies"]], [reply_id])
 
         marked = session.update_disposition(
-            connection=connection,
+            external_session=external_session,
             message_id=reply_id,
             disposition="absorbed",
             reason="handled",
@@ -129,7 +129,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(marked["disposition"], "absorbed")
 
         conversation = session.get_direct_conversation(
-            connection=connection,
+            external_session=external_session,
             identity_id=actor_identity["identity_id"],
             limit=20,
         )
@@ -160,16 +160,16 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_session_rejects_missing_or_unreachable_actor_identity(self) -> None:
         session = self._session([])
-        _key, connection, _identity = self._connection(session)
+        _key, external_session, _identity = self._external_session(session)
 
         missing = session.send_message(
-            connection=connection,
+            external_session=external_session,
             target_identity_id="",
             content="ping",
             reply_to=None,
         )
         unreachable = session.send_message(
-            connection=connection,
+            external_session=external_session,
             target_identity_id="act-market-missing",
             content="ping",
             reply_to=None,
@@ -185,11 +185,11 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_session_list_and_send_reject_offline_actor_rows(self) -> None:
         offline_actor = self._actor_identity(role="market", label="offline")
         session = self._session([{**offline_actor, "status": "offline"}])
-        _key, connection, _identity = self._connection(session)
+        _key, external_session, _identity = self._external_session(session)
 
         actors = session.list_actors(role_id=None)
         sent = session.send_message(
-            connection=connection,
+            external_session=external_session,
             target_identity_id=offline_actor["identity_id"],
             content="ping",
             reply_to=None,
@@ -203,16 +203,16 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_session_reads_actor_reply_once_without_client_cursor(self) -> None:
         actor_identity = self._actor_identity()
         session = self._session([{**actor_identity, "status": "online"}])
-        _key, connection, identity = self._connection(session)
-        initial_cursor = connection["last_event_id"]
+        _key, external_session, identity = self._external_session(session)
+        initial_cursor = external_session["last_event_id"]
         sent = session.send_message(
-            connection=connection,
+            external_session=external_session,
             target_identity_id=actor_identity["identity_id"],
             content="ping",
             reply_to=None,
         )
         self.assertTrue(sent.get("ok"), msg=sent)
-        self.assertEqual(connection["last_event_id"], initial_cursor)
+        self.assertEqual(external_session["last_event_id"], initial_cursor)
         actor_reply = message_service.send_im_message(
             sender_identity=actor_identity,
             to=identity,
@@ -221,22 +221,22 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(actor_reply.get("ok"), msg=actor_reply)
 
-        first = session.read_events(connection=connection, limit=50, wait_ms=0)
-        second = session.read_events(connection=connection, limit=50, wait_ms=0)
-        ack = session.ack_event(connection=connection, event_id=actor_reply["event_id"])
-        third = session.read_events(connection=connection, limit=50, wait_ms=0)
+        first = session.read_events(external_session=external_session, limit=50, wait_ms=0)
+        second = session.read_events(external_session=external_session, limit=50, wait_ms=0)
+        ack = session.ack_event(external_session=external_session, event_id=actor_reply["event_id"])
+        third = session.read_events(external_session=external_session, limit=50, wait_ms=0)
 
         self.assertEqual([event["message_id"] for event in first["events"]], [actor_reply["message"]["id"]])
         self.assertEqual([event["message_id"] for event in second["events"]], [actor_reply["message"]["id"]])
         self.assertTrue(ack.get("ok"), msg=ack)
         self.assertEqual(third["events"], [])
 
-    def test_external_delivery_is_connection_read_ack_not_actor_processing(self) -> None:
+    def test_external_delivery_is_external_session_read_ack_not_actor_processing(self) -> None:
         actor_identity = self._actor_identity()
         session = self._session([{**actor_identity, "status": "online"}])
-        _key, connection, identity = self._connection(session)
+        _key, external_session, identity = self._external_session(session)
         sent = session.send_message(
-            connection=connection,
+            external_session=external_session,
             target_identity_id=actor_identity["identity_id"],
             content="ping",
             reply_to=None,
@@ -250,8 +250,8 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(actor_reply.get("ok"), msg=actor_reply)
 
-        events = session.read_events(connection=connection, limit=50, wait_ms=0)
-        ack = session.ack_event(connection=connection, event_id=actor_reply["event_id"])
+        events = session.read_events(external_session=external_session, limit=50, wait_ms=0)
+        ack = session.ack_event(external_session=external_session, event_id=actor_reply["event_id"])
 
         self.assertEqual([event["message_id"] for event in events["events"]], [actor_reply["message"]["id"]])
         self.assertTrue(ack.get("ok"), msg=ack)

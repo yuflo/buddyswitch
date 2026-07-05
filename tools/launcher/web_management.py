@@ -295,7 +295,7 @@ class WebManagementService:
             actor_lister=self._external_im_actor_rows,
             actor_delivery_handler=self._wake_im_actor,
             im_session=self._im_session,
-            web_connection_provider=self.ensure_web_im_identity,
+            web_external_session_provider=self.ensure_web_im_identity,
         )
 
     def handle_api(

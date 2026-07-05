@@ -22,16 +22,16 @@ class _FakeExternalImSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def create_connection(self, *, display_name: str) -> dict[str, object]:
-        self.calls.append(("create_connection", {"display_name": display_name}))
-        return {"ok": True, "connection_key": "imck-bridge"}
+    def create_external_session(self, *, display_name: str) -> dict[str, object]:
+        self.calls.append(("create_external_session", {"display_name": display_name}))
+        return {"ok": True, "external_session_key": "imsk-bridge"}
 
-    def authenticate(self, connection_key: str) -> dict[str, object]:
-        self.calls.append(("authenticate", {"connection_key": connection_key}))
+    def authenticate_external_session_key(self, external_session_key: str) -> dict[str, object]:
+        self.calls.append(("authenticate_external_session_key", {"external_session_key": external_session_key}))
         return {
             "ok": True,
             "identity": {"id": "ext-bridge", "type": "external"},
-            "connection": {"identity_id": "ext-bridge"},
+            "external_session": {"identity_id": "ext-bridge"},
         }
 
     def list_actors(self, *, role_id: str | None = None) -> dict[str, object]:
@@ -52,7 +52,7 @@ class _FakeExternalImSession:
     def send_message(
         self,
         *,
-        connection: dict[str, object],
+        external_session: dict[str, object],
         target_identity_id: object,
         content: str,
         reply_to: object = None,
@@ -61,7 +61,7 @@ class _FakeExternalImSession:
             (
                 "send_message",
                 {
-                    "connection": connection,
+                    "external_session": external_session,
                     "target_identity_id": target_identity_id,
                     "content": content,
                     "reply_to": reply_to,
@@ -70,26 +70,26 @@ class _FakeExternalImSession:
         )
         return {"ok": True, "delivery_status": "accepted", "message": {"id": "msg-bridge"}}
 
-    def read_events(self, *, connection: dict[str, object], limit: int = 50, wait_ms: int = 0) -> dict[str, object]:
-        self.calls.append(("read_events", {"connection": connection, "limit": limit, "wait_ms": wait_ms}))
+    def read_events(self, *, external_session: dict[str, object], limit: int = 50, wait_ms: int = 0) -> dict[str, object]:
+        self.calls.append(("read_events", {"external_session": external_session, "limit": limit, "wait_ms": wait_ms}))
         return {"ok": True, "events": [{"event_id": "imev-bridge", "message_id": "msg-reply"}]}
 
-    def ack_event(self, *, connection: dict[str, object], event_id: str) -> dict[str, object]:
-        self.calls.append(("ack_event", {"connection": connection, "event_id": event_id}))
+    def ack_event(self, *, external_session: dict[str, object], event_id: str) -> dict[str, object]:
+        self.calls.append(("ack_event", {"external_session": external_session, "event_id": event_id}))
         return {"ok": True, "event_id": event_id}
 
 
 class _FakeWebIdentityProvider:
     def __init__(self) -> None:
-        self.connection = {"identity_id": "ext-web"}
+        self.external_session = {"identity_id": "ext-web"}
         self.calls: list[str] = []
 
     def ensure(self) -> dict[str, object]:
         self.calls.append("ensure")
         return {
             "identity": {"id": "ext-web", "type": "external"},
-            "connection": self.connection,
-            "connection_key": "imck-secret",
+            "external_session": self.external_session,
+            "external_session_key": "imsk-secret",
             "client_kind": "web-management",
             "display_name": "BuddySwitch Web",
         }
@@ -100,15 +100,20 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         session = _FakeExternalImSession()
         service = web_management.WebManagementService(repo_root=ROOT, im_session=session)  # type: ignore[arg-type]
 
-        status, created = service.handle_api("POST", "/api/im/connections", b'{"display_name":"Bridge"}', {})
+        status, created = service.handle_api("POST", "/api/im/external-sessions", b'{"display_name":"Bridge"}', {})
         self.assertEqual(status, 200)
-        self.assertEqual(created["connection_key"], "imck-bridge")
+        self.assertEqual(created["external_session_key"], "imsk-bridge")
+        self.assertNotIn("external_session_key_hash", created)
+
+        status, removed = service.handle_api("POST", "/api/im/connections", b'{"display_name":"Bridge"}', {})
+        self.assertEqual(status, 404)
+        self.assertFalse(removed["ok"])
 
         status, actors = service.handle_api(
             "GET",
             "/api/im/actors?role_id=market",
             b"",
-            {"Authorization": "Bearer imck-bridge"},
+            {"Authorization": "Bearer imsk-bridge"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(actors["count"], 1)
@@ -117,8 +122,8 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         self.assertEqual(
             session.calls,
             [
-                ("create_connection", {"display_name": "Bridge"}),
-                ("authenticate", {"connection_key": "imck-bridge"}),
+                ("create_external_session", {"display_name": "Bridge"}),
+                ("authenticate_external_session_key", {"external_session_key": "imsk-bridge"}),
                 ("list_actors", {"role_id": "market"}),
             ],
         )
@@ -135,7 +140,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         status, web_session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(status, 200)
         self.assertEqual(web_session["identity"], {"id": "ext-web", "type": "external"})
-        self.assertNotIn("connection_key", web_session)
+        self.assertNotIn("external_session_key", web_session)
 
         status, sent = service.handle_api(
             "POST",
@@ -161,14 +166,14 @@ class ImWebManagementProjectionTests(unittest.TestCase):
                 (
                     "send_message",
                     {
-                        "connection": provider.connection,
+                        "external_session": provider.external_session,
                         "target_identity_id": "act-market-demo",
                         "content": "ping",
                         "reply_to": None,
                     },
                 ),
-                ("read_events", {"connection": provider.connection, "limit": 5, "wait_ms": 10}),
-                ("ack_event", {"connection": provider.connection, "event_id": "imev-bridge"}),
+                ("read_events", {"external_session": provider.external_session, "limit": 5, "wait_ms": 10}),
+                ("ack_event", {"external_session": provider.external_session, "event_id": "imev-bridge"}),
             ],
         )
 
@@ -211,10 +216,10 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         forbidden_fragments = (
             "from env.services import messages",
             "import messages as message_service",
-            "message_service." + "create_external_connection",
-            "message_service." + "authenticate_external_connection_key",
-            "message_service." + "send_external_connection_message",
-            "message_service." + "read_external_connection_events",
+            "message_service." + "create_external_session",
+            "message_service." + "authenticate_external_session_key",
+            "message_service." + "send_external_session_message",
+            "message_service." + "read_external_session_events",
             "message_service." + "get_im_direct_conversation",
             "message_service." + "get_im_message",
             "message_service." + "list_im_replies",

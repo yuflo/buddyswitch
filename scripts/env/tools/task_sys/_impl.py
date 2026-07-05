@@ -29,6 +29,15 @@ def _current_identity(context: Any) -> dict[str, Any]:
         payload = to_payload()
         if isinstance(payload, dict):
             return payload
+    active_actor = context.get("active_actor") if hasattr(context, "get") else getattr(context, "active_actor", None)
+    if isinstance(active_actor, dict):
+        actor_id = active_actor.get("actor_id")
+        if isinstance(actor_id, str) and actor_id.strip():
+            return {"id": actor_id.strip(), "type": "actor"}
+        identity_id = active_actor.get("id")
+        identity_type = active_actor.get("type")
+        if isinstance(identity_id, str) and identity_id.strip() and isinstance(identity_type, str) and identity_type.strip():
+            return {"id": identity_id.strip(), "type": identity_type.strip()}
     return {}
 
 

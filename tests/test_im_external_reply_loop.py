@@ -101,19 +101,20 @@ class _WakeHandlerDispatcher:
         }
 
 class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _create_connection(self, router: im_http_router.ImHttpRouter) -> str:
+    def _create_external_session(self, router: im_http_router.ImHttpRouter) -> str:
         status, created = router.handle(
             "POST",
-            "/api/im/connections",
+            "/api/im/external-sessions",
             json.dumps({"display_name": "local acceptance"}).encode("utf-8"),
             {},
         )
         self.assertEqual(status, 200, msg=created)
         self.assertTrue(created.get("ok"), msg=created)
-        self.assertIsInstance(created.get("connection_key"), str, msg=created)
+        self.assertIsInstance(created.get("external_session_key"), str, msg=created)
+        self.assertNotIn("connection_key", created)
         self.assertNotIn("participant_" + "token", created)
         self.assertNotIn("event_" + "cursor", created)
-        return str(created["connection_key"])
+        return str(created["external_session_key"])
 
     def test_external_send_actor_reply_to_external_visible_once_without_cursor(self) -> None:
         actor_identity_id = self._runtime_actor_id(role="market", label="reply-loop")
@@ -129,7 +130,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ],
             actor_delivery_handler=daemon.wake_im_actor,
         )
-        key = self._create_connection(router)
+        key = self._create_external_session(router)
 
         status, sent = router.handle(
             "POST",

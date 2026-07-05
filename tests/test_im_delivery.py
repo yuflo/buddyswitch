@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from env.services import im_delivery
+from env.services import messages as message_service
 
 
 class ImDeliveryTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class ImDeliveryTests(unittest.TestCase):
             "delivery_status": "accepted",
         }
 
-        delivered = im_delivery.attach_post_write_delivery_status(
+        delivered = message_service.attach_post_write_delivery_status(
             result,
             actor_delivery_handler=lambda payload: calls.append(dict(payload))
             or {"actor_handling_status": "submitted"},
@@ -53,7 +53,7 @@ class ImDeliveryTests(unittest.TestCase):
             "delivery_status": "accepted",
         }
 
-        delivered = im_delivery.attach_post_write_delivery_status(
+        delivered = message_service.attach_post_write_delivery_status(
             result,
             actor_delivery_handler=lambda payload: calls.append(dict(payload))
             or {"actor_handling_status": "submitted"},
@@ -71,7 +71,7 @@ class ImDeliveryTests(unittest.TestCase):
             "event_id": "imev-3",
         }
 
-        delivered = im_delivery.attach_post_write_delivery_status(
+        delivered = message_service.attach_post_write_delivery_status(
             result,
             actor_delivery_handler=lambda payload: calls.append(dict(payload))
             or {"actor_handling_status": "submitted"},
@@ -84,7 +84,7 @@ class ImDeliveryTests(unittest.TestCase):
     def test_non_ok_write_result_is_returned_without_delivery_status_mutation(self) -> None:
         result = {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "bad"}}
 
-        delivered = im_delivery.attach_post_write_delivery_status(
+        delivered = message_service.attach_post_write_delivery_status(
             result,
             actor_delivery_handler=lambda _payload: self.fail("actor delivery must not be called"),
         )

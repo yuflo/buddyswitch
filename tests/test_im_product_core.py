@@ -30,47 +30,46 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         identity_id = self._runtime_actor_id(role=role, label=label)
         return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": role}
 
-    def _external_connection(
+    def _external_session(
         self,
         *,
         display_name: str = "local smoke",
     ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-        created = message_service.create_external_connection(display_name=display_name)
+        created = message_service.create_external_session(display_name=display_name)
         self.assertTrue(created.get("ok"), msg=created)
-        connection_key = created.get("connection_key")
-        self.assertIsInstance(connection_key, str, msg=created)
-        assert isinstance(connection_key, str)
-        auth = message_service.authenticate_external_connection_key(connection_key)
+        external_session_key = created.get("external_session_key")
+        self.assertIsInstance(external_session_key, str, msg=created)
+        assert isinstance(external_session_key, str)
+        auth = message_service.authenticate_external_session_key(external_session_key)
         self.assertTrue(auth.get("ok"), msg=auth)
-        connection = auth.get("connection")
+        external_session = auth.get("external_session")
         identity = auth.get("identity")
-        self.assertIsInstance(connection, dict, msg=auth)
+        self.assertIsInstance(external_session, dict, msg=auth)
         self.assertIsInstance(identity, dict, msg=auth)
-        assert isinstance(connection, dict)
+        assert isinstance(external_session, dict)
         assert isinstance(identity, dict)
-        return created, connection, identity
+        return created, external_session, identity
 
-    def test_create_external_connection_returns_only_connection_key_and_persists_internal_state(self) -> None:
-        response = message_service.create_external_connection(display_name="local smoke")
+    def test_create_external_session_returns_only_session_key_and_persists_internal_state(self) -> None:
+        response = message_service.create_external_session(display_name="local smoke")
 
         self.assertTrue(response.get("ok"), msg=response)
-        connection_key = response.get("connection_key")
-        self.assertIsInstance(connection_key, str, msg=response)
-        assert isinstance(connection_key, str)
-        self.assertTrue(connection_key.startswith("imck-"), msg=response)
-        self.assertNotIn("participant", response)
-        self.assertNotIn("participant_" + "token", response)
-        self.assertNotIn("event_" + "cursor", response)
-        self.assertNotIn("client_kind", response)
+        external_session_key = response.get("external_session_key")
+        self.assertIsInstance(external_session_key, str, msg=response)
+        assert isinstance(external_session_key, str)
+        self.assertTrue(external_session_key.startswith("imsk-"), msg=response)
+        self.assertNotIn("connection_key", response)
+        self.assertNotIn("external_connection", response)
+        self.assertNotIn("connection", response)
 
-        auth = message_service.authenticate_external_connection_key(connection_key)
+        auth = message_service.authenticate_external_session_key(external_session_key)
         self.assertTrue(auth.get("ok"), msg=auth)
         identity = auth.get("identity")
-        connection = auth.get("connection")
+        external_session = auth.get("external_session")
         self.assertIsInstance(identity, dict, msg=auth)
-        self.assertIsInstance(connection, dict, msg=auth)
+        self.assertIsInstance(external_session, dict, msg=auth)
         assert isinstance(identity, dict)
-        assert isinstance(connection, dict)
+        assert isinstance(external_session, dict)
         self.assertEqual(identity.get("type"), "external")
         external_id = identity.get("id")
         self.assertIsInstance(external_id, str, msg=auth)
@@ -82,16 +81,17 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(profile_row["identity"], {"id": external_id, "type": "external"})
         self.assertEqual(profile_row["display_name"], "local smoke")
 
-        connection_files = sorted((self.runtime_state_root / "im" / "connections").glob("*.json"))
-        self.assertEqual(len(connection_files), 1)
-        connection_text = connection_files[0].read_text(encoding="utf-8")
-        self.assertNotIn(connection_key, connection_text)
-        connection_row = json.loads(connection_text)
-        self.assertEqual(connection_row["identity_id"], external_id)
-        self.assertNotIn("participant", connection_row)
-        self.assertEqual(connection_row["display_name"], "local smoke")
-        self.assertEqual(connection_row["last_event_id"], "imev-000000000000")
-        self.assertTrue(str(connection_row["connection_key_hash"]).startswith("sha256:"))
+        session_files = sorted((self.runtime_state_root / "im" / "external_sessions").glob("*.json"))
+        self.assertEqual(len(session_files), 1)
+        session_text = session_files[0].read_text(encoding="utf-8")
+        self.assertNotIn(external_session_key, session_text)
+        session_row = json.loads(session_text)
+        self.assertEqual(session_row["identity_id"], external_id)
+        self.assertEqual(session_row["display_name"], "local smoke")
+        self.assertEqual(session_row["last_event_id"], "imev-000000000000")
+        self.assertTrue(str(session_row["external_session_key_hash"]).startswith("sha256:"))
+        self.assertNotIn("connection_key_hash", session_row)
+        self.assertNotIn("connection", session_row)
         self.assertEqual(auth["identity"], {"id": external_id, "type": "external"})
 
     def test_list_im_actor_contacts_projects_online_runtime_rows_without_actor_address(self) -> None:
@@ -134,7 +134,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(all("actor_address" not in row for row in response["actors"]))
 
     def test_current_send_target_rejects_external_identity_by_reach_policy_without_mutating_state(self) -> None:
-        _created, _connection, external = self._external_connection()
+        _created, _external_session, external = self._external_session()
         external_id = str(external["id"])
         before = {
             name: sorted(path.name for path in (self.runtime_state_root / "im" / name).glob("*.json"))
@@ -301,7 +301,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(snapshot(), before)
 
     def test_send_im_message_persists_durable_objects_without_actor_handling_contract(self) -> None:
-        _created, _connection, sender = self._external_connection()
+        _created, _external_session, sender = self._external_session()
         sender_ref = sender
         target = self._actor_identity()
 
@@ -377,13 +377,13 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(all(event["conversation_id"] == conversation_id for event in events))
 
     def test_send_im_message_returns_final_target_identity_for_explicit_and_reply_to_targets(self) -> None:
-        _created, connection, external = self._external_connection(display_name="target identity response")
+        _created, external_session, external = self._external_session(display_name="target identity response")
         actor = self._actor_identity(role="market", label="act-market-target-response")
         pm = self._actor_identity(role="pm", label="act-pm-target-response")
         dev = self._actor_identity(role="dev", label="act-dev-target-response")
 
-        external_root = message_service.send_external_connection_message(
-            connection=connection,
+        external_root = message_service.send_external_session_message(
+            external_session=external_session,
             target_identity=actor["identity"],
             content="ping",
         )
@@ -414,37 +414,37 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(actor_root["target_identity"], dev["identity"])
         self.assertEqual(actor_reply["target_identity"], pm["identity"])
 
-    def test_external_connection_reads_actor_reply_once_without_client_cursor(self) -> None:
-        _created, connection, sender = self._external_connection()
+    def test_external_session_reads_actor_reply_once_without_client_cursor(self) -> None:
+        _created, external_session, sender = self._external_session()
         sender_ref = sender
         actor = self._actor_identity()
-        initial_cursor = connection["last_event_id"]
-        send_response = message_service.send_external_connection_message(
-            connection=connection,
+        initial_cursor = external_session["last_event_id"]
+        send_response = message_service.send_external_session_message(
+            external_session=external_session,
             target_identity=actor["identity"],
             content="ping",
         )
-        self.assertEqual(connection["last_event_id"], initial_cursor)
+        self.assertEqual(external_session["last_event_id"], initial_cursor)
         actor_reply = message_service.send_im_message(
             sender_identity=actor,
             to=sender_ref,
             content="pong",
             reply_to=send_response["message"]["id"],
         )
-        first_read = message_service.read_external_connection_events(
-            connection=connection,
+        first_read = message_service.read_external_session_events(
+            external_session=external_session,
             wait_ms=0,
         )
-        second_read = message_service.read_external_connection_events(
-            connection=connection,
+        second_read = message_service.read_external_session_events(
+            external_session=external_session,
             wait_ms=0,
         )
-        ack = message_service.ack_external_connection_event(
-            connection=connection,
+        ack = message_service.ack_external_session_event(
+            external_session=external_session,
             event_id=actor_reply["event_id"],
         )
-        third_read = message_service.read_external_connection_events(
-            connection=connection,
+        third_read = message_service.read_external_session_events(
+            external_session=external_session,
             wait_ms=0,
         )
 
@@ -465,15 +465,15 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(event["reply_to"], send_response["message"]["id"])
         self.assertEqual([row["event_id"] for row in second_read["events"]], [actor_reply["event_id"]])
         self.assertTrue(ack.get("ok"), msg=ack)
-        self.assertEqual(connection["last_event_id"], actor_reply["event_id"])
+        self.assertEqual(external_session["last_event_id"], actor_reply["event_id"])
         self.assertEqual(third_read["events"], [])
 
-    def test_external_connection_send_requires_canonical_target_identity_only(self) -> None:
-        _created, connection, _sender = self._external_connection()
+    def test_external_session_send_requires_canonical_target_identity_only(self) -> None:
+        _created, external_session, _sender = self._external_session()
         actor = self._actor_identity()
 
-        response = message_service.send_external_connection_message(
-            connection=connection,
+        response = message_service.send_external_session_message(
+            external_session=external_session,
             target_identity=actor["identity"],
             content="ping",
         )
@@ -483,17 +483,17 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("wake_" + "status", response)
         self.assertNotIn("target_" + "role_id", response)
         with self.assertRaises(TypeError):
-            message_service.send_external_connection_message(
-                connection=connection,
+            message_service.send_external_session_message(
+                external_session=external_session,
                 to=actor,
                 content="old shape",
             )
 
-    def test_external_connection_ack_rejects_non_visible_event_without_advancing_cursor(self) -> None:
-        _created_a, connection_a, _sender_a = self._external_connection(display_name="sender a")
-        _created_b, _connection_b, sender_b = self._external_connection(display_name="sender b")
+    def test_external_session_ack_rejects_non_visible_event_without_advancing_cursor(self) -> None:
+        _created_a, external_session_a, _sender_a = self._external_session(display_name="sender a")
+        _created_b, _external_session_b, sender_b = self._external_session(display_name="sender b")
         actor = self._actor_identity()
-        before = connection_a["last_event_id"]
+        before = external_session_a["last_event_id"]
         actor_reply = message_service.send_im_message(
             sender_identity=actor,
             to=sender_b,
@@ -501,25 +501,25 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             reply_to=None,
         )
 
-        ack = message_service.ack_external_connection_event(
-            connection=connection_a,
+        ack = message_service.ack_external_session_event(
+            external_session=external_session_a,
             event_id=actor_reply["event_id"],
         )
 
         self.assertFalse(ack.get("ok"), msg=ack)
         self.assertEqual(ack["error"]["code"], "E_IM_SCOPE")
-        self.assertEqual(connection_a["last_event_id"], before)
+        self.assertEqual(external_session_a["last_event_id"], before)
 
-    def test_external_connection_ack_rejects_out_of_order_consumable_event(self) -> None:
-        _created, connection, sender = self._external_connection()
+    def test_external_session_ack_rejects_out_of_order_consumable_event(self) -> None:
+        _created, external_session, sender = self._external_session()
         sender_ref = sender
         actor = self._actor_identity()
-        root = message_service.send_external_connection_message(
-            connection=connection,
+        root = message_service.send_external_session_message(
+            external_session=external_session,
             target_identity=actor["identity"],
             content="ping",
         )
-        before = connection["last_event_id"]
+        before = external_session["last_event_id"]
         first_reply = message_service.send_im_message(
             sender_identity=actor,
             to=sender_ref,
@@ -533,9 +533,9 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             reply_to=root["message"]["id"],
         )
 
-        read = message_service.read_external_connection_events(connection=connection, wait_ms=0)
-        ack = message_service.ack_external_connection_event(
-            connection=connection,
+        read = message_service.read_external_session_events(external_session=external_session, wait_ms=0)
+        ack = message_service.ack_external_session_event(
+            external_session=external_session,
             event_id=second_reply["event_id"],
         )
 
@@ -545,14 +545,14 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(ack.get("ok"), msg=ack)
         self.assertEqual(ack["error"]["code"], "E_IM_CURSOR")
-        self.assertEqual(connection["last_event_id"], before)
+        self.assertEqual(external_session["last_event_id"], before)
 
-    def test_external_connection_events_waits_for_new_visible_events_until_timeout(self) -> None:
-        _created, connection, sender = self._external_connection(display_name="long poll smoke")
+    def test_external_session_events_waits_for_new_visible_events_until_timeout(self) -> None:
+        _created, external_session, sender = self._external_session(display_name="long poll smoke")
         sender_ref = sender
         target = self._actor_identity()
-        root = message_service.send_external_connection_message(
-            connection=connection,
+        root = message_service.send_external_session_message(
+            external_session=external_session,
             target_identity=target["identity"],
             content="ping before wait",
         )
@@ -574,8 +574,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.addCleanup(thread.join, 1)
 
         started_at = time.monotonic()
-        events = message_service.read_external_connection_events(
-            connection=connection,
+        events = message_service.read_external_session_events(
+            external_session=external_session,
             wait_ms=500,
         )
         elapsed = time.monotonic() - started_at
@@ -588,7 +588,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("next_cursor", events)
 
     def test_reply_uses_original_direct_conversation(self) -> None:
-        _created, _connection, external = self._external_connection()
+        _created, _external_session, external = self._external_session()
         external_ref = external
         actor = self._actor_identity()
         root = message_service.send_im_message(
@@ -621,7 +621,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(reply_states[0]["disposition"], "unseen")
 
     def test_message_replies_and_disposition_are_participant_scoped(self) -> None:
-        _created, _connection, external = self._external_connection()
+        _created, _external_session, external = self._external_session()
         external_ref = external
         actor = self._actor_identity()
         root = message_service.send_im_message(
@@ -636,7 +636,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             content="pong",
             reply_to=root["message"]["id"],
         )
-        _other_created, _other_connection, outsider = self._external_connection(display_name="other smoke")
+        _other_created, _other_external_session, outsider = self._external_session(display_name="other smoke")
 
         read_reply = message_service.get_im_message(
             identity=external_ref,
@@ -679,7 +679,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(state["owner_identity_id"], external["id"])
 
     def test_direct_conversation_read_returns_visible_messages_in_order(self) -> None:
-        _created, _connection, external = self._external_connection()
+        _created, _external_session, external = self._external_session()
         external_ref = external
         actor = self._actor_identity()
         root = message_service.send_im_message(

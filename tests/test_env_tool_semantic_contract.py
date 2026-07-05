@@ -420,8 +420,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
         self.assertEqual(message_desc["title"], "Central IM Messages")
         self.assertEqual(message_rows["message.send"]["authority"], "message.central_im_channel")
-        self.assertEqual(message_rows["message.get"]["authority"], "message.active_actor_exact_message")
-        self.assertEqual(message_rows["message.mark"]["authority"], "message.active_actor_message_disposition")
+        self.assertEqual(message_rows["message.get"]["authority"], "message.current_identity_exact_message")
+        self.assertEqual(message_rows["message.mark"]["authority"], "message.current_identity_message_disposition")
         self.assertEqual(message_rows["message.list"]["authority"], "message.central_im_identity_events")
         self.assertIn("active actor Central IM identity event feed", message_rows["message.list"]["visibility"])
 

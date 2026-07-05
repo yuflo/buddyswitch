@@ -57,12 +57,12 @@ class WebImIdentityProvider:
                     "client_kind": CLIENT_KIND,
                     "display_name": DISPLAY_NAME,
                     "identity": authenticated["identity"],
-                    "connection_key": str(record["connection_key"]).strip(),
+                    "external_session_key": str(record["external_session_key"]).strip(),
                     "created_at": created_at if isinstance(created_at, str) and created_at.strip() else now,
                     "updated_at": now,
                 }
                 self._write(updated)
-                updated["connection"] = authenticated["connection"]
+                updated["external_session"] = authenticated["external_session"]
                 return updated
             return self._register_new()
 
@@ -77,48 +77,48 @@ class WebImIdentityProvider:
         return payload
 
     def _authenticate_record(self, record: dict[str, Any]) -> dict[str, Any] | None:
-        connection_key = record.get("connection_key")
+        external_session_key = record.get("external_session_key")
         identity = record.get("identity")
-        if not isinstance(connection_key, str) or not connection_key.strip() or not isinstance(identity, dict):
+        if not isinstance(external_session_key, str) or not external_session_key.strip() or not isinstance(identity, dict):
             return None
-        auth = self._im_session.authenticate(connection_key)
+        auth = self._im_session.authenticate_external_session_key(external_session_key)
         if auth.get("ok") is not True:
             return None
         authenticated = auth.get("identity")
-        connection = auth.get("connection")
-        if not isinstance(authenticated, dict) or not isinstance(connection, dict):
+        external_session = auth.get("external_session")
+        if not isinstance(authenticated, dict) or not isinstance(external_session, dict):
             return None
         if _external_id(identity) != _external_id(authenticated):
             return None
-        return {"identity": authenticated, "connection": connection}
+        return {"identity": authenticated, "external_session": external_session}
 
     def _register_new(self) -> dict[str, Any]:
-        result = self._im_session.create_connection(display_name=DISPLAY_NAME)
+        result = self._im_session.create_external_session(display_name=DISPLAY_NAME)
         if result.get("ok") is not True:
             message = result.get("error", {}).get("message") if isinstance(result.get("error"), dict) else None
-            raise WebImIdentityError(str(message or "Unable to create Web Management IM connection."))
+            raise WebImIdentityError(str(message or "Unable to create Web Management IM external session."))
         now = runtime_files.now_iso()
-        connection_key = result.get("connection_key")
-        if not isinstance(connection_key, str) or not connection_key:
-            raise WebImIdentityError("Web Management IM connection creation returned an invalid key.")
-        authenticated = self._im_session.authenticate(connection_key)
+        external_session_key = result.get("external_session_key")
+        if not isinstance(external_session_key, str) or not external_session_key:
+            raise WebImIdentityError("Web Management IM external session creation returned an invalid key.")
+        authenticated = self._im_session.authenticate_external_session_key(external_session_key)
         if authenticated.get("ok") is not True:
-            raise WebImIdentityError("Web Management IM connection could not be authenticated.")
+            raise WebImIdentityError("Web Management IM external session could not be authenticated.")
         identity = authenticated.get("identity")
-        connection = authenticated.get("connection")
-        if not isinstance(identity, dict) or not isinstance(connection, dict):
+        external_session = authenticated.get("external_session")
+        if not isinstance(identity, dict) or not isinstance(external_session, dict):
             raise WebImIdentityError("Web Management IM authentication returned an invalid identity.")
         record = {
             "schema_version": SCHEMA_VERSION,
             "client_kind": CLIENT_KIND,
             "display_name": DISPLAY_NAME,
             "identity": identity,
-            "connection_key": connection_key,
+            "external_session_key": external_session_key,
             "created_at": now,
             "updated_at": now,
         }
         self._write(record)
-        record["connection"] = connection
+        record["external_session"] = external_session
         return record
 
     def _write(self, record: dict[str, Any]) -> None:

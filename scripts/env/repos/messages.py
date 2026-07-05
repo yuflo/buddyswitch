@@ -76,28 +76,34 @@ def _reject_retired_fields(row: dict[str, Any], fields: tuple[str, ...], context
         raise ValueError(f"{context} contains retired IM field(s): {', '.join(present)}")
 
 
-def save_im_connection(connection: dict[str, Any]) -> dict[str, Any]:
-    key_hash = _require_non_empty_text(connection.get("connection_key_hash"), "connection.connection_key_hash")
+def save_external_session(external_session: dict[str, Any]) -> dict[str, Any]:
+    key_hash = _require_non_empty_text(
+        external_session.get("external_session_key_hash"),
+        "external_session.external_session_key_hash",
+    )
     if not key_hash.startswith("sha256:"):
-        raise ValueError("connection.connection_key_hash must start with sha256:")
+        raise ValueError("external_session.external_session_key_hash must start with sha256:")
     normalized = dict(
-        connection_key_hash=key_hash,
-        identity_id=runtime_files.require_id(str(connection.get("identity_id") or ""), "connection.identity_id"),
-        display_name=_require_non_empty_text(connection.get("display_name"), "connection.display_name"),
-        last_event_id=_require_non_empty_text(connection.get("last_event_id"), "connection.last_event_id"),
-        created_at=_require_non_empty_text(connection.get("created_at"), "connection.created_at"),
-        last_used_at=_require_non_empty_text(connection.get("last_used_at"), "connection.last_used_at"),
+        external_session_key_hash=key_hash,
+        identity_id=runtime_files.require_id(
+            str(external_session.get("identity_id") or ""),
+            "external_session.identity_id",
+        ),
+        display_name=_require_non_empty_text(external_session.get("display_name"), "external_session.display_name"),
+        last_event_id=_require_non_empty_text(external_session.get("last_event_id"), "external_session.last_event_id"),
+        created_at=_require_non_empty_text(external_session.get("created_at"), "external_session.created_at"),
+        last_used_at=_require_non_empty_text(external_session.get("last_used_at"), "external_session.last_used_at"),
     )
     _require_im_write_root()
-    runtime_files.write_json_object(_im_dir("connections") / f"{key_hash.replace(':', '-', 1)}.json", normalized)
+    runtime_files.write_json_object(_im_dir("external_sessions") / f"{key_hash.replace(':', '-', 1)}.json", normalized)
     return normalized
 
 
-def get_im_connection_by_key_hash(key_hash: str) -> dict[str, Any] | None:
-    normalized = _require_non_empty_text(key_hash, "connection_key_hash")
+def get_external_session_by_key_hash(key_hash: str) -> dict[str, Any] | None:
+    normalized = _require_non_empty_text(key_hash, "external_session_key_hash")
     if not normalized.startswith("sha256:"):
-        raise ValueError("connection_key_hash must start with sha256:")
-    path = _im_dir("connections") / f"{normalized.replace(':', '-', 1)}.json"
+        raise ValueError("external_session_key_hash must start with sha256:")
+    path = _im_dir("external_sessions") / f"{normalized.replace(':', '-', 1)}.json"
     if not path.exists():
         return None
     return runtime_files.read_json_object(path)

@@ -97,16 +97,16 @@ class BuddySwitchImApi:
         self.server = server.rstrip("/")
         self._opener = request.build_opener(request.ProxyHandler({}))
 
-    def create_connection(self, *, display_name: str) -> dict[str, Any]:
-        return self._request("POST", "/api/im/connections", {"display_name": display_name}, connection_key=None)
+    def create_external_session(self, *, display_name: str) -> dict[str, Any]:
+        return self._request("POST", "/api/im/external-sessions", {"display_name": display_name}, external_session_key=None)
 
-    def list_actors(self, *, connection_key: str) -> dict[str, Any]:
-        return self._request("GET", "/api/im/actors", None, connection_key=connection_key)
+    def list_actors(self, *, external_session_key: str) -> dict[str, Any]:
+        return self._request("GET", "/api/im/actors", None, external_session_key=external_session_key)
 
     def send_message(
         self,
         *,
-        connection_key: str,
+        external_session_key: str,
         target_identity_id: str,
         content: str,
         reply_to: str | None = None,
@@ -119,28 +119,28 @@ class BuddySwitchImApi:
                 "content": content,
                 "reply_to": reply_to,
             },
-            connection_key=connection_key,
+            external_session_key=external_session_key,
         )
 
-    def read_events(self, *, connection_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
+    def read_events(self, *, external_session_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
         return self._request(
             "GET",
             f"/api/im/events?limit={limit}&wait_ms={wait_ms}",
             None,
-            connection_key=connection_key,
+            external_session_key=external_session_key,
             timeout_seconds=_request_timeout_seconds(wait_ms=wait_ms),
         )
 
-    def ack_event(self, *, connection_key: str, event_id: str) -> dict[str, Any]:
+    def ack_event(self, *, external_session_key: str, event_id: str) -> dict[str, Any]:
         return self._request(
             "POST",
             "/api/im/events/ack",
             {"event_id": event_id},
-            connection_key=connection_key,
+            external_session_key=external_session_key,
         )
 
-    def get_message(self, *, connection_key: str, message_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/api/im/messages/{message_id}", None, connection_key=connection_key)
+    def get_message(self, *, external_session_key: str, message_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/api/im/messages/{message_id}", None, external_session_key=external_session_key)
 
     def _request(
         self,
@@ -148,13 +148,13 @@ class BuddySwitchImApi:
         path: str,
         payload: dict[str, Any] | None,
         *,
-        connection_key: str | None,
+        external_session_key: str | None,
         timeout_seconds: float = 30,
     ) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload, ensure_ascii=True).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        if connection_key:
-            headers["Authorization"] = f"Bearer {connection_key}"
+        if external_session_key:
+            headers["Authorization"] = f"Bearer {external_session_key}"
         req = request.Request(f"{self.server}{path}", data=body, headers=headers, method=method)
         try:
             with self._opener.open(req, timeout=timeout_seconds) as response:
@@ -429,26 +429,34 @@ class ImessageChannelController:
         with self._state_lock:
             state = self.state_store.load()
             contact = self._contact(state, sender)
-            connection_key = self._connection_key(contact)
+            external_session_key = self._external_session_key(contact)
             route = _route_from_row(row, sender=sender)
 
             if content == "/actors":
-                return self._handle_actors(state, contact, connection_key, route)
+                return self._handle_actors(state, contact, external_session_key, route)
             if _is_numeric_choice(content) and contact.get("pending_actor_choices"):
                 return self._handle_numeric_choice(state, contact, content, route)
-            return self._handle_ordinary_message(state, contact, connection_key, row, sender=sender, content=content, route=route)
+            return self._handle_ordinary_message(
+                state,
+                contact,
+                external_session_key,
+                row,
+                sender=sender,
+                content=content,
+                route=route,
+            )
 
     def poll_outbound_once(self, *, wait_ms: int = 0, limit: int = 50) -> dict[str, Any]:
         with self._state_lock:
             state = self.state_store.load()
             poll_targets = [
-                (sender_key, _contact_connection_key(contact))
+                (sender_key, _contact_external_session_key(contact))
                 for sender_key, contact in _contacts(state).items()
-                if _contact_connection_key(contact)
+                if _contact_external_session_key(contact)
             ]
         sent_count = 0
-        for sender_key, connection_key in poll_targets:
-            events = self.api.read_events(connection_key=connection_key, limit=limit, wait_ms=wait_ms)
+        for sender_key, external_session_key in poll_targets:
+            events = self.api.read_events(external_session_key=external_session_key, limit=limit, wait_ms=wait_ms)
             if events.get("ok") is not True:
                 raise ChannelError(str((events.get("error") or {}).get("message") or "BuddySwitch events read failed"))
             with self._state_lock:
@@ -466,9 +474,9 @@ class ImessageChannelController:
                     if not event_id or not message_id:
                         continue
                     if event_id in sent_ids:
-                        self._ack_outbound_event(connection_key=connection_key, event_id=event_id)
+                        self._ack_outbound_event(external_session_key=external_session_key, event_id=event_id)
                         continue
-                    fetched = self.api.get_message(connection_key=connection_key, message_id=message_id)
+                    fetched = self.api.get_message(external_session_key=external_session_key, message_id=message_id)
                     if fetched.get("ok") is not True or not isinstance(fetched.get("message"), dict):
                         continue
                     message = fetched["message"]
@@ -477,30 +485,30 @@ class ImessageChannelController:
                     content = str(message.get("content") or "").strip()
                     actor_id = _actor_id_for_reply(event, message)
                     if not route or not content or not actor_id:
-                        self._ack_outbound_event(connection_key=connection_key, event_id=event_id)
+                        self._ack_outbound_event(external_session_key=external_session_key, event_id=event_id)
                         continue
                     self.imsg.send(route=route, text=f"[Message From {actor_id}]\n\n{content}")
                     sent_ids.add(event_id)
                     contact_sent_count += 1
                     contact["sent_outbound_event_ids"] = sorted(sent_ids)
                     self.state_store.save(state)
-                    self._ack_outbound_event(connection_key=connection_key, event_id=event_id)
+                    self._ack_outbound_event(external_session_key=external_session_key, event_id=event_id)
                 if contact_sent_count:
                     sent_count += contact_sent_count
         return {"ok": True, "sent": sent_count}
 
-    def _ack_outbound_event(self, *, connection_key: str, event_id: str) -> bool:
-        result = self.api.ack_event(connection_key=connection_key, event_id=event_id)
+    def _ack_outbound_event(self, *, external_session_key: str, event_id: str) -> bool:
+        result = self.api.ack_event(external_session_key=external_session_key, event_id=event_id)
         return result.get("ok") is True
 
     def _handle_actors(
         self,
         state: dict[str, Any],
         contact: dict[str, Any],
-        connection_key: str,
+        external_session_key: str,
         route: dict[str, Any],
     ) -> dict[str, Any]:
-        payload = self.api.list_actors(connection_key=connection_key)
+        payload = self.api.list_actors(external_session_key=external_session_key)
         if payload.get("ok") is not True:
             raise ChannelError(str((payload.get("error") or {}).get("message") or "actor list failed"))
         choices: dict[str, str] = {}
@@ -543,7 +551,7 @@ class ImessageChannelController:
         self,
         state: dict[str, Any],
         contact: dict[str, Any],
-        connection_key: str,
+        external_session_key: str,
         row: dict[str, Any],
         *,
         sender: str,
@@ -560,7 +568,7 @@ class ImessageChannelController:
         if inbound_key in seen:
             return {"ok": True, "status": "duplicate"}
         response = self.api.send_message(
-            connection_key=connection_key,
+            external_session_key=external_session_key,
             target_identity_id=active_identity_id,
             content=content,
             reply_to=None,
@@ -584,18 +592,18 @@ class ImessageChannelController:
             contacts[key] = _default_contact()
         return contacts[key]
 
-    def _connection_key(self, contact: dict[str, Any]) -> str:
-        existing = _contact_connection_key(contact)
+    def _external_session_key(self, contact: dict[str, Any]) -> str:
+        existing = _contact_external_session_key(contact)
         if existing:
             return existing
-        created = self.api.create_connection(display_name=self.config.display_name)
+        created = self.api.create_external_session(display_name=self.config.display_name)
         if created.get("ok") is not True:
-            raise ChannelError(str((created.get("error") or {}).get("message") or "connection creation failed"))
-        connection_key = created.get("connection_key")
-        if not isinstance(connection_key, str) or not connection_key.strip():
-            raise ChannelError("connection creation did not return connection_key")
-        contact["connection_key"] = connection_key.strip()
-        return connection_key.strip()
+            raise ChannelError(str((created.get("error") or {}).get("message") or "external session creation failed"))
+        external_session_key = created.get("external_session_key")
+        if not isinstance(external_session_key, str) or not external_session_key.strip():
+            raise ChannelError("external session creation did not return external_session_key")
+        contact["external_session_key"] = external_session_key.strip()
+        return external_session_key.strip()
 
 
 class ImessageChannelWorker:
@@ -660,9 +668,9 @@ def _default_contact() -> dict[str, Any]:
 
 def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
     contact = _default_contact()
-    connection_key = payload.get("connection_key")
-    if isinstance(connection_key, str) and connection_key.strip():
-        contact["connection_key"] = connection_key.strip()
+    external_session_key = payload.get("external_session_key")
+    if isinstance(external_session_key, str) and external_session_key.strip():
+        contact["external_session_key"] = external_session_key.strip()
     active_identity_id = payload.get("active_identity_id")
     if isinstance(active_identity_id, str) and active_identity_id.strip():
         contact["active_identity_id"] = active_identity_id.strip()
@@ -764,8 +772,8 @@ def _active_identity_id(contact: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
-def _contact_connection_key(contact: dict[str, Any]) -> str:
-    value = contact.get("connection_key")
+def _contact_external_session_key(contact: dict[str, Any]) -> str:
+    value = contact.get("external_session_key")
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 

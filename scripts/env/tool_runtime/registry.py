@@ -11,9 +11,6 @@ from typing import Any, Mapping
 
 import env.tools
 
-from env.domain.identity import ActorIdentityProfile
-from env.domain.identity import actor_identity
-from env.repos import identities as identity_repo
 from env.tool_runtime.definition import ActionDefinition
 from env.tool_runtime.definition import TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED
 from env.tool_runtime.definition import ToolDefinition
@@ -465,16 +462,14 @@ def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) 
     return response
 
 
-def _actor_identity_profile_from_dispatch(*, actor_id: str, active_role: str) -> ActorIdentityProfile:
-    profile = ActorIdentityProfile(
+def _actor_identity_profile_from_dispatch(*, actor_id: str, active_role: str) -> Any:
+    from env.domain.identity import ActorIdentityProfile
+    from env.domain.identity import actor_identity
+
+    return ActorIdentityProfile(
         identity=actor_identity(actor_id),
         role_id=active_role,
     )
-    existing = identity_repo.get_actor_identity_profile(profile.identity.id)
-    if isinstance(existing, dict) and existing.get("role_id") == profile.role_id:
-        return ActorIdentityProfile.from_payload(existing)
-    saved = identity_repo.save_actor_identity_profile(profile.to_payload())
-    return ActorIdentityProfile.from_payload(saved)
 
 
 def dispatch_env_tool_request(

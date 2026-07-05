@@ -239,8 +239,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             body="market",
             template="brief",
             supersedes_artifact_id=None,
-            created_by_actor=actor,
-            author_actors=[actor],
+            created_by_identity=actor["actor_id"],
+            author_identities=[actor["actor_id"]],
             source_refs=[{"type": "note", "label": "seed"}],
         )
         artifact = artifact_repo.update_artifact(str(artifact["id"]), {"is_current": True})

@@ -508,6 +508,14 @@ class ToolContext(Mapping[str, Any]):
             manifest_path=manifest_path,
         )
 
+    @property
+    def active_actor(self) -> IdentityRef:
+        return self.current_identity
+
+    @property
+    def active_role(self) -> str:
+        return self.role_id
+
     def runtime_policy_preview(self, operation_semantics: dict[str, dict[str, Any]]) -> dict[str, Any]:
         from env.tool_runtime import role_auth
 

@@ -95,6 +95,38 @@ class RepoConsistencyTests(unittest.TestCase):
                     hits.append(f"{relative}:{line_no}:{snippet[:260]}")
         return hits
 
+    def test_external_session_naming_has_no_live_connection_residue(self) -> None:
+        surfaces = (
+            ROOT / "scripts" / "env" / "repos" / "messages.py",
+            ROOT / "scripts" / "env" / "services" / "messages.py",
+            ROOT / "tools" / "launcher" / "external_im_session.py",
+            ROOT / "tools" / "launcher" / "im_http_router.py",
+            ROOT / "tools" / "launcher" / "web_im_identity.py",
+            ROOT / "tools" / "launcher" / "imessage_channel.py",
+            ROOT / "tools" / "launcher" / "assets" / "web-management" / "app.js",
+            ROOT / "docs" / "arch" / "web-interface-call-architecture.md",
+        )
+        forbidden = (
+            "create_external_" + "connection",
+            "authenticate_external_" + "connection_key",
+            "send_external_" + "connection_message",
+            "read_external_" + "connection_events",
+            "ack_external_" + "connection_event",
+            "save_im_" + "connection",
+            "get_im_" + "connection_by_key_hash",
+            "connection_" + "key",
+            "connection_" + "key_hash",
+            "/api/im/" + "connections",
+            "state/im/" + "connections",
+            "im/" + "connections",
+            "Web IM " + "connection",
+        )
+        for surface in surfaces:
+            source = surface.read_text(encoding="utf-8")
+            for fragment in forbidden:
+                with self.subTest(surface=str(surface.relative_to(ROOT)), fragment=fragment):
+                    self.assertNotIn(fragment, source)
+
     @staticmethod
     def _retired_actor_private_host_path_tokens() -> tuple[str, ...]:
         return (
@@ -650,10 +682,9 @@ print(json.dumps({{
             hits.extend(self._scan_targets(pattern, targets))
         self.assertEqual(hits, [], msg="\n".join(hits))
 
-    def test_central_im_write_does_not_import_delivery_or_processing(self) -> None:
+    def test_central_im_write_does_not_import_processing_or_channel(self) -> None:
         source = (ROOT / "scripts" / "env" / "services" / "messages.py").read_text(encoding="utf-8")
         forbidden = (
-            "im_delivery",
             "wake_im_actor",
             "mailbox.local_trigger",
             "task_sys_ingress",
@@ -664,15 +695,13 @@ print(json.dumps({{
         self.assertEqual(hits, [])
 
     def test_im_delivery_helper_does_not_import_processing_or_channel(self) -> None:
-        source = (ROOT / "scripts" / "env" / "services" / "im_delivery.py").read_text(encoding="utf-8")
+        source = (ROOT / "scripts" / "env" / "services" / "messages.py").read_text(encoding="utf-8")
         forbidden = (
             "task_sys_ingress",
             "ImMessageCreatedHandler",
             "imessage_channel",
             "web_management",
             "im_http_router",
-            "env.repos.messages",
-            "send_im_message",
         )
         hits = [term for term in forbidden if term in source]
         self.assertEqual(hits, [])

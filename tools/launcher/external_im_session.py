@@ -6,7 +6,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Optional
 
-from env.services import im_delivery
 from env.services import messages as message_service
 
 
@@ -18,11 +17,11 @@ def _auth_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_AUTH", "message": message}}
 
 
-def _external_identity_from_connection(connection: dict[str, Any]) -> dict[str, Any]:
-    identity_id = connection.get("identity_id")
+def _external_identity_from_session(external_session: dict[str, Any]) -> dict[str, Any]:
+    identity_id = external_session.get("identity_id")
     if isinstance(identity_id, str) and identity_id.strip():
         return {"ok": True, "identity": {"id": identity_id.strip(), "type": "external"}}
-    return _auth_error("connection.identity_id must be a non-empty string")
+    return _auth_error("external_session.identity_id must be a non-empty string")
 
 
 class ExternalImSession:
@@ -35,11 +34,11 @@ class ExternalImSession:
         self._actor_lister = actor_lister or (lambda _role_id: [])
         self._actor_delivery_handler = actor_delivery_handler
 
-    def create_connection(self, *, display_name: str) -> dict[str, Any]:
-        return message_service.create_external_connection(display_name=display_name)
+    def create_external_session(self, *, display_name: str) -> dict[str, Any]:
+        return message_service.create_external_session(display_name=display_name)
 
-    def authenticate(self, connection_key: str) -> dict[str, Any]:
-        return message_service.authenticate_external_connection_key(connection_key)
+    def authenticate_external_session_key(self, external_session_key: str) -> dict[str, Any]:
+        return message_service.authenticate_external_session_key(external_session_key)
 
     def list_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
         return message_service.list_im_actor_contacts(self._actor_lister(role_id), role_id=role_id)
@@ -47,7 +46,7 @@ class ExternalImSession:
     def send_message(
         self,
         *,
-        connection: dict[str, Any],
+        external_session: dict[str, Any],
         target_identity_id: Any,
         content: str,
         reply_to: Any = None,
@@ -55,8 +54,8 @@ class ExternalImSession:
         target_response = self._actor_target_identity(target_identity_id, field="target_identity_id")
         if target_response.get("ok") is not True:
             return target_response
-        result = message_service.send_external_connection_message(
-            connection=connection,
+        result = message_service.send_external_session_message(
+            external_session=external_session,
             target_identity=target_response["identity"],
             content=content,
             reply_to=reply_to if reply_to is not None else None,
@@ -69,33 +68,33 @@ class ExternalImSession:
             and isinstance(result_target.get("type"), str)
             else target_response["identity"]
         )
-        return im_delivery.attach_post_write_delivery_status(
+        return message_service.attach_post_write_delivery_status(
             result,
             target_identity=handling_target,
             actor_delivery_handler=self._actor_delivery_handler,
         )
 
-    def read_events(self, *, connection: dict[str, Any], limit: int = 50, wait_ms: int = 0) -> dict[str, Any]:
-        return message_service.read_external_connection_events(
-            connection=connection,
+    def read_events(self, *, external_session: dict[str, Any], limit: int = 50, wait_ms: int = 0) -> dict[str, Any]:
+        return message_service.read_external_session_events(
+            external_session=external_session,
             limit=limit,
             wait_ms=wait_ms,
         )
 
-    def ack_event(self, *, connection: dict[str, Any], event_id: str) -> dict[str, Any]:
-        return message_service.ack_external_connection_event(
-            connection=connection,
+    def ack_event(self, *, external_session: dict[str, Any], event_id: str) -> dict[str, Any]:
+        return message_service.ack_external_session_event(
+            external_session=external_session,
             event_id=event_id,
         )
 
     def get_direct_conversation(
         self,
         *,
-        connection: dict[str, Any],
+        external_session: dict[str, Any],
         identity_id: Any,
         limit: int = 20,
     ) -> dict[str, Any]:
-        identity_response = _external_identity_from_connection(connection)
+        identity_response = _external_identity_from_session(external_session)
         if identity_response.get("ok") is not True:
             return identity_response
         target_response = self._actor_target_identity(identity_id, field="identity_id")
@@ -107,8 +106,8 @@ class ExternalImSession:
             limit=limit,
         )
 
-    def get_message(self, *, connection: dict[str, Any], message_id: str) -> dict[str, Any]:
-        identity_response = _external_identity_from_connection(connection)
+    def get_message(self, *, external_session: dict[str, Any], message_id: str) -> dict[str, Any]:
+        identity_response = _external_identity_from_session(external_session)
         if identity_response.get("ok") is not True:
             return identity_response
         return message_service.get_im_message(
@@ -116,8 +115,8 @@ class ExternalImSession:
             message_id=message_id,
         )
 
-    def list_replies(self, *, connection: dict[str, Any], message_id: str) -> dict[str, Any]:
-        identity_response = _external_identity_from_connection(connection)
+    def list_replies(self, *, external_session: dict[str, Any], message_id: str) -> dict[str, Any]:
+        identity_response = _external_identity_from_session(external_session)
         if identity_response.get("ok") is not True:
             return identity_response
         return message_service.list_im_replies(
@@ -128,12 +127,12 @@ class ExternalImSession:
     def update_disposition(
         self,
         *,
-        connection: dict[str, Any],
+        external_session: dict[str, Any],
         message_id: str,
         disposition: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        identity_response = _external_identity_from_connection(connection)
+        identity_response = _external_identity_from_session(external_session)
         if identity_response.get("ok") is not True:
             return identity_response
         return message_service.update_im_disposition(

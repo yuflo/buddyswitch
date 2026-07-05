@@ -353,7 +353,7 @@ class WebManagementUnitTests(unittest.TestCase):
             self.assertEqual(payload["identity"]["type"], "external")
             self.assertNotIn("participant_token", payload)
             self.assertNotIn("participant", payload)
-            self.assertNotIn("connection_key", payload)
+            self.assertNotIn("external_session_key", payload)
             self.assertNotIn("event_cursor", payload)
             self.assertEqual(os.environ.get("BUDDYSWITCH_STATE_ROOT"), str(shared_root / "state"))
             self.assertNotIn("BUDDYSWITCH_ACTOR_ID", os.environ)
@@ -1147,8 +1147,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertNotIn("participant", second_payload)
         self.assertNotIn("participant_token", first_payload)
         self.assertNotIn("participant_token", second_payload)
-        self.assertNotIn("connection_key", first_payload)
-        self.assertNotIn("connection_key", second_payload)
+        self.assertNotIn("external_session_key", first_payload)
+        self.assertNotIn("external_session_key", second_payload)
         self.assertNotIn("event_cursor", first_payload)
         self.assertNotIn("event_cursor", second_payload)
         self.assertEqual(len(self._external_identity_files()), 1)
@@ -1156,7 +1156,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(identity["client_kind"], "web-management")
         self.assertEqual(identity["display_name"], "BuddySwitch Web")
         self.assertEqual(identity["identity"], first_payload["identity"])
-        self.assertIn("connection_key", identity)
+        self.assertIn("external_session_key", identity)
         self.assertNotIn("participant", identity)
         self.assertNotIn("participant_token", identity)
         self.assertNotIn("event_cursor", identity)
@@ -1170,7 +1170,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         first_external_id = first_payload["identity"]["id"]
         identity_path = self._identity_path()
         identity = json.loads(identity_path.read_text(encoding="utf-8"))
-        identity["connection_key"] = "imck-invalid"
+        identity["external_session_key"] = "imsk-invalid"
         identity_path.write_text(json.dumps(identity, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
         replaced_status, replaced_payload = self._service().handle_api("GET", "/api/im/session", b"", {})
@@ -1183,7 +1183,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(len(self._external_identity_files()), 2)
 
     def test_browser_style_im_routes_send_read_fetch_ack_and_restore_history_without_browser_token(self) -> None:
-        """Browser-style Web request sends target-identity IM through /api/im/messages, actor reply becomes visible through /api/im/events, browser fetches the reply through /api/im/messages/<id>, browser acks through /api/im/events/ack, and direct conversation shows both messages without exposing connection_key."""
+        """Browser-style Web request sends target-identity IM through /api/im/messages, actor reply becomes visible through /api/im/events, browser fetches the reply through /api/im/messages/<id>, browser acks through /api/im/events/ack, and direct conversation shows both messages without exposing external_session_key."""
         actor_route = {
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-history"),
@@ -1239,7 +1239,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual([event["message_id"] for event in events["events"]], [reply["message"]["id"]])
         self.assertNotIn("messages", events)
         self.assertNotIn("participant_token", events)
-        self.assertNotIn("connection_key", events)
+        self.assertNotIn("external_session_key", events)
         self.assertNotIn("next_cursor", events)
         self.assertNotIn("ack", events)
 
@@ -1256,7 +1256,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         status, fetched = service.handle_api("GET", f"/api/im/messages/{reply_id}", b"", {})
         self.assertEqual(status, 200, msg=fetched)
         self.assertEqual(fetched["message"]["content"], "pong")
-        self.assertNotIn("connection_key", fetched)
+        self.assertNotIn("external_session_key", fetched)
 
         status, acked = service.handle_api(
             "POST",
@@ -1266,7 +1266,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         )
         self.assertEqual(status, 200, msg=acked)
         self.assertTrue(acked["ok"])
-        self.assertNotIn("connection_key", acked)
+        self.assertNotIn("external_session_key", acked)
 
         status, after_ack = service.handle_api("GET", "/api/im/events?wait_ms=0", b"", {})
         self.assertEqual(status, 200, msg=after_ack)
@@ -1280,9 +1280,9 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         )
         self.assertEqual(status, 200, msg=history)
         self.assertEqual([row["id"] for row in history["messages"]], [sent_message_id, reply_id])
-        self.assertNotIn("connection_key", history)
+        self.assertNotIn("external_session_key", history)
 
-    def test_im_events_are_connection_wide_and_do_not_fetch_or_ack_messages(self) -> None:
+    def test_im_events_are_external_session_wide_and_do_not_fetch_or_ack_messages(self) -> None:
         market_actor = {
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-market"),

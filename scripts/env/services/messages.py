@@ -7,6 +7,7 @@ import hashlib
 import secrets
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from env.domain.identity import ACTOR_ID_PATTERN, IdentityRef, ROLE_ID_PATTERN
@@ -19,6 +20,7 @@ def _im_payload_error(message: str) -> dict[str, Any]:
 
 
 _BLOCKED_ACTOR_CONTACT_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
+ActorDeliveryHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _identity_ref(value: Any, field: str = "identity") -> dict[str, str]:
@@ -106,7 +108,7 @@ def identity_for_current_send_target(
     return _im_payload_error(f"{field} is not a reachable target identity: {identity_id}")
 
 
-def create_external_connection(*, display_name: str) -> dict[str, Any]:
+def create_external_session(*, display_name: str) -> dict[str, Any]:
     from env.repos import identities as identity_repo
     from env.repos import messages as message_repo
 
@@ -123,17 +125,11 @@ def create_external_connection(*, display_name: str) -> dict[str, Any]:
             "created_at": now,
         }
     )
-    external_connection = {
-        "external_identity_id": external_identity_id,
-        "display_name": normalized_display_name,
-        "created_at": now,
-        "last_seen_at": now,
-    }
-    connection_key = f"imck-{secrets.token_hex(24)}"
-    connection_key_hash = _im_connection_key_hash(connection_key)
-    message_repo.save_im_connection(
+    external_session_key = f"imsk-{secrets.token_hex(24)}"
+    external_session_key_hash = _external_session_key_hash(external_session_key)
+    message_repo.save_external_session(
         {
-            "connection_key_hash": connection_key_hash,
+            "external_session_key_hash": external_session_key_hash,
             "identity_id": external_identity_id,
             "display_name": normalized_display_name,
             "last_event_id": message_repo.INITIAL_IM_EVENT_CURSOR,
@@ -143,36 +139,37 @@ def create_external_connection(*, display_name: str) -> dict[str, Any]:
     )
     return {
         "ok": True,
-        "connection_key": connection_key,
+        "external_session_key": external_session_key,
         "identity": {"id": external_identity_id, "type": "external"},
-        "external_connection": external_connection,
     }
 
 
-def _im_connection_key_hash(connection_key: str) -> str:
-    return "sha256:" + hashlib.sha256(connection_key.encode("utf-8")).hexdigest()
+def _external_session_key_hash(external_session_key: str) -> str:
+    return "sha256:" + hashlib.sha256(external_session_key.encode("utf-8")).hexdigest()
 
 
-def authenticate_external_connection_key(connection_key: str) -> dict[str, Any]:
+def authenticate_external_session_key(external_session_key: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    if not isinstance(connection_key, str) or not connection_key.strip():
-        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection_key is required"}}
-    connection = message_repo.get_im_connection_by_key_hash(_im_connection_key_hash(connection_key.strip()))
-    if connection is None:
-        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "connection_key is invalid"}}
+    if not isinstance(external_session_key, str) or not external_session_key.strip():
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "external_session_key is required"}}
+    external_session = message_repo.get_external_session_by_key_hash(
+        _external_session_key_hash(external_session_key.strip())
+    )
+    if external_session is None:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": "external_session_key is invalid"}}
     try:
-        identity = _identity_ref(connection.get("identity_id"), "connection.identity_id")
+        identity = _identity_ref(external_session.get("identity_id"), "external_session.identity_id")
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
-    updated = dict(connection)
+    updated = dict(external_session)
     updated["identity_id"] = identity["id"]
     updated["last_used_at"] = message_repo.runtime_files.now_iso()
-    saved = message_repo.save_im_connection(updated)
+    saved = message_repo.save_external_session(updated)
     return {
         "ok": True,
         "identity": identity,
-        "connection": saved,
+        "external_session": saved,
     }
 
 
@@ -375,32 +372,92 @@ def send_im_message(
     return response
 
 
-def _connection_identity_ref(connection: dict[str, Any]) -> dict[str, str]:
-    identity_id = connection.get("identity_id")
-    return _identity_ref(identity_id, "connection.identity_id")
+def attach_post_write_delivery_status(
+    result: dict[str, Any],
+    *,
+    target_identity: dict[str, Any] | None = None,
+    actor_delivery_handler: ActorDeliveryHandler | None = None,
+) -> dict[str, Any]:
+    if result.get("ok") is not True:
+        return result
+    target = _delivery_target(result, target_identity)
+    if target is None or target.get("type") != "actor":
+        result["actor_handling_status"] = "not_applicable"
+        return result
+    if actor_delivery_handler is None:
+        result["actor_handling_status"] = "handling_failed"
+        return result
+    try:
+        payload = _actor_message_created_payload(result, target)
+    except ValueError:
+        result["actor_handling_status"] = "handling_failed"
+        return result
+    handling = actor_delivery_handler(payload)
+    if isinstance(handling, dict) and isinstance(handling.get("actor_handling_status"), str):
+        result["actor_handling_status"] = handling["actor_handling_status"]
+    else:
+        result["actor_handling_status"] = "handling_failed"
+    return result
 
 
-def _save_connection_last_event(connection: dict[str, Any], event_id: str) -> dict[str, Any]:
+def _delivery_target(
+    result: dict[str, Any],
+    explicit_target: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    for candidate in (explicit_target, result.get("target_identity")):
+        if isinstance(candidate, dict):
+            try:
+                return IdentityRef.from_payload(candidate).to_payload()
+            except ValueError:
+                continue
+    return None
+
+
+def _required_text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value.strip()
+
+
+def _actor_message_created_payload(result: dict[str, Any], target: dict[str, str]) -> dict[str, Any]:
+    message = result.get("message")
+    if not isinstance(message, dict):
+        raise ValueError("post-write IM delivery requires message refs")
+    return {
+        "type": "im.message.created",
+        "target_identity_id": target["id"],
+        "message_id": _required_text(message.get("id"), "message.id"),
+        "conversation_id": _required_text(message.get("conversation_id"), "message.conversation_id"),
+        "event_id": _required_text(result.get("event_id"), "event_id"),
+    }
+
+
+def _external_session_identity_ref(external_session: dict[str, Any]) -> dict[str, str]:
+    identity_id = external_session.get("identity_id")
+    return _identity_ref(identity_id, "external_session.identity_id")
+
+
+def _save_external_session_last_event(external_session: dict[str, Any], event_id: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
-    updated = dict(connection)
+    updated = dict(external_session)
     updated["last_event_id"] = str(event_id)
     updated["last_used_at"] = message_repo.runtime_files.now_iso()
-    saved = message_repo.save_im_connection(updated)
-    connection.clear()
-    connection.update(saved)
+    saved = message_repo.save_external_session(updated)
+    external_session.clear()
+    external_session.update(saved)
     return saved
 
 
-def send_external_connection_message(
+def send_external_session_message(
     *,
-    connection: dict[str, Any],
+    external_session: dict[str, Any],
     target_identity: dict[str, Any],
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:
     try:
-        sender = _connection_identity_ref(connection)
+        sender = _external_session_identity_ref(external_session)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     try:
@@ -418,19 +475,19 @@ def send_external_connection_message(
     return external_response
 
 
-def read_external_connection_events(
+def read_external_session_events(
     *,
-    connection: dict[str, Any],
+    external_session: dict[str, Any],
     limit: int = 50,
     wait_ms: int = 0,
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
     try:
-        identity = _connection_identity_ref(connection)
+        identity = _external_session_identity_ref(external_session)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
-    last_event_id = connection.get("last_event_id")
+    last_event_id = external_session.get("last_event_id")
     cursor = last_event_id if isinstance(last_event_id, str) and last_event_id.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
     normalized_limit = limit if isinstance(limit, int) and limit > 0 else 50
     wait_seconds = min(wait_ms if isinstance(wait_ms, int) and wait_ms > 0 else 0, 30000) / 1000
@@ -448,15 +505,15 @@ def read_external_connection_events(
     return {"ok": True, "events": events}
 
 
-def ack_external_connection_event(
+def ack_external_session_event(
     *,
-    connection: dict[str, Any],
+    external_session: dict[str, Any],
     event_id: str,
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
     try:
-        identity = _connection_identity_ref(connection)
+        identity = _external_session_identity_ref(external_session)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     normalized_event_id = event_id.strip() if isinstance(event_id, str) else ""
@@ -467,14 +524,14 @@ def ack_external_connection_event(
     visible_index_by_id = {str(event.get("event_id") or ""): index for index, event in enumerate(events)}
     event_index = visible_index_by_id.get(normalized_event_id)
     if event_index is None:
-        return _im_scope_error("event is not visible to the connection")
+        return _im_scope_error("event is not visible to the external session")
     event = events[event_index]
     identity_id = identity["id"]
     sender_identity = event.get("sender_identity") if isinstance(event.get("sender_identity"), dict) else {}
     if sender_identity.get("id") == identity_id:
-        return _im_scope_error("event is not consumable by the connection")
+        return _im_scope_error("event is not consumable by the external session")
 
-    last_event_id = connection.get("last_event_id")
+    last_event_id = external_session.get("last_event_id")
     cursor = last_event_id if isinstance(last_event_id, str) and last_event_id.strip() else message_repo.INITIAL_IM_EVENT_CURSOR
     cursor_index = visible_index_by_id.get(cursor)
     if cursor == normalized_event_id or (cursor_index is not None and event_index <= cursor_index):
@@ -497,11 +554,11 @@ def ack_external_connection_event(
             "ok": False,
             "error": {
                 "code": "E_IM_CURSOR",
-                "message": "event_id is not the next unacknowledged event for the connection",
+                "message": "event_id is not the next unacknowledged event for the external session",
             },
         }
 
-    saved = _save_connection_last_event(connection, normalized_event_id)
+    saved = _save_external_session_last_event(external_session, normalized_event_id)
     return {
         "ok": True,
         "event_id": normalized_event_id,

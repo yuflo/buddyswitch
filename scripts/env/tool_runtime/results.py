@@ -226,7 +226,8 @@ def success(
     *,
     tool: str,
     action: str,
-    current_identity: dict[str, Any],
+    current_identity: dict[str, Any] | None = None,
+    active_actor: dict[str, Any] | None = None,
     active_role: str,
     effect_summary: str,
     state_changed: bool,
@@ -242,6 +243,11 @@ def success(
     follow_up_affordances: list[dict[str, Any]] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if current_identity is None and active_actor is not None:
+        if isinstance(active_actor, dict) and isinstance(active_actor.get("actor_id"), str):
+            current_identity = {"id": active_actor["actor_id"], "type": "actor"}
+        elif isinstance(active_actor, dict) and isinstance(active_actor.get("id"), str):
+            current_identity = dict(active_actor)
     payload: dict[str, Any] = {
         "ok": True,
         "tool": tool,

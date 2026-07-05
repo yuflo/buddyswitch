@@ -845,7 +845,7 @@ test('open tui pending disables only open tui', () => {
   );
 });
 
-test('im event URL is connection-wide with bounded wait only', () => {
+test('im event URL is external-session-wide with bounded wait only', () => {
   assert.equal(
     app.buildImEventsUrl(15000),
     '/api/im/events?wait_ms=15000'
@@ -1084,7 +1084,7 @@ test('fetched im message appends projected reply without browser cursor state', 
   ]);
 });
 
-test('connection-wide fetched event messages only append when they touch selected actor', () => {
+test('external-session-wide fetched event messages only append when they touch selected actor', () => {
   const state = app.createState();
   state.selectedActorId = 'act-market-selected';
   state.imConversationIdentityId = 'act-market-selected';
@@ -1118,7 +1118,7 @@ test('connection-wide fetched event messages only append when they touch selecte
   ]);
 });
 
-test('polling connection-wide events acks off-selected actor message without rendering it', async () => {
+test('polling external-session-wide events acks off-selected actor message without rendering it', async () => {
   const originalFetch = global.fetch;
   const calls = [];
   global.fetch = async function (url, options) {

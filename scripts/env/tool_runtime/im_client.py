@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from env.services import im_delivery
 from env.services import messages as message_service
 from env.tool_runtime import results as tool_results
 
@@ -53,7 +52,7 @@ class ActorImClient:
             content=str(args.get("content") or ""),
             reply_to=reply_to,
         )
-        return im_delivery.attach_post_write_delivery_status(
+        return message_service.attach_post_write_delivery_status(
             result,
             target_identity=self._result_target_identity(result, target if isinstance(target, dict) else None),
             actor_delivery_handler=getattr(self._context.daemon, "wake_im_actor", None),

@@ -416,12 +416,17 @@ def create_track(
     track_id: str,
     title: str,
     *,
-    owner_identity: dict[str, Any] | str,
+    owner_identity: dict[str, Any] | str | None = None,
+    owner_actor: dict[str, Any] | None = None,
     outcome: str,
     now: dict[str, Any],
     acceptance_criteria: list[str] | None = None,
     non_goals: list[str] | None = None,
 ) -> dict[str, Any]:
+    if owner_identity is None:
+        if not isinstance(owner_actor, dict):
+            raise ValueError("owner_identity must be an identity id or identity route payload")
+        owner_identity = _identity_id_for_route_payload(owner_actor, "owner_identity")
     return track_repo.create_track(
         track_id,
         title,

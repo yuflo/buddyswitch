@@ -110,8 +110,8 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 body="market",
                 template="brief",
                 supersedes_artifact_id=None,
-                created_by_identity=actor,
-                author_identities=[actor],
+                created_by_identity=actor["actor_id"],
+                author_identities=[actor["actor_id"]],
                 source_refs=[{"type": "note", "label": "seed"}],
             )
             return artifact["id"]

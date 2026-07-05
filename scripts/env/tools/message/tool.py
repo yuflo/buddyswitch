@@ -166,7 +166,7 @@ def _build_definition() -> ToolDefinition:
                     'original_message_id and original_final_disposition when reply_to is provided',
                 ),
                 use_when=(
-                    'You need to create a new Central IM message to a specific reachable target identity.',
+                    'You need to create a new Central IM message from the active actor identity to a specific reachable target identity.',
                     'You need to reply to one processable inbound message, including external-origin messages, using only reply_to.',
                 ),
                 do_not_use_when=(

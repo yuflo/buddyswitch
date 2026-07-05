@@ -233,7 +233,7 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, 'apply' + 'ImEventsPayload');
   assertExcludes(appJs, 'messageTouches' + 'KnownOrSelectedActor');
   assertExcludes(appJs, 'external-participants');
-  assertExcludes(appJs, 'connection_' + 'key');
+  assertExcludes(appJs, 'external_session_' + 'key');
   assertExcludes(appJs, 'imParticipantToken');
   assertExcludes(appJs, 'participant_' + 'token');
   assertExcludes(appJs, 'event_' + 'cursor');

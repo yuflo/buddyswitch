@@ -220,9 +220,9 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-reply")
-        created = message_service.create_external_connection(display_name="local smoke")
+        created = message_service.create_external_session(display_name="local smoke")
         self.assertTrue(created.get("ok"), msg=created)
-        auth = message_service.authenticate_external_connection_key(str(created["connection_key"]))
+        auth = message_service.authenticate_external_session_key(str(created["external_session_key"]))
         self.assertTrue(auth.get("ok"), msg=auth)
         root = message_service.send_im_message(
             sender_identity=auth["identity"],

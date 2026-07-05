@@ -20,6 +20,8 @@ from env.repos import track_comments as comment_repo  # noqa: E402
 
 ACTOR_DEV = {"actor_id": "act-dev-track-comments", "role_id": "dev"}
 ACTOR_PM = {"actor_id": "act-pm-track-comments", "role_id": "pm"}
+ACTOR_DEV_ID = ACTOR_DEV["actor_id"]
+ACTOR_PM_ID = ACTOR_PM["actor_id"]
 
 
 class TrackCommentsRepoTests(unittest.TestCase):
@@ -41,7 +43,7 @@ class TrackCommentsRepoTests(unittest.TestCase):
     def test_create_root_comment_writes_track_scoped_file_without_legacy_fields(self) -> None:
         comment = comment_repo.create_track_comment(
             track_id="track-repo-a",
-            by_actor=ACTOR_DEV,
+            by_identity=ACTOR_DEV_ID,
             content="Root comment",
         )
 
@@ -70,13 +72,13 @@ class TrackCommentsRepoTests(unittest.TestCase):
             "id": "comment-validate",
             "track_id": "track-validate",
             "thread_id": "comment-validate",
-            "by_actor": ACTOR_DEV,
+            "by_identity_id": ACTOR_DEV_ID,
             "content": "Validate",
             "reply_to": None,
-            "mentioned_actors": [],
+            "mentioned_identity_ids": [],
             "status": "open",
             "created_at": runtime_files.now_iso(),
-            "resolved_by_actor": None,
+            "resolved_by_identity_id": None,
             "resolved_at": None,
             "resolution_summary": None,
         }
@@ -96,19 +98,19 @@ class TrackCommentsRepoTests(unittest.TestCase):
     def test_reply_inherits_thread_and_rejects_cross_track_parent(self) -> None:
         root_a = comment_repo.create_track_comment(
             track_id="track-reply-a",
-            by_actor=ACTOR_DEV,
+            by_identity=ACTOR_DEV_ID,
             content="Root A",
         )
         root_b = comment_repo.create_track_comment(
             track_id="track-reply-b",
-            by_actor=ACTOR_DEV,
+            by_identity=ACTOR_DEV_ID,
             content="Root B",
         )
 
         reply = comment_repo.reply_to_track_comment(
             track_id="track-reply-a",
             reply_to=root_a["id"],
-            by_actor=ACTOR_PM,
+            by_identity=ACTOR_PM_ID,
             content="Reply A",
         )
         self.assertEqual(reply["reply_to"], root_a["id"])
@@ -120,7 +122,7 @@ class TrackCommentsRepoTests(unittest.TestCase):
             comment_repo.reply_to_track_comment(
                 track_id="track-reply-a",
                 reply_to=root_b["id"],
-                by_actor=ACTOR_PM,
+                by_identity=ACTOR_PM_ID,
                 content="Bad cross-track reply",
             )
         self.assertEqual(comment_repo.comments_for_track("track-reply-a"), before)
@@ -128,13 +130,13 @@ class TrackCommentsRepoTests(unittest.TestCase):
     def test_thread_reads_are_exact_track_scoped_when_thread_ids_collide(self) -> None:
         root_a = comment_repo.create_track_comment(
             track_id="track-thread-a",
-            by_actor=ACTOR_DEV,
+            by_identity=ACTOR_DEV_ID,
             content="Root A",
             thread_id="thread-shared",
         )
         root_b = comment_repo.create_track_comment(
             track_id="track-thread-b",
-            by_actor=ACTOR_DEV,
+            by_identity=ACTOR_DEV_ID,
             content="Root B",
             thread_id="thread-shared",
         )
@@ -148,19 +150,19 @@ class TrackCommentsRepoTests(unittest.TestCase):
     def test_resolve_track_comment_thread_updates_only_one_track(self) -> None:
         root_a = comment_repo.create_track_comment(
             track_id="track-resolve-a",
-            by_actor=ACTOR_DEV,
+            by_identity=ACTOR_DEV_ID,
             content="Root A",
             thread_id="thread-collide",
         )
         reply_a = comment_repo.reply_to_track_comment(
             track_id="track-resolve-a",
             reply_to=root_a["id"],
-            by_actor=ACTOR_PM,
+            by_identity=ACTOR_PM_ID,
             content="Reply A",
         )
         root_b = comment_repo.create_track_comment(
             track_id="track-resolve-b",
-            by_actor=ACTOR_DEV,
+            by_identity=ACTOR_DEV_ID,
             content="Root B",
             thread_id="thread-collide",
         )
@@ -168,7 +170,7 @@ class TrackCommentsRepoTests(unittest.TestCase):
         resolved = comment_repo.resolve_track_comment_thread(
             track_id="track-resolve-a",
             comment_id=reply_a["id"],
-            resolved_by_actor=ACTOR_PM,
+            resolved_by_identity=ACTOR_PM_ID,
             resolution_summary="Resolved in Track A only.",
         )
 

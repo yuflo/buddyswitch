@@ -44,19 +44,24 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         status, created = router.handle(
             "POST",
-            "/api/im/connections",
+            "/api/im/external-sessions",
             json.dumps({"display_name": "local smoke"}).encode("utf-8"),
             {},
         )
         self.assertEqual(status, 200)
         self.assertTrue(created["ok"], msg=created)
-        key = created["connection_key"]
-        self.assertTrue(key.startswith("imck-"))
+        key = created["external_session_key"]
+        self.assertTrue(key.startswith("imsk-"))
+        self.assertNotIn("connection_key", created)
         self.assertNotIn("participant", created)
         self.assertNotIn("participant_" + "token", created)
         self.assertNotIn("event_" + "cursor", created)
 
-        auth = message_service.authenticate_external_connection_key(key)
+        status, old_route_payload = router.handle("POST", "/api/im/connections", b'{"display_name":"Bridge"}', {})
+        self.assertEqual(status, 404)
+        self.assertFalse(old_route_payload["ok"])
+
+        auth = message_service.authenticate_external_session_key(key)
         self.assertTrue(auth["ok"], msg=auth)
 
         status, session = router.handle(
@@ -246,12 +251,12 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [])
         status, created = router.handle(
             "POST",
-            "/api/im/connections",
+            "/api/im/external-sessions",
             json.dumps({"display_name": "local smoke"}).encode("utf-8"),
             {},
         )
         self.assertEqual(status, 200)
-        key = created["connection_key"]
+        key = created["external_session_key"]
 
         status, payload = router.handle(
             "POST",
