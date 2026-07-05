@@ -29,13 +29,13 @@ class ImHttpRouter:
         self,
         *,
         actor_lister: Callable[[str | None], list[dict[str, Any]]],
-        wake_actor: Callable[[dict[str, Any]], dict[str, Any]],
+        actor_message_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         im_session: Any | None = None,
         web_connection_provider: WebConnectionProvider | None = None,
     ) -> None:
         self._session = im_session or external_im_session.ExternalImSession(
             actor_lister=actor_lister,
-            wake_actor=wake_actor,
+            actor_message_handler=actor_message_handler,
         )
         self._web_connection_provider = web_connection_provider
 

@@ -30,19 +30,19 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         actor_rows: list[dict[str, Any]],
         *,
-        wake_calls: list[dict[str, Any]] | None = None,
+        handling_calls: list[dict[str, Any]] | None = None,
     ) -> external_im_session.ExternalImSession:
         def list_actors(role_id: str | None) -> list[dict[str, Any]]:
             if role_id is None:
                 return actor_rows
             return [row for row in actor_rows if row.get("role_id") == role_id]
 
-        def wake_actor(payload: dict[str, Any]) -> dict[str, Any]:
-            if wake_calls is not None:
-                wake_calls.append(dict(payload))
-            return {"wake_status": "submitted", "runtime_target": "parent", "error": None}
+        def handle_actor(payload: dict[str, Any]) -> dict[str, Any]:
+            if handling_calls is not None:
+                handling_calls.append(dict(payload))
+            return {"actor_handling_status": "submitted", "runtime_target": "parent", "error": None}
 
-        return external_im_session.ExternalImSession(actor_lister=list_actors, wake_actor=wake_actor)
+        return external_im_session.ExternalImSession(actor_lister=list_actors, actor_message_handler=handle_actor)
 
     def _connection(self, session: external_im_session.ExternalImSession) -> tuple[str, dict[str, Any], dict[str, Any]]:
         created = session.create_connection(display_name="local smoke")
@@ -62,10 +62,10 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_session_create_auth_send_event_conversation_and_disposition_flow(self) -> None:
         actor_identity = self._actor_identity()
-        wake_calls: list[dict[str, Any]] = []
+        handling_calls: list[dict[str, Any]] = []
         session = self._session(
             [{**actor_identity, "status": "online"}],
-            wake_calls=wake_calls,
+            handling_calls=handling_calls,
         )
         _key, connection, identity = self._connection(session)
 
@@ -81,8 +81,20 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             reply_to=None,
         )
         self.assertTrue(sent.get("ok"), msg=sent)
-        self.assertEqual(sent["wake_status"], "submitted")
-        self.assertEqual(len(wake_calls), 1)
+        self.assertEqual(sent["actor_handling_status"], "submitted")
+        self.assertNotIn("wake_" + "status", sent)
+        self.assertEqual(
+            handling_calls,
+            [
+                {
+                    "type": "im.message.created",
+                    "target_identity_id": actor_identity["identity_id"],
+                    "message_id": sent["message"]["id"],
+                    "conversation_id": sent["message"]["conversation_id"],
+                    "event_id": sent["event_id"],
+                }
+            ],
+        )
         message_id = sent["message"]["id"]
 
         fetched = session.get_message(connection=connection, message_id=message_id)
@@ -94,7 +106,6 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             to=identity,
             content="pong",
             reply_to=message_id,
-            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
         )
         self.assertTrue(actor_reply.get("ok"), msg=actor_reply)
         reply_id = actor_reply["message"]["id"]
@@ -169,7 +180,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("target_identity_id", missing["error"]["message"])
         self.assertFalse(unreachable.get("ok"), msg=unreachable)
         self.assertEqual(unreachable["error"]["code"], "E_IM_PAYLOAD")
-        self.assertIn("not a reachable actor identity", unreachable["error"]["message"])
+        self.assertIn("not a reachable target identity", unreachable["error"]["message"])
 
     def test_session_list_and_send_reject_offline_actor_rows(self) -> None:
         offline_actor = self._actor_identity(role="market", label="offline")
@@ -187,7 +198,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(actors["actors"], [])
         self.assertFalse(sent.get("ok"), msg=sent)
         self.assertEqual(sent["error"]["code"], "E_IM_PAYLOAD")
-        self.assertIn("not a reachable actor identity", sent["error"]["message"])
+        self.assertIn("not a reachable target identity", sent["error"]["message"])
 
     def test_session_reads_actor_reply_once_without_client_cursor(self) -> None:
         actor_identity = self._actor_identity()
@@ -207,7 +218,6 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             to=identity,
             content="pong",
             reply_to=sent["message"]["id"],
-            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
         )
         self.assertTrue(actor_reply.get("ok"), msg=actor_reply)
 

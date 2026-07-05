@@ -41,20 +41,20 @@ class ActorImClient:
             if target_response.get("ok") is not True:
                 return target_response
             target = target_response["identity"]
-            target_role_id = target_response.get("role_id")
         elif reply_to is not None:
             target = None
-            target_role_id = None
         else:
             target_response = self._send_target_identity(target_identity_id)
             return target_response
-        return message_service.send_im_message(
+        result = message_service.send_im_message(
             sender_identity=self._identity,
             to=target if isinstance(target, dict) else None,
-            target_role_id=target_role_id if isinstance(target_role_id, str) else None,
             content=str(args.get("content") or ""),
             reply_to=reply_to,
-            wake_actor=self._wake_actor,
+        )
+        return self._with_actor_handling_status(
+            result,
+            self._result_target_identity(result, target if isinstance(target, dict) else None),
         )
 
     def get(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -94,28 +94,49 @@ class ActorImClient:
             reason=args.get("reason") if isinstance(args.get("reason"), str) else None,
         )
 
-    def _wake_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
-        wake = getattr(self._context.daemon, "wake_im_actor", None)
-        if callable(wake):
-            return wake(payload)
-        return {"wake_status": "submitted", "runtime_target": "parent", "error": None}
-
     def _send_target_identity(self, value: Any) -> dict[str, Any]:
-        identity_id = value.strip() if isinstance(value, str) and value.strip() else ""
-        if identity_id.startswith("ext-"):
-            return {
-                "ok": False,
-                "error": {
-                    "code": "E_IM_PAYLOAD",
-                    "message": "external target_identity_id requires reply_to conversation routing context",
-                },
-            }
-        return message_service.actor_identity_for_current_send_target(
+        return message_service.identity_for_current_send_target(
             self._online_actor_rows(role_id=None),
             value,
             field="target_identity_id",
             active_identity_id=self._current_identity_payload().get("id"),
         )
+
+    def _result_target_identity(self, result: dict[str, Any], explicit_target: dict[str, Any] | None) -> dict[str, Any] | None:
+        if isinstance(explicit_target, dict):
+            return explicit_target
+        target = result.get("target_identity")
+        if isinstance(target, dict) and isinstance(target.get("id"), str) and isinstance(target.get("type"), str):
+            return {"id": target["id"], "type": target["type"]}
+        return None
+
+    def _with_actor_handling_status(self, result: dict[str, Any], target: dict[str, Any] | None) -> dict[str, Any]:
+        if result.get("ok") is not True:
+            return result
+        if not isinstance(target, dict) or target.get("type") != "actor" or not isinstance(target.get("id"), str):
+            result["actor_handling_status"] = "not_applicable"
+            return result
+        message = result.get("message")
+        if not isinstance(message, dict):
+            result["actor_handling_status"] = "handling_failed"
+            return result
+        payload = {
+            "type": "im.message.created",
+            "target_identity_id": target["id"],
+            "message_id": message.get("id"),
+            "conversation_id": message.get("conversation_id"),
+            "event_id": result.get("event_id"),
+        }
+        wake = getattr(self._context.daemon, "wake_im_actor", None)
+        if not callable(wake):
+            result["actor_handling_status"] = "handling_failed"
+            return result
+        handling = wake(payload)
+        if isinstance(handling, dict) and isinstance(handling.get("actor_handling_status"), str):
+            result["actor_handling_status"] = handling["actor_handling_status"]
+        else:
+            result["actor_handling_status"] = "handling_failed"
+        return result
 
     def _conversation_target_identity(self, value: Any) -> dict[str, Any]:
         identity_id = value.strip() if isinstance(value, str) and value.strip() else ""
@@ -125,7 +146,7 @@ class ActorImClient:
             return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "target_identity_id must not be the active actor identity"}}
         if identity_id.startswith("ext-"):
             return {"ok": True, "identity": {"id": identity_id, "type": "external"}}
-        return message_service.actor_identity_for_current_send_target(
+        return message_service.identity_for_current_send_target(
             self._online_actor_rows(role_id=None),
             identity_id,
             field="target_identity_id",

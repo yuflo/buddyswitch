@@ -95,6 +95,27 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         return [line for line in completed.stdout.splitlines() if line.strip()]
 
+    def _scan_target_text(self, pattern: str, targets: list[str], *, flags: int = 0) -> list[str]:
+        hits: list[str] = []
+        for target in targets:
+            path = ROOT / target
+            if path.is_file():
+                files = [path]
+            else:
+                files = [
+                    row
+                    for row in path.rglob("*.py")
+                    if "__pycache__" not in row.parts and row.suffix == ".py"
+                ]
+            for file_path in files:
+                text = file_path.read_text(encoding="utf-8")
+                relative = file_path.relative_to(ROOT)
+                for match in re.finditer(pattern, text, flags):
+                    line_no = text.count("\n", 0, match.start()) + 1
+                    snippet = " ".join(match.group(0).split())
+                    hits.append(f"{relative}:{line_no}:{snippet[:260]}")
+        return hits
+
     @staticmethod
     def _is_docs_spec_context_hit(line: str) -> bool:
         path_text, _sep, _rest = line.partition(":")
@@ -592,6 +613,81 @@ print(json.dumps({{
                 if not is_allowed_hit(line):
                     disallowed.append(line)
 
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_im_sender_reach_live_surfaces_do_not_expose_actor_handling_coupling(self) -> None:
+        targets = [
+            "scripts/env/services/messages.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "scripts/env/tools/message/tool.py",
+            "tests/test_im_product_core.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/test_web_management.py",
+            "tests/test_env_tool_schema_contract.py",
+            "tests/test_env_tool_response_contract.py",
+            "tests/test_context_binding_env_tool.py",
+        ]
+        multiline_patterns = [
+            r"send_im_message\([\s\S]{0,500}\btarget_role_id\s*=",
+            r"send_im_message\([\s\S]{0,500}\bwake_actor\s*=",
+        ]
+        patterns = [
+            r"\bactor_identity_for_current_send_target\b",
+            r"target_identity_id is only required for new actor-directed messages",
+            r"new actor-directed message",
+            r"external target_identity_id requires reply_to conversation routing context",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_patterns:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        for pattern in patterns:
+            hits.extend(self._scan_targets(pattern, targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_im_actor_handling_surfaces_do_not_accept_sender_supplied_role(self) -> None:
+        targets = [
+            "scripts/env/tool_runtime/daemon_client.py",
+            "scripts/env/tool_runtime/context.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "tests/test_im_external_reply_loop.py",
+            "tests/test_communication_identity_cutover.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_web_management.py",
+        ]
+        multiline_forbidden = [
+            r"wake_im_actor\(\s*\{[\s\S]{0,500}\btarget_role_id\b",
+        ]
+        forbidden = [
+            r"payload\.get\([\"']target_role_id[\"']\)",
+            r"record\.get\([\"']role_id[\"']\)",
+            r"wake_status",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_forbidden:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        for pattern in forbidden:
+            hits.extend(self._scan_targets(pattern, targets))
+
+        def is_allowed_hit(line: str) -> bool:
+            parts = line.split(":", 2)
+            path = parts[0] if parts else ""
+            content = parts[2] if len(parts) == 3 else line
+            if path.startswith("tests/") and "assertNotIn(" in content:
+                return True
+            return False
+
+        disallowed = [line for line in hits if not is_allowed_hit(line)]
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
 
     def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:

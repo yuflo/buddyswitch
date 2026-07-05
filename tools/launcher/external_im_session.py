@@ -10,7 +10,7 @@ from env.services import messages as message_service
 
 
 ActorLister = Callable[[Optional[str]], list[dict[str, Any]]]
-WakeActor = Callable[[dict[str, Any]], dict[str, Any]]
+ActorMessageHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _auth_error(message: str) -> dict[str, Any]:
@@ -29,10 +29,10 @@ class ExternalImSession:
         self,
         *,
         actor_lister: ActorLister | None = None,
-        wake_actor: WakeActor | None = None,
+        actor_message_handler: ActorMessageHandler | None = None,
     ) -> None:
         self._actor_lister = actor_lister or (lambda _role_id: [])
-        self._wake_actor = wake_actor or (lambda _payload: {"wake_status": "submitted"})
+        self._actor_message_handler = actor_message_handler
 
     def create_connection(self, *, display_name: str) -> dict[str, Any]:
         return message_service.create_external_connection(display_name=display_name)
@@ -54,14 +54,21 @@ class ExternalImSession:
         target_response = self._actor_target_identity(target_identity_id, field="target_identity_id")
         if target_response.get("ok") is not True:
             return target_response
-        return message_service.send_external_connection_message(
+        result = message_service.send_external_connection_message(
             connection=connection,
             target_identity=target_response["identity"],
-            target_role_id=str(target_response["role_id"]),
             content=content,
             reply_to=reply_to if reply_to is not None else None,
-            wake_actor=self._wake_actor,
         )
+        result_target = result.get("target_identity")
+        handling_target = (
+            {"id": result_target["id"], "type": result_target["type"]}
+            if isinstance(result_target, dict)
+            and isinstance(result_target.get("id"), str)
+            and isinstance(result_target.get("type"), str)
+            else target_response["identity"]
+        )
+        return self._with_actor_handling_status(result, handling_target)
 
     def read_events(self, *, connection: dict[str, Any], limit: int = 50, wait_ms: int = 0) -> dict[str, Any]:
         return message_service.read_external_connection_events(
@@ -132,8 +139,35 @@ class ExternalImSession:
         )
 
     def _actor_target_identity(self, value: Any, *, field: str) -> dict[str, Any]:
-        return message_service.actor_identity_for_current_send_target(
+        return message_service.identity_for_current_send_target(
             self._actor_lister(None),
             value,
             field=field,
         )
+
+    def _with_actor_handling_status(self, result: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+        if result.get("ok") is not True:
+            return result
+        if target.get("type") != "actor" or not isinstance(target.get("id"), str):
+            result["actor_handling_status"] = "not_applicable"
+            return result
+        message = result.get("message")
+        if not isinstance(message, dict):
+            result["actor_handling_status"] = "handling_failed"
+            return result
+        payload = {
+            "type": "im.message.created",
+            "target_identity_id": target["id"],
+            "message_id": message.get("id"),
+            "conversation_id": message.get("conversation_id"),
+            "event_id": result.get("event_id"),
+        }
+        if self._actor_message_handler is None:
+            result["actor_handling_status"] = "handling_failed"
+            return result
+        handling = self._actor_message_handler(payload)
+        if isinstance(handling, dict) and isinstance(handling.get("actor_handling_status"), str):
+            result["actor_handling_status"] = handling["actor_handling_status"]
+        else:
+            result["actor_handling_status"] = "handling_failed"
+        return result

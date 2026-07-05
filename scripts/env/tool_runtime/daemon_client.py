@@ -414,15 +414,30 @@ def wake_im_actor(
         if not isinstance(payload, dict):
             raise ValueError("wake payload must be an object")
         if payload.get("type") != "im.message.created":
-            return {"wake_status": "not_applicable", "runtime_target": "none", "error": "unsupported IM wake type"}
+            return {"actor_handling_status": "not_applicable", "runtime_target": "none", "error": "unsupported IM wake type"}
+        if "target_role_id" in payload:
+            raise ValueError("target_role_id is not accepted for im.message.created actor handling")
         target_identity_id = _actor_identity_id(payload.get("target_identity_id"), "target_identity_id")
-        target_role_id = _role_id(payload.get("target_role_id"), "target_role_id")
         message_id = _non_empty_text(payload.get("message_id"), "message_id")
         conversation_id = _non_empty_text(payload.get("conversation_id"), "conversation_id")
         event_id = _non_empty_text(payload.get("event_id"), "event_id")
         wake_id = _non_empty_text(payload.get("wake_id") or f"imwake-{uuid.uuid4().hex[:12]}", "wake_id")
     except Exception as exc:
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": str(exc)}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
+
+    from env.repos import identities as identity_repo
+
+    profile = identity_repo.get_actor_identity_profile(target_identity_id)
+    if not isinstance(profile, dict):
+        return {
+            "actor_handling_status": "handling_failed",
+            "runtime_target": "none",
+            "error": f"actor identity profile not found: {target_identity_id}",
+        }
+    try:
+        target_role_id = _role_id(profile.get("role_id"), "actor identity profile role_id")
+    except Exception as exc:
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
 
     reachability_call = check_reachability_fn or check_reachability
     mailbox_call = request_mailbox_fn or request_mailbox
@@ -432,13 +447,13 @@ def wake_im_actor(
             socket_path=socket_path,
         )
     except Exception as exc:
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": str(exc)}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
     if not isinstance(reachability, dict):
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "reachability response must be an object"}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "reachability response must be an object"}
     if reachability.get("reachability_status") != "online":
         status = reachability.get("reachability_status")
         return {
-            "wake_status": "target_not_online",
+            "actor_handling_status": "target_not_online",
             "runtime_target": "none",
             "error": f"target identity is not online: {status}",
             "reachability_status": status,
@@ -447,10 +462,10 @@ def wake_im_actor(
     record = reachability.get("record")
     endpoint = record.get("endpoint") if isinstance(record, dict) else None
     if not isinstance(endpoint, dict) or endpoint.get("kind") != "daemon_mailbox_socket":
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target endpoint is not daemon_mailbox_socket"}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "target endpoint is not daemon_mailbox_socket"}
     mailbox_socket = endpoint.get("socket_path")
     if not isinstance(mailbox_socket, str) or not mailbox_socket.strip():
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "target mailbox socket_path is required"}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "target mailbox socket_path is required"}
 
     try:
         envelope = mailbox_call(
@@ -471,16 +486,16 @@ def wake_im_actor(
             socket_path=Path(mailbox_socket),
         )
     except Exception as exc:
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": str(exc)}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
     if not isinstance(envelope, dict):
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": "mailbox response must be an object"}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "mailbox response must be an object"}
     if envelope.get("ok") is not True:
         error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
         message = error.get("message") if isinstance(error.get("message"), str) else "mailbox local trigger failed"
-        return {"wake_status": "wake_failed", "runtime_target": "none", "error": message}
+        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": message}
     result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
     return {
-        "wake_status": "submitted",
+        "actor_handling_status": "submitted",
         "runtime_target": "daemon_mailbox",
         "error": None,
         "handling_status": result.get("handling_status") if isinstance(result.get("handling_status"), str) else None,

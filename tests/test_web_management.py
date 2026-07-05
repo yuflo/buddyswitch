@@ -416,7 +416,6 @@ class WebManagementUnitTests(unittest.TestCase):
         payload = {
             "type": "im.message.created",
             "target_identity_id": "act-pm-demo",
-            "target_role_id": "pm",
             "message_id": "msg-1",
             "conversation_id": "conv-1",
             "event_id": "imev-1",
@@ -424,11 +423,11 @@ class WebManagementUnitTests(unittest.TestCase):
         with mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
             "wake_im_actor",
-            return_value={"wake_status": "submitted", "runtime_target": "parent", "error": None},
+            return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
         ) as wake_im_actor:
             result = service._wake_im_actor(payload)
 
-        self.assertEqual(result["wake_status"], "submitted")
+        self.assertEqual(result["actor_handling_status"], "submitted")
         wake_im_actor.assert_called_once_with(payload)
         self.assertEqual(runner.calls, [])
 
@@ -1184,7 +1183,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(len(self._external_identity_files()), 2)
 
     def test_browser_style_im_routes_send_read_fetch_ack_and_restore_history_without_browser_token(self) -> None:
-        """Browser-style Web request sends actor-directed IM through /api/im/messages, actor reply becomes visible through /api/im/events, browser fetches the reply through /api/im/messages/<id>, browser acks through /api/im/events/ack, and direct conversation shows both messages without exposing connection_key."""
+        """Browser-style Web request sends target-identity IM through /api/im/messages, actor reply becomes visible through /api/im/events, browser fetches the reply through /api/im/messages/<id>, browser acks through /api/im/events/ack, and direct conversation shows both messages without exposing connection_key."""
         actor_route = {
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-history"),
@@ -1199,7 +1198,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         with mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
             "wake_im_actor",
-            return_value={"wake_status": "submitted", "runtime_target": "parent", "error": None},
+            return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
         ) as wake_im_actor:
             status, sent = service.handle_api(
                 "POST",
@@ -1216,8 +1215,10 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
         self.assertEqual(status, 200, msg=sent)
         self.assertEqual(sent["delivery_status"], "accepted")
-        self.assertEqual(sent["wake_status"], "submitted")
+        self.assertEqual(sent["actor_handling_status"], "submitted")
+        self.assertNotIn("wake_" + "status", sent)
         wake_im_actor.assert_called_once()
+        self.assertNotIn("target_" + "role_id", wake_im_actor.call_args.args[0])
         sent_message_id = sent["message"]["id"]
 
         reply = message_service.send_im_message(
@@ -1225,7 +1226,6 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             to=web_identity,
             content="pong",
             reply_to=sent_message_id,
-            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
         )
         self.assertTrue(reply["ok"], msg=reply)
 
@@ -1326,7 +1326,6 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                 to=web_identity,
                 content=content,
                 reply_to=sent_by_actor[actor_route["actor_id"]]["message"]["id"],
-                wake_actor=lambda _payload: {"wake_status": "not_applicable"},
             )
             self.assertTrue(reply["ok"], msg=reply)
 
@@ -1598,7 +1597,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         with mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
             "wake_im_actor",
-            return_value={"wake_status": "submitted", "runtime_target": "parent", "error": None},
+            return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
         ) as wake_im_actor:
             status, payload = service.handle_api(
                 "POST",
@@ -1608,9 +1607,11 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             )
 
         self.assertEqual(status, 200, msg=payload)
+        self.assertEqual(payload["actor_handling_status"], "submitted")
+        self.assertNotIn("wake_" + "status", payload)
         wake_im_actor.assert_called_once()
         self.assertEqual(wake_im_actor.call_args.args[0]["target_identity_id"], target_identity_id)
-        self.assertEqual(wake_im_actor.call_args.args[0]["target_role_id"], "market")
+        self.assertNotIn("target_" + "role_id", wake_im_actor.call_args.args[0])
 
     def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
         from env.domain import task_sys

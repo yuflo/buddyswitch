@@ -101,7 +101,7 @@ class _RecordingWakeDaemon:
 
     def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.wake_calls.append(dict(payload))
-        return {"wake_status": "submitted", "runtime_target": "parent", "error": None}
+        return {"actor_handling_status": "submitted", "runtime_target": "parent", "error": None}
 
 
 class MessageToolImClientTests(unittest.TestCase):
@@ -142,6 +142,82 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_IM_PAYLOAD")
         self.assertIn("target_identity_id", response.get("error", {}).get("message", ""))
 
+    def test_actor_send_calls_message_service_with_identity_only_target(self) -> None:
+        actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-send")
+        target_id = self._runtime_actor_id(role="pm", label="act-pm-im-target")
+        captured: dict[str, Any] = {}
+        handling_calls: list[dict[str, Any]] = []
+
+        class _Daemon:
+            def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
+                return {
+                    "actors": [
+                        {
+                            "identity_id": target_id,
+                            "identity": {"id": target_id, "type": "actor"},
+                            "role_id": "pm",
+                            "status": "online",
+                        }
+                    ]
+                }
+
+            def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
+                handling_calls.append(dict(payload))
+                return {"actor_handling_status": "submitted", "runtime_target": "parent", "error": None}
+
+        def fake_send_im_message(**kwargs: Any) -> dict[str, Any]:
+            captured.update(kwargs)
+            return {
+                "ok": True,
+                "message": {"id": "msg-identity-only", "conversation_id": "conv-identity-only", "reply_to": None},
+                "event_id": "imev-identity-only",
+                "delivery_status": "accepted",
+                "next_cursor": "imev-identity-only",
+            }
+
+        original = im_client_module.message_service.send_im_message
+        im_client_module.message_service.send_im_message = fake_send_im_message
+        try:
+            client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=_Daemon()))
+            response = client.send({"target_identity_id": target_id, "content": "hello"})
+        finally:
+            im_client_module.message_service.send_im_message = original
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("actor_handling_status"), "submitted")
+        self.assertEqual(captured["sender_identity"], {"id": actor_id, "type": "actor"})
+        self.assertEqual(captured["to"], {"id": target_id, "type": "actor"})
+        self.assertEqual(captured["content"], "hello")
+        self.assertIsNone(captured.get("reply_to"))
+        self.assertNotIn("target_" + "role_id", captured)
+        self.assertNotIn("wake_" + "actor", captured)
+        self.assertEqual(
+            handling_calls,
+            [
+                {
+                    "type": "im.message.created",
+                    "target_identity_id": target_id,
+                    "message_id": "msg-identity-only",
+                    "conversation_id": "conv-identity-only",
+                    "event_id": "imev-identity-only",
+                }
+            ],
+        )
+
+    def test_actor_send_external_target_rejection_is_reach_policy_not_actor_signature(self) -> None:
+        actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-ext-policy")
+        daemon = _RecordingWakeDaemon()
+        client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=daemon))
+
+        response = client.send({"target_identity_id": "ext-policy-target", "content": "hello"})
+
+        self.assertFalse(response.get("ok"), msg=response)
+        message = response.get("error", {}).get("message", "")
+        self.assertIn("reachable target identity", message)
+        self.assertNotIn("requires reply_to conversation routing context", message)
+        self.assertNotIn("actor identity", message)
+        self.assertEqual(daemon.wake_calls, [])
+
     def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-reply")
         created = message_service.create_external_connection(display_name="local smoke")
@@ -151,9 +227,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         root = message_service.send_im_message(
             sender_identity=auth["identity"],
             to={"id": actor_id, "type": "actor"},
-            target_role_id="dev",
             content="ping",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         daemon = _RecordingWakeDaemon()
         client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=daemon))
@@ -163,7 +237,8 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(reply.get("ok"), msg=reply)
         self.assertEqual(reply["message"]["reply_to"], root["message"]["id"])
         self.assertEqual(reply["message"]["conversation_id"], root["message"]["conversation_id"])
-        self.assertEqual(reply["wake_status"], "not_applicable")
+        self.assertEqual(reply["actor_handling_status"], "not_applicable")
+        self.assertNotIn("wake_" + "status", reply)
         self.assertEqual(reply["original_message_id"], root["message"]["id"])
         self.assertEqual(reply["original_final_disposition"], "replied")
         self.assertEqual(daemon.wake_calls, [])
@@ -178,15 +253,47 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(persisted["owner_identity_id"], actor_id)
         self.assertEqual(persisted["disposition"], "replied")
 
+    def test_actor_reply_to_actor_origin_message_uses_resolved_target_for_actor_handling(self) -> None:
+        active_actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-actor-reply")
+        source_actor_id = self._runtime_actor_id(role="pm", label="act-pm-im-actor-reply")
+        root = message_service.send_im_message(
+            sender_identity={"id": source_actor_id, "type": "actor"},
+            to={"id": active_actor_id, "type": "actor"},
+            content="Need a reply.",
+        )
+        self.assertTrue(root.get("ok"), msg=root)
+        daemon = _RecordingWakeDaemon()
+        client = im_client_module.ActorImClient(
+            _RealImContext(identity_id=active_actor_id, role_id="dev", daemon=daemon)
+        )
+
+        reply = client.send({"content": "Reply from dev.", "reply_to": root["message"]["id"]})
+
+        self.assertTrue(reply.get("ok"), msg=reply)
+        self.assertEqual(reply["message"]["reply_to"], root["message"]["id"])
+        self.assertEqual(reply["target_identity"], {"id": source_actor_id, "type": "actor"})
+        self.assertEqual(reply["actor_handling_status"], "submitted")
+        self.assertEqual(
+            daemon.wake_calls,
+            [
+                {
+                    "type": "im.message.created",
+                    "target_identity_id": source_actor_id,
+                    "message_id": reply["message"]["id"],
+                    "conversation_id": reply["message"]["conversation_id"],
+                    "event_id": reply["event_id"],
+                }
+            ],
+        )
+        self.assertNotIn("wake_" + "status", reply)
+
     def test_mark_needs_parent_is_rejected_without_parent_submit(self) -> None:
         active_actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-parent-fail")
         sender_actor_id = self._runtime_actor_id(role="pm", label="act-pm-im-parent-fail")
         incoming = message_service.send_im_message(
             sender_identity={"id": sender_actor_id, "type": "actor"},
             to={"id": active_actor_id, "type": "actor"},
-            target_role_id="dev",
             content="This needs parent handling.",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         message_id = incoming["message"]["id"]
         daemon = _RecordingParentDaemon()

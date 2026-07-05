@@ -286,14 +286,14 @@ class WebManagementService:
         self._busy_guard = busy_guard or BusyGuard()
         self._im_session = im_session or external_im_session.ExternalImSession(
             actor_lister=self._external_im_actor_rows,
-            wake_actor=self._wake_im_actor,
+            actor_message_handler=self._wake_im_actor,
         )
         self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider(
             im_session=self._im_session
         )
         self._im_router = im_http_router.ImHttpRouter(
             actor_lister=self._external_im_actor_rows,
-            wake_actor=self._wake_im_actor,
+            actor_message_handler=self._wake_im_actor,
             im_session=self._im_session,
             web_connection_provider=self.ensure_web_im_identity,
         )

@@ -15,6 +15,7 @@ for candidate in (SCRIPTS, LAUNCHER):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
+from env.repos import identities  # noqa: E402
 from env.repos import messages as message_repo  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
@@ -107,6 +108,13 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
 
     def test_im_wake_payload_uses_target_identity_route(self) -> None:
         calls: dict[str, Any] = {}
+        identities.save_actor_identity_profile(
+            {
+                "identity": {"id": "act-dev-im-wake", "type": "actor"},
+                "role_id": "dev",
+                "label": "Dev IM wake",
+            }
+        )
 
         def fake_check_reachability(*, target_identity_id: str, socket_path: Path | None = None) -> dict[str, Any]:
             calls["target_identity_id"] = target_identity_id
@@ -115,7 +123,7 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
                 "reachability_status": "online",
                 "record": {
                     "identity_id": target_identity_id,
-                    "role_id": "dev",
+                    "role_id": "wrong",
                     "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": "/tmp/identity-mailbox.sock"},
                 },
             }
@@ -128,7 +136,6 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
             {
                 "type": "im.message.created",
                 "target_identity_id": "act-dev-im-wake",
-                "target_role_id": "dev",
                 "message_id": "msg-im-wake",
                 "conversation_id": "conv-im-wake",
                 "event_id": "event-im-wake",
@@ -137,14 +144,15 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
             request_mailbox_fn=fake_request_mailbox,
         )
 
-        self.assertEqual(result["wake_status"], "submitted")
+        self.assertEqual(result["actor_handling_status"], "submitted")
         self.assertEqual(calls["target_identity_id"], "act-dev-im-wake")
         self.assertEqual(calls["mailbox"]["method"], "mailbox.local_trigger")
         self.assertEqual(calls["mailbox"]["params"]["identity_id"], "act-dev-im-wake")
         self.assertEqual(calls["mailbox"]["params"]["role_id"], "dev")
+        self.assertNotEqual(calls["mailbox"]["params"]["role_id"], "wrong")
         self.assertNotIn("actor" + "_address", calls["mailbox"]["params"])
 
-    def test_actor_active_send_to_external_identity_rejects_without_reply_context(self) -> None:
+    def test_actor_active_send_to_external_identity_rejects_by_reach_policy(self) -> None:
         client = im_client_module.ActorImClient(
             _IdentityContext(identity_id="act-dev-im-active-external", role_id="dev", daemon=_NoActorsDaemon())
         )
@@ -158,8 +166,10 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
 
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual((response.get("error") or {}).get("code"), "E_IM_PAYLOAD")
-        self.assertIn("reply_to", (response.get("error") or {}).get("message", ""))
-        self.assertIn("external", (response.get("error") or {}).get("message", ""))
+        message = (response.get("error") or {}).get("message", "")
+        self.assertIn("reachable target identity", message)
+        self.assertIn("reach policy", message)
+        self.assertNotIn("reply_to", message)
 
 
 if __name__ == "__main__":

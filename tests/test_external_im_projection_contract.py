@@ -77,7 +77,7 @@ class _FakeExternalImSession:
             "message": {"id": "msg-fake", "conversation_id": "conv-fake", "reply_to": reply_to},
             "event_id": "imev-fake",
             "delivery_status": "accepted",
-            "wake_status": "submitted",
+            "actor_handling_status": "submitted",
         }
 
     def read_events(self, *, connection: dict[str, Any], limit: int = 50, wait_ms: int = 0) -> dict[str, Any]:
@@ -151,7 +151,6 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         session = _FakeExternalImSession()
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
         )
 
@@ -165,7 +164,6 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         session = _FakeExternalImSession()
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
         )
 
@@ -221,7 +219,6 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         provider = _FakeWebIdentityProvider(session.connection)
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
             web_connection_provider=provider.ensure,
         )
@@ -288,7 +285,6 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         provider = _FakeWebIdentityProvider(session.connection)
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
             web_connection_provider=provider.ensure,
         )

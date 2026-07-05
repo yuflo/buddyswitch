@@ -553,30 +553,22 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         root = message_service.send_im_message(
             sender_identity=pm_identity,
             to=dev_identity,
-            target_role_id="dev",
             content="Need proof asset",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         reply = message_service.send_im_message(
             sender_identity=design_identity,
             to=dev_identity,
-            target_role_id="dev",
             content="Screenshot ready",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         message_service.send_im_message(
             sender_identity=dev_identity,
             to=pm_identity,
-            target_role_id="pm",
             content="Sent by dev only",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         message_service.send_im_message(
             sender_identity=market_identity,
             to=pm_identity,
-            target_role_id="pm",
             content="Not dev inbox",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
 
         instance_json = self._instance_json()

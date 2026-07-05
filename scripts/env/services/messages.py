@@ -80,7 +80,7 @@ def list_im_actor_contacts(actor_rows: list[dict[str, Any]], role_id: str | None
     return {"ok": True, "actors": actors, "count": len(actors)}
 
 
-def actor_identity_for_current_send_target(
+def identity_for_current_send_target(
     actor_rows: list[dict[str, Any]],
     target_identity_id: Any,
     *,
@@ -92,6 +92,8 @@ def actor_identity_for_current_send_target(
         return _im_payload_error(f"{field} is required")
     if isinstance(active_identity_id, str) and active_identity_id.strip() and identity_id == active_identity_id.strip():
         return _im_payload_error(f"{field} must not be the current actor identity")
+    if identity_id.startswith("ext-"):
+        return _im_payload_error(f"{field} is not a reachable target identity under current reach policy: {identity_id}")
     for row in actor_rows:
         actor = _actor_contact_from_runtime_row(row)
         if actor is None:
@@ -100,8 +102,8 @@ def actor_identity_for_current_send_target(
         if status in _BLOCKED_ACTOR_CONTACT_STATUSES:
             continue
         if actor["identity_id"] == identity_id:
-            return {"ok": True, "identity": actor_identity(identity_id).to_payload(), "role_id": actor["role_id"]}
-    return _im_payload_error(f"{field} is not a reachable actor identity: {identity_id}")
+            return {"ok": True, "identity": actor_identity(identity_id).to_payload()}
+    return _im_payload_error(f"{field} is not a reachable target identity: {identity_id}")
 
 
 def create_external_connection(*, display_name: str) -> dict[str, Any]:
@@ -251,10 +253,8 @@ def send_im_message(
     *,
     sender_identity: dict[str, Any],
     to: dict[str, Any] | None,
-    target_role_id: str | None = None,
     content: str,
     reply_to: str | None = None,
-    wake_actor: Any | None = None,
 ) -> dict[str, Any]:
     from env.repos import messages as message_repo
 
@@ -355,29 +355,6 @@ def send_im_message(
             message_id=reply_to_id,
         )
 
-    wake_status = "not_applicable"
-    if target.get("type") == "actor" and isinstance(target_role_id, str) and target_role_id.strip():
-        wake_payload = {
-            "type": "im.message.created",
-            "wake_id": _new_im_id("imwake"),
-            "target_identity_id": target["id"],
-            "target_role_id": target_role_id.strip(),
-            "message_id": message_id,
-            "conversation_id": conversation_id,
-            "event_id": event_id,
-            "created_at": now,
-        }
-        if wake_actor is None:
-            wake_status = "submitted"
-        else:
-            try:
-                wake_result = wake_actor(wake_payload)
-            except Exception:
-                wake_status = "wake_failed"
-            else:
-                candidate = wake_result.get("wake_status") if isinstance(wake_result, dict) else None
-                wake_status = candidate if candidate in {"submitted", "target_not_online", "wake_failed", "not_applicable"} else "wake_failed"
-
     response = {
         "ok": True,
         "message": {
@@ -385,9 +362,9 @@ def send_im_message(
             "conversation_id": conversation["id"],
             "reply_to": message["reply_to"],
         },
+        "target_identity": dict(target),
         "event_id": event_id,
         "delivery_status": "accepted",
-        "wake_status": wake_status,
         "next_cursor": event_id,
     }
     if reply_to_id is not None:
@@ -419,35 +396,22 @@ def send_external_connection_message(
     *,
     connection: dict[str, Any],
     target_identity: dict[str, Any],
-    target_role_id: str,
     content: str,
     reply_to: str | None = None,
-    wake_actor: Any | None = None,
 ) -> dict[str, Any]:
     try:
         sender = _connection_identity_ref(connection)
     except ValueError as exc:
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
-    normalized_target_role_id = target_role_id.strip() if isinstance(target_role_id, str) else ""
-    if (
-        isinstance(target_identity, dict)
-        and target_identity.get("type") == "actor"
-        and not normalized_target_role_id
-    ):
-        return _im_payload_error("target_role_id is required for actor target_identity")
     try:
         target = _identity_ref(target_identity, "target_identity")
     except ValueError as exc:
         return _im_payload_error(str(exc))
-    if target["type"] == "actor" and not normalized_target_role_id:
-        return _im_payload_error("target_role_id is required for actor target_identity")
     result = send_im_message(
         sender_identity=sender,
         to=target,
-        target_role_id=normalized_target_role_id or None,
         content=content,
         reply_to=reply_to,
-        wake_actor=wake_actor,
     )
     external_response = dict(result)
     external_response.pop("next_cursor", None)

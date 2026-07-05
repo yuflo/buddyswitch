@@ -28,7 +28,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_external_http_contract_send_events_get_and_mark(self) -> None:
         actor_identity = self._actor_identity()
-        wake_calls: list[dict[str, object]] = []
+        handling_calls: list[dict[str, object]] = []
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda role_id: [
                 {
@@ -39,7 +39,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ]
             if role_id in {None, "market"}
             else [],
-            wake_actor=lambda payload: wake_calls.append(dict(payload)) or {"wake_status": "submitted"},
+            actor_message_handler=lambda payload: handling_calls.append(dict(payload)) or {"actor_handling_status": "submitted"},
         )
 
         status, created = router.handle(
@@ -106,12 +106,22 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(sent["delivery_status"], "accepted")
-        self.assertEqual(sent["wake_status"], "submitted")
+        self.assertEqual(sent["actor_handling_status"], "submitted")
+        self.assertNotIn("wake_" + "status", sent)
         self.assertNotIn("next_cursor", sent)
         message_id = sent["message"]["id"]
-        self.assertEqual(len(wake_calls), 1)
-        self.assertEqual(wake_calls[0]["type"], "im.message.created")
-        self.assertNotIn("content", wake_calls[0])
+        self.assertEqual(
+            handling_calls,
+            [
+                {
+                    "type": "im.message.created",
+                    "target_identity_id": actor_identity["identity_id"],
+                    "message_id": sent["message"]["id"],
+                    "conversation_id": sent["message"]["conversation_id"],
+                    "event_id": sent["event_id"],
+                }
+            ],
+        )
 
         status, events = router.handle(
             "GET",
@@ -156,7 +166,6 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             to=auth["identity"],
             content="pong",
             reply_to=message_id,
-            wake_actor=lambda _payload: {"wake_status": "not_applicable"},
         )
         reply_id = actor_reply["message"]["id"]
 
@@ -225,7 +234,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(missing_identity["error"]["message"], "identity_id is required")
 
     def test_old_messages_send_route_is_not_im_contract(self) -> None:
-        router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [], wake_actor=lambda _payload: {})
+        router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [])
 
         old_route = "/api/messages" + "/send"
         status, payload = router.handle("POST", old_route, b'{"actor_id":"act-x","content":"hi"}', {})
@@ -234,7 +243,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(payload["ok"])
 
     def test_message_send_payload_errors_return_json_400(self) -> None:
-        router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [], wake_actor=lambda _payload: {})
+        router = im_http_router.ImHttpRouter(actor_lister=lambda _role_id: [])
         status, created = router.handle(
             "POST",
             "/api/im/connections",

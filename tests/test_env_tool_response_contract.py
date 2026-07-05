@@ -803,9 +803,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         seed_response = message_service.send_im_message(
             sender_identity={"id": pm_actor_id, "type": "actor"},
             to={"id": dev_actor_id, "type": "actor"},
-            target_role_id="dev",
             content="This needs parent handling.",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         self.assertTrue(seed_response.get("ok"), msg=seed_response)
         message_id = seed_response["message"]["id"]

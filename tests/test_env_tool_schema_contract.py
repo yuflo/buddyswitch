@@ -285,17 +285,25 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             str(row)
             for row in (
                 message_send_action.description,
+                message_send["properties"]["target_identity_id"].get("description"),
                 message_send["properties"]["reply_to"].get("description"),
+                message_send_action.result_content_level,
                 message_send_action.success_effect,
                 message_send_action.failure_state_guarantee,
+                message_send_action.writes,
+                message_send_action.returns,
+                message_send_action.preconditions,
+                message_send_action.use_when,
                 message_send_action.do_not_use_when,
             )
         ).lower()
         for snippet in (
             "central im message",
+            "target identity",
+            "reach policy",
             "reply_to",
             "processable inbound",
-            "target_identity_id is only required for new actor-directed messages",
+            "target_identity_id is only required for a new target-identity message",
             "external",
             "active actor",
             "replied",
@@ -303,8 +311,13 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             "previous disposition",
             "message.mark(absorbed)",
             "task_sys.need_parent",
+            "actor_handling_status",
+            "target actor local inbound event",
+            "target_identity",
         ):
             self.assertIn(snippet, send_contract_text)
+        self.assertNotIn("actor-directed", send_contract_text)
+        self.assertNotIn("tasks", message_send_action.does_not_write)
         mark_contract_text = " ".join(
             str(row)
             for row in (
