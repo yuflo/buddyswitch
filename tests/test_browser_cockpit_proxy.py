@@ -40,6 +40,8 @@ SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening man
 HARD_PAGE_BLOCK = (
     "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
 )
+LEGACY_CURRENT_TARGET_FIELD = "current_" + "target_id"
+LEGACY_PAGE_TARGET_MAP_FIELD = "page_id_to_" + "target_id"
 
 
 def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
@@ -143,23 +145,7 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
                 raw_message = _read_client_text_frame(self.rfile)
                 message = json.loads(raw_message)
                 state.setdefault("rpc_requests", []).append(message)
-                if message.get("method") == "Target.createTarget":
-                    params = message.get("params") if isinstance(message.get("params"), dict) else {}
-                    target_id = state.get("create_target_id", "target-created")
-                    if isinstance(target_id, str) and target_id:
-                        targets = state.setdefault("targets", [])
-                        if isinstance(targets, list):
-                            targets.append(
-                                {
-                                    "id": target_id,
-                                    "type": "page",
-                                    "url": params.get("url"),
-                                    "title": state.get("create_title", "Created"),
-                                }
-                            )
-                    response = {"id": message.get("id"), "result": {"targetId": target_id}}
-                else:
-                    response = {"id": message.get("id"), "result": {"success": True}}
+                response = {"id": message.get("id"), "result": {"success": True}}
                 _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
                 return
             self.send_response(404)
@@ -656,7 +642,7 @@ for raw_line in sys.stdin:
         self.assertIn("search_page", by_name)
         search_page = by_name["search_page"]
         self.assertIn("BuddySwitch", search_page.get("description", ""))
-        self.assertIn("browser-session", search_page.get("description", ""))
+        self.assertIn("upstream Chrome DevTools MCP new_page", search_page.get("description", ""))
         schema = search_page.get("inputSchema")
         self.assertIsInstance(schema, dict, msg=search_page)
         assert isinstance(schema, dict)
@@ -832,8 +818,10 @@ for raw_line in sys.stdin:
         )
 
         self.assertEqual(responses[0]["id"], 1)
-        self.assertEqual(forwarded, [])
-        self.assertEqual(upstream_argv, [])
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertEqual(forwarded[0]["params"]["arguments"], {"url": "https://example.com/new", "background": True})
+        self.assertIn(f"--browser-url={browser_url}", upstream_argv)
         self.assertEqual([call.get("method") for call in self._last_proxy_broker_calls], ["browser.acquire"])
         broker_params_text = json.dumps(self._last_proxy_broker_calls[0].get("params"), ensure_ascii=True)
         self.assertNotIn(str(ROOT), broker_params_text)
@@ -842,122 +830,91 @@ for raw_line in sys.stdin:
         self.assertNotIn("HOME", broker_params_text)
         self.assertNotIn("CODEX_HOME", broker_params_text)
 
-    def test_new_page_opens_locally_through_browser_session_without_forwarding(self) -> None:
+    def test_new_page_forwards_upstream_with_background_true(self) -> None:
         cdp_state: dict[str, object] = {
             "requests": [],
             "targets": _page_targets(1),
-            "create_target_id": "target-new-local",
         }
         browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
-
             responses, forwarded, upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
                 browser_url=browser_url,
                 instance_root=instance_root,
             )
-            server.close()
-            thread.join(timeout=2)
 
-            self.assertEqual(forwarded, [])
-            self.assertEqual(upstream_argv, [])
-            response = responses[0]
-            self.assertFalse(response["result"].get("isError", False), msg=response)
-            text = response["result"]["content"][0]["text"]
-            self.assertIn("browser-session", text)
-            self.assertIn("opened", text)
-            self.assertIn("https://example.com/new", text)
-            self.assertIn("target-new-local", text)
-            self.assertIn("40s", text)
-            self.assertIn("2026-", text)
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-new-local")
-            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-            self.assertEqual(page_idle["current_target_id"], "target-new-local")
-
-        rpc_requests = cdp_state.get("rpc_requests")
-        self.assertIsInstance(rpc_requests, list, msg=cdp_state)
-        assert isinstance(rpc_requests, list)
-        self.assertEqual([request.get("method") for request in rpc_requests], ["Target.createTarget"])
-
-    def test_new_page_reuse_reports_browser_session_state_without_forwarding(self) -> None:
-        target_url = "https://example.com/reuse"
-        cdp_state: dict[str, object] = {
-            "requests": [],
-            "targets": _page_targets(1) + [{"id": "target-existing-local", "type": "page", "url": target_url}],
-        }
-        browser_url = self._start_cdp_list_server(cdp_state)
-
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
-
-            responses, forwarded, upstream_argv, _stderr = self._run_proxy(
-                [self._single_call("new_page", {"url": target_url})],
-                browser_url=browser_url,
-                instance_root=instance_root,
-            )
-            server.close()
-            thread.join(timeout=2)
-
-            self.assertEqual(forwarded, [])
-            self.assertEqual(upstream_argv, [])
-            response = responses[0]
-            self.assertFalse(response["result"].get("isError", False), msg=response)
-            text = response["result"]["content"][0]["text"]
-            self.assertIn("browser-session", text)
-            self.assertIn("reused", text)
-            self.assertIn(target_url, text)
-            self.assertIn("target-existing-local", text)
-            self.assertIn("40s", text)
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-existing-local")
-
+        self.assertEqual(len(forwarded), 1)
+        self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+        forwarded_call = forwarded[0]
+        self.assertEqual(forwarded_call["params"]["name"], "new_page")
+        self.assertEqual(
+            forwarded_call["params"]["arguments"],
+            {"url": "https://example.com/new", "background": True},
+        )
+        response = responses[0]
+        self.assertFalse(response["result"].get("isError", False), msg=response)
+        self.assertIn("called new_page", response["result"]["content"][0]["text"])
         self.assertEqual(cdp_state.get("rpc_requests", []), [])
 
-    def test_search_page_opens_locally_without_forwarding(self) -> None:
-        cdp_state: dict[str, object] = {
-            "requests": [],
-            "targets": _page_targets(1),
-            "create_target_id": "target-search-local",
-        }
+    def test_new_page_does_not_call_target_create_target(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/no-cdp", "background": False})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
+
+        self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertIs(forwarded[0]["params"]["arguments"]["background"], True)
+        self.assertEqual(cdp_state.get("rpc_requests", []), [])
+
+    def test_search_page_builds_url_and_forwards_upstream_new_page(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
-
             responses, forwarded, upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("search_page", {"query": "BuddySwitch browser resource lifecycle", "engine": "google"})],
                 browser_url=browser_url,
                 instance_root=instance_root,
             )
-            server.close()
-            thread.join(timeout=2)
 
-            self.assertEqual(forwarded, [])
-            self.assertEqual(upstream_argv, [])
-            response = responses[0]
-            self.assertFalse(response["result"].get("isError", False), msg=response)
-            text = response["result"]["content"][0]["text"]
-            self.assertIn("browser-session", text)
-            self.assertIn("search_page", text)
-            self.assertIn("google", text)
-            self.assertIn("https://www.google.com/search?q=BuddySwitch+browser+resource+lifecycle", text)
-            self.assertIn("target-search-local", text)
-            self.assertIn("40s", text)
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-search-local")
+        self.assertEqual(len(forwarded), 1)
+        self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertEqual(
+            forwarded[0]["params"]["arguments"],
+            {
+                "url": "https://www.google.com/search?q=BuddySwitch+browser+resource+lifecycle",
+                "background": True,
+            },
+        )
+        self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+        self.assertEqual(cdp_state.get("rpc_requests", []), [])
 
-        rpc_requests = cdp_state.get("rpc_requests")
-        self.assertIsInstance(rpc_requests, list, msg=cdp_state)
-        assert isinstance(rpc_requests, list)
-        self.assertEqual([request.get("method") for request in rpc_requests], ["Target.createTarget"])
+    def test_search_page_does_not_call_target_create_target(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
-    def test_search_page_blank_query_is_rejected_locally(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("search_page", {"query": "BuddySwitch", "engine": "reddit"})],
+                browser_url=browser_url,
+                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
+            )
+
+        self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertEqual(cdp_state.get("rpc_requests", []), [])
+
+    def test_search_page_rejects_blank_query_before_forwarding(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
 
@@ -975,7 +932,7 @@ for raw_line in sys.stdin:
         self.assertIn("query", response["result"]["content"][0]["text"])
         self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_search_page_rejects_unsupported_engine(self) -> None:
+    def test_search_page_rejects_unsupported_engine_before_forwarding(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
 
@@ -1004,17 +961,11 @@ for raw_line in sys.stdin:
         }
         for engine, expected_url in expected_urls.items():
             with self.subTest(engine=engine):
-                cdp_state: dict[str, object] = {
-                    "requests": [],
-                    "targets": _page_targets(1),
-                    "create_target_id": f"target-search-{engine}",
-                }
+                cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
                 browser_url = self._start_cdp_list_server(cdp_state)
 
                 with tempfile.TemporaryDirectory() as temp_root:
                     instance_root = Path(temp_root) / "instances" / f"act-dev-browser-{engine}"
-                    daemon_core, server, thread = self._start_mailbox(instance_root)
-
                     responses, forwarded, upstream_argv, _stderr = self._run_proxy(
                         [
                             self._single_call(
@@ -1025,24 +976,16 @@ for raw_line in sys.stdin:
                         browser_url=browser_url,
                         instance_root=instance_root,
                     )
-                    server.close()
-                    thread.join(timeout=2)
 
-                    self.assertEqual(forwarded, [])
-                    self.assertEqual(upstream_argv, [])
-                    response = responses[0]
-                    self.assertFalse(response["result"].get("isError", False), msg=response)
-                    text = response["result"]["content"][0]["text"]
-                    self.assertIn(engine, text)
-                    self.assertIn(expected_url, text)
-                    self.assertIn(f"target-search-{engine}", text)
-                    saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
                     self.assertEqual(
-                        saved["scheduled_triggers"]["schedule-1"]["schedule_key"],
-                        f"browser.page.idle:target-search-{engine}",
+                        forwarded[0]["params"]["arguments"],
+                        {"url": expected_url, "background": True},
                     )
+                    self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+                    self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+                    self.assertEqual(cdp_state.get("rpc_requests", []), [])
 
-    def test_new_page_blank_url_is_rejected_locally(self) -> None:
+    def test_new_page_blank_url_is_forwarded_to_upstream(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
 
@@ -1053,42 +996,33 @@ for raw_line in sys.stdin:
                 instance_root=Path(temp_root) / "instances" / "act-dev-browser",
             )
 
-        self.assertEqual(forwarded, [])
-        self.assertEqual(upstream_argv, [])
+        self.assertEqual(len(forwarded), 1)
+        self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertEqual(forwarded[0]["params"]["arguments"], {"url": "   ", "background": True})
         response = responses[0]
-        self.assertTrue(response["result"].get("isError"), msg=response)
-        self.assertIn("target_url", response["result"]["content"][0]["text"])
+        self.assertFalse(response["result"].get("isError", False), msg=response)
         self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_list_pages_appends_browser_session_state(self) -> None:
-        cdp_state: dict[str, object] = {
-            "requests": [],
-            "targets": [
-                {
-                    "id": "target-current",
-                    "type": "page",
-                    "url": "https://example.com/current",
-                    "title": "Current Title",
-                }
-            ],
-        }
-        browser_url = self._start_cdp_list_server(cdp_state)
+    def test_list_pages_projects_page_id_resource_state(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
             self._write_page_idle_state(
                 instance_root,
                 {
-                    "current_target_id": "target-current",
+                    "current_page_id": "page-current",
+                    "selected_page_id": "page-current",
                     "current_page_updated_at": "2026-07-01T00:00:00Z",
-                    "targets": {
-                        "target-current": {
-                            "target_id": "target-current",
-                            "target_url": "https://example.com/current",
+                    "pages": {
+                        "page-current": {
+                            "page_id": "page-current",
+                            "url": "https://example.com/current",
+                            "title": "Current Title",
                             "last_used_at": "2026-07-01T00:00:00Z",
                         }
                     },
-                    "page_id_to_target_id": {},
                 },
             )
 
@@ -1102,13 +1036,16 @@ for raw_line in sys.stdin:
         self.assertEqual(forwarded[0]["params"]["name"], "list_pages")
         text = "\n".join(item["text"] for item in responses[0]["result"]["content"] if item.get("type") == "text")
         self.assertIn("called list_pages", text)
-        self.assertIn("BuddySwitch browser-session state:", text)
-        self.assertIn("current_target_id: target-current", text)
-        self.assertIn("target_id: target-current", text)
+        self.assertIn("BuddySwitch browser page resource projection:", text)
+        self.assertIn("current_page_id: page-current", text)
+        self.assertIn("selected_page_id: page-current", text)
+        self.assertIn("page_id: page-current", text)
         self.assertIn("title: Current Title", text)
         self.assertIn("url: https://example.com/current", text)
         self.assertIn("current: true", text)
         self.assertIn("idle_expires_at: 2026-07-01T00:00:40Z", text)
+        self.assertNotIn(LEGACY_CURRENT_TARGET_FIELD, text)
+        self.assertNotIn("target_id:", text)
         self.assertNotIn("Browser lifecycle warning:", text)
 
     def test_list_pages_with_no_tracked_pages_schedules_release(self) -> None:
@@ -1198,55 +1135,44 @@ for raw_line in sys.stdin:
             ["list_pages", "close_page"],
         )
 
-    def test_new_page_below_hint_threshold_opens_without_page_hint(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(3), "create_target_id": "target-new-page"})
+    def test_new_page_forwarding_does_not_append_local_page_hint(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(4)}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            _daemon_core, server, thread = self._start_mailbox(instance_root)
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
                 browser_url=browser_url,
                 instance_root=instance_root,
             )
-            server.close()
-            thread.join(timeout=2)
 
-        self.assertEqual(forwarded, [])
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
         self.assertNotIn("Browser pages:", json.dumps(responses, ensure_ascii=True))
+        self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_new_page_refreshes_idle_with_explicit_instance_root_without_env(self) -> None:
-        before = _page_targets(1)
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": before, "create_target_id": "target-new-page"})
+    def test_new_page_forwards_with_explicit_instance_root_without_env(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
-
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
                 browser_url=browser_url,
                 instance_root=instance_root,
                 clear_instance_root_env=True,
             )
-            server.close()
-            thread.join(timeout=2)
 
-            self.assertEqual(forwarded, [])
-            self.assertIn("Browser page idle refreshed: 40s", json.dumps(responses, ensure_ascii=True))
-            self.assertNotIn("TTL", json.dumps(responses, ensure_ascii=True))
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            schedule = saved["scheduled_triggers"]["schedule-1"]
-            self.assertEqual(schedule["type"], "browser.page.expired")
-            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-new-page")
-            self.assertEqual(schedule["payload"]["target_id"], "target-new-page")
-            self.assertEqual(schedule["payload"], {"target_id": "target-new-page"})
-            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-            self.assertEqual(page_idle["current_target_id"], "target-new-page")
-            self.assertFalse(thread.is_alive())
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["arguments"], {"url": "https://example.com/new", "background": True})
+        self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+        self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_new_page_without_instance_root_is_blocked_before_forwarding(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
+    def test_new_page_without_instance_root_forwards_upstream(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": []}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
             [self._single_call("new_page", {"url": "https://example.com/new"})],
@@ -1254,14 +1180,15 @@ for raw_line in sys.stdin:
             clear_instance_root_env=True,
         )
 
-        self.assertEqual(forwarded, [])
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertEqual(forwarded[0]["params"]["arguments"], {"url": "https://example.com/new", "background": True})
         response = responses[0]
-        self.assertIs(response["result"]["isError"], True)
-        self.assertIn("--instance-root", response["result"]["content"][0]["text"])
+        self.assertFalse(response["result"].get("isError", False), msg=response)
+        self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_new_page_registration_failure_closes_new_target_and_returns_error(self) -> None:
-        before = _page_targets(1)
-        cdp_state: dict[str, object] = {"requests": [], "targets": before, "create_target_id": "target-new-page"}
+    def test_new_page_does_not_read_cdp_page_count_before_forwarding(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "list_fail": True}
         browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
@@ -1271,87 +1198,51 @@ for raw_line in sys.stdin:
                 instance_root=Path(temp_root) / "instances" / "act-dev-browser",
             )
 
-        self.assertEqual(forwarded, [])
-        response = responses[0]
-        self.assertTrue(response["result"].get("isError"), msg=response)
-        self.assertIn("registration_failed", response["result"]["content"][0]["text"])
-        rpc_requests = cdp_state.get("rpc_requests")
-        self.assertIsInstance(rpc_requests, list, msg=cdp_state)
-        assert isinstance(rpc_requests, list)
-        self.assertEqual([request.get("method") for request in rpc_requests], ["Target.createTarget", "Target.closeTarget"])
-        self.assertEqual(rpc_requests[1].get("params"), {"targetId": "target-new-page"})
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+        self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_new_page_reuse_registration_failure_returns_error_without_forwarding(self) -> None:
-        target_url = "https://example.com/new"
-        cdp_state: dict[str, object] = {
-            "requests": [],
-            "targets": [{"id": "target-existing-page", "type": "page", "url": target_url}],
-        }
+    def test_select_page_marks_mcp_page_id_current(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("select_page", {"pageId": "page-3", "bringToFront": True})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(responses[0]["id"], 1)
+            self.assertEqual(forwarded[0]["params"]["arguments"]["bringToFront"], False)
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:page-3")
+            self.assertEqual(schedule["payload"], {"page_id": "page-3"})
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["current_page_id"], "page-3")
+            self.assertEqual(page_idle["selected_page_id"], "page-3")
+            self.assertEqual(page_idle["pages"]["page-3"]["url"], "https://example.com/selected")
+            self.assertNotIn(LEGACY_CURRENT_TARGET_FIELD, page_idle)
+            self.assertNotIn(LEGACY_PAGE_TARGET_MAP_FIELD, page_idle)
+            self.assertNotIn("targets", page_idle)
+            self.assertFalse(thread.is_alive())
+
+    def test_select_page_marks_page_current_without_cdp_target_lookup(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "list_fail": True}
         browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
-            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-                [self._single_call("new_page", {"url": target_url})],
-                browser_url=browser_url,
-                instance_root=Path(temp_root) / "instances" / "act-dev-browser",
-            )
-
-        self.assertEqual(forwarded, [])
-        response = responses[0]
-        self.assertTrue(response["result"].get("isError"), msg=response)
-        self.assertIn("registration_failed", response["result"]["content"][0]["text"])
-        self.assertEqual(cdp_state.get("rpc_requests", []), [])
-
-    def test_new_page_reuse_refreshes_idle_without_forwarding(self) -> None:
-        target_url = "https://example.com/new"
-        targets = _page_targets(9) + [{"id": "target-existing-page", "type": "page", "url": target_url}]
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": targets})
-
-        with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
             daemon_core, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-                [self._single_call("new_page", {"url": target_url})],
-                browser_url=browser_url,
-                instance_root=instance_root,
-            )
-            server.close()
-            thread.join(timeout=2)
-
-            self.assertEqual(forwarded, [])
-            self.assertIn("target-existing-page", json.dumps(responses, ensure_ascii=True))
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            schedule = saved["scheduled_triggers"]["schedule-1"]
-            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-existing-page")
-            self.assertEqual(schedule["payload"], {"target_id": "target-existing-page"})
-            self.assertFalse(thread.is_alive())
-
-    def test_select_page_refreshes_idle_for_resolved_page_id(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
-
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self._write_page_idle_state(
-                instance_root,
-                {
-                    "current_target_id": "target-old",
-                    "current_page_updated_at": "2026-06-23T00:00:00Z",
-                    "targets": {
-                        "target-select": {
-                            "target_id": "target-select",
-                            "target_url": "https://example.com/select",
-                            "last_used_at": "2026-06-23T00:00:00Z",
-                            "page_id": "3",
-                        }
-                    },
-                    "page_id_to_target_id": {"3": "target-select"},
-                },
-            )
-            daemon_core, server, thread = self._start_mailbox(instance_root)
-
-            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-                [self._single_call("select_page", {"pageId": 3, "bringToFront": True})],
+                [self._single_call("select_page", {"pageId": "page-4", "bringToFront": True})],
                 browser_url=browser_url,
                 instance_root=instance_root,
             )
@@ -1362,65 +1253,21 @@ for raw_line in sys.stdin:
             self.assertEqual(forwarded[0]["params"]["arguments"]["bringToFront"], False)
             saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
-            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-select")
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:page-4")
             page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-            self.assertEqual(page_idle["current_target_id"], "target-select")
-            self.assertFalse(thread.is_alive())
+            self.assertEqual(page_idle["current_page_id"], "page-4")
+            self.assertEqual(page_idle["selected_page_id"], "page-4")
+            self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_select_page_resolves_selected_url_when_page_id_mapping_is_empty(self) -> None:
-        browser_url = self._start_cdp_list_server(
-            {
-                "requests": [],
-                "targets": [
-                    {
-                        "id": "target-selected",
-                        "type": "page",
-                        "url": "https://example.com/selected",
-                    }
-                ],
-            }
-        )
+    def test_select_page_without_page_id_reports_lifecycle_warning(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self._write_page_idle_state(instance_root, {"targets": {}, "page_id_to_target_id": {}})
-            daemon_core, server, thread = self._start_mailbox(instance_root)
-
-            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
-                [self._single_call("select_page", {"pageId": 3, "bringToFront": True})],
-                browser_url=browser_url,
-                instance_root=instance_root,
-            )
-            server.close()
-            thread.join(timeout=2)
-
-            self.assertEqual(responses[0]["id"], 1)
-            self.assertEqual(forwarded[0]["params"]["arguments"]["bringToFront"], False)
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            schedule = saved["scheduled_triggers"]["schedule-1"]
-            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-selected")
-            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-            self.assertEqual(page_idle["current_target_id"], "target-selected")
-            self.assertEqual(page_idle["page_id_to_target_id"], {"3": "target-selected"})
-
-    def test_select_page_ambiguous_selected_url_does_not_refresh_wrong_target(self) -> None:
-        browser_url = self._start_cdp_list_server(
-            {
-                "requests": [],
-                "targets": [
-                    {"id": "target-selected-a", "type": "page", "url": "https://example.com/selected"},
-                    {"id": "target-selected-b", "type": "page", "url": "https://example.com/selected"},
-                ],
-            }
-        )
-
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self._write_page_idle_state(instance_root, {"targets": {}, "page_id_to_target_id": {}})
             daemon_core, server, thread = self._start_mailbox(instance_root)
 
             responses, _forwarded, _upstream_argv, _stderr = self._run_proxy(
-                [self._single_call("select_page", {"pageId": 3, "bringToFront": True})],
+                [self._single_call("select_page", {"bringToFront": True})],
                 browser_url=browser_url,
                 instance_root=instance_root,
             )
@@ -1429,27 +1276,26 @@ for raw_line in sys.stdin:
 
             self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
             self.assertIn("lifecycle warning", json.dumps(responses, ensure_ascii=True).lower())
-            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-            self.assertNotIn("current_target_id", page_idle)
+            self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
 
-    def test_page_scoped_success_refreshes_current_page_idle(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+    def test_page_scoped_success_refreshes_selected_page_id_idle(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
             self._write_page_idle_state(
                 instance_root,
                 {
-                    "current_target_id": "target-current",
+                    "current_page_id": "page-current",
+                    "selected_page_id": "page-current",
                     "current_page_updated_at": "2026-06-23T00:00:00Z",
-                    "targets": {
-                        "target-current": {
-                            "target_id": "target-current",
-                            "target_url": "https://example.com/current",
+                    "pages": {
+                        "page-current": {
+                            "page_id": "page-current",
+                            "url": "https://example.com/current",
                             "last_used_at": "2026-06-23T00:00:00Z",
                         }
                     },
-                    "page_id_to_target_id": {},
                 },
             )
             daemon_core, server, thread = self._start_mailbox(instance_root)
@@ -1466,16 +1312,16 @@ for raw_line in sys.stdin:
             self.assertEqual(forwarded[0]["params"]["name"], "take_snapshot")
             saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
-            self.assertEqual(schedule["schedule_key"], "browser.page.idle:target-current")
-            self.assertEqual(schedule["payload"], {"target_id": "target-current"})
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:page-current")
+            self.assertEqual(schedule["payload"], {"page_id": "page-current"})
             self.assertFalse(thread.is_alive())
 
-    def test_page_scoped_success_without_current_page_reports_lifecycle_warning(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+    def test_page_scoped_success_without_selected_page_reports_clear_lifecycle_warning(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self._write_page_idle_state(instance_root, {"targets": {}, "page_id_to_target_id": {}})
+            self._write_page_idle_state(instance_root, {"pages": {}})
             daemon_core, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
@@ -1489,19 +1335,20 @@ for raw_line in sys.stdin:
             self.assertEqual(forwarded[0]["params"]["name"], "take_snapshot")
             self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
             self.assertIn("lifecycle warning", json.dumps(responses, ensure_ascii=True).lower())
+            self.assertIn("selected page", json.dumps(responses, ensure_ascii=True).lower())
 
     def test_non_page_use_and_failed_page_response_do_not_refresh_idle(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
             self._write_page_idle_state(
                 instance_root,
                 {
-                    "current_target_id": "target-current",
+                    "current_page_id": "page-current",
+                    "selected_page_id": "page-current",
                     "current_page_updated_at": "2026-06-23T00:00:00Z",
-                    "targets": {"target-current": {"target_id": "target-current", "last_used_at": "2026-06-23T00:00:00Z"}},
-                    "page_id_to_target_id": {},
+                    "pages": {"page-current": {"page_id": "page-current", "last_used_at": "2026-06-23T00:00:00Z"}},
                 },
             )
             daemon_core, server, thread = self._start_mailbox(instance_root)
@@ -1529,25 +1376,26 @@ for raw_line in sys.stdin:
             self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
             self.assertFalse(thread.is_alive())
 
-    def test_new_page_reaching_hint_threshold_opens_and_appends_page_hint(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(4), "create_target_id": "target-new-page"})
+    def test_new_page_with_high_cdp_page_count_still_forwards_upstream(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(4)}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            _daemon_core, server, thread = self._start_mailbox(instance_root)
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
                 browser_url=browser_url,
                 instance_root=instance_root,
             )
-            server.close()
-            thread.join(timeout=2)
 
-        self.assertEqual(forwarded, [])
-        self.assertIn(SOFT_PAGE_HINT_5, json.dumps(responses, ensure_ascii=True))
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+        self.assertNotIn(SOFT_PAGE_HINT_5, json.dumps(responses, ensure_ascii=True))
+        self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_new_page_blocks_locally_at_hard_page_limit_without_forwarding(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(10)})
+    def test_new_page_no_longer_blocks_from_local_cdp_hard_page_limit(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(10)}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
@@ -1556,36 +1404,38 @@ for raw_line in sys.stdin:
                 instance_root=Path(temp_root) / "instances" / "act-dev-browser",
             )
 
-        self.assertEqual(forwarded, [])
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
         response = responses[0]
-        self.assertIs(response["result"]["isError"], True)
-        self.assertIn(HARD_PAGE_BLOCK, response["result"]["content"][0]["text"])
+        self.assertFalse(response["result"].get("isError", False), msg=response)
+        self.assertNotIn(HARD_PAGE_BLOCK, response["result"]["content"][0]["text"])
+        self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_new_page_reuses_exact_url_at_hard_page_limit_without_forwarding(self) -> None:
+    def test_new_page_does_not_reuse_exact_url_through_local_cdp_gate(self) -> None:
         target_url = "https://example.com/new"
         targets = _page_targets(9) + [{"id": "target-existing-page", "type": "page", "url": target_url}]
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": targets})
+        cdp_state: dict[str, object] = {"requests": [], "targets": targets}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            _daemon_core, server, thread = self._start_mailbox(instance_root)
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": target_url})],
                 browser_url=browser_url,
                 instance_root=instance_root,
             )
-            server.close()
-            thread.join(timeout=2)
 
-        self.assertEqual(forwarded, [])
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["arguments"], {"url": target_url, "background": True})
         response = responses[0]
         self.assertFalse(response["result"].get("isError", False), msg=response)
         text = response["result"]["content"][0]["text"]
-        self.assertIn("target-existing-page", text)
-        self.assertIn("state: reused", text)
+        self.assertNotIn("state: reused", text)
+        self.assertEqual(cdp_state.get("requests"), [])
 
-    def test_new_page_reports_page_count_verification_failure_without_forwarding(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "list_fail": True})
+    def test_new_page_forwards_when_local_cdp_page_count_is_unavailable(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "list_fail": True}
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
@@ -1594,10 +1444,12 @@ for raw_line in sys.stdin:
                 instance_root=Path(temp_root) / "instances" / "act-dev-browser",
             )
 
-        self.assertEqual(forwarded, [])
+        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(forwarded[0]["params"]["name"], "new_page")
         response = responses[0]
-        self.assertIs(response["result"]["isError"], True)
-        self.assertIn("page-count", response["result"]["content"][0]["text"].lower())
+        self.assertFalse(response["result"].get("isError", False), msg=response)
+        self.assertNotIn("page-count", response["result"]["content"][0]["text"].lower())
+        self.assertEqual(cdp_state.get("requests"), [])
 
     def test_select_page_forces_no_bring_to_front(self) -> None:
         _responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
@@ -1647,8 +1499,28 @@ for raw_line in sys.stdin:
         tools = responses[0]["result"]["tools"]
         by_name = {tool["name"]: tool for tool in tools}
         self.assertIn("BuddySwitch", json.dumps(by_name["new_page"], ensure_ascii=True))
-        self.assertIn("browser-session", json.dumps(by_name["new_page"], ensure_ascii=True))
+        self.assertIn("upstream Chrome DevTools MCP", json.dumps(by_name["new_page"], ensure_ascii=True))
+        self.assertIn("background=true", json.dumps(by_name["new_page"], ensure_ascii=True))
         self.assertIn("foreground activation", json.dumps(by_name["select_page"], ensure_ascii=True))
+
+    def test_tool_descriptions_teach_mcp_page_id_truth(self) -> None:
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [{"jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": {}}]
+        )
+
+        self.assertEqual(forwarded, [])
+        tools = responses[0]["result"]["tools"]
+        by_name = {tool["name"]: tool for tool in tools}
+        list_pages_text = json.dumps(by_name["list_pages"], ensure_ascii=True)
+        select_page_text = json.dumps(by_name["select_page"], ensure_ascii=True)
+        snapshot_text = json.dumps(by_name["take_snapshot"], ensure_ascii=True)
+        self.assertIn("upstream MCP pageId", list_pages_text)
+        self.assertIn("selected upstream MCP pageId", select_page_text)
+        self.assertIn("selected upstream MCP pageId", snapshot_text)
+        for text in (list_pages_text, select_page_text, snapshot_text):
+            self.assertNotIn("browser-session", text)
+            self.assertNotIn("target_id", text)
+            self.assertNotIn(LEGACY_CURRENT_TARGET_FIELD, text)
 
 
 if __name__ == "__main__":

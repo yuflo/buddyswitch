@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import sys
 import tempfile
 import unittest
@@ -78,18 +79,39 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.handler_module = load_module(HANDLER_PATH)
         self.triggers = load_module(TRIGGERS_PATH)
+        self.release_calls: list[dict[str, object]] = []
+        self.close_calls: list[dict[str, object]] = []
+        self.list_pages_payload: list[dict[str, object]] = []
         lifecycle = self.handler_module.browser_lifecycle
-        originals = {
-            "close_page_target": lifecycle.close_page_target,
-            "schedule_browser_cockpit_release": lifecycle.schedule_browser_cockpit_release,
-            "current_target_id": lifecycle.current_target_id,
-            "refresh_current_page_idle": lifecycle.refresh_current_page_idle,
-        }
-        self.addCleanup(lambda: [setattr(lifecycle, name, value) for name, value in originals.items()])
+        self._original_schedule_browser_cockpit_release = lifecycle.schedule_browser_cockpit_release
+        self._original_refresh_page_idle = lifecycle.refresh_page_idle
+        self.addCleanup(
+            setattr,
+            lifecycle,
+            "schedule_browser_cockpit_release",
+            self._original_schedule_browser_cockpit_release,
+        )
+        self.addCleanup(setattr, lifecycle, "refresh_page_idle", self._original_refresh_page_idle)
+
+        def fake_schedule_browser_cockpit_release(**kwargs: object) -> dict[str, object]:
+            self.release_calls.append(kwargs)
+            return {"schedule": {"schedule_id": "schedule-release"}}
+
+        def fake_list_mcp_pages(_browser_endpoint: str) -> list[dict[str, object]]:
+            return list(self.list_pages_payload)
+
+        def fake_close_mcp_page(browser_endpoint: str, page_id: object) -> dict[str, object]:
+            self.close_calls.append({"browser_endpoint": browser_endpoint, "page_id": page_id})
+            return {"status": "closed", "page_id": page_id}
+
+        lifecycle.schedule_browser_cockpit_release = fake_schedule_browser_cockpit_release
+        self.handler_module.list_mcp_pages = fake_list_mcp_pages
+        self.handler_module.close_mcp_page = fake_close_mcp_page
 
     def _trigger(
         self,
         *,
+        page_id: object = "page-idle-1",
         target_actor_address: dict[str, str] | None = None,
         due_at: str | None = None,
     ) -> Any:
@@ -102,336 +124,172 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
             origin_id="schedule-1",
             correlation_id=None,
-            payload={"target_id": "target-idle-1"},
+            payload={"page_id": page_id},
             source_context=source_context,
         )
 
-    def test_auto_close_closes_existing_target_by_target_id(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
-            calls.append({"browser_url": browser_url, "target_id": target_id})
-            return {"status": "closed", "target_id": target_id}
-
-        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-        handler = self.handler_module.BrowserPageExpiredHandler()
-
-        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
-
-        self.assertEqual(result.status, "handled")
-        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-idle-1"}])
-
-    def test_auto_close_missing_target_is_handled(self) -> None:
-        def fake_close_page_target(_browser_url: str, target_id: str) -> dict[str, str]:
-            return {"status": "already_gone", "target_id": target_id}
-
-        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-        handler = self.handler_module.BrowserPageExpiredHandler()
-
-        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
-
-        self.assertEqual(result.status, "handled")
-
-    def test_expiry_close_forgets_idle_target(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self.handler_module.browser_lifecycle._write_page_idle_state(
-                instance_root,
-                {
-                    "current_target_id": "target-idle-1",
-                    "current_page_updated_at": "2026-06-24T00:00:00Z",
-                    "targets": {
-                        "target-idle-1": {
-                            "target_id": "target-idle-1",
-                            "target_url": "https://example.com/old",
-                            "last_used_at": "2026-06-24T00:00:00Z",
-                            "page_id": "7",
-                        }
-                    },
-                    "page_id_to_target_id": {"7": "target-idle-1"},
-                },
-            )
-            context = FakeContext()
-            context.instance_root = instance_root
-
-            def fake_close_page_target(_browser_url: str, target_id: str) -> dict[str, str]:
-                return {"status": "closed", "target_id": target_id}
-
-            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = lambda **_kwargs: {
-                "schedule": {"schedule_id": "schedule-release"}
+    def _write_page_state(
+        self,
+        instance_root: Path,
+        *,
+        page_id: str = "page-idle-1",
+        url: str = "https://example.com/old",
+        title: str = "Old Title",
+        current: bool = False,
+    ) -> None:
+        state: dict[str, object] = {
+            "pages": {
+                page_id: {
+                    "page_id": page_id,
+                    "url": url,
+                    "title": title,
+                    "last_used_at": "2026-06-24T00:00:00Z",
+                }
             }
-            handler = self.handler_module.BrowserPageExpiredHandler()
+        }
+        if current:
+            state["current_page_id"] = page_id
+            state["selected_page_id"] = page_id
+            state["current_page_updated_at"] = "2026-06-24T00:00:00Z"
+        self.handler_module.browser_lifecycle._write_page_idle_state(instance_root, state)
 
-            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+    def _context(self, instance_root: Path, *, browser_port: int | None = 9444) -> Any:
+        instance_root.mkdir(parents=True, exist_ok=True)
+        instance_json = instance_root / "instance.json"
+        instance_json.write_text(
+            json.dumps({"actor_id": "act-dev-browser", "role": "dev", "browser_port": browser_port}, ensure_ascii=True) + "\n",
+            encoding="utf-8",
+        )
+        context = FakeContext()
+        context.instance_root = instance_root
+        context.instance_json = instance_json
+        context.instance_payload = {"browser_port": None}
+        return context
 
-            self.assertEqual(result.status, "handled")
-            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(state["targets"], {})
-            self.assertEqual(state["page_id_to_target_id"], {})
-            self.assertNotIn("current_target_id", state)
+    def test_expiry_payload_requires_page_id(self) -> None:
+        inbound = load_module(BROWSER_INBOUND_PATH)
+        self.assertEqual(inbound.BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT["required_fields"], ("page_id",))
 
-    def test_final_tracked_page_schedules_release_after_close(self) -> None:
-        release_calls: list[dict[str, object]] = []
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self.handler_module.browser_lifecycle._write_page_idle_state(
-                instance_root,
-                {
-                    "current_target_id": "target-idle-1",
-                    "current_page_updated_at": "2026-06-24T00:00:00Z",
-                    "targets": {
-                        "target-idle-1": {
-                            "target_id": "target-idle-1",
-                            "target_url": "https://example.com/old",
-                            "last_used_at": "2026-06-24T00:00:00Z",
-                        }
-                    },
-                    "page_id_to_target_id": {},
-                },
-            )
-            context = FakeContext()
-            context.instance_root = instance_root
-
-            def fake_close_page_target(_browser_url: str, target_id: str) -> dict[str, str]:
-                return {"status": "closed", "target_id": target_id}
-
-            def fake_schedule_browser_cockpit_release(**kwargs: object) -> dict[str, object]:
-                release_calls.append(kwargs)
-                return {"schedule": {"schedule_id": "schedule-release"}}
-
-            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = fake_schedule_browser_cockpit_release
-            handler = self.handler_module.BrowserPageExpiredHandler()
-
-            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
-
-            self.assertEqual(result.status, "handled")
-            self.assertEqual(release_calls, [{"instance_root": instance_root, "reason": "page_idle_empty"}])
-
-    def test_expiry_already_gone_forgets_idle_target(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self.handler_module.browser_lifecycle._write_page_idle_state(
-                instance_root,
-                {
-                    "targets": {
-                        "target-idle-1": {
-                            "target_id": "target-idle-1",
-                            "target_url": "https://example.com/old",
-                            "last_used_at": "2026-06-24T00:00:00Z",
-                            "page_id": "7",
-                        }
-                    },
-                    "page_id_to_target_id": {"7": "target-idle-1"},
-                },
-            )
-            context = FakeContext()
-            context.instance_root = instance_root
-
-            def fake_close_page_target(_browser_url: str, target_id: str) -> dict[str, str]:
-                return {"status": "already_gone", "target_id": target_id}
-
-            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = lambda **_kwargs: {
-                "schedule": {"schedule_id": "schedule-release"}
-            }
-            handler = self.handler_module.BrowserPageExpiredHandler()
-
-            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
-
-            self.assertEqual(result.status, "handled")
-            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(state["targets"], {})
-            self.assertEqual(state["page_id_to_target_id"], {})
-
-    def test_stale_endpoint_forgets_target_and_schedules_release(self) -> None:
-        release_calls: list[dict[str, object]] = []
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            self.handler_module.browser_lifecycle._write_page_idle_state(
-                instance_root,
-                {
-                    "current_target_id": "target-idle-1",
-                    "current_page_updated_at": "2026-06-24T00:00:00Z",
-                    "targets": {
-                        "target-idle-1": {
-                            "target_id": "target-idle-1",
-                            "target_url": "https://example.com/old",
-                            "last_used_at": "2026-06-24T00:00:00Z",
-                        }
-                    },
-                    "page_id_to_target_id": {},
-                },
-            )
-            context = FakeContext()
-            context.instance_root = instance_root
-
-            def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
-                raise self.handler_module.browser_lifecycle.BrowserLifecycleError(
-                    "failed to read Chrome DevTools /json/list: connection refused"
-                )
-
-            def fake_schedule_browser_cockpit_release(**kwargs: object) -> dict[str, object]:
-                release_calls.append(kwargs)
-                return {"schedule": {"schedule_id": "schedule-release"}}
-
-            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = fake_schedule_browser_cockpit_release
-            handler = self.handler_module.BrowserPageExpiredHandler()
-
-            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
-
-            self.assertEqual(result.status, "handled")
-            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(state["targets"], {})
-            self.assertNotIn("current_target_id", state)
-            self.assertEqual(release_calls, [{"instance_root": instance_root, "reason": "page_idle_empty"}])
-
-    def test_auto_close_browser_unavailable_is_handled_as_stale(self) -> None:
-        def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
-            raise self.handler_module.browser_lifecycle.BrowserLifecycleError(
-                "failed to read Chrome DevTools /json/list: connection refused"
-            )
-
-        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+        trigger = self._trigger(page_id=" ")
         handler = self.handler_module.BrowserPageExpiredHandler()
 
-        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
-
-        self.assertEqual(result.status, "handled")
-
-    def test_expiry_reads_fresh_browser_port_from_instance_json(self) -> None:
-        calls: list[dict[str, object]] = []
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            instance_root.mkdir(parents=True)
-            instance_json = instance_root / "instance.json"
-            instance_json.write_text(
-                json.dumps(
-                    {
-                        "actor_id": "act-dev-browser",
-                        "role": "dev",
-                        "browser_port": 9555,
-                    },
-                    ensure_ascii=True,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            context = FakeContext()
-            context.instance_payload = {"browser_port": None}
-            context.instance_root = instance_root
-            context.instance_json = instance_json
-
-            def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
-                calls.append({"browser_url": browser_url, "target_id": target_id})
-                return {"status": "already_gone", "target_id": target_id}
-
-            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-            self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = lambda **_kwargs: {
-                "schedule": {"schedule_id": "schedule-release"}
-            }
-            handler = self.handler_module.BrowserPageExpiredHandler()
-
-            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
-
-            self.assertEqual(result.status, "handled")
-            self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9555", "target_id": "target-idle-1"}])
-
-    def test_auto_close_close_failure_returns_failed_once(self) -> None:
-        def fake_close_page_target(_browser_url: str, _target_id: str) -> dict[str, str]:
-            raise self.handler_module.browser_lifecycle.BrowserLifecycleError("simulated close failure")
-
-        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-        handler = self.handler_module.BrowserPageExpiredHandler()
-
-        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(), trigger=trigger)
 
         self.assertEqual(result.status, "failed")
-        self.assertEqual(result.message, "simulated close failure")
+        self.assertIn("page_id", result.message)
 
-    def test_current_page_with_running_parent_turn_refreshes_idle_without_closing(self) -> None:
-        close_calls: list[dict[str, object]] = []
+    def test_expiry_closes_confirmed_mcp_page_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_state(instance_root)
+            context = self._context(instance_root)
+            self.list_pages_payload = [{"pageId": "page-idle-1", "url": "https://example.com/old", "title": "Old Title"}]
+            handler = self.handler_module.BrowserPageExpiredHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(self.close_calls, [{"browser_endpoint": "http://127.0.0.1:9444", "page_id": "page-idle-1"}])
+            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(state["pages"], {})
+
+    def test_expiry_does_not_close_when_page_id_missing_from_list_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_state(instance_root)
+            context = self._context(instance_root)
+            self.list_pages_payload = []
+            handler = self.handler_module.BrowserPageExpiredHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(self.close_calls, [])
+            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(state["pages"], {})
+            self.assertEqual(self.release_calls, [{"instance_root": instance_root, "reason": "page_idle_empty"}])
+
+    def test_expiry_does_not_close_when_page_identity_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_state(instance_root, url="https://example.com/original", title="Original")
+            context = self._context(instance_root)
+            self.list_pages_payload = [{"pageId": "page-idle-1", "url": "https://example.com/reused", "title": "Other"}]
+            handler = self.handler_module.BrowserPageExpiredHandler()
+
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(self.close_calls, [])
+            state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(state["pages"], {})
+
+    def test_expiry_keeps_current_selected_page_when_parent_turn_running(self) -> None:
         refresh_calls: list[dict[str, object]] = []
 
-        self.handler_module.browser_lifecycle.current_target_id = lambda _instance_root: "target-idle-1"
-
-        def fake_refresh_current_page_idle(**kwargs: object) -> dict[str, object]:
+        def fake_refresh_page_idle(**kwargs: object) -> dict[str, object]:
             refresh_calls.append(kwargs)
             return {"idle_refreshed": True, "idle_seconds": 40}
 
-        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
-            close_calls.append({"browser_url": browser_url, "target_id": target_id})
-            return {"status": "closed", "target_id": target_id}
+        self.handler_module.browser_lifecycle.refresh_page_idle = fake_refresh_page_idle
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_state(instance_root, current=True)
+            context = self._context(instance_root)
+            self.list_pages_payload = [{"pageId": "page-idle-1", "url": "https://example.com/old", "title": "Old Title"}]
+            handler = self.handler_module.BrowserPageExpiredHandler()
 
-        self.handler_module.browser_lifecycle.refresh_current_page_idle = fake_refresh_current_page_idle
-        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-        handler = self.handler_module.BrowserPageExpiredHandler()
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(activity_status="running"), trigger=self._trigger())
 
-        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(activity_status="running"), trigger=self._trigger())
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(self.close_calls, [])
+            self.assertEqual(refresh_calls, [{"instance_root": instance_root, "page_id": "page-idle-1"}])
 
-        self.assertEqual(result.status, "handled")
-        self.assertEqual(close_calls, [])
-        self.assertEqual(refresh_calls, [{"instance_root": FakeContext.instance_root, "target_id": "target-idle-1"}])
+    def test_final_tracked_page_schedules_release_after_mcp_close(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_state(instance_root)
+            context = self._context(instance_root)
+            self.list_pages_payload = [{"pageId": "page-idle-1", "url": "https://example.com/old", "title": "Old Title"}]
+            handler = self.handler_module.BrowserPageExpiredHandler()
 
-    def test_non_current_page_closes_even_when_parent_turn_is_running(self) -> None:
-        calls: list[dict[str, object]] = []
-        self.handler_module.browser_lifecycle.current_target_id = lambda _instance_root: "target-other"
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
 
-        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
-            calls.append({"browser_url": browser_url, "target_id": target_id})
-            return {"status": "closed", "target_id": target_id}
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(self.release_calls, [{"instance_root": instance_root, "reason": "page_idle_empty"}])
 
-        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-        handler = self.handler_module.BrowserPageExpiredHandler()
+    def test_page_expiry_never_calls_cdp_target_close(self) -> None:
+        self.assertFalse(hasattr(self.handler_module.browser_lifecycle, "close_page_" + "target"))
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_page_state(instance_root)
+            context = self._context(instance_root)
+            self.list_pages_payload = [{"pageId": "page-idle-1", "url": "https://example.com/old", "title": "Old Title"}]
+            handler = self.handler_module.BrowserPageExpiredHandler()
 
-        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(activity_status="running"), trigger=self._trigger())
+            result = handler.handle(context, state=object(), runtime=FakeRuntime(), trigger=self._trigger())
 
-        self.assertEqual(result.status, "handled")
-        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-idle-1"}])
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(len(self.close_calls), 1)
 
-    def test_current_page_closes_when_parent_is_idle(self) -> None:
-        calls: list[dict[str, object]] = []
-        self.handler_module.browser_lifecycle.current_target_id = lambda _instance_root: "target-idle-1"
-
-        def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
-            calls.append({"browser_url": browser_url, "target_id": target_id})
-            return {"status": "closed", "target_id": target_id}
-
-        self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
-        handler = self.handler_module.BrowserPageExpiredHandler()
-
-        result = handler.handle(FakeContext(), state=object(), runtime=FakeRuntime(activity_status="idle"), trigger=self._trigger())
-
-        self.assertEqual(result.status, "handled")
-        self.assertEqual(calls, [{"browser_url": "http://127.0.0.1:9444", "target_id": "target-idle-1"}])
-
-    def test_stale_due_trigger_does_not_close_recently_refreshed_target(self) -> None:
-        calls: list[dict[str, object]] = []
+    def test_stale_due_trigger_does_not_close_recently_refreshed_page(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
             self.handler_module.browser_lifecycle._write_page_idle_state(
                 instance_root,
                 {
-                    "targets": {
-                        "target-idle-1": {
-                            "target_id": "target-idle-1",
-                            "target_url": "https://example.com/recent",
+                    "pages": {
+                        "page-idle-1": {
+                            "page_id": "page-idle-1",
+                            "url": "https://example.com/old",
+                            "title": "Old Title",
                             "last_used_at": "2026-06-24T00:04:30Z",
                         }
-                    },
-                    "page_id_to_target_id": {},
+                    }
                 },
             )
-            context = FakeContext()
-            context.instance_root = instance_root
-
-            def fake_close_page_target(browser_url: str, target_id: str) -> dict[str, str]:
-                calls.append({"browser_url": browser_url, "target_id": target_id})
-                return {"status": "closed", "target_id": target_id}
-
-            self.handler_module.browser_lifecycle.close_page_target = fake_close_page_target
+            context = self._context(instance_root)
+            self.list_pages_payload = [{"pageId": "page-idle-1", "url": "https://example.com/old", "title": "Old Title"}]
             handler = self.handler_module.BrowserPageExpiredHandler()
 
             result = handler.handle(
@@ -442,14 +300,14 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             )
 
             self.assertEqual(result.status, "handled")
-            self.assertEqual(calls, [])
+            self.assertEqual(self.close_calls, [])
             state = json.loads(self.handler_module.browser_lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertIn("target-idle-1", state["targets"])
+            self.assertIn("page-idle-1", state["pages"])
 
-    def test_inbound_contract_requires_only_target_id(self) -> None:
+    def test_inbound_contract_requires_only_page_id(self) -> None:
         inbound = load_module(BROWSER_INBOUND_PATH)
 
-        self.assertEqual(inbound.BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT["required_fields"], ("target_id",))
+        self.assertEqual(inbound.BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT["required_fields"], ("page_id",))
 
     def test_inbound_registers_browser_release_event(self) -> None:
         inbound = load_module(BROWSER_INBOUND_PATH)
@@ -473,6 +331,42 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("wrong target actor", result.message)
+
+    def test_run_mcp_tool_waits_for_initialize_before_tool_call(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            stub_path = Path(temp_root) / "staged_mcp.py"
+            stub_path.write_text(
+                "\n".join(
+                    [
+                        "import json, select, sys",
+                        "first = sys.stdin.readline()",
+                        "if not first:",
+                        "    raise SystemExit(1)",
+                        "ready, _, _ = select.select([sys.stdin], [], [], 0.05)",
+                        "if ready:",
+                        "    sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': 'init', 'result': {'protocolVersion': '2024-11-05'}}) + '\\n')",
+                        "    sys.stdout.flush()",
+                        "    raise SystemExit(0)",
+                        "init = json.loads(first)",
+                        "sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': init['id'], 'result': {'protocolVersion': '2024-11-05'}}) + '\\n')",
+                        "sys.stdout.flush()",
+                        "for raw in sys.stdin:",
+                        "    message = json.loads(raw)",
+                        "    if message.get('method') == 'tools/call':",
+                        "        sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': message['id'], 'result': {'content': [{'type': 'text', 'text': '## Pages\\n2: https://example.test [selected]'}]}}) + '\\n')",
+                        "        sys.stdout.flush()",
+                        "        raise SystemExit(0)",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            command = f"{shlex.quote(sys.executable)} {shlex.quote(str(stub_path))}"
+
+            with mock.patch.dict(os.environ, {"BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND": command}):
+                message = self.handler_module._run_mcp_tool("http://127.0.0.1:9444", "list_pages", {})
+
+            self.assertIn("## Pages", self.handler_module._tool_response_text(message))
 
 
 class BrowserReleaseHandlerTests(unittest.TestCase):
@@ -519,11 +413,11 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         context.instance_payload = {"browser_port": None}
         return context
 
-    def _write_page_idle(self, instance_root: Path, targets: dict[str, object]) -> None:
+    def _write_page_idle(self, instance_root: Path, pages: dict[str, object]) -> None:
         state_path = instance_root / "runtime" / "browser" / "page_idle.json"
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(
-            json.dumps({"targets": targets, "page_id_to_target_id": {}}, ensure_ascii=True, indent=2) + "\n",
+            json.dumps({"pages": pages}, ensure_ascii=True, indent=2) + "\n",
             encoding="utf-8",
         )
 
@@ -601,11 +495,11 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self.assertEqual(result.status, "handled")
         self.assertEqual(calls, [])
 
-    def test_release_noops_when_page_idle_targets_remain(self) -> None:
+    def test_release_noops_when_page_idle_pages_remain(self) -> None:
         calls = self._install_manager_recorder()
         with tempfile.TemporaryDirectory() as temp_root:
             context = self._context(Path(temp_root) / "instances" / "act-dev-browser")
-            self._write_page_idle(context.instance_root, {"target-active": {"target_id": "target-active"}})
+            self._write_page_idle(context.instance_root, {"page-active": {"page_id": "page-active"}})
             self._install_cdp_targets([])
             handler = self.release_module.BrowserReleaseHandler()
 

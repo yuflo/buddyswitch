@@ -17,7 +17,6 @@ import socket
 import subprocess
 import threading
 import time
-from types import SimpleNamespace
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -304,39 +303,13 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "durability": "runtime",
                 }
 
-        class FakeBrowserSession:
-            @staticmethod
-            def open_or_reuse_page(**kwargs: object) -> object:
-                calls.append({"method": "open_or_reuse_page", **kwargs})
-                return SimpleNamespace(
-                    kind="opened",
-                    target_url=kwargs.get("target_url"),
-                    page_count=1,
-                    projected_page_count=2,
-                    target_id="target-broker-open",
-                    page_opened=True,
-                    page_reused=False,
-                    idle_refreshed=True,
-                    idle_seconds=40,
-                    idle_expires_at="2026-07-02T00:00:40Z",
-                    message=None,
-                )
-
         patcher_manager = patch.object(
             dispatcher,
             "browser_runtime_manager",
             FakeBrowserRuntimeManager,
             create=True,
         )
-        patcher_session = patch.object(
-            dispatcher,
-            "browser_session",
-            FakeBrowserSession,
-            create=True,
-        )
         patcher_manager.start()
-        patcher_session.start()
-        self.addCleanup(patcher_session.stop)
         self.addCleanup(patcher_manager.stop)
         return calls
 

@@ -131,17 +131,6 @@ def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
                         "id": message.get("id"),
                         "error": {"code": -32000, "message": "simulated cdp create target failure"},
                     }
-                elif message.get("method") == "Target.closeTarget":
-                    params = message.get("params") if isinstance(message.get("params"), dict) else {}
-                    target_id = params.get("targetId")
-                    targets = state.setdefault("targets", [])
-                    if isinstance(targets, list):
-                        state["targets"] = [
-                            target
-                            for target in targets
-                            if not (isinstance(target, dict) and target.get("id") == target_id)
-                        ]
-                    response = {"id": message.get("id"), "result": {"success": True}}
                 else:
                     params = message.get("params") if isinstance(message.get("params"), dict) else {}
                     targets = state.setdefault("targets", [])
@@ -545,7 +534,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("tools" + "/launcher", text)
         self.assertNotIn("scripts/env/client.py", text)
         self.assertNotIn("cdp_background_page.py", text)
-        self.assertNotIn("Target.createTarget", text)
+        self.assertNotIn("Target." + "createTarget", text)
         self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
 
     def test_search_rejects_empty_query_and_unknown_engine(self) -> None:

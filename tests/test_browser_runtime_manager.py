@@ -500,7 +500,7 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             pid_file = browser_dir / "chrome.pid"
             page_idle_file = runtime_browser_dir / "page_idle.json"
             pid_file.write_text(f"{chrome_proc.pid}\n", encoding="utf-8")
-            page_idle_file.write_text('{"targets": {}}\n', encoding="utf-8")
+            page_idle_file.write_text('{"pages": {}}\n', encoding="utf-8")
             state = self._daemon_state(instance_root)
             browser_schedule = state.create_schedule(
                 delay_seconds=600,

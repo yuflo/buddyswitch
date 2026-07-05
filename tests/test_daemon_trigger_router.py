@@ -296,7 +296,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"], second)
             self.assertNotIn("browser_page_idle", saved)
-            self.assertNotIn("current_target_id", saved)
+            self.assertNotIn("current_" + "target_id", saved)
 
     def test_keyed_schedule_upsert_does_not_reuse_non_pending_history(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

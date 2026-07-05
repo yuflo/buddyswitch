@@ -40,6 +40,7 @@ _DOC_SPEC_CONTEXT_MARKERS = (
     "cockpit-browser-session-resource-lifecycle",
     "development-plan",
     "implementation-plan",
+    "instance-stop-browser-schedule-cleanup",
     "merge-plan",
     "objective",
     "parallel-agent-execution-plan",
@@ -286,6 +287,38 @@ print(json.dumps({{
                     continue
                 hits.append(line)
 
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_browser_cockpit_selected_page_live_surfaces_reject_actor_page_cdp_truth(self) -> None:
+        self.assertFalse(
+            (ROOT / "scripts" / "env" / ("cdp_browser_" + "session.py")).exists(),
+            "orphan actor-page CDP browser session helper should be removed",
+        )
+        scan_files = [
+            "tools/launcher/chrome_devtools_cockpit_proxy.py",
+            "tools/launcher/browser_page_expired_handler.py",
+            "tools/launcher/browser_inbound.py",
+            "scripts/env/cdp_browser_lifecycle.py",
+        ]
+        forbidden_tokens = (
+            "cdp_browser_" + "session",
+            "browser_" + "session.",
+            "open_or_" + "reuse_page",
+            "current_" + "target_id",
+            "page_id_to_" + "target_id",
+            "target_id_for_" + "page_id",
+            "create_background_page_" + "target",
+            "close_page_" + "target",
+            "Target." + "closeTarget",
+            "target_idle_expiry_after_" + "due_at",
+            "forget_page_idle_" + "target",
+        )
+        hits: list[str] = []
+        for relative in scan_files:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            for token in forbidden_tokens:
+                if token in text:
+                    hits.append(f"{relative}: {token}")
         self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_side_thread_lifecycle_boundary_has_no_direct_call_residue(self) -> None:

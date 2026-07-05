@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import shlex
 import socket
 import stat
 import subprocess
@@ -222,17 +223,7 @@ class Handler(BaseHTTPRequestHandler):
                 targets = []
                 state["targets"] = targets
             method = message.get("method")
-            if method == "Target.closeTarget":
-                params = message.get("params") if isinstance(message.get("params"), dict) else {}
-                target_id = params.get("targetId")
-                state["targets"] = [
-                    target
-                    for target in targets
-                    if not (isinstance(target, dict) and target.get("id") == target_id)
-                ]
-                write_state(state)
-                response = {"id": message.get("id"), "result": {"success": True}}
-            elif method == "Target.createTarget":
+            if method == "Target.createTarget":
                 params = message.get("params") if isinstance(message.get("params"), dict) else {}
                 target_id = f"target-{len(targets) + 1}"
                 targets.append(
@@ -274,10 +265,59 @@ from pathlib import Path
 
 argv_path = Path(os.environ["BUDDYSWITCH_TEST_UPSTREAM_ARGV"])
 calls_path = Path(os.environ["BUDDYSWITCH_TEST_UPSTREAM_CALLS"])
+state_path = Path(os.environ["BUDDYSWITCH_TEST_UPSTREAM_STATE"])
 argv_path.parent.mkdir(parents=True, exist_ok=True)
 with argv_path.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(sys.argv[1:], ensure_ascii=True) + "\n")
 
+
+def read_state() -> dict[str, object]:
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        payload = {"pages": [], "selected_page_id": None}
+    if not isinstance(payload, dict):
+        payload = {"pages": [], "selected_page_id": None}
+    pages = payload.get("pages")
+    if not isinstance(pages, list):
+        payload["pages"] = []
+    return payload
+
+
+def write_state(payload: dict[str, object]) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
+def find_page(payload: dict[str, object], page_id: object) -> dict[str, object] | None:
+    normalized = str(page_id)
+    pages = payload.get("pages")
+    if not isinstance(pages, list):
+        return None
+    for page in pages:
+        if isinstance(page, dict) and str(page.get("pageId")) == normalized:
+            return page
+    return None
+
+
+def list_pages_text(payload: dict[str, object]) -> str:
+    pages = payload.get("pages")
+    selected = payload.get("selected_page_id")
+    if not isinstance(pages, list) or not pages:
+        return "Pages: <none>"
+    lines = ["Pages:"]
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        page_id = page.get("pageId")
+        title = page.get("title") if isinstance(page.get("title"), str) else "Untitled"
+        url = page.get("url") if isinstance(page.get("url"), str) else "about:blank"
+        marker = " [selected]" if str(page_id) == str(selected) else ""
+        lines.append(f"{page_id}: {title} - {url}{marker}")
+    return "\n".join(lines)
+
+
+write_state(read_state())
 
 for raw_line in sys.stdin:
     line = raw_line.strip()
@@ -303,16 +343,61 @@ for raw_line in sys.stdin:
     elif method == "tools/call":
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
         tool_name = params.get("name")
-        if tool_name == "select_page":
-            response_text = "Selected page: https://www.google.com/search?q=lazy+release+smoke [selected]"
+        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        state = read_state()
+        pages = state.setdefault("pages", [])
+        if not isinstance(pages, list):
+            pages = []
+            state["pages"] = pages
+        if tool_name == "new_page":
+            page_id = len(pages) + 1
+            url = arguments.get("url") if isinstance(arguments.get("url"), str) else "about:blank"
+            page = {
+                "pageId": page_id,
+                "title": "Lazy Release Smoke",
+                "url": url,
+            }
+            pages.append(page)
+            write_state(state)
+            response_text = f"Opened page {page_id}: {url}"
+            response_extra = {"pages": pages}
+        elif tool_name == "list_pages":
+            response_text = list_pages_text(state)
+            response_extra = {"pages": pages}
+        elif tool_name == "select_page":
+            page_id = arguments.get("pageId")
+            page = find_page(state, page_id)
+            if page is None:
+                response_text = f"Page not found: {page_id}"
+                response_extra = {}
+            else:
+                state["selected_page_id"] = str(page.get("pageId"))
+                write_state(state)
+                url = page.get("url") if isinstance(page.get("url"), str) else "about:blank"
+                response_text = f"Selected page: {url} [selected]"
+                response_extra = {"pages": pages}
         elif tool_name == "take_snapshot":
             response_text = "Snapshot: lazy release smoke result page"
+            response_extra = {"pages": pages}
+        elif tool_name == "close_page":
+            page_id = arguments.get("pageId")
+            state["pages"] = [
+                page
+                for page in pages
+                if not (isinstance(page, dict) and str(page.get("pageId")) == str(page_id))
+            ]
+            if str(state.get("selected_page_id")) == str(page_id):
+                state["selected_page_id"] = None
+            write_state(state)
+            response_text = f"Closed page: {page_id}"
+            response_extra = {"pages": state["pages"]}
         else:
             response_text = "fake upstream tool response"
+            response_extra = {}
         response = {
             "jsonrpc": "2.0",
             "id": request_id,
-            "result": {"content": [{"type": "text", "text": response_text}]},
+            "result": {"content": [{"type": "text", "text": response_text}], **response_extra},
         }
     else:
         response = {"jsonrpc": "2.0", "id": request_id, "result": {}}
@@ -562,6 +647,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "status": "active",
                     "current_task_id": None,
                     "current_track_id": None,
+                    "thread_id": "thr-main",
                     "workspace_dir": str(instance_root / "workspace"),
                     "browser_port": None,
                     "created_at": "2026-06-30T00:00:00Z",
@@ -656,14 +742,14 @@ with calls_path.open("a", encoding="utf-8") as handle:
             }
         )
 
-    def _page_trigger(self, triggers: Any, *, actor_id: str, role: str, target_id: str) -> Any:
+    def _page_trigger(self, triggers: Any, *, actor_id: str, role: str, page_id: str) -> Any:
         return triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.page.expired",
             target_actor_address={"role_id": role, "actor_id": actor_id},
             origin_id="schedule-page",
             correlation_id=None,
-            payload={"target_id": target_id},
+            payload={"page_id": page_id},
             source_context={"schedule_id": "schedule-page"},
         )
 
@@ -757,6 +843,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
             broker_socket = temp_root_path / "runtime-broker.sock"
             upstream_argv = temp_root_path / "upstream_argv.jsonl"
             upstream_calls = temp_root_path / "upstream_calls.jsonl"
+            upstream_state = temp_root_path / "upstream_state.json"
             release_schedules: list[dict[str, object]] = []
             fake_chrome_pids: list[int] = []
             fake_port = free_port()
@@ -783,6 +870,10 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(broker_socket),
                     "BUDDYSWITCH_TEST_UPSTREAM_ARGV": str(upstream_argv),
                     "BUDDYSWITCH_TEST_UPSTREAM_CALLS": str(upstream_calls),
+                    "BUDDYSWITCH_TEST_UPSTREAM_STATE": str(upstream_state),
+                    "BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND": " ".join(
+                        shlex.quote(part) for part in (sys.executable, str(fake_upstream))
+                    ),
                     "NO_PROXY": "127.0.0.1,localhost",
                     "no_proxy": "127.0.0.1,localhost",
                 }
@@ -831,7 +922,9 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     arguments={"url": "https://www.google.com/search?q=lazy+release+smoke"},
                 )
                 self.assertFalse(new_page_response.get("result", {}).get("isError"), msg=new_page_response)
-                self.assertIn("target-1", json.dumps(new_page_response, ensure_ascii=True))
+                new_page_text = json.dumps(new_page_response, ensure_ascii=True)
+                self.assertIn("Opened page 1", new_page_text)
+                self.assertIn('"background": true', json.dumps(read_jsonl(upstream_calls), ensure_ascii=True))
 
                 listed_response = self._send_proxy_tool_call(
                     proxy,
@@ -841,9 +934,11 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 )
                 self.assertFalse(listed_response.get("result", {}).get("isError"), msg=listed_response)
                 listed_text = json.dumps(listed_response, ensure_ascii=True)
-                self.assertIn("BuddySwitch browser-session state", listed_text)
-                self.assertIn("target_id: target-1", listed_text)
-                self.assertIn("current: true", listed_text)
+                self.assertIn("Pages:", listed_text)
+                self.assertIn("1: Lazy Release Smoke", listed_text)
+                self.assertIn("BuddySwitch browser page resource projection", listed_text)
+                self.assertIn("current_page_id: <none>", listed_text)
+                self.assertIn("selected_page_id: <none>", listed_text)
 
                 selected_response = self._send_proxy_tool_call(
                     proxy,
@@ -856,9 +951,23 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertIn("Selected page:", selected_text)
                 self.assertIn("Browser page idle refreshed", selected_text)
 
-                snapshot_response = self._send_proxy_tool_call(
+                listed_after_select_response = self._send_proxy_tool_call(
                     proxy,
                     request_id=5,
+                    tool_name="list_pages",
+                    arguments={},
+                )
+                self.assertFalse(listed_after_select_response.get("result", {}).get("isError"), msg=listed_after_select_response)
+                listed_after_select_text = json.dumps(listed_after_select_response, ensure_ascii=True)
+                self.assertIn("current_page_id: 1", listed_after_select_text)
+                self.assertIn("selected_page_id: 1", listed_after_select_text)
+                self.assertIn("page_id: 1", listed_after_select_text)
+                self.assertIn("current: true", listed_after_select_text)
+                self.assertIn("selected: true", listed_after_select_text)
+
+                snapshot_response = self._send_proxy_tool_call(
+                    proxy,
+                    request_id=6,
                     tool_name="take_snapshot",
                     arguments={},
                 )
@@ -874,14 +983,14 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     msg=saved_daemon_state["scheduled_triggers"],
                 )
                 self.assertTrue(
-                    any(row.get("schedule_key") == "browser.page.idle:target-1" for row in scheduled_rows),
+                    any(row.get("schedule_key") == "browser.page.idle:1" for row in scheduled_rows),
                     msg=saved_daemon_state["scheduled_triggers"],
                 )
                 page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-                targets = page_idle.get("targets")
-                self.assertIsInstance(targets, dict, msg=page_idle)
-                assert isinstance(targets, dict)
-                self.assertEqual(list(targets), ["target-1"])
+                pages = page_idle.get("pages")
+                self.assertIsInstance(pages, dict, msg=page_idle)
+                assert isinstance(pages, dict)
+                self.assertEqual(list(pages), ["1"])
                 mailbox_server.close()
                 mailbox_thread.join(timeout=2)
 
@@ -899,7 +1008,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     context,
                     state=object(),
                     runtime=FakeRuntime(),
-                    trigger=self._page_trigger(triggers, actor_id=actor_id, role=role, target_id="target-1"),
+                    trigger=self._page_trigger(triggers, actor_id=actor_id, role=role, page_id="1"),
                 )
                 self.assertEqual(page_result.status, "handled", msg=getattr(page_result, "message", None))
                 self.assertEqual(release_schedules[-1]["trigger_type"], "browser.cockpit.release")
@@ -907,8 +1016,18 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 page_idle_after_close = json.loads(
                     (instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8")
                 )
-                self.assertEqual(page_idle_after_close["targets"], {})
+                self.assertEqual(page_idle_after_close["pages"], {})
+                self.assertEqual(json.loads(upstream_state.read_text(encoding="utf-8"))["pages"], [])
                 self.assertEqual(json.loads(fake_chrome_state.read_text(encoding="utf-8"))["targets"], [])
+                close_calls = [
+                    entry.get("params", {})
+                    for entry in read_jsonl(upstream_calls)
+                    if entry.get("method") == "tools/call"
+                    and isinstance(entry.get("params"), dict)
+                    and entry.get("params", {}).get("name") == "close_page"
+                ]
+                self.assertTrue(close_calls, msg=read_jsonl(upstream_calls))
+                self.assertEqual(close_calls[-1].get("arguments"), {"pageId": 1})
 
                 release_result = release_handler.BrowserReleaseHandler().handle(
                     context,
@@ -928,16 +1047,21 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     wait_until(lambda: not pid_alive(first_browser_pid)),
                     "release must stop first fake Chrome process",
                 )
+                upstream_invocations_after_release = len(read_jsonl(upstream_argv))
 
                 second_proxy_response = self._send_proxy_tool_call(
                     proxy,
-                    request_id=6,
+                    request_id=7,
                     tool_name="list_pages",
                     arguments={},
                 )
                 self.assertFalse(second_proxy_response.get("result", {}).get("isError"), msg=second_proxy_response)
                 self.assertTrue(port_accepts(fake_port))
-                self.assertEqual(len(read_jsonl(upstream_argv)), 2, "next browser call must restart upstream MCP")
+                self.assertEqual(
+                    len(read_jsonl(upstream_argv)),
+                    upstream_invocations_after_release + 1,
+                    "next browser call must restart the proxy upstream MCP",
+                )
                 start_events = [entry for entry in read_jsonl(ensure_calls) if entry.get("started") is True]
                 self.assertGreaterEqual(len(start_events), 2, "next browser call must relaunch fake runtime")
                 for event in start_events:

@@ -1751,11 +1751,11 @@ exec "$real_git" "$@"
         self.assertNotIn("def open_browser_for_active_instance", search_text)
         self.assertNotIn("'open_browser': open_browser_for_active_instance", search_text)
         self.assertNotIn("from env import cdp_browser_" + "session as browser_session", search_text)
-        self.assertNotIn("browser_session." + "open_or_reuse_page", search_text)
+        self.assertNotIn("browser_" + "session." + "open_or_" + "reuse_page", search_text)
         self.assertNotIn("ensure_" + "browser_url_for_instance", search_text)
         self.assertNotIn("browser_url_from_" + "instance_payload", search_text)
         self.assertNotIn("cdp_background_page.py", search_text)
-        self.assertNotIn("Target.createTarget", search_text)
+        self.assertNotIn("Target." + "createTarget", search_text)
         self.assertNotIn("BUDDYSWITCH_SEARCH_BROWSER_" + "ENSURE_COMMAND", search_text)
         self.assertNotIn("tools" + "/launcher", search_text)
         self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
@@ -5391,7 +5391,7 @@ exec "$real_git" "$@"
             (runtime_browser_dir / "cockpit-upstream.pid").write_text(f"{upstream_proc.pid}\n", encoding="utf-8")
             (runtime_browser_dir / "cockpit-upstream.pgid").write_text(f"{upstream_pgid}\n", encoding="utf-8")
             (runtime_browser_dir / "page_idle.json").write_text(
-                json.dumps({"targets": {}, "page_id_to_target_id": {}}, ensure_ascii=True) + "\n",
+                json.dumps({"pages": {}}, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
@@ -10141,7 +10141,7 @@ exit 0
             (runtime_browser_dir / "cockpit-upstream.pid").write_text(f"{upstream_proc.pid}\n", encoding="utf-8")
             (runtime_browser_dir / "cockpit-upstream.pgid").write_text(f"{upstream_pgid}\n", encoding="utf-8")
             (runtime_browser_dir / "page_idle.json").write_text(
-                json.dumps({"targets": {}, "page_id_to_target_id": {}}, ensure_ascii=True) + "\n",
+                json.dumps({"pages": {}}, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
