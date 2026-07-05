@@ -209,26 +209,42 @@ def _stop_mcp_process(proc: subprocess.Popen[str]) -> None:
         proc.wait(timeout=2.0)
 
 
-def _run_mcp_tool(browser_endpoint: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    upstream = shlex.split(os.environ.get("BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND", DEFAULT_UPSTREAM_COMMAND))
-    if not upstream:
-        raise browser_lifecycle.BrowserLifecycleError("upstream chrome-devtools-mcp command is empty")
-    argv = upstream + [f"--browser-url={browser_endpoint}"]
-    initialize_id = "buddyswitch.browser_page_expired.initialize"
-    call_id = "buddyswitch.browser_page_expired.tool"
-    proc = subprocess.Popen(
-        argv,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        start_new_session=True,
-    )
-    deadline = time.monotonic() + MCP_TOOL_TIMEOUT_SECONDS
-    try:
+class McpToolSession:
+    def __init__(self, browser_endpoint: str) -> None:
+        upstream = shlex.split(os.environ.get("BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND", DEFAULT_UPSTREAM_COMMAND))
+        if not upstream:
+            raise browser_lifecycle.BrowserLifecycleError("upstream chrome-devtools-mcp command is empty")
+        argv = upstream + [f"--browser-url={browser_endpoint}"]
+        self._proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+        self._closed = False
+        self._call_count = 0
+        try:
+            self._initialize()
+        except Exception:
+            self.close()
+            raise
+
+    def __enter__(self) -> "McpToolSession":
+        return self
+
+    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+        self.close()
+
+    def _deadline(self) -> float:
+        return time.monotonic() + MCP_TOOL_TIMEOUT_SECONDS
+
+    def _initialize(self) -> None:
+        initialize_id = "buddyswitch.browser_page_expired.initialize"
         _write_mcp_message(
-            proc,
+            self._proc,
             {
                 "jsonrpc": "2.0",
                 "id": initialize_id,
@@ -241,16 +257,20 @@ def _run_mcp_tool(browser_endpoint: str, name: str, arguments: dict[str, Any]) -
             },
         )
         initialize_response = _read_mcp_response(
-            proc,
+            self._proc,
             initialize_id,
             operation="initialize",
-            deadline=deadline,
+            deadline=self._deadline(),
         )
         if isinstance(initialize_response.get("error"), dict):
             raise browser_lifecycle.BrowserLifecycleError(f"upstream chrome-devtools-mcp initialize failed: {initialize_response['error']}")
-        _write_mcp_message(proc, {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+        _write_mcp_message(self._proc, {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self._call_count += 1
+        call_id = f"buddyswitch.browser_page_expired.tool.{self._call_count}"
         _write_mcp_message(
-            proc,
+            self._proc,
             {
                 "jsonrpc": "2.0",
                 "id": call_id,
@@ -258,15 +278,35 @@ def _run_mcp_tool(browser_endpoint: str, name: str, arguments: dict[str, Any]) -
                 "params": {"name": name, "arguments": arguments},
             },
         )
-        message = _read_mcp_response(proc, call_id, operation=name, deadline=deadline)
+        message = _read_mcp_response(self._proc, call_id, operation=name, deadline=self._deadline())
         if isinstance(message.get("error"), dict):
             raise browser_lifecycle.BrowserLifecycleError(f"{name} failed: {message['error']}")
         result = message.get("result")
         if isinstance(result, dict) and result.get("isError") is True:
             raise browser_lifecycle.BrowserLifecycleError(_tool_response_text(message) or f"{name} failed")
         return message
-    finally:
-        _stop_mcp_process(proc)
+
+    def list_pages(self) -> list[dict[str, Any]]:
+        return _pages_from_mcp_response(self.call_tool("list_pages", {}))
+
+    def close_page(self, page_id: object) -> dict[str, Any]:
+        self.call_tool("close_page", {"pageId": _coerce_close_page_id(page_id)})
+        return {"status": "closed", "page_id": page_id}
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        _stop_mcp_process(self._proc)
+
+
+def open_mcp_session(browser_endpoint: str) -> McpToolSession:
+    return McpToolSession(browser_endpoint)
+
+
+def _run_mcp_tool(browser_endpoint: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    with open_mcp_session(browser_endpoint) as session:
+        return session.call_tool(name, arguments)
 
 
 def _coerce_close_page_id(page_id: object) -> object:
@@ -347,35 +387,46 @@ def _pages_from_mcp_response(message: dict[str, Any]) -> list[dict[str, Any]]:
     return _pages_from_text(_tool_response_text(message))
 
 
-def list_mcp_pages(browser_endpoint: str) -> list[dict[str, Any]]:
-    return _pages_from_mcp_response(_run_mcp_tool(browser_endpoint, "list_pages", {}))
+def _recorded_page_state(instance_root: Path, page_id: object) -> dict[str, Any] | None:
+    state = browser_lifecycle._read_page_idle_state(instance_root)
+    pages = state.get("pages")
+    if not isinstance(pages, dict):
+        return None
+    value = pages.get(str(page_id))
+    return value if isinstance(value, dict) else None
 
 
-def close_mcp_page(browser_endpoint: str, page_id: object) -> dict[str, Any]:
-    _run_mcp_tool(browser_endpoint, "close_page", {"pageId": _coerce_close_page_id(page_id)})
-    return {"status": "closed", "page_id": page_id}
-
-
-def _matching_mcp_page(pages: list[dict[str, Any]], page_id: object) -> dict[str, Any] | None:
-    normalized = str(page_id)
-    for page in pages:
-        if str(_page_id_value(page)) == normalized:
-            return page
-    return None
-
-
-def _page_identity_matches(recorded: dict[str, Any] | None, observed: dict[str, Any]) -> bool:
-    if not isinstance(recorded, dict):
-        return True
+def _recorded_identity_candidates(recorded: dict[str, Any], pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     recorded_url = _page_field(recorded, "url", "target_url")
-    observed_url = _page_field(observed, "url", "target_url")
-    if recorded_url and observed_url and recorded_url != observed_url:
-        return False
+    if recorded_url is None:
+        return []
     recorded_title = _page_field(recorded, "title")
-    observed_title = _page_field(observed, "title")
-    if recorded_title and observed_title and recorded_title != observed_title:
-        return False
-    return True
+    candidates: list[dict[str, Any]] = []
+    for page in pages:
+        observed_url = _page_field(page, "url", "target_url")
+        if observed_url != recorded_url:
+            continue
+        observed_title = _page_field(page, "title")
+        if recorded_title and observed_title and observed_title != recorded_title:
+            continue
+        candidates.append(page)
+    return candidates
+
+
+def _resolve_recorded_page(recorded: dict[str, Any], pages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    recorded_url = _page_field(recorded, "url", "target_url")
+    if recorded_url is None:
+        raise browser_lifecycle.BrowserLifecycleError("recorded browser page URL is missing; cannot safely resolve MCP page")
+    candidates = _recorded_identity_candidates(recorded, pages)
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        raise browser_lifecycle.BrowserLifecycleError(f"multiple MCP pages match recorded browser page URL: {recorded_url}")
+    return candidates[0]
+
+
+def _recorded_page_visible(recorded: dict[str, Any], pages: list[dict[str, Any]]) -> bool:
+    return bool(_recorded_identity_candidates(recorded, pages))
 
 
 class BrowserPageExpiredHandler:
@@ -437,47 +488,42 @@ class BrowserPageExpiredHandler:
                 if state is not None:
                     _schedule_release_if_empty(root, state)
             return daemon_core.HandlerResult.handled()
+        page_id = payload["page_id"]
+        if root is None:
+            return daemon_core.HandlerResult.failed("instance_root is required for browser page expiry cleanup")
+        recorded_page = _recorded_page_state(root, page_id)
+        if recorded_page is None:
+            return daemon_core.HandlerResult.handled()
         try:
-            mcp_pages = list_mcp_pages(browser_endpoint)
+            with open_mcp_session(browser_endpoint) as session:
+                mcp_pages = session.list_pages()
+                resolved_page = _resolve_recorded_page(recorded_page, mcp_pages)
+                if resolved_page is None:
+                    state = _forget_tracked_page(root, page_id)
+                    if state is not None:
+                        _schedule_release_if_empty(root, state)
+                    return daemon_core.HandlerResult.handled()
+                close_page_id = _page_id_value(resolved_page)
+                if close_page_id is None:
+                    raise browser_lifecycle.BrowserLifecycleError("resolved MCP page is missing pageId")
+                session.close_page(close_page_id)
+                verified_pages = session.list_pages()
+                if _recorded_page_visible(recorded_page, verified_pages):
+                    recorded_url = _page_field(recorded_page, "url", "target_url") or "<unknown>"
+                    return daemon_core.HandlerResult.failed(f"browser page still visible after MCP close: {recorded_url}")
         except browser_lifecycle.BrowserLifecycleError as exc:
             message = str(exc)
             if _is_stale_browser_error(message):
                 if root is not None:
-                    state = _forget_tracked_page(root, payload["page_id"])
+                    state = _forget_tracked_page(root, page_id)
                     if state is not None:
                         _schedule_release_if_empty(root, state)
                 return daemon_core.HandlerResult.handled()
             return daemon_core.HandlerResult.failed(message)
-        page_id = payload["page_id"]
-        observed_page = _matching_mcp_page(mcp_pages, page_id)
-        if observed_page is None:
-            if root is not None:
-                state = _forget_tracked_page(root, page_id)
-                if state is not None:
-                    _schedule_release_if_empty(root, state)
-            return daemon_core.HandlerResult.handled()
-        recorded_page: dict[str, Any] | None = None
         if root is not None:
-            state = browser_lifecycle._read_page_idle_state(root)
-            pages = state.get("pages")
-            if isinstance(pages, dict):
-                value = pages.get(str(page_id))
-                recorded_page = value if isinstance(value, dict) else None
-        if not _page_identity_matches(recorded_page, observed_page):
-            if root is not None:
-                state = _forget_tracked_page(root, page_id)
-                if state is not None:
-                    _schedule_release_if_empty(root, state)
-            return daemon_core.HandlerResult.handled()
-        try:
-            close_result = close_mcp_page(browser_endpoint, page_id)
-        except browser_lifecycle.BrowserLifecycleError as exc:
-            return daemon_core.HandlerResult.failed(str(exc))
-        if close_result.get("status") in {"closed", "already_gone"}:
-            if root is not None:
-                state = _forget_tracked_page(root, page_id)
-                if state is not None:
-                    _schedule_release_if_empty(root, state)
+            state = _forget_tracked_page(root, page_id)
+            if state is not None:
+                _schedule_release_if_empty(root, state)
         return daemon_core.HandlerResult.handled()
 
 
