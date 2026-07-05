@@ -633,6 +633,50 @@ print(json.dumps({{
         disallowed = [line for line in hits if not is_allowed_hit(line)]
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
 
+    def test_im_post_write_delivery_is_not_reimplemented_in_sender_projections(self) -> None:
+        targets = [
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+        ]
+        forbidden = [
+            r"def _with_actor_handling_status",
+            r"actor_message_handler",
+            r"[\"']type[\"']\s*:\s*[\"']im\.message\.created[\"']",
+        ]
+        hits: list[str] = []
+        for pattern in forbidden:
+            hits.extend(self._scan_targets(pattern, targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_central_im_write_does_not_import_delivery_or_processing(self) -> None:
+        source = (ROOT / "scripts" / "env" / "services" / "messages.py").read_text(encoding="utf-8")
+        forbidden = (
+            "im_delivery",
+            "wake_im_actor",
+            "mailbox.local_trigger",
+            "task_sys_ingress",
+            "ImMessageCreatedHandler",
+            "imessage_channel",
+        )
+        hits = [term for term in forbidden if term in source]
+        self.assertEqual(hits, [])
+
+    def test_im_delivery_helper_does_not_import_processing_or_channel(self) -> None:
+        source = (ROOT / "scripts" / "env" / "services" / "im_delivery.py").read_text(encoding="utf-8")
+        forbidden = (
+            "task_sys_ingress",
+            "ImMessageCreatedHandler",
+            "imessage_channel",
+            "web_management",
+            "im_http_router",
+            "env.repos.messages",
+            "send_im_message",
+        )
+        hits = [term for term in forbidden if term in source]
+        self.assertEqual(hits, [])
+
     def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:
         desc = tool_catalog.env_tools_description()
         operation_semantics = tool_catalog.operation_semantics()

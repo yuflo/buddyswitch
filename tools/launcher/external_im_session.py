@@ -6,11 +6,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Optional
 
+from env.services import im_delivery
 from env.services import messages as message_service
 
 
 ActorLister = Callable[[Optional[str]], list[dict[str, Any]]]
-ActorMessageHandler = Callable[[dict[str, Any]], dict[str, Any]]
+ActorDeliveryHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _auth_error(message: str) -> dict[str, Any]:
@@ -29,10 +30,10 @@ class ExternalImSession:
         self,
         *,
         actor_lister: ActorLister | None = None,
-        actor_message_handler: ActorMessageHandler | None = None,
+        actor_delivery_handler: ActorDeliveryHandler | None = None,
     ) -> None:
         self._actor_lister = actor_lister or (lambda _role_id: [])
-        self._actor_message_handler = actor_message_handler
+        self._actor_delivery_handler = actor_delivery_handler
 
     def create_connection(self, *, display_name: str) -> dict[str, Any]:
         return message_service.create_external_connection(display_name=display_name)
@@ -68,7 +69,11 @@ class ExternalImSession:
             and isinstance(result_target.get("type"), str)
             else target_response["identity"]
         )
-        return self._with_actor_handling_status(result, handling_target)
+        return im_delivery.attach_post_write_delivery_status(
+            result,
+            target_identity=handling_target,
+            actor_delivery_handler=self._actor_delivery_handler,
+        )
 
     def read_events(self, *, connection: dict[str, Any], limit: int = 50, wait_ms: int = 0) -> dict[str, Any]:
         return message_service.read_external_connection_events(
@@ -144,30 +149,3 @@ class ExternalImSession:
             value,
             field=field,
         )
-
-    def _with_actor_handling_status(self, result: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
-        if result.get("ok") is not True:
-            return result
-        if target.get("type") != "actor" or not isinstance(target.get("id"), str):
-            result["actor_handling_status"] = "not_applicable"
-            return result
-        message = result.get("message")
-        if not isinstance(message, dict):
-            result["actor_handling_status"] = "handling_failed"
-            return result
-        payload = {
-            "type": "im.message.created",
-            "target_identity_id": target["id"],
-            "message_id": message.get("id"),
-            "conversation_id": message.get("conversation_id"),
-            "event_id": result.get("event_id"),
-        }
-        if self._actor_message_handler is None:
-            result["actor_handling_status"] = "handling_failed"
-            return result
-        handling = self._actor_message_handler(payload)
-        if isinstance(handling, dict) and isinstance(handling.get("actor_handling_status"), str):
-            result["actor_handling_status"] = handling["actor_handling_status"]
-        else:
-            result["actor_handling_status"] = "handling_failed"
-        return result

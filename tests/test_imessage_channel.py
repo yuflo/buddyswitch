@@ -710,10 +710,12 @@ class ImessageChannelResidueTests(unittest.TestCase):
         source = (ROOT / "tools" / "launcher" / "imessage_channel.py").read_text(encoding="utf-8")
 
         self.assertNotIn("env.services.messages", source)
+        self.assertNotIn("env.services.im_delivery", source)
         self.assertNotIn("env.repos.messages", source)
         self.assertNotIn("send_im_message", source)
         self.assertNotIn("send_external_connection_message", source)
         self.assertNotIn("read_external_connection_events", source)
+        self.assertNotIn("ack_external_connection_event", source)
 
     def test_no_retired_imessage_surface(self) -> None:
         retired_terms = (

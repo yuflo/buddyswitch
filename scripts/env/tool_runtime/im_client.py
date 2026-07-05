@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from env.services import im_delivery
 from env.services import messages as message_service
 from env.tool_runtime import results as tool_results
 
@@ -52,9 +53,10 @@ class ActorImClient:
             content=str(args.get("content") or ""),
             reply_to=reply_to,
         )
-        return self._with_actor_handling_status(
+        return im_delivery.attach_post_write_delivery_status(
             result,
-            self._result_target_identity(result, target if isinstance(target, dict) else None),
+            target_identity=self._result_target_identity(result, target if isinstance(target, dict) else None),
+            actor_delivery_handler=getattr(self._context.daemon, "wake_im_actor", None),
         )
 
     def get(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -109,34 +111,6 @@ class ActorImClient:
         if isinstance(target, dict) and isinstance(target.get("id"), str) and isinstance(target.get("type"), str):
             return {"id": target["id"], "type": target["type"]}
         return None
-
-    def _with_actor_handling_status(self, result: dict[str, Any], target: dict[str, Any] | None) -> dict[str, Any]:
-        if result.get("ok") is not True:
-            return result
-        if not isinstance(target, dict) or target.get("type") != "actor" or not isinstance(target.get("id"), str):
-            result["actor_handling_status"] = "not_applicable"
-            return result
-        message = result.get("message")
-        if not isinstance(message, dict):
-            result["actor_handling_status"] = "handling_failed"
-            return result
-        payload = {
-            "type": "im.message.created",
-            "target_identity_id": target["id"],
-            "message_id": message.get("id"),
-            "conversation_id": message.get("conversation_id"),
-            "event_id": result.get("event_id"),
-        }
-        wake = getattr(self._context.daemon, "wake_im_actor", None)
-        if not callable(wake):
-            result["actor_handling_status"] = "handling_failed"
-            return result
-        handling = wake(payload)
-        if isinstance(handling, dict) and isinstance(handling.get("actor_handling_status"), str):
-            result["actor_handling_status"] = handling["actor_handling_status"]
-        else:
-            result["actor_handling_status"] = "handling_failed"
-        return result
 
     def _conversation_target_identity(self, value: Any) -> dict[str, Any]:
         identity_id = value.strip() if isinstance(value, str) and value.strip() else ""

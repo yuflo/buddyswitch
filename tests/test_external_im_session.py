@@ -42,7 +42,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 handling_calls.append(dict(payload))
             return {"actor_handling_status": "submitted", "runtime_target": "parent", "error": None}
 
-        return external_im_session.ExternalImSession(actor_lister=list_actors, actor_message_handler=handle_actor)
+        return external_im_session.ExternalImSession(actor_lister=list_actors, actor_delivery_handler=handle_actor)
 
     def _connection(self, session: external_im_session.ExternalImSession) -> tuple[str, dict[str, Any], dict[str, Any]]:
         created = session.create_connection(display_name="local smoke")
@@ -230,6 +230,33 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual([event["message_id"] for event in second["events"]], [actor_reply["message"]["id"]])
         self.assertTrue(ack.get("ok"), msg=ack)
         self.assertEqual(third["events"], [])
+
+    def test_external_delivery_is_connection_read_ack_not_actor_processing(self) -> None:
+        actor_identity = self._actor_identity()
+        session = self._session([{**actor_identity, "status": "online"}])
+        _key, connection, identity = self._connection(session)
+        sent = session.send_message(
+            connection=connection,
+            target_identity_id=actor_identity["identity_id"],
+            content="ping",
+            reply_to=None,
+        )
+        self.assertTrue(sent.get("ok"), msg=sent)
+        actor_reply = message_service.send_im_message(
+            sender_identity=actor_identity,
+            to=identity,
+            content="pong",
+            reply_to=sent["message"]["id"],
+        )
+        self.assertTrue(actor_reply.get("ok"), msg=actor_reply)
+
+        events = session.read_events(connection=connection, limit=50, wait_ms=0)
+        ack = session.ack_event(connection=connection, event_id=actor_reply["event_id"])
+
+        self.assertEqual([event["message_id"] for event in events["events"]], [actor_reply["message"]["id"]])
+        self.assertTrue(ack.get("ok"), msg=ack)
+        self.assertNotIn("actor_handling_status", events)
+        self.assertNotIn("task_sys", str(events))
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ]
             if role_id in {None, "market"}
             else [],
-            actor_message_handler=lambda payload: handling_calls.append(dict(payload)) or {"actor_handling_status": "submitted"},
+            actor_delivery_handler=lambda payload: handling_calls.append(dict(payload)) or {"actor_handling_status": "submitted"},
         )
 
         status, created = router.handle(

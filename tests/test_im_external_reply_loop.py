@@ -127,7 +127,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "status": "online",
                 }
             ],
-            actor_message_handler=daemon.wake_im_actor,
+            actor_delivery_handler=daemon.wake_im_actor,
         )
         key = self._create_connection(router)
 
