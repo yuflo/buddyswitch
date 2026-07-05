@@ -42,8 +42,8 @@ PAGE_SCOPED_USE_TOOLS = {
     "press_key",
 }
 BROWSER_SESSION_TOOL_DESCRIPTIONS = {
-    "new_page": "BuddySwitch chrome-devtools-cockpit forwards page creation to upstream Chrome DevTools MCP new_page with background=true so the page stays non-activating.",
-    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect upstream MCP pageId values, selected-page state, URLs, titles, and BuddySwitch lifecycle projection.",
+    "new_page": "BuddySwitch chrome-devtools-cockpit forwards page creation to upstream Chrome DevTools MCP new_page with background=true and records the returned selected MCP pageId as BuddySwitch current/selected projection.",
+    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect upstream MCP pageId values, selected-page state, URLs, titles, and BuddySwitch current/selected projection.",
     "select_page": "BuddySwitch selects the requested upstream MCP pageId without foreground activation and records it as the selected upstream MCP pageId lifecycle projection.",
     "take_snapshot": "Use after list_pages/select_page to inspect the selected upstream MCP pageId content.",
     "take_screenshot": "Use after list_pages/select_page to capture the selected upstream MCP pageId.",
@@ -60,7 +60,8 @@ SEARCH_PAGE_TOOL = {
     "name": "search_page",
     "description": (
         "BuddySwitch chrome-devtools-cockpit.search_page builds a supported search URL and forwards it "
-        "to upstream Chrome DevTools MCP new_page with background=true."
+        "to upstream Chrome DevTools MCP new_page with background=true, then records the returned "
+        "selected MCP pageId as BuddySwitch current/selected projection."
     ),
     "inputSchema": {
         "type": "object",
@@ -80,6 +81,10 @@ SEARCH_PAGE_TOOL = {
     },
 }
 SELECTED_URL_RE = re.compile(r"(https?://\S+)\s+\[selected\]", re.IGNORECASE)
+SELECTED_PAGE_LINE_RE = re.compile(
+    r"^\s*(?P<page_id>\d+)\s*:\s*(?P<url>\S+)(?:\s+.*?)?\s+\[selected\]\s*$",
+    re.IGNORECASE,
+)
 LIFECYCLE_WARNING_PREFIX = "Browser lifecycle warning:"
 
 
@@ -576,6 +581,22 @@ def selected_url_from_response(message: dict[str, Any]) -> str | None:
     return match.group(1).strip()
 
 
+def selected_page_from_new_page_response(message: dict[str, Any]) -> dict[str, str] | None:
+    for line in tool_response_text(message).splitlines():
+        match = SELECTED_PAGE_LINE_RE.match(line)
+        if not match:
+            continue
+        page_id = match.group("page_id").strip()
+        target_url = match.group("url").strip()
+        if not page_id:
+            return None
+        selected_page = {"page_id": page_id}
+        if target_url:
+            selected_page["url"] = target_url
+        return selected_page
+    return None
+
+
 def _tool_response_succeeded(message: dict[str, Any]) -> bool:
     result = message.get("result")
     return isinstance(result, dict) and result.get("isError") is not True
@@ -593,11 +614,30 @@ def patch_tool_response_page_use_metadata(
     if isinstance(page_hint, str) and page_hint:
         patched = patch_tool_response_hint(patched, page_hint)
     kind = metadata.get("kind")
-    if kind != "new_page" and not _tool_response_succeeded(message):
+    if not _tool_response_succeeded(message):
         return patched
     root = _instance_root_path(instance_root)
     if root is None:
         return patched
+    if kind == "new_page":
+        selected_page = selected_page_from_new_page_response(message)
+        if selected_page is None:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened page id was not readable from upstream new_page response; browser idle was not refreshed.",
+            )
+        try:
+            hint = _refresh_current_idle_hint(
+                root=root,
+                page_id=selected_page["page_id"],
+                target_url=selected_page.get("url"),
+            )
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened page idle was not refreshed: {exc}",
+            )
+        return patch_tool_response_hint(patched, hint)
     if kind == "list_pages":
         if not _tool_response_succeeded(message):
             return patched

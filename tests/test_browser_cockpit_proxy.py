@@ -300,6 +300,8 @@ for raw_line in sys.stdin:
                 raise SystemExit(0)
             continue
         response_text = "called " + str(params.get("name"))
+        if params.get("name") == "new_page":
+            response_text = os.environ.get("BUDDYSWITCH_TEST_PROXY_NEW_PAGE_TEXT", response_text)
         if params.get("name") == "select_page":
             response_text = "Selected page: https://example.com/selected [selected]"
         response = {
@@ -857,6 +859,161 @@ for raw_line in sys.stdin:
         self.assertFalse(response["result"].get("isError", False), msg=response)
         self.assertIn("called new_page", response["result"]["content"][0]["text"])
         self.assertEqual(cdp_state.get("rpc_requests", []), [])
+
+    def test_new_page_success_marks_opened_selected_page_current(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                extra_env={
+                    "BUDDYSWITCH_TEST_PROXY_NEW_PAGE_TEXT": (
+                        "## Pages\n"
+                        "1: about:blank\n"
+                        "2: https://example.com/new [selected]"
+                    )
+                },
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+            self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+            self.assertEqual(
+                forwarded[0]["params"]["arguments"],
+                {"url": "https://example.com/new", "background": True},
+            )
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:2")
+            self.assertEqual(schedule["payload"], {"page_id": "2"})
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["current_page_id"], "2")
+            self.assertEqual(page_idle["selected_page_id"], "2")
+            self.assertEqual(page_idle["pages"]["2"]["url"], "https://example.com/new")
+            self.assertEqual(cdp_state.get("rpc_requests", []), [])
+            self.assertFalse(thread.is_alive())
+
+    def test_search_page_success_marks_opened_selected_page_current(self) -> None:
+        cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
+        browser_url = self._start_cdp_list_server(cdp_state)
+        search_url = "https://www.google.com/search?q=BuddySwitch+open+current+projection"
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("search_page", {"query": "BuddySwitch open current projection", "engine": "google"})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                extra_env={
+                    "BUDDYSWITCH_TEST_PROXY_NEW_PAGE_TEXT": (
+                        "## Pages\n"
+                        "1: about:blank\n"
+                        f"2: {search_url} [selected]"
+                    )
+                },
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+            self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+            self.assertEqual(forwarded[0]["params"]["arguments"], {"url": search_url, "background": True})
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            schedule = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:2")
+            self.assertEqual(schedule["payload"], {"page_id": "2"})
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["current_page_id"], "2")
+            self.assertEqual(page_idle["selected_page_id"], "2")
+            self.assertEqual(page_idle["pages"]["2"]["url"], search_url)
+            self.assertEqual(cdp_state.get("rpc_requests", []), [])
+            self.assertFalse(thread.is_alive())
+
+    def test_opened_page_then_list_pages_does_not_schedule_empty_release(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+        search_url = "https://www.google.com/search?q=BuddySwitch+open+current+projection"
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [
+                    self._single_call("search_page", {"query": "BuddySwitch open current projection", "engine": "google"}),
+                    {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_pages", "arguments": {}}},
+                ],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                extra_env={
+                    "BUDDYSWITCH_TEST_PROXY_NEW_PAGE_TEXT": (
+                        "## Pages\n"
+                        "1: about:blank\n"
+                        f"2: {search_url} [selected]"
+                    )
+                },
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual([call["params"]["name"] for call in forwarded], ["new_page", "list_pages"])
+            self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
+            self.assertFalse(responses[1]["result"].get("isError", False), msg=responses[1])
+            text = "\n".join(item["text"] for item in responses[1]["result"]["content"] if item.get("type") == "text")
+            self.assertIn("current_page_id: 2", text)
+            self.assertIn("selected_page_id: 2", text)
+            self.assertIn("page_id: 2", text)
+            self.assertIn("current: true", text)
+            self.assertIn("selected: true", text)
+            self.assertIn("idle_tracked: true", text)
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            release_schedules = [
+                item
+                for item in saved["scheduled_triggers"].values()
+                if item["type"] == "browser.cockpit.release" and item.get("payload") == {"reason": "page_idle_empty"}
+            ]
+            self.assertEqual(release_schedules, [])
+            self.assertFalse(thread.is_alive())
+
+    def test_new_page_without_selected_page_id_reports_lifecycle_warning_without_state(self) -> None:
+        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/new"})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                extra_env={
+                    "BUDDYSWITCH_TEST_PROXY_NEW_PAGE_TEXT": "Opened page without selected marker.",
+                },
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+            response_text = json.dumps(responses[0], ensure_ascii=True)
+            self.assertIn("Browser lifecycle warning", response_text)
+            self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
+            if daemon_core.daemon_state_file(instance_root).exists():
+                saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+                page_expiry_schedules = [
+                    item
+                    for item in saved["scheduled_triggers"].values()
+                    if item["type"] == "browser.page.expired"
+                ]
+                self.assertEqual(page_expiry_schedules, [])
+            self.assertFalse(thread.is_alive())
 
     def test_new_page_does_not_call_target_create_target(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
@@ -1521,6 +1678,22 @@ for raw_line in sys.stdin:
             self.assertNotIn("browser-session", text)
             self.assertNotIn("target_id", text)
             self.assertNotIn(LEGACY_CURRENT_TARGET_FIELD, text)
+
+    def test_tool_descriptions_teach_open_current_projection(self) -> None:
+        responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+            [{"jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": {}}]
+        )
+
+        self.assertEqual(forwarded, [])
+        tools = responses[0]["result"]["tools"]
+        by_name = {tool["name"]: tool for tool in tools}
+        new_page_text = json.dumps(by_name["new_page"], ensure_ascii=True)
+        search_page_text = json.dumps(by_name["search_page"], ensure_ascii=True)
+        list_pages_text = json.dumps(by_name["list_pages"], ensure_ascii=True)
+        for text in (new_page_text, search_page_text):
+            self.assertIn("records the returned selected MCP pageId", text)
+            self.assertIn("current/selected projection", text)
+        self.assertIn("BuddySwitch current/selected projection", list_pages_text)
 
 
 if __name__ == "__main__":
