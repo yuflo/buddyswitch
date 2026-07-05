@@ -30,27 +30,6 @@ _FORBIDDEN_RUNTIME_SURFACES = {
     "roadmap",
     "approval",
 }
-_DOC_SPEC_CONTEXT_MARKERS = (
-    "alignment",
-    "appendix",
-    "browser-session-task",
-    "code-implementation-plan",
-    "completion-implementation-plan",
-    "development-plan",
-    "implementation-plan",
-    "merge-plan",
-    "objective",
-    "parallel-agent-execution-plan",
-    "remove-" + "dash" + "board-and-skill-create",
-    "scope",
-    "task-checkout-plan",
-    "task-split",
-    "test-plan",
-    "phase-2-prompt",
-    "phase2-prompt",
-)
-
-
 class RepoConsistencyTests(unittest.TestCase):
     _OLD_FLAG_PATTERNS = (
         "search open-browser --query",
@@ -115,42 +94,6 @@ class RepoConsistencyTests(unittest.TestCase):
                     snippet = " ".join(match.group(0).split())
                     hits.append(f"{relative}:{line_no}:{snippet[:260]}")
         return hits
-
-    @staticmethod
-    def _is_docs_spec_context_hit(line: str) -> bool:
-        path_text, _sep, _rest = line.partition(":")
-        if not path_text.startswith("docs/spec/"):
-            return False
-        if path_text.startswith("docs/spec/identity-redesign/"):
-            return True
-        if path_text.startswith("docs/spec/imessage-channel-im-api-boundary-optimization/"):
-            return True
-        if path_text.startswith("docs/spec/im-api-unified-rebuild-forward/"):
-            return True
-        if path_text.startswith("docs/spec/im-product-boundary-convergence-2026-07-03/"):
-            return True
-        if path_text.startswith("docs/spec/identity-communication-cutover-2026-07-04/"):
-            return True
-        if path_text.startswith("docs/spec/identity-communication-full-pass-2026-07-04/"):
-            return True
-        if path_text.startswith("docs/spec/2026-07-03-identity-first-communication-task-brief/evidence-"):
-            return True
-        if path_text.startswith("docs/spec/task-sys-im-completion-status-observability/"):
-            return True
-        if path_text.startswith("docs/spec/task-sys-proactive-rebuild/"):
-            return True
-        if path_text.startswith("docs/spec/task-sys-side-frame-lifecycle/"):
-            return True
-        if path_text.startswith("docs/spec/2026-07-01-task-sys-rebuild-"):
-            return True
-        if path_text.startswith("docs/spec/2026-07-02-side-thread-lifecycle-"):
-            return True
-        if path_text.startswith("docs/spec/2026-07-02-side-thread-model-effort-"):
-            return True
-        if path_text.startswith("docs/spec/browser-cockpit-lazy-release/"):
-            return True
-        name = Path(path_text).name
-        return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
 
     @staticmethod
     def _retired_actor_private_host_path_tokens() -> tuple[str, ...]:
@@ -1004,7 +947,6 @@ print(json.dumps({{
             "tools/launcher/assets",
             "buddyswitch/skills",
             "docs/bitter",
-            "docs/spec",
         ]
         completed = subprocess.run(
             [
@@ -1019,62 +961,8 @@ print(json.dumps({{
             check=False,
         )
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
-        hits = [
-            line
-            for line in completed.stdout.splitlines()
-            if line.strip() and not self._is_docs_spec_context_hit(line)
-        ]
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_docs_spec_drift_filter_rejects_unmarked_live_guidance(self) -> None:
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-05-22-tool-layer-semantic-source-of-truth-implementation-plan.md:1:TOOL_SPEC"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-06-30-fea-webui-fea-daemon-main-merge-plan.md:1:tests/test_env_tool_schema_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/imessage-channel-im-api-boundary-optimization/99-final-acceptance.md:1:tests/test_external_im_projection_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/im-api-unified-rebuild-forward/phase-01-unified-auth-context.md:1:tests/test_external_im_projection_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/identity-communication-full-pass-2026-07-04/phase-11-final-acceptance-plan.md:1:tests/test_external_im_projection_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-07-03-identity-first-communication-task-brief/evidence-2026-07-04-live-user-simulation/run/scripts/live_identity_full_pass_probe.py:1:track.get"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/task-sys-im-completion-status-observability/phase-1-task-sys-close.md:1:tests/test_env_tool_semantic_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/task-sys-side-frame-lifecycle/phase-05-tool-feedback-contract.md:1:tests/test_env_tool_response_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/browser-cockpit-lazy-release/phase-06-search-open-browser-ensure.md:1:tests/test_env_tool_response_contract.py"
-            )
-        )
-        self.assertFalse(
-            self._is_docs_spec_context_hit("docs/spec/runtime-guidance.md:1:TOOL_SPEC")
-        )
 
     def test_active_guidance_does_not_reference_capture_as_env_tool(self) -> None:
         completed = subprocess.run(
@@ -1111,11 +999,6 @@ print(json.dumps({{
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
-        self.assertFalse(
-            self._is_docs_spec_context_hit(
-                "docs/spec/live-runtime-guidance.md:1:Use scripts/env/tools/task/contract.py"
-            )
-        )
 
     def test_active_cli_guidance_has_no_old_env_client_flags(self) -> None:
         targets = [
@@ -1273,9 +1156,6 @@ print(json.dumps({{
             if line.startswith("tests/"):
                 allowed.append(line)
                 continue
-            if "/docs/spec/" in lower or "/docs/memo/" in lower:
-                allowed.append(line)
-                continue
             if line.startswith("scripts/artifact_selection.py:"):
                 allowed.append(line)
                 continue
@@ -1297,8 +1177,6 @@ print(json.dumps({{
         for line in hits:
             lower = line.lower()
             if line.startswith("tests/"):
-                continue
-            if "/docs/spec/" in lower or "/docs/memo/" in lower or "/docs/bitter/" in lower:
                 continue
             disallowed.append(line)
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
@@ -1420,25 +1298,6 @@ print(json.dumps({{
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_parallel_modular_architecture_memo_documents_current_skill_tool_boundary(self) -> None:
-        path = ROOT / "docs/memo/buddyswitch-parallel-modular-architecture.md"
-        text = path.read_text(encoding="utf-8")
-        lowered = text.lower()
-
-        self.assertIn("## skill / tool contract 衔接规则", lowered)
-        self.assertIn("context.get.tool_catalog", text)
-        self.assertIn("python3 scripts/turn_runtime.py status", text)
-        self.assertIn("scripts/env/tool_runtime/definition.py", text)
-        self.assertIn("scripts/env/tool_runtime/registry.py", text)
-        self.assertIn("scripts/env/tools/<tool>/tool.py", text)
-        self.assertIn("scripts/env/tools/<tool>/_impl.py", text)
-        self.assertIn("skill 通过 runtime discovery 消费能力，不复制能力", lowered)
-        self.assertNotIn("## 第一阶段落地", text)
-        self.assertIn("## 已落地基础", text)
-        self.assertIn("workflow engine", lowered)
-        self.assertIn("plugin system", lowered)
-        self.assertIn("event bus", lowered)
 
     def test_readme_runtime_sources_match_per_tool_runtime(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8")

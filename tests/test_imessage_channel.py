@@ -730,7 +730,6 @@ class ImessageChannelResidueTests(unittest.TestCase):
             ROOT / "buddyswitch-codex",
             ROOT / "tools" / "launcher",
             ROOT / "tests",
-            ROOT / "docs" / "spec",
         ]
         hits: list[str] = []
         for path in live_paths:
@@ -785,16 +784,12 @@ class ImessageChannelResidueTests(unittest.TestCase):
         live_roots = [
             ROOT / "tools" / "launcher",
             ROOT / "tests",
-            ROOT / "docs" / "spec",
         ]
-        excluded = ROOT / "docs" / "spec" / "imessage-channel-im-api-boundary-optimization"
         hits: list[str] = []
         for path in live_roots:
             files = [path] if path.is_file() else [row for row in path.rglob("*") if row.is_file()]
             for file_path in files:
                 if "__pycache__" in file_path.parts:
-                    continue
-                if excluded in file_path.parents:
                     continue
                 text = file_path.read_text(encoding="utf-8", errors="ignore")
                 for line_number, line in enumerate(text.splitlines(), start=1):
@@ -804,14 +799,6 @@ class ImessageChannelResidueTests(unittest.TestCase):
                         if pattern.search(line):
                             hits.append(f"{file_path.relative_to(ROOT)}:{line_number}: {line.strip()}")
         self.assertEqual(hits, [])
-
-    def test_smoke_runbook_covers_delayed_control_regression(self) -> None:
-        source = (ROOT / "docs" / "spec" / "imessage-channel-smoke-runbook.md").read_text(encoding="utf-8")
-
-        self.assertIn("Immediately send /actors before the actor reply arrives.", source)
-        self.assertIn("Confirm the actor list returns promptly.", source)
-        self.assertIn("Confirm the original actor reply still arrives once in the same chat.", source)
-
 
 def _create_chat_db(path: Path, *, chat_id: int) -> None:
     with sqlite3.connect(path) as db:
