@@ -135,7 +135,7 @@ def _read_success(action: str, context: Any, *, effect_summary: str, extra: dict
         read_scope="actor-owned task sys task records",
         allowed_next_actions=[
             "Use task_sys.get for full task detail.",
-            "Use task_sys.close when the active frame completed the source-bound task.",
+            "Use task_sys.close when the active frame completed the required task work.",
             "Use task_sys.need_parent when side processing requires parent work.",
         ],
         extra=extra,

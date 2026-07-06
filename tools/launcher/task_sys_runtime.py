@@ -96,9 +96,58 @@ def _json_block(value: Mapping[str, Any]) -> str:
     return json.dumps(dict(value), ensure_ascii=True, indent=2, sort_keys=True)
 
 
+def _im_message_tool_capability_lines() -> tuple[str, ...]:
+    return (
+        "- message.contacts(...) to inspect discoverable actor targets when target discovery is needed.",
+        "- message.list(...) to inspect active-identity Central IM events when event feed context is needed.",
+        "- message.get(message_id=...) to read exact processable inbound messages.",
+        "- message.conversation(target_identity_id=..., ...) to inspect visible direct conversation context.",
+        "- message.send(reply_to=source_message_id, content=...) to reply to the current source message.",
+        "- message.send(target_identity_id=..., content=...) to send required IM communication to an explicit actor or external identity.",
+        "- message.mark(message_id=..., disposition=absorbed) when a processable inbound message needs no reply.",
+    )
+
+
+def _render_im_message_task_guidance(*, frame_kind: str) -> tuple[str, str, str]:
+    close_line = (
+        "- After the required message work succeeds, call task_sys.close(task_id=..., summary=...)."
+        if frame_kind == "parent"
+        else "- After the task is completed in side, call task_sys.close(task_id=..., summary=...)."
+    )
+    return (
+        "For an IM source message:",
+        "\n".join(
+            (
+                "Use the message tool contract as the authority for message reads, sends, target resolution, and disposition.",
+                "Allowed message operations for completing this IM-source task:",
+                *_im_message_tool_capability_lines(),
+                close_line,
+            )
+        ),
+        "Message task boundary:",
+    )
+
+
 def render_side_frame(frame: Mapping[str, Any]) -> str:
     payload = _require_mapping(frame, "frame")
     task_id = _require_text(payload.get("task_id"), "frame.task_id")
+    source = _require_mapping(payload.get("source"), "frame.source")
+    source_type = source.get("type")
+    if source_type == "im.message.created":
+        source_guidance = (
+            *_render_im_message_task_guidance(frame_kind="side"),
+            "\n".join(
+                (
+                    "- Keep message work tied to the current IM-source task.",
+                    "- Use task_sys.need_parent only when required work needs parent resources outside message tools.",
+                )
+            ),
+        )
+    else:
+        source_guidance = (
+            "Source-specific resources:",
+            "No source-specific message capability is added for this source type.",
+        )
     return "\n\n".join(
         (
             "task_sys.side_frame",
@@ -110,27 +159,28 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             ),
             f"Task id: {task_id}",
             "Task Sys source:",
-            _json_block(_require_mapping(payload.get("source"), "frame.source")),
+            _json_block(source),
             "Task Sys context:",
             _json_block(_require_mapping(payload.get("context"), "frame.context")),
             "Core policy: decide by required resources.",
             (
                 "A side thread may handle the task only when completion requires this task_sys.side_frame, exact "
-                "source objects referenced by this frame, bounded read-only inspection, current-source IM "
-                "disposition/reply, and one Task Sys frame operation."
+                "source objects referenced by this frame, bounded read-only inspection, source-specific message "
+                "tools allowed by this frame, and one Task Sys frame operation."
             ),
             (
                 "If the task requires parent attention, workspace resources, browser/web/research resources, shared "
-                "product-state writes, durable deliverables, new outbound communication, or multi-step execution, do "
-                "not perform it in side. Call task_sys.need_parent."
+                "product-state writes outside the message tools, durable deliverables, or multi-step execution "
+                "outside the current message task, do not perform it in side. Call task_sys.need_parent."
             ),
             "Allowed side resources:",
+            *source_guidance,
             "\n".join(
                 (
                     "1. Frame and exact source reads",
                     "- Read this task frame.",
                     "- Read exact source refs from this frame.",
-                    "- Use message.get / message.conversation only as needed for the current source.",
+                    "- Use source-specific product reads only when allowed above.",
                     "- Use track/artifact/context read-only tools only for bounded inspection.",
                     (
                         "- Use local read-only inspection only; do not run tests, builds, app servers, installers, "
@@ -141,23 +191,7 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             ),
             "\n".join(
                 (
-                    "2. Current-source IM closure",
-                    "For an IM source message, side may only:",
-                    "- reply to the exact source message with message.send(reply_to=source_message_id, content=...),",
-                    (
-                        "- or mark the exact source message absorbed with "
-                        "message.mark(message_id=source_message_id, disposition=absorbed)."
-                    ),
-                    (
-                        "Do not start a new IM conversation. Do not send to target_identity_id from side unless the "
-                        "frame explicitly defines that as the exact source-bound closure, which normal IM inbound "
-                        "frames do not."
-                    ),
-                )
-            ),
-            "\n".join(
-                (
-                    "3. Task Sys frame operation",
+                    "2. Task Sys frame operation",
                     "Finish this frame with exactly one legal Task Sys operation:",
                     "- task_sys.close(task_id=..., summary=...) when the task is completed in side.",
                     (
@@ -177,7 +211,7 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     "- artifacts, evidence, durable deliverables,",
                     "- raw runtime files or buddyswitch/objects direct writes,",
                     "- permission changes, sandbox broadening, or external credentials,",
-                    "- any outbound communication that is not an exact reply/closure for the current source.",
+                    "- outbound communication outside this frame's source-specific message guidance.",
                 )
             ),
             "Decision procedure:",
@@ -187,8 +221,8 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     "2. If all required resources are allowed side resources, complete the task in side.",
                     "3. If any required resource is forbidden or belongs to parent, call task_sys.need_parent.",
                     (
-                        "4. Do not call task_sys.need_parent merely because a user-facing reply is needed. If the "
-                        "reply is a short exact IM reply to the current source message, handle it in side."
+                        "4. Do not call task_sys.need_parent for message work that this frame's source-specific "
+                        "message guidance allows."
                     ),
                     (
                         "5. Do call task_sys.need_parent for research, implementation, planning, verification, "
@@ -197,18 +231,16 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     ),
                 )
             ),
-            "IM closure order:",
+            "Frame completion order:",
             "\n".join(
                 (
-                    "- If replying: first call message.send(reply_to=source_message_id, content=...).",
-                    "- If absorbing: first call message.mark(message_id=source_message_id, disposition=absorbed).",
-                    "- Only after that source-bound action succeeds, call task_sys.close.",
+                    "- Perform required message actions before closing the task.",
                     (
-                        "- If the source-bound action fails, do not close the task. Retry if clearly safe, otherwise "
-                        "call task_sys.need_parent with failure context."
+                        "- If the message action fails, do not close the task. Retry if clearly safe, otherwise call "
+                        "task_sys.need_parent with failure context."
                     ),
                     (
-                        "- If the source-bound action succeeded but task_sys.close fails, retry task_sys.close; do "
+                        "- If the message action succeeded but task_sys.close fails, retry task_sys.close; do "
                         "not send a duplicate reply."
                     ),
                 )
@@ -244,23 +276,23 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
     source_type = source.get("type")
     if source_type == "im.message.created":
         source_guidance = (
-            "For an IM source message:",
+            *_render_im_message_task_guidance(frame_kind="parent"),
             "\n".join(
                 (
-                    "- If replying, first call message.send(reply_to=source_message_id, content=...).",
-                    "- If no reply is needed, first call message.mark(message_id=source_message_id, disposition=absorbed).",
-                    "- Only after the source-bound IM action succeeds, call task_sys.close.",
-                    (
-                        "- If the IM action succeeds but task_sys.close fails, retry task_sys.close and do not send a "
-                        "duplicate reply."
-                    ),
+                    "- Use message tools only for work required by this parent frame and its parent_handoff_params.",
+                    "- Do not rely on parent turn completion to close this Task Sys task.",
                 )
             ),
             "Allowed parent frame operations:",
             "\n".join(
                 (
-                    "- message.send(reply_to=source_message_id, content=...) for a source-bound reply.",
-                    "- message.mark(message_id=source_message_id, disposition=absorbed) when no reply is needed.",
+                    "- message.contacts(...)",
+                    "- message.list(...)",
+                    "- message.get(message_id=...)",
+                    "- message.conversation(target_identity_id=..., ...)",
+                    "- message.send(reply_to=source_message_id, content=...)",
+                    "- message.send(target_identity_id=..., content=...)",
+                    "- message.mark(message_id=..., disposition=absorbed)",
                     "- task_sys.close(task_id=..., summary=...)",
                 )
             ),
