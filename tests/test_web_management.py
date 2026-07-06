@@ -1116,9 +1116,12 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         return sorted(identities_dir.glob("*.json")) if identities_dir.is_dir() else []
 
     @staticmethod
-    def _instance_list_for_identity_routes(identity_routes: list[dict[str, str]]) -> dict[str, object]:
+    def _seed_actor_identity_profiles(identity_routes: list[dict[str, str]]) -> None:
         for route in identity_routes:
             save_test_actor_identity_profile(actor_id=route["actor_id"], role_id=route["role_id"])
+
+    @staticmethod
+    def _instance_list_for_identity_routes(identity_routes: list[dict[str, str]]) -> dict[str, object]:
         return {
             "instances": [
                 {
@@ -1150,6 +1153,18 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                     service.handle_api(method, path, body, {})
                 self.assertEqual(raised.exception.status, 404)
                 self.assertEqual(raised.exception.code, "NOT_FOUND")
+
+    def test_web_im_actor_roster_does_not_create_actor_identity_profile(self) -> None:
+        routes = [{"actor_id": "act-web-profile-missing", "role_id": "dev"}]
+        runner = FakeRunner()
+        runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_identity_routes(routes)))
+        service = self._service(runner)
+
+        status, payload = service.handle_api("GET", "/api/im/actors", b"", {})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["count"], 1)
+        self.assertIsNone(identity_repo.get_actor_identity_profile("act-web-profile-missing"))
 
     def test_im_session_creates_one_stable_web_identity_per_runtime(self) -> None:
         first = self._service()
@@ -1208,6 +1223,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             "role_id": "market",
             "actor_id": self._runtime_actor_id(role="market", label="web-im-history"),
         }
+        self._seed_actor_identity_profiles([actor_route])
         runner = FakeRunner()
         runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_identity_routes([actor_route])))
         service = self._service(runner)
@@ -1319,6 +1335,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             "role_id": "dev",
             "actor_id": self._runtime_actor_id(role="dev", label="web-im-dev"),
         }
+        self._seed_actor_identity_profiles([market_actor, dev_actor])
         runner = FakeRunner()
         runner.add(["instance", "list", "--json"], command_json(self._instance_list_for_identity_routes([market_actor, dev_actor])))
         service = self._service(runner)

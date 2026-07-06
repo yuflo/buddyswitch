@@ -31,6 +31,7 @@ from task_sys_runtime import cleanup_task_sys_side_lease as task_sys_cleanup_tas
 from task_sys_runtime import execute_instruction as task_sys_execute_instruction  # noqa: E402
 from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from env.domain import task_sys  # noqa: E402
+from env.repos import identities as identity_repo  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 
@@ -1181,6 +1182,8 @@ def derive_daemon_runtime_env(context: DaemonContext) -> dict[str, str]:
         "BUDDYSWITCH_INSTANCE_ROOT": str(context.instance_root),
         "BUDDYSWITCH_INSTANCE_JSON": str(context.instance_json),
         "BUDDYSWITCH_WORKSPACE_DIR": str(context.workspace_dir),
+        "BUDDYSWITCH_ACTOR_ID": context.actor_id,
+        "BUDDYSWITCH_ROLE_ID": context.role,
     }
 
 
@@ -1203,6 +1206,24 @@ def identity_route_for_context(context: DaemonContext) -> dict[str, str]:
     return identity_route_payload(
         {"identity_id": context.actor_id, "role_id": context.role},
         "context.identity_route",
+    )
+
+
+def ensure_actor_identity_profile(context: DaemonContext, identity_route: dict[str, str]) -> dict[str, Any]:
+    existing = identity_repo.get_actor_identity_profile(identity_route["identity_id"])
+    if isinstance(existing, dict):
+        if existing.get("role_id") != identity_route["role_id"]:
+            raise ValueError(
+                "actor identity profile role mismatch: "
+                f"{identity_route['identity_id']} has {existing.get('role_id')}, "
+                f"instance has {identity_route['role_id']}"
+            )
+        return existing
+    return identity_repo.save_actor_identity_profile(
+        {
+            "identity": {"id": identity_route["identity_id"], "type": "actor"},
+            "role_id": identity_route["role_id"],
+        }
     )
 
 
@@ -1845,6 +1866,7 @@ def run_daemon(
     os.environ.update(derive_daemon_runtime_env(context))
     runtime_files.refresh_runtime_roots_from_env()
     identity_route = identity_route_for_context(context)
+    ensure_actor_identity_profile(context, identity_route)
     state = DaemonState.load(
         instance_root=context.instance_root,
         actor_id=context.actor_id,
