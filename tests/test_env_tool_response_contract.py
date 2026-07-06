@@ -754,12 +754,10 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
         pm_actor_id = self._runtime_actor_id(role="pm", label="act-pm-parent-submit-contract")
         instance_json = self._instance_json(role="dev", actor_id="act-dev-parent-submit-contract")
-        target_participant = {"kind": "actor", "actor_address": {"actor_id": dev_actor_id, "role_id": "dev"}}
         seed_response = message_service.send_im_message(
-            sender_participant={"kind": "actor", "actor_address": {"actor_id": pm_actor_id, "role_id": "pm"}},
-            to=target_participant,
+            sender_identity={"id": pm_actor_id, "type": "actor"},
+            target_identity={"id": dev_actor_id, "type": "actor"},
             content="This needs parent handling.",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         self.assertTrue(seed_response.get("ok"), msg=seed_response)
         message_id = seed_response["message"]["id"]
@@ -787,7 +785,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
         self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
         self.assertIn("message.get", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
-        state = message_repo.get_im_message_state(message_id, target_participant)
+        state = message_repo.get_im_message_state(message_id, dev_actor_id)
         self.assertIsInstance(state, dict, msg=response)
         assert isinstance(state, dict)
         self.assertEqual(state["disposition"], "unseen")
@@ -837,7 +835,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = tool_results.rejection(
             tool="track",
             action="track.create",
-            active_actor={"actor_id": "act-pm-response-contract", "role_id": "pm"},
+            current_identity={"id": "act-pm-response-contract", "type": "actor"},
             active_role="pm",
             code="E_TRACK_PAYLOAD",
             message="now must be an object",
@@ -863,7 +861,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             tool_results.rejection(
                 tool="track",
                 action="track.create",
-                active_actor={"actor_id": "act-pm-response-contract", "role_id": "pm"},
+                current_identity={"id": "act-pm-response-contract", "type": "actor"},
                 active_role="pm",
                 code="E_TRACK_PAYLOAD",
                 message="now must be an object",
@@ -877,24 +875,24 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 extra={"field_errors": []},
             )
 
-    def test_tool_result_helpers_require_full_active_actor(self) -> None:
-        actor = {"actor_id": "act-pm-result-helper", "role_id": "pm"}
+    def test_tool_result_helpers_require_current_identity(self) -> None:
+        identity = {"id": "act-pm-result-helper", "type": "actor"}
         ok = tool_results.success(
             tool="context",
             action="context.summarize",
-            active_actor=actor,
+            current_identity=identity,
             active_role="pm",
             effect_summary="Returned context.",
             state_changed=False,
             durability="none",
         )
-        self.assertEqual(ok.get("active_actor"), actor)
+        self.assertEqual(ok.get("current_identity"), identity)
         self.assertEqual(ok.get("active_role"), "pm")
 
         rejection = tool_results.rejection(
             tool="context",
             action="context.summarize",
-            active_actor=actor,
+            current_identity=identity,
             active_role="pm",
             code="E_CONTEXT_PAYLOAD",
             message="limit must be a positive integer",
@@ -906,7 +904,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             retryable=True,
             retry_guidance="Fix limit and retry.",
         )
-        self.assertEqual(rejection.get("active_actor"), actor)
+        self.assertEqual(rejection.get("current_identity"), identity)
         self.assertEqual(rejection.get("active_role"), "pm")
 
         with self.assertRaises((TypeError, ValueError)):
@@ -937,7 +935,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             tool_results.success(
                 tool="context",
                 action="context.summarize",
-                active_actor={"role_id": "pm"},
+                current_identity={"type": "actor"},
                 active_role="pm",
                 effect_summary="Returned context.",
                 state_changed=False,

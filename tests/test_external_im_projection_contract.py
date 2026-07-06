@@ -24,20 +24,18 @@ from tools.launcher import web_management  # noqa: E402
 class _FakeExternalImSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.connection = {"identity_id": "ext-fake"}
-        self.participant = {"kind": "external", "external_id": "ext-fake"}
+        self.external_session = {"identity_id": "ext-fake"}
 
-    def create_connection(self, *, display_name: str) -> dict[str, Any]:
-        self.calls.append(("create_connection", {"display_name": display_name}))
-        return {"ok": True, "connection_key": "imck-fake"}
+    def create_external_session(self, *, display_name: str) -> dict[str, Any]:
+        self.calls.append(("create_external_session", {"display_name": display_name}))
+        return {"ok": True, "external_session_key": "imsk-fake"}
 
-    def authenticate(self, connection_key: str) -> dict[str, Any]:
-        self.calls.append(("authenticate", {"connection_key": connection_key}))
+    def authenticate_external_session_key(self, external_session_key: str) -> dict[str, Any]:
+        self.calls.append(("authenticate_external_session_key", {"external_session_key": external_session_key}))
         return {
             "ok": True,
             "identity": {"id": "ext-fake", "type": "external"},
-            "participant": self.participant,
-            "connection": self.connection,
+            "external_session": self.external_session,
         }
 
     def list_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
@@ -58,7 +56,7 @@ class _FakeExternalImSession:
     def send_message(
         self,
         *,
-        connection: dict[str, Any],
+        external_session: dict[str, Any],
         target_identity_id: Any,
         content: str,
         reply_to: Any = None,
@@ -67,7 +65,7 @@ class _FakeExternalImSession:
             (
                 "send_message",
                 {
-                    "connection": connection,
+                    "external_session": external_session,
                     "target_identity_id": target_identity_id,
                     "content": content,
                     "reply_to": reply_to,
@@ -79,39 +77,44 @@ class _FakeExternalImSession:
             "message": {"id": "msg-fake", "conversation_id": "conv-fake", "reply_to": reply_to},
             "event_id": "imev-fake",
             "delivery_status": "accepted",
-            "wake_status": "submitted",
+            "actor_handling_status": "submitted",
         }
 
-    def read_events(self, *, connection: dict[str, Any], limit: int = 50, wait_ms: int = 0) -> dict[str, Any]:
-        self.calls.append(("read_events", {"connection": connection, "limit": limit, "wait_ms": wait_ms}))
+    def read_events(self, *, external_session: dict[str, Any], limit: int = 50, wait_ms: int = 0) -> dict[str, Any]:
+        self.calls.append(("read_events", {"external_session": external_session, "limit": limit, "wait_ms": wait_ms}))
         return {"ok": True, "events": []}
 
     def get_direct_conversation(
         self,
         *,
-        connection: dict[str, Any],
+        external_session: dict[str, Any],
         identity_id: Any,
         limit: int = 20,
     ) -> dict[str, Any]:
-        self.calls.append(("get_direct_conversation", {"connection": connection, "identity_id": identity_id, "limit": limit}))
+        self.calls.append(
+            (
+                "get_direct_conversation",
+                {"external_session": external_session, "identity_id": identity_id, "limit": limit},
+            )
+        )
         return {"ok": False, "error": {"code": "E_IM_NOT_FOUND", "message": "direct conversation not found"}}
 
-    def get_message(self, *, connection: dict[str, Any], message_id: str) -> dict[str, Any]:
-        self.calls.append(("get_message", {"connection": connection, "message_id": message_id}))
+    def get_message(self, *, external_session: dict[str, Any], message_id: str) -> dict[str, Any]:
+        self.calls.append(("get_message", {"external_session": external_session, "message_id": message_id}))
         return {"ok": True, "message": {"id": message_id, "content": "pong"}}
 
-    def ack_event(self, *, connection: dict[str, Any], event_id: str) -> dict[str, Any]:
-        self.calls.append(("ack_event", {"connection": connection, "event_id": event_id}))
+    def ack_event(self, *, external_session: dict[str, Any], event_id: str) -> dict[str, Any]:
+        self.calls.append(("ack_event", {"external_session": external_session, "event_id": event_id}))
         return {"ok": True, "event_id": event_id}
 
-    def list_replies(self, *, connection: dict[str, Any], message_id: str) -> dict[str, Any]:
-        self.calls.append(("list_replies", {"connection": connection, "message_id": message_id}))
+    def list_replies(self, *, external_session: dict[str, Any], message_id: str) -> dict[str, Any]:
+        self.calls.append(("list_replies", {"external_session": external_session, "message_id": message_id}))
         return {"ok": True, "message_id": message_id, "replies": [], "count": 0}
 
     def update_disposition(
         self,
         *,
-        connection: dict[str, Any],
+        external_session: dict[str, Any],
         message_id: str,
         disposition: str,
         reason: str | None = None,
@@ -120,7 +123,7 @@ class _FakeExternalImSession:
             (
                 "update_disposition",
                 {
-                    "connection": connection,
+                    "external_session": external_session,
                     "message_id": message_id,
                     "disposition": disposition,
                     "reason": reason,
@@ -131,16 +134,16 @@ class _FakeExternalImSession:
 
 
 class _FakeWebIdentityProvider:
-    def __init__(self, connection: dict[str, Any]) -> None:
-        self.connection = connection
+    def __init__(self, external_session: dict[str, Any]) -> None:
+        self.external_session = external_session
         self.calls: list[str] = []
 
     def ensure(self) -> dict[str, Any]:
         self.calls.append("ensure")
         return {
             "identity": {"id": "ext-fake", "type": "external"},
-            "connection": self.connection,
-            "connection_key": "imck-secret",
+            "external_session": self.external_session,
+            "external_session_key": "imsk-secret",
             "participant_token": "pt-secret",
             "event_cursor": "imev-secret",
             "client_kind": "web-management",
@@ -153,7 +156,6 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         session = _FakeExternalImSession()
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
         )
 
@@ -167,19 +169,23 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         session = _FakeExternalImSession()
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
         )
 
-        status, created = router.handle("POST", "/api/im/connections", b'{"display_name":"Bridge"}', {})
+        status, created = router.handle("POST", "/api/im/external-sessions", b'{"display_name":"Bridge"}', {})
         self.assertEqual(status, 200)
-        self.assertEqual(created["connection_key"], "imck-fake")
+        self.assertEqual(created["external_session_key"], "imsk-fake")
+        self.assertNotIn("external_session_key_hash", created)
+
+        status, removed = router.handle("POST", "/api/im/connections", b'{"display_name":"Bridge"}', {})
+        self.assertEqual(status, 404)
+        self.assertFalse(removed["ok"])
 
         status, actors = router.handle(
             "GET",
             "/api/im/actors?role_id=market",
             b"",
-            {"Authorization": "Bearer imck-fake"},
+            {"Authorization": "Bearer imsk-fake"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(actors["count"], 1)
@@ -194,7 +200,7 @@ class ExternalImProjectionContractTests(unittest.TestCase):
                     "reply_to": None,
                 }
             ).encode("utf-8"),
-            {"Authorization": "Bearer imck-fake"},
+            {"Authorization": "Bearer imsk-fake"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(sent["delivery_status"], "accepted")
@@ -202,14 +208,14 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         self.assertEqual(
             session.calls,
             [
-                ("create_connection", {"display_name": "Bridge"}),
-                ("authenticate", {"connection_key": "imck-fake"}),
+                ("create_external_session", {"display_name": "Bridge"}),
+                ("authenticate_external_session_key", {"external_session_key": "imsk-fake"}),
                 ("list_actors", {"role_id": "market"}),
-                ("authenticate", {"connection_key": "imck-fake"}),
+                ("authenticate_external_session_key", {"external_session_key": "imsk-fake"}),
                 (
                     "send_message",
                     {
-                        "connection": session.connection,
+                        "external_session": session.external_session,
                         "target_identity_id": "act-market-demo",
                         "content": "ping",
                         "reply_to": None,
@@ -220,12 +226,11 @@ class ExternalImProjectionContractTests(unittest.TestCase):
 
     def test_router_web_provider_session_and_protected_routes_use_shared_session(self) -> None:
         session = _FakeExternalImSession()
-        provider = _FakeWebIdentityProvider(session.connection)
+        provider = _FakeWebIdentityProvider(session.external_session)
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
-            web_connection_provider=provider.ensure,
+            web_external_session_provider=provider.ensure,
         )
 
         status, web_session = router.handle("GET", "/api/im/session", b"", {})
@@ -239,10 +244,10 @@ class ExternalImProjectionContractTests(unittest.TestCase):
                 "display_name": "BuddySwitch Web",
             },
         )
-        self.assertNotIn("connection_key", web_session)
+        self.assertNotIn("external_session_key", web_session)
         self.assertNotIn("participant_token", web_session)
         self.assertNotIn("event_cursor", web_session)
-        self.assertNotIn("connection", web_session)
+        self.assertNotIn("external_session", web_session)
 
         status, sent = router.handle(
             "POST",
@@ -274,25 +279,24 @@ class ExternalImProjectionContractTests(unittest.TestCase):
                 (
                     "send_message",
                     {
-                        "connection": session.connection,
+                        "external_session": session.external_session,
                         "target_identity_id": "act-market-demo",
                         "content": "ping",
                         "reply_to": None,
                     },
                 ),
-                ("read_events", {"connection": session.connection, "limit": 3, "wait_ms": 25}),
-                ("ack_event", {"connection": session.connection, "event_id": "imev-fake"}),
+                ("read_events", {"external_session": session.external_session, "limit": 3, "wait_ms": 25}),
+                ("ack_event", {"external_session": session.external_session, "event_id": "imev-fake"}),
             ],
         )
 
     def test_router_rejects_malformed_authorization_without_web_provider_fallback(self) -> None:
         session = _FakeExternalImSession()
-        provider = _FakeWebIdentityProvider(session.connection)
+        provider = _FakeWebIdentityProvider(session.external_session)
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [],
-            wake_actor=lambda _payload: {},
             im_session=session,
-            web_connection_provider=provider.ensure,
+            web_external_session_provider=provider.ensure,
         )
 
         status, payload = router.handle("GET", "/api/im/session", b"", {"Authorization": "Basic nope"})
@@ -313,8 +317,8 @@ class ExternalImProjectionContractTests(unittest.TestCase):
                     {
                         "event_id": "imev-reply",
                         "message_id": "msg-reply",
-                        "from_identity_id": "act-market-demo",
-                        "to_identity_id": "ext-fake",
+                        "sender_identity": {"id": "act-market-demo", "type": "actor"},
+                        "target_identity": {"id": "ext-fake", "type": "external"},
                     }
                 ],
             }
@@ -325,7 +329,7 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         )
         service = web_management.WebManagementService(
             repo_root=ROOT,
-            web_im_identity_provider=_FakeWebIdentityProvider(session.connection),
+            web_im_identity_provider=_FakeWebIdentityProvider(session.external_session),
             im_session=session,
         )
 
@@ -338,7 +342,10 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([event["event_id"] for event in events["events"]], ["imev-reply"])
         self.assertNotIn("messages", events)
-        self.assertEqual(session.calls, [("read_events", {"connection": session.connection, "limit": 10, "wait_ms": 0})])
+        self.assertEqual(
+            session.calls,
+            [("read_events", {"external_session": session.external_session, "limit": 10, "wait_ms": 0})],
+        )
 
         status, message = service.handle_api("GET", "/api/im/messages/msg-reply", b"", {})
         self.assertEqual(status, 200)
@@ -359,12 +366,12 @@ class ExternalImProjectionContractTests(unittest.TestCase):
         self.assertEqual(
             session.calls,
             [
-                ("read_events", {"connection": session.connection, "limit": 10, "wait_ms": 0}),
-                ("get_message", {"connection": session.connection, "message_id": "msg-reply"}),
-                ("ack_event", {"connection": session.connection, "event_id": "imev-reply"}),
+                ("read_events", {"external_session": session.external_session, "limit": 10, "wait_ms": 0}),
+                ("get_message", {"external_session": session.external_session, "message_id": "msg-reply"}),
+                ("ack_event", {"external_session": session.external_session, "event_id": "imev-reply"}),
                 (
                     "get_direct_conversation",
-                    {"connection": session.connection, "identity_id": "act-market-demo", "limit": 20},
+                    {"external_session": session.external_session, "identity_id": "act-market-demo", "limit": 20},
                 ),
             ],
         )

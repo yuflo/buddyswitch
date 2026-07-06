@@ -84,6 +84,16 @@ _RETIRED_TASK_APIS = frozenset(
     }
 )
 
+_RETIRED_MESSAGE_APIS = frozenset(
+    {
+        "validate_message",
+        "list_messages",
+        "get_message",
+        "save_message",
+        "create_message",
+    }
+)
+
 _RETIRED_OBJECT_APIS = frozenset(
     {
         "VALID_TRACK_STATE",
@@ -95,7 +105,6 @@ _RETIRED_OBJECT_APIS = frozenset(
         "track_comment_file",
         "validate_track",
         "validate_artifact",
-        "validate_message",
         "validate_track_comment",
         "list_tracks",
         "list_artifacts",
@@ -115,10 +124,6 @@ _RETIRED_OBJECT_APIS = frozenset(
         "delete_artifact",
         "delete_artifacts_by_role",
         "delete_all_artifacts",
-        "list_messages",
-        "get_message",
-        "save_message",
-        "create_message",
         "list_track_comments",
         "get_track_comment",
         "save_track_comment",
@@ -134,6 +139,10 @@ def __getattr__(name: str) -> Any:
     if name in _RETIRED_TASK_APIS:
         raise AttributeError(
             f"env_store.{name} is retired; use env.repos.tasks with explicit instance context"
+        )
+    if name in _RETIRED_MESSAGE_APIS:
+        raise AttributeError(
+            f"env_store.{name} is retired; use identity-first IM APIs in env.services.messages and env.repos.messages"
         )
     if name in _RETIRED_OBJECT_APIS:
         raise AttributeError(

@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from env.domain.identity import IdentityRef
 from env.repos import track_comments as track_comment_repo
 from env.repos import tracks as track_repo
 
@@ -19,31 +20,30 @@ def _preview(value: Any, *, limit: int = 160) -> str:
     return normalized[: limit - 3].rstrip() + "..."
 
 
-def _same_actor(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) -> bool:
-    if left is None or right is None:
-        return False
-    return left.get("actor_id") == right.get("actor_id") and left.get("role_id") == right.get("role_id")
-
-
-def _identity_id_from_actor(actor: Mapping[str, Any] | None) -> str | None:
-    if actor is None:
+def _identity_id(value: Mapping[str, Any] | str | None) -> str | None:
+    if value is None:
         return None
-    actor_id = actor.get("actor_id")
-    return actor_id if isinstance(actor_id, str) and actor_id else None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, Mapping):
+        if isinstance(value.get("identity"), Mapping):
+            return IdentityRef.from_payload(value["identity"]).id
+        if isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
+            return IdentityRef.from_payload(value).id
+    return None
 
 
 def _comment_author_identity_id(comment: Mapping[str, Any]) -> str | None:
     identity_id = comment.get("by_identity_id")
     if isinstance(identity_id, str) and identity_id:
         return identity_id
-    actor = comment.get("by_actor")
-    return _identity_id_from_actor(actor) if isinstance(actor, Mapping) else None
+    return None
 
 
 def comment_threads(
     comments: Iterable[Mapping[str, Any]],
     *,
-    active_actor: Mapping[str, Any] | None = None,
+    current_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for raw in comments:
@@ -57,7 +57,7 @@ def comment_threads(
         grouped.setdefault(thread_id, []).append(row)
 
     rows: list[dict[str, Any]] = []
-    active_identity_id = _identity_id_from_actor(active_actor)
+    active_identity_id = _identity_id(current_identity)
     for thread_id, thread_comments in grouped.items():
         thread_comments.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
         latest = thread_comments[-1] if thread_comments else {}
@@ -117,11 +117,11 @@ def track_detail(
     track: Mapping[str, Any],
     *,
     comments: Iterable[Mapping[str, Any]] | None = None,
-    active_actor: Mapping[str, Any] | None = None,
+    current_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     page = track_summary(track, comments=comments)
     relations = [dict(row) for row in track.get("artifact_relations", []) if isinstance(row, Mapping)]
-    thread_projection = comment_threads(comments or [], active_actor=active_actor)
+    thread_projection = comment_threads(comments or [], current_identity=current_identity)
     page.update(
         {
             "materials": [row for row in relations if row.get("role") == "material"],
@@ -134,13 +134,13 @@ def track_detail(
     return page
 
 
-def list_track_summaries(*, owner_actor: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+def list_track_summaries(*, owner_identity: Mapping[str, Any] | str | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    owner_identity_id = _identity_id_from_actor(owner_actor)
+    owner_identity_id = _identity_id(owner_identity)
     for track in track_repo.list_tracks():
         if track.get("archived_at") is not None:
             continue
-        if owner_actor is not None and track.get("owner_identity_id") != owner_identity_id:
+        if owner_identity is not None and track.get("owner_identity_id") != owner_identity_id:
             continue
         track_id = track.get("id")
         comments = track_comment_repo.comments_for_track(track_id) if isinstance(track_id, str) else []
@@ -148,9 +148,9 @@ def list_track_summaries(*, owner_actor: Mapping[str, Any] | None = None) -> lis
     return rows
 
 
-def get_track_detail(track_id: str, *, active_actor: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+def get_track_detail(track_id: str, *, current_identity: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     track = track_repo.get_track(track_id)
     if track is None or track.get("archived_at") is not None:
         return None
     comments = track_comment_repo.comments_for_track(track_id)
-    return track_detail(track, comments=comments, active_actor=active_actor)
+    return track_detail(track, comments=comments, current_identity=current_identity)

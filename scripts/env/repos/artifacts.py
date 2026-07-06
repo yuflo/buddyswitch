@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from env.tool_runtime.actor_profile import ActorAddress
+from env.domain.identity import IdentityRef
 from . import runtime_files
 
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
@@ -53,21 +53,15 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def _normalize_actor(value: Any, field: str) -> dict[str, str]:
-    try:
-        return ActorAddress.from_payload(value).to_payload()
-    except ValueError as exc:
-        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
-
-
-def _actor_identity_id(value: Any, field: str) -> str:
-    return _normalize_actor(value, field)["actor_id"]
-
-
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
         return runtime_files.require_id(value.strip(), field)
-    return _actor_identity_id(value, field)
+    if isinstance(value, dict):
+        if isinstance(value.get("identity"), dict):
+            return IdentityRef.from_payload(value["identity"]).id
+        if isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
+            return IdentityRef.from_payload(value).id
+    raise ValueError(f"{field} must be an identity id or identity payload")
 
 
 def _normalize_source_refs(raw_refs: Any) -> list[dict[str, Any]] | None:
@@ -138,10 +132,7 @@ def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
         sha256 = _require_non_empty_text(raw.get("sha256"), "attachment.sha256")
         if len(sha256) != _SHA256_HEX_LENGTH or any(ch not in "0123456789abcdef" for ch in sha256):
             raise ValueError("attachment.sha256 must be 64 lowercase hex chars")
-        created_by_identity_id = _identity_id(
-            raw.get("created_by_identity_id", raw.get("created_by_actor")),
-            "attachment.created_by_identity_id",
-        )
+        created_by_identity_id = _identity_id(raw.get("created_by_identity_id"), "attachment.created_by_identity_id")
         created_at = _require_non_empty_text(raw.get("created_at"), "attachment.created_at")
         rows.append(
             {
@@ -217,13 +208,13 @@ def create_artifact_revision(
     *,
     artifact_id: str | None,
     title: str,
-    created_by_actor: dict[str, Any],
+    created_by_identity: dict[str, Any] | str,
     body: str,
     template: str,
     summary: str = "",
     source_refs: list[dict[str, Any]] | None = None,
     supersedes_artifact_id: str | None = None,
-    author_actors: list[dict[str, Any]] | None = None,
+    author_identities: list[dict[str, Any] | str] | None = None,
     legacy_source_run: str | None = None,
 ) -> dict[str, Any]:
     if legacy_source_run is not None:
@@ -234,7 +225,7 @@ def create_artifact_revision(
     if get_artifact(resolved_id):
         raise ValueError(f"artifact already exists: {resolved_id}")
 
-    creator_identity_id = _actor_identity_id(created_by_actor, "created_by_actor")
+    creator_identity_id = _identity_id(created_by_identity, "created_by_identity")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("body must be a non-empty string")
     if template not in VALID_ARTIFACT_TEMPLATES:
@@ -265,9 +256,9 @@ def create_artifact_revision(
         demote_previous = previous_patch
 
     author_identity_ids = [creator_identity_id]
-    if isinstance(author_actors, list):
-        for row in author_actors:
-            identity_id = _actor_identity_id(row, "author_actors[]")
+    if isinstance(author_identities, list):
+        for row in author_identities:
+            identity_id = _identity_id(row, "author_identities[]")
             if identity_id not in author_identity_ids:
                 author_identity_ids.append(identity_id)
 
@@ -314,7 +305,6 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         "supersedes_artifact_id",
         "is_current",
         "revision",
-        "author_actors",
         "author_identity_ids",
     }
     for key, value in patch.items():
@@ -328,7 +318,7 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
 def adopt_local_attachment(
     artifact_id: str,
     filename: str,
-    created_by_actor: dict[str, Any],
+    created_by_identity: dict[str, Any] | str,
     source_path: Path,
     content_type: str | None,
     context: Any,
@@ -353,7 +343,7 @@ def adopt_local_attachment(
     if not raw:
         raise ValueError("source_path must reference a non-empty file")
 
-    creator_identity_id = _actor_identity_id(created_by_actor, "created_by_actor")
+    creator_identity_id = _identity_id(created_by_identity, "created_by_identity")
     attachment_id = f"att-{uuid.uuid4().hex[:10]}"
     inferred_content_type = mimetypes.guess_type(resolved_source.name)[0] or "application/octet-stream"
     content_type_value = content_type.strip() if isinstance(content_type, str) and content_type.strip() else inferred_content_type
@@ -411,10 +401,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
 
     if "created_by" in artifact or "authors" in artifact:
         raise ValueError("artifact.created_by/artifact.authors are retired; use created_by_identity_id/author_identity_ids")
-    created_by_identity_id = _identity_id(
-        artifact.get("created_by_identity_id", artifact.get("created_by_actor")),
-        "artifact.created_by_identity_id",
-    )
+    created_by_identity_id = _identity_id(artifact.get("created_by_identity_id"), "artifact.created_by_identity_id")
 
     body = artifact.get("body")
     if not isinstance(body, str) or not body.strip():
@@ -448,12 +435,6 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if isinstance(authors_raw, list):
         for row in authors_raw:
             identity_id = _identity_id(row, "artifact.author_identity_ids[]")
-            if identity_id not in author_identity_ids:
-                author_identity_ids.append(identity_id)
-    legacy_authors_raw = artifact.get("author_actors")
-    if isinstance(legacy_authors_raw, list):
-        for row in legacy_authors_raw:
-            identity_id = _actor_identity_id(row, "artifact.author_actors[]")
             if identity_id not in author_identity_ids:
                 author_identity_ids.append(identity_id)
     if created_by_identity_id not in author_identity_ids:

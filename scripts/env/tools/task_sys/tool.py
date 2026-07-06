@@ -139,7 +139,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="close",
                 title="task_sys.close",
-                description="Close a Task Sys task after the active side or parent frame has completed the required source-bound work.",
+                description="Close a Task Sys task after the active side or parent frame has completed the required frame work.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -181,7 +181,7 @@ def _build_definition() -> ToolDefinition:
                     "side_cleanup",
                     "close_result",
                 ),
-                use_when=("The active side or parent frame completed the source-bound work and the task should be closed.",),
+                use_when=("The active side or parent frame completed the required frame work and the task should be closed.",),
                 do_not_use_when=(
                     "A side frame needs parent work; use task_sys.need_parent instead.",
                     "You only need to inspect current task state; use task_sys.list or task_sys.get.",

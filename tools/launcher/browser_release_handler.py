@@ -25,14 +25,11 @@ import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 BROWSER_COCKPIT_RELEASE_EVENT_TYPE = "browser.cockpit.release"
 
 
-def _context_actor_address(context: Any) -> dict[str, str]:
-    value = getattr(context, "actor_address", None)
-    if isinstance(value, dict):
-        role_id = value.get("role_id")
-        actor_id = value.get("actor_id")
-        if isinstance(role_id, str) and role_id and isinstance(actor_id, str) and actor_id:
-            return {"role_id": role_id, "actor_id": actor_id}
-    return daemon_core.actor_address_for_context(context).to_payload()
+def _context_identity_route(context: Any) -> dict[str, str]:
+    return {
+        "identity_id": str(getattr(context, "actor_id", "")).strip(),
+        "role_id": str(getattr(context, "role", "")).strip(),
+    }
 
 
 def _payload(trigger: Any) -> dict[str, Any]:
@@ -123,10 +120,13 @@ class BrowserReleaseHandler:
         if getattr(trigger, "type", None) != BROWSER_COCKPIT_RELEASE_EVENT_TYPE:
             return daemon_core.HandlerResult.ignored()
         try:
-            local_actor = _context_actor_address(context)
-            target_actor = getattr(trigger, "target_actor_address", None)
-            if target_actor != local_actor:
-                raise PermissionError("wrong target actor for browser cockpit release trigger")
+            local_route = _context_identity_route(context)
+            target_route = {
+                "identity_id": str(getattr(trigger, "target_identity_id", "")).strip(),
+                "role_id": str(getattr(trigger, "target_role_id", "")).strip(),
+            }
+            if target_route != local_route:
+                raise PermissionError("wrong target identity for browser cockpit release trigger")
             payload = _payload(trigger)
             if _parent_turn_is_running(runtime):
                 return _skip("parent_turn_running")
@@ -138,7 +138,7 @@ class BrowserReleaseHandler:
             instance_payload = _fresh_instance_payload(context)
             actor_id = instance_payload.get("actor_id")
             if not isinstance(actor_id, str) or not actor_id.strip():
-                actor_id = local_actor["actor_id"]
+                actor_id = local_route["identity_id"]
             endpoint = _browser_endpoint(instance_payload)
             if endpoint is not None and _has_real_user_page(endpoint):
                 return _skip("real_user_page_present")

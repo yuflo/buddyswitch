@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import env_legacy_store as env_store  # noqa: E402
+from env.repos import messages as message_repo  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -454,7 +455,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(pm_scope_pub.get("ok"), msg=pm_scope_pub)
 
-        before_messages = list(env_store.list_messages())
+        before_messages = list(message_repo.list_im_messages())
         before_tasks = self._instance_task_snapshot()
 
         dev_result = self._create_draft(
@@ -518,7 +519,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(pm_context.get("ok"), msg=pm_context)
         self.assertNotIn("requests", pm_context)
 
-        after_messages = list(env_store.list_messages())
+        after_messages = list(message_repo.list_im_messages())
         after_tasks = self._instance_task_snapshot()
         self.assertEqual(before_messages, after_messages)
         self.assertEqual(before_tasks, after_tasks)

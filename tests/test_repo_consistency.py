@@ -30,31 +30,6 @@ _FORBIDDEN_RUNTIME_SURFACES = {
     "roadmap",
     "approval",
 }
-_DOC_SPEC_CONTEXT_MARKERS = (
-    "alignment",
-    "appendix",
-    "browser-cockpit-control-plane",
-    "browser-session-task",
-    "code-implementation-plan",
-    "completion-implementation-plan",
-    "cockpit-browser-session-resource-lifecycle",
-    "development-plan",
-    "implementation-plan",
-    "instance-stop-browser-schedule-cleanup",
-    "merge-plan",
-    "objective",
-    "parallel-agent-execution-plan",
-    "remove-" + "dash" + "board-and-skill-create",
-    "scope",
-    "search-open-browser-cockpit-rebuild",
-    "task-checkout-plan",
-    "task-split",
-    "test-plan",
-    "phase-2-prompt",
-    "phase2-prompt",
-)
-
-
 class RepoConsistencyTests(unittest.TestCase):
     _OLD_FLAG_PATTERNS = (
         "search open-browser --query",
@@ -99,33 +74,58 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         return [line for line in completed.stdout.splitlines() if line.strip()]
 
-    @staticmethod
-    def _is_docs_spec_context_hit(line: str) -> bool:
-        path_text, _sep, _rest = line.partition(":")
-        if not path_text.startswith("docs/spec/"):
-            return False
-        if path_text.startswith("docs/spec/identity-redesign/"):
-            return True
-        if path_text.startswith("docs/spec/imessage-channel-im-api-boundary-optimization/"):
-            return True
-        if path_text.startswith("docs/spec/im-api-unified-rebuild-forward/"):
-            return True
-        if path_text.startswith("docs/spec/task-sys-im-completion-status-observability/"):
-            return True
-        if path_text.startswith("docs/spec/task-sys-proactive-rebuild/"):
-            return True
-        if path_text.startswith("docs/spec/task-sys-side-frame-lifecycle/"):
-            return True
-        if path_text.startswith("docs/spec/2026-07-01-task-sys-rebuild-"):
-            return True
-        if path_text.startswith("docs/spec/2026-07-02-side-thread-lifecycle-"):
-            return True
-        if path_text.startswith("docs/spec/2026-07-02-side-thread-model-effort-"):
-            return True
-        if path_text.startswith("docs/spec/browser-cockpit-lazy-release/"):
-            return True
-        name = Path(path_text).name
-        return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
+    def _scan_target_text(self, pattern: str, targets: list[str], *, flags: int = 0) -> list[str]:
+        hits: list[str] = []
+        for target in targets:
+            path = ROOT / target
+            if path.is_file():
+                files = [path]
+            else:
+                files = [
+                    row
+                    for row in path.rglob("*.py")
+                    if "__pycache__" not in row.parts and row.suffix == ".py"
+                ]
+            for file_path in files:
+                text = file_path.read_text(encoding="utf-8")
+                relative = file_path.relative_to(ROOT)
+                for match in re.finditer(pattern, text, flags):
+                    line_no = text.count("\n", 0, match.start()) + 1
+                    snippet = " ".join(match.group(0).split())
+                    hits.append(f"{relative}:{line_no}:{snippet[:260]}")
+        return hits
+
+    def test_external_session_naming_has_no_live_connection_residue(self) -> None:
+        surfaces = (
+            ROOT / "scripts" / "env" / "repos" / "messages.py",
+            ROOT / "scripts" / "env" / "services" / "messages.py",
+            ROOT / "tools" / "launcher" / "external_im_session.py",
+            ROOT / "tools" / "launcher" / "im_http_router.py",
+            ROOT / "tools" / "launcher" / "web_im_identity.py",
+            ROOT / "tools" / "launcher" / "imessage_channel.py",
+            ROOT / "tools" / "launcher" / "assets" / "web-management" / "app.js",
+            ROOT / "docs" / "arch" / "web-interface-call-architecture.md",
+        )
+        forbidden = (
+            "create_external_" + "connection",
+            "authenticate_external_" + "connection_key",
+            "send_external_" + "connection_message",
+            "read_external_" + "connection_events",
+            "ack_external_" + "connection_event",
+            "save_im_" + "connection",
+            "get_im_" + "connection_by_key_hash",
+            "connection_" + "key",
+            "connection_" + "key_hash",
+            "/api/im/" + "connections",
+            "state/im/" + "connections",
+            "im/" + "connections",
+            "Web IM " + "connection",
+        )
+        for surface in surfaces:
+            source = surface.read_text(encoding="utf-8")
+            for fragment in forbidden:
+                with self.subTest(surface=str(surface.relative_to(ROOT)), fragment=fragment):
+                    self.assertNotIn(fragment, source)
 
     @staticmethod
     def _retired_actor_private_host_path_tokens() -> tuple[str, ...]:
@@ -508,6 +508,334 @@ print(json.dumps({{
 
         self.assertEqual(hits, [], msg="\n".join(hits))
 
+    def test_communication_identity_live_surfaces_have_no_retired_shapes(self) -> None:
+        high_signal_targets = [
+            "scripts/env/repos/messages.py",
+            "scripts/env/services/messages.py",
+            "scripts/env/tools/message",
+            "scripts/env/tool_runtime/im_client.py",
+            "scripts/env/tools/context/_impl.py",
+            "scripts/env_cleanup.py",
+            "scripts/env_legacy_store.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "tools/launcher/assets/web-management/app.js",
+            "tools/launcher/imessage_channel.py",
+            "tools/launcher/web_im_identity.py",
+            "tools/launcher/task_sys_" + "runtime.py",
+            "tools/launcher/assets/roles",
+            "buddyswitch/skills/shared/message-tool",
+            "buddyswitch/skills/shared/track-tool",
+            "tests/test_communication_identity_cutover.py",
+            "tests/test_im_product_core.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/test_web_management.py",
+            "tests/web_management_ui_state.test.js",
+            "tests/web_management_ui_contract.test.js",
+            "tests/test_im_web_management_projection.py",
+            "tests/test_imessage_channel.py",
+            "tests/test_context_binding_env_tool.py",
+            "tests/test_cleanup_system.py",
+            "tests/test_env_store_v2.py",
+            "tests/test_runtime_broker.py",
+            "tests/test_browser_page_expired_handler.py",
+            "tests/test_notification_center.py",
+            "tests/test_task_checkout_handler.py",
+            "tests/test_daemon_mailbox.py",
+            "tests/test_track_env_tool.py",
+            "tests/test_artifact_env_tool.py",
+            "tests/test_track_comment_env_tool.py",
+            "tests/test_artifact_selection.py",
+            "tests/test_track_comment_added_handler.py",
+            "tests/test_task_sys_runtime_executor.py",
+        ]
+        flattened_im_targets = [
+            "scripts/env/repos/messages.py",
+            "scripts/env/tools/context/_impl.py",
+            "tools/launcher/assets/web-management/app.js",
+            "tools/launcher/imessage_channel.py",
+            "tests/test_communication_identity_cutover.py",
+            "tests/test_im_product_core.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/web_management_ui_state.test.js",
+            "tests/test_imessage_channel.py",
+            "tests/test_context_binding_env_tool.py",
+            "tests/test_runtime_broker.py",
+        ]
+        participant_field_targets = [
+            "scripts/env/repos/messages.py",
+            "tools/launcher/web_im_identity.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/test_im_http_router.py",
+            "tests/test_im_product_core.py",
+            "tests/test_web_management.py",
+            "tests/test_context_binding_env_tool.py",
+            "tests/test_runtime_broker.py",
+        ]
+        track_artifact_targets = [
+            "scripts/env/repos/tracks.py",
+            "scripts/env/domain/artifact_visibility.py",
+            "tests/test_track_env_tool.py",
+            "tests/test_artifact_env_tool.py",
+            "tests/test_artifact_selection.py",
+        ]
+
+        scans = [
+            (
+                r"ActorAddress|actor_address|from_actor_address|to_actor_address|processed_by_actor_address"
+                r"|source_actor_address|target_actor_address|identity_from_im_participant"
+                r"|participant\.actor_address|participant\.external_id"
+                r"|\"kind\"\s*:\s*\"actor\"|\"kind\"\s*:\s*\"external\"",
+                high_signal_targets,
+            ),
+            (r"\bfrom_identity_id\b|\bto_identity_id\b|\bvisible_to_identity\b", flattened_im_targets),
+            (r"['\"]participants['\"]|['\"]participant['\"]", participant_field_targets),
+            (r"\bfrom_actor\b", track_artifact_targets),
+        ]
+
+        def is_allowed_hit(line: str) -> bool:
+            parts = line.split(":", 2)
+            path = parts[0] if parts else ""
+            content = parts[2] if len(parts) == 3 else line
+            lowered = content.lower()
+            if path.startswith("tests/"):
+                if "assertNotIn(" in content or "assertNotRegex(" in content or "assertFalse(" in content:
+                    return True
+                if " not in " in content and ("assertTrue(" in content or "assertEqual(" in content):
+                    return True
+                if "for forbidden in" in content:
+                    return True
+                if any(fragment in lowered for fragment in ("legacy", "does_not", "without_actor_address", "no_retired", "retired")):
+                    return True
+            if "retired_shape" in content or "legacy_rejection_payload" in content:
+                return True
+            return False
+
+        disallowed: list[str] = []
+        for pattern, targets in scans:
+            for line in self._scan_targets(pattern, targets):
+                if not is_allowed_hit(line):
+                    disallowed.append(line)
+
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_im_sender_reach_live_surfaces_do_not_expose_actor_handling_coupling(self) -> None:
+        targets = [
+            "scripts/env/services/messages.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "scripts/env/tools/message/tool.py",
+            "tests/test_im_product_core.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_external_im_projection_contract.py",
+            "tests/test_web_management.py",
+            "tests/test_env_tool_schema_contract.py",
+            "tests/test_env_tool_response_contract.py",
+            "tests/test_context_binding_env_tool.py",
+        ]
+        multiline_patterns = [
+            r"send_im_message\([\s\S]{0,500}\btarget_role_id\s*=",
+            r"send_im_message\([\s\S]{0,500}\bwake_actor\s*=",
+        ]
+        patterns = [
+            r"\bactor_identity_for_current_send_target\b",
+            r"target_identity_id is only required for new actor-directed messages",
+            r"new actor-directed message",
+            r"external target_identity_id requires reply_to conversation routing context",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_patterns:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        for pattern in patterns:
+            hits.extend(self._scan_targets(pattern, targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_im_target_resolver_rebuild_has_no_old_send_resolver_residue(self) -> None:
+        targets = [
+            "scripts/env/services/messages.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "scripts/env/tools/message/tool.py",
+            "scripts/env/tools/context/_impl.py",
+            "tests/test_im_product_core.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_env_tool_schema_contract.py",
+            "tests/test_env_tool_semantic_contract.py",
+            "tests/test_context_binding_env_tool.py",
+        ]
+        patterns = [
+            r"\bidentity_for_current_send_target\b",
+            r"not a reachable target identity under current reach policy",
+            r"external target_identity_id requires reply_to conversation routing context",
+            r"message\.send.*must.*message\.contacts",
+            r"message\.contacts.*before message\.send",
+            r"contacts.*as.*send.*authority",
+        ]
+        hits: list[str] = []
+        for pattern in patterns:
+            hits.extend(self._scan_targets(pattern, targets))
+
+        def is_allowed_hit(line: str) -> bool:
+            parts = line.split(":", 2)
+            path = parts[0] if parts else ""
+            content = parts[2] if len(parts) == 3 else line
+            if path.startswith("tests/") and ("assertNotIn(" in content or "forbidden" in content):
+                return True
+            return False
+
+        disallowed = [line for line in hits if not is_allowed_hit(line)]
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_im_reply_wrapper_convergence_has_no_old_core_reply_branch_residue(self) -> None:
+        targets = [
+            "scripts/env/services/messages.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/task_sys_" + "runtime.py",
+            "scripts/env/tools/message/tool.py",
+            "buddyswitch/skills/shared/task-management/SKILL.md",
+            "tests/test_im_product_core.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_im_external_reply_loop.py",
+            "tests/test_web_management.py",
+            "tests/test_task_sys_runtime_executor.py",
+            "tests/test_env_tool_schema_contract.py",
+            "tests/test_env_tool_semantic_contract.py",
+            "tests/test_task_management_skill_architecture.py",
+            "tests/test_context_binding_env_tool.py",
+        ]
+        patterns = [
+            r"\b_resolve_reply_" + r"conversation\b",
+            r"\b_direct_conversation_" + r"identity_ids\b",
+            r"reply target cannot be " + r"derived from the " + r"direct conversation",
+            r"reply_to must stay in the same " + r"direct conversation",
+            r"Central IM derives the other " + r"direct identity",
+            r"central im derives the other " + r"direct identity",
+            r"reply_to only to reply inside the existing " + r"direct conversation",
+            r"reply inside the existing " + r"direct conversation",
+            r"target_identity_id is only required for a new " + r"target-identity message",
+        ]
+        multiline_patterns = [
+            r"send_im_message\([\s\S]{0,500}\bto\s*=\s*None[\s\S]{0,500}\breply_to\s*=",
+            r"send_im_message\([\s\S]{0,500}\breply_to\s*=[\s\S]{0,500}\bto\s*=\s*None",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_patterns:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        for pattern in patterns:
+            hits.extend(self._scan_targets(pattern, targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_im_send_paths_do_not_use_actor_list_as_target_resolver(self) -> None:
+        targets = [
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+        ]
+        multiline_patterns = [
+            r"def _send_target_identity[\s\S]{0,800}_online_actor_rows",
+            r"def send_message[\s\S]{0,1000}_actor_lister",
+            r"def send_message[\s\S]{0,1000}list_im_actor_contacts",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_patterns:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_im_actor_handling_surfaces_do_not_accept_sender_supplied_role(self) -> None:
+        targets = [
+            "scripts/env/tool_runtime/daemon_client.py",
+            "scripts/env/tool_runtime/context.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "tests/test_im_external_reply_loop.py",
+            "tests/test_communication_identity_cutover.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_web_management.py",
+        ]
+        multiline_forbidden = [
+            r"wake_im_actor\(\s*\{[\s\S]{0,500}\btarget_role_id\b",
+        ]
+        forbidden = [
+            r"payload\.get\([\"']target_role_id[\"']\)",
+            r"record\.get\([\"']role_id[\"']\)",
+            r"wake_status",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_forbidden:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        for pattern in forbidden:
+            hits.extend(self._scan_targets(pattern, targets))
+
+        def is_allowed_hit(line: str) -> bool:
+            parts = line.split(":", 2)
+            path = parts[0] if parts else ""
+            content = parts[2] if len(parts) == 3 else line
+            if path.startswith("tests/") and "assertNotIn(" in content:
+                return True
+            return False
+
+        disallowed = [line for line in hits if not is_allowed_hit(line)]
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_im_post_write_delivery_is_not_reimplemented_in_sender_projections(self) -> None:
+        targets = [
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+        ]
+        forbidden = [
+            r"def _with_actor_handling_status",
+            r"actor_message_handler",
+            r"[\"']type[\"']\s*:\s*[\"']im\.message\.created[\"']",
+        ]
+        hits: list[str] = []
+        for pattern in forbidden:
+            hits.extend(self._scan_targets(pattern, targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_central_im_write_does_not_import_processing_or_channel(self) -> None:
+        source = (ROOT / "scripts" / "env" / "services" / "messages.py").read_text(encoding="utf-8")
+        forbidden = (
+            "wake_im_actor",
+            "mailbox.local_trigger",
+            "task_sys_ingress",
+            "ImMessageCreatedHandler",
+            "imessage_channel",
+        )
+        hits = [term for term in forbidden if term in source]
+        self.assertEqual(hits, [])
+
+    def test_im_delivery_helper_does_not_import_processing_or_channel(self) -> None:
+        source = (ROOT / "scripts" / "env" / "services" / "messages.py").read_text(encoding="utf-8")
+        forbidden = (
+            "task_sys_ingress",
+            "ImMessageCreatedHandler",
+            "imessage_channel",
+            "web_management",
+            "im_http_router",
+        )
+        hits = [term for term in forbidden if term in source]
+        self.assertEqual(hits, [])
+
     def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:
         desc = tool_catalog.env_tools_description()
         operation_semantics = tool_catalog.operation_semantics()
@@ -834,7 +1162,6 @@ print(json.dumps({{
             "tools/launcher/assets",
             "buddyswitch/skills",
             "docs/bitter",
-            "docs/spec",
         ]
         completed = subprocess.run(
             [
@@ -849,67 +1176,8 @@ print(json.dumps({{
             check=False,
         )
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
-        hits = [
-            line
-            for line in completed.stdout.splitlines()
-            if line.strip() and not self._is_docs_spec_context_hit(line)
-        ]
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_docs_spec_drift_filter_rejects_unmarked_live_guidance(self) -> None:
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-05-22-tool-layer-semantic-source-of-truth-implementation-plan.md:1:TOOL_SPEC"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-06-30-fea-webui-fea-daemon-main-merge-plan.md:1:tests/test_env_tool_schema_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/imessage-channel-im-api-boundary-optimization/99-final-acceptance.md:1:tests/test_external_im_projection_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/im-api-unified-rebuild-forward/phase-01-unified-auth-context.md:1:tests/test_external_im_projection_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/task-sys-im-completion-status-observability/phase-1-task-sys-close.md:1:tests/test_env_tool_semantic_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/task-sys-side-frame-lifecycle/phase-05-tool-feedback-contract.md:1:tests/test_env_tool_response_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/browser-cockpit-lazy-release/phase-06-search-open-browser-ensure.md:1:tests/test_env_tool_response_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-07-02-browser-cockpit-control-plane-phase-5-plan.md:1:tests/test_env_tool_response_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-07-01-cockpit-browser-session-resource-lifecycle-phase-6-plan.md:1:tests/test_env_tool_response_contract.py"
-            )
-        )
-        self.assertTrue(
-            self._is_docs_spec_context_hit(
-                "docs/spec/2026-07-04-search-open-browser-cockpit-rebuild-phase-c-plan.md:1:tests/test_env_tool_response_contract.py"
-            )
-        )
-        self.assertFalse(
-            self._is_docs_spec_context_hit("docs/spec/runtime-guidance.md:1:TOOL_SPEC")
-        )
 
     def test_active_guidance_does_not_reference_capture_as_env_tool(self) -> None:
         completed = subprocess.run(
@@ -946,11 +1214,6 @@ print(json.dumps({{
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
-        self.assertFalse(
-            self._is_docs_spec_context_hit(
-                "docs/spec/live-runtime-guidance.md:1:Use scripts/env/tools/task/contract.py"
-            )
-        )
 
     def test_active_cli_guidance_has_no_old_env_client_flags(self) -> None:
         targets = [
@@ -1108,9 +1371,6 @@ print(json.dumps({{
             if line.startswith("tests/"):
                 allowed.append(line)
                 continue
-            if "/docs/spec/" in lower or "/docs/memo/" in lower:
-                allowed.append(line)
-                continue
             if line.startswith("scripts/artifact_selection.py:"):
                 allowed.append(line)
                 continue
@@ -1132,8 +1392,6 @@ print(json.dumps({{
         for line in hits:
             lower = line.lower()
             if line.startswith("tests/"):
-                continue
-            if "/docs/spec/" in lower or "/docs/memo/" in lower or "/docs/bitter/" in lower:
                 continue
             disallowed.append(line)
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
@@ -1255,25 +1513,6 @@ print(json.dumps({{
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_parallel_modular_architecture_memo_documents_current_skill_tool_boundary(self) -> None:
-        path = ROOT / "docs/memo/buddyswitch-parallel-modular-architecture.md"
-        text = path.read_text(encoding="utf-8")
-        lowered = text.lower()
-
-        self.assertIn("## skill / tool contract 衔接规则", lowered)
-        self.assertIn("context.get.tool_catalog", text)
-        self.assertIn("python3 scripts/turn_runtime.py status", text)
-        self.assertIn("scripts/env/tool_runtime/definition.py", text)
-        self.assertIn("scripts/env/tool_runtime/registry.py", text)
-        self.assertIn("scripts/env/tools/<tool>/tool.py", text)
-        self.assertIn("scripts/env/tools/<tool>/_impl.py", text)
-        self.assertIn("skill 通过 runtime discovery 消费能力，不复制能力", lowered)
-        self.assertNotIn("## 第一阶段落地", text)
-        self.assertIn("## 已落地基础", text)
-        self.assertIn("workflow engine", lowered)
-        self.assertIn("plugin system", lowered)
-        self.assertIn("event bus", lowered)
 
     def test_readme_runtime_sources_match_per_tool_runtime(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8")

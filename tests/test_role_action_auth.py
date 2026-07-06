@@ -15,7 +15,6 @@ if str(SCRIPTS) not in sys.path:
 import env_manifest  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
 from env.tool_runtime import role_auth  # noqa: E402
-from env.tool_runtime.actor_profile import AuthSubject  # noqa: E402
 
 
 class RoleActionAuthPolicyTests(unittest.TestCase):
@@ -25,9 +24,6 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             role["id"] for role in self.manifest.get("roles", []) if isinstance(role, dict)
         )
         self.operation_semantics = tool_registry.operation_semantics()
-
-    def _subject(self, role: str) -> AuthSubject:
-        return AuthSubject(role_id=role)
 
     def test_manifest_roles_are_runtime_roles(self) -> None:
         self.assertEqual(self.roles, role_auth.manifest_role_ids(self.manifest))
@@ -44,21 +40,21 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
     def test_none_permission_allows_every_manifest_role(self) -> None:
         self.assertEqual(role_auth.allowed_roles_for_permission("none", self.manifest), self.roles)
         for role in self.roles:
-            decision = role_auth.authorize("none", self._subject(role), self.manifest)
+            decision = role_auth.authorize("none", role, self.manifest)
             with self.subTest(role=role):
                 self.assertTrue(decision.allowed)
                 self.assertEqual(decision.allowed_roles, tuple(sorted(self.roles)))
 
-    def test_authorize_rejects_raw_active_role_strings(self) -> None:
+    def test_authorize_rejects_non_string_role_ids(self) -> None:
         with self.assertRaises(TypeError):
-            role_auth.authorize("none", "pm", self.manifest)  # type: ignore[arg-type]
+            role_auth.authorize("none", {"role_id": "pm"}, self.manifest)  # type: ignore[arg-type]
 
     def test_track_owner_permissions_allow_every_manifest_role_at_policy_layer(self) -> None:
         for permission in ("track.create", "track.update_requirements", "track.update_status", "track.archive", "track.resolve_comment_thread"):
             with self.subTest(permission=permission):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
-                self.assertTrue(role_auth.authorize(permission, self._subject("pm"), self.manifest).allowed)
-                self.assertTrue(role_auth.authorize(permission, self._subject("dev"), self.manifest).allowed)
+                self.assertTrue(role_auth.authorize(permission, "pm", self.manifest).allowed)
+                self.assertTrue(role_auth.authorize(permission, "dev", self.manifest).allowed)
 
     def test_common_permissions_allow_every_manifest_role(self) -> None:
         for permission in (
@@ -73,7 +69,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
 
     def test_unknown_active_role_is_denied(self) -> None:
-        decision = role_auth.authorize("track.read", self._subject("ghost"), self.manifest)
+        decision = role_auth.authorize("track.read", "ghost", self.manifest)
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.required_permission, "track.read")
         self.assertEqual(decision.active_role, "ghost")
@@ -81,7 +77,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertIn("unknown role", decision.reason)
 
     def test_unknown_permission_is_denied_with_policy_metadata(self) -> None:
-        decision = role_auth.authorize("unknown.permission", self._subject("pm"), self.manifest)
+        decision = role_auth.authorize("unknown.permission", "pm", self.manifest)
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.required_permission, "unknown.permission")
         self.assertEqual(decision.active_role, "pm")
@@ -89,7 +85,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertIn("not covered", decision.reason)
 
     def test_role_action_summary_returns_runtime_policy_preview_shape(self) -> None:
-        summary = role_auth.role_action_summary(self._subject("market"), self.manifest, self.operation_semantics)
+        summary = role_auth.role_action_summary("market", self.manifest, self.operation_semantics)
         old_keys = (
             "role_" + "authority_" + "source",
             "allowed_" + "actions",
@@ -118,7 +114,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertEqual(summary["restricted_action_details"], {})
 
     def test_pm_preview_has_no_pm_only_restricted_actions(self) -> None:
-        summary = role_auth.role_action_summary(self._subject("pm"), self.manifest, self.operation_semantics)
+        summary = role_auth.role_action_summary("pm", self.manifest, self.operation_semantics)
         self.assertNotIn("track.create", summary["restricted_actions"])
         self.assertNotIn("track.archive", summary["restricted_actions"])
         self.assertNotIn("track.resolve_comment_thread", summary["restricted_actions"])

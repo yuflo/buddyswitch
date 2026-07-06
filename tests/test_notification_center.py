@@ -242,7 +242,8 @@ class NotificationCenterTests(unittest.TestCase):
         trigger = daemon_core.daemon_triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal",
             type="im.message.created",
-            target_actor_address={"role_id": "dev", "actor_id": "act-dev-nc"},
+            target_identity_id="act-dev-nc",
+            target_role_id="dev",
             origin_id="sig-nc",
             correlation_id=None,
             payload={"message_id": "msg-nc", "conversation_id": "conv-nc", "event_id": "imev-nc"},
@@ -280,13 +281,15 @@ class NotificationCenterTests(unittest.TestCase):
         trigger = daemon_core.daemon_triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal",
             type="track.comment.added",
-            target_actor_address={"role_id": "dev", "actor_id": "act-dev-track-nc"},
+            target_identity_id="act-dev-track-nc",
+            target_role_id="dev",
             origin_id="sig-track-nc",
             correlation_id=None,
             payload={"track_id": "track-nc", "comment_id": "comment-nc", "thread_id": "comment-nc"},
             source_context={
                 "signal_id": "sig-track-nc",
-                "source_actor_address": {"role_id": "pm", "actor_id": "act-pm-track-nc"},
+                "source_identity_id": "act-pm-track-nc",
+                "source_role_id": "pm",
                 "created_at": "2026-06-10T00:00:00Z",
             },
         )

@@ -6,8 +6,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from env.tool_runtime.actor_profile import AuthSubject
-
 COMMON_ROLE_PERMISSIONS = frozenset(
     {
         "track.read",
@@ -79,14 +77,14 @@ def allowed_roles_for_permission(required_permission: str, manifest: dict[str, A
     )
 
 
-def _require_auth_subject(subject: AuthSubject) -> AuthSubject:
-    if not isinstance(subject, AuthSubject):
-        raise TypeError("role_auth requires AuthSubject")
-    return subject
+def _require_role_id(role_id: Any) -> str:
+    if not isinstance(role_id, str) or not role_id.strip():
+        raise TypeError("role_auth requires a non-empty role_id string")
+    return role_id.strip()
 
 
-def authorize(required_permission: str, auth_subject: AuthSubject, manifest: dict[str, Any]) -> AuthDecision:
-    active_role = _require_auth_subject(auth_subject).role_id
+def authorize(required_permission: str, role_id: str, manifest: dict[str, Any]) -> AuthDecision:
+    active_role = _require_role_id(role_id)
     allowed_roles = tuple(sorted(allowed_roles_for_permission(required_permission, manifest)))
     roles = manifest_role_ids(manifest)
     if not allowed_roles:
@@ -126,18 +124,18 @@ def authorize(required_permission: str, auth_subject: AuthSubject, manifest: dic
 
 
 def role_action_summary(
-    auth_subject: AuthSubject,
+    role_id: str,
     manifest: dict[str, Any],
     operation_semantics: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    active_role = _require_auth_subject(auth_subject).role_id
+    active_role = _require_role_id(role_id)
     available_actions: list[str] = []
     restricted_actions: list[str] = []
     restricted_action_details: dict[str, dict[str, Any]] = {}
 
     for action_id, semantics in sorted(operation_semantics.items()):
         required_permission = str(semantics.get("required_permission", ""))
-        decision = authorize(required_permission, auth_subject, manifest)
+        decision = authorize(required_permission, active_role, manifest)
         if decision.allowed:
             available_actions.append(action_id)
             continue

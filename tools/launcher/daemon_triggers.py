@@ -28,7 +28,8 @@ class DaemonTrigger:
         *,
         source: str,
         type: str,
-        target_actor_address: dict[str, str],
+        target_identity_id: str,
+        target_role_id: str,
         origin_id: str | None,
         correlation_id: str | None,
         payload: dict[str, Any],
@@ -36,7 +37,8 @@ class DaemonTrigger:
     ) -> None:
         self.source = _non_empty_string(source, "source")
         self.type = _non_empty_string(type, "type")
-        self.target_actor_address = _actor_address_payload(target_actor_address, "target_actor_address")
+        self.target_identity_id = _non_empty_string(target_identity_id, "target_identity_id")
+        self.target_role_id = _non_empty_string(target_role_id, "target_role_id")
         self.origin_id = _optional_string(origin_id, "origin_id")
         self.correlation_id = _optional_string(correlation_id, "correlation_id")
         if not isinstance(payload, dict):
@@ -50,7 +52,8 @@ class DaemonTrigger:
         return {
             "source": self.source,
             "type": self.type,
-            "target_actor_address": dict(self.target_actor_address),
+            "target_identity_id": self.target_identity_id,
+            "target_role_id": self.target_role_id,
             "origin_id": self.origin_id,
             "correlation_id": self.correlation_id,
             "payload": dict(self.payload),
@@ -80,12 +83,13 @@ def _optional_string(value: Any, field: str) -> str | None:
     return value.strip()
 
 
-def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
+def _route_payload(value: Any, field: str) -> dict[str, str]:
     if not isinstance(value, dict):
-        raise ValueError(f"{field} must be an actor address object")
-    role_id = _non_empty_string(value.get("role_id"), f"{field}.role_id")
-    actor_id = _non_empty_string(value.get("actor_id"), f"{field}.actor_id")
-    return {"role_id": role_id, "actor_id": actor_id}
+        raise ValueError(f"{field} must be an identity route object")
+    return {
+        "identity_id": _non_empty_string(value.get("identity_id"), f"{field}.identity_id"),
+        "role_id": _non_empty_string(value.get("role_id"), f"{field}.role_id"),
+    }
 
 
 def _string_field(payload: dict[str, Any], *names: str) -> str | None:
@@ -103,7 +107,8 @@ def _trigger_type_for_app_server_method(method: str) -> str:
 def normalize_app_server_notification(
     notification: dict[str, Any],
     *,
-    target_actor_address: dict[str, Any],
+    target_identity_id: str,
+    target_role_id: str,
     correlation_id: str | None = None,
 ) -> DaemonTrigger:
     if not isinstance(notification, dict):
@@ -127,7 +132,8 @@ def normalize_app_server_notification(
     return DaemonTrigger(
         source=APP_SERVER_NOTIFICATION,
         type=_trigger_type_for_app_server_method(method),
-        target_actor_address=_actor_address_payload(target_actor_address, "target_actor_address"),
+        target_identity_id=target_identity_id,
+        target_role_id=target_role_id,
         origin_id=turn_id,
         correlation_id=correlation_id,
         payload=dict(params),
@@ -143,20 +149,24 @@ def normalize_cross_actor_signal(signal: dict[str, Any]) -> DaemonTrigger:
         raise ValueError("signal payload must be an object")
     signal_id = _non_empty_string(signal.get("signal_id"), "signal_id")
     signal_type = _non_empty_string(signal.get("type"), "type")
-    source_actor_address = _actor_address_payload(signal.get("source_actor_address"), "source_actor_address")
-    target_actor_address = _actor_address_payload(signal.get("target_actor_address"), "target_actor_address")
+    source_identity_id = _non_empty_string(signal.get("source_identity_id"), "source_identity_id")
+    source_role_id = _non_empty_string(signal.get("source_role_id"), "source_role_id")
+    target_identity_id = _non_empty_string(signal.get("target_identity_id"), "target_identity_id")
+    target_role_id = _non_empty_string(signal.get("target_role_id"), "target_role_id")
     created_at = _non_empty_string(signal.get("created_at"), "created_at")
     correlation_id = signal.get("correlation_id")
     return DaemonTrigger(
         source=MAILBOX_CROSS_ACTOR_SIGNAL,
         type=signal_type,
-        target_actor_address=target_actor_address,
+        target_identity_id=target_identity_id,
+        target_role_id=target_role_id,
         origin_id=signal_id,
         correlation_id=correlation_id if isinstance(correlation_id, str) and correlation_id else None,
         payload=dict(payload),
         source_context={
             "signal_id": signal_id,
-            "source_actor_address": source_actor_address,
+            "source_identity_id": source_identity_id,
+            "source_role_id": source_role_id,
             "created_at": created_at,
         },
     )
@@ -165,7 +175,8 @@ def normalize_cross_actor_signal(signal: dict[str, Any]) -> DaemonTrigger:
 def normalize_local_trigger(
     *,
     trigger_type: str,
-    target_actor_address: dict[str, Any],
+    target_identity_id: str,
+    target_role_id: str,
     origin_id: str | None,
     correlation_id: str | None,
     payload: dict[str, Any],
@@ -174,7 +185,8 @@ def normalize_local_trigger(
     return DaemonTrigger(
         source=MAILBOX_LOCAL_TRIGGER,
         type=trigger_type,
-        target_actor_address=_actor_address_payload(target_actor_address, "target_actor_address"),
+        target_identity_id=target_identity_id,
+        target_role_id=target_role_id,
         origin_id=origin_id,
         correlation_id=correlation_id,
         payload=payload,
@@ -185,7 +197,8 @@ def normalize_local_trigger(
 def normalize_scheduled_trigger(
     schedule: dict[str, Any],
     *,
-    target_actor_address: dict[str, Any],
+    target_identity_id: str,
+    target_role_id: str,
 ) -> DaemonTrigger:
     if not isinstance(schedule, dict):
         raise ValueError("schedule must be an object")
@@ -206,7 +219,8 @@ def normalize_scheduled_trigger(
     return DaemonTrigger(
         source=SCHEDULED_TRIGGER,
         type=trigger_type,
-        target_actor_address=_actor_address_payload(target_actor_address, "target_actor_address"),
+        target_identity_id=target_identity_id,
+        target_role_id=target_role_id,
         origin_id=schedule_id,
         correlation_id=None,
         payload=dict(payload),

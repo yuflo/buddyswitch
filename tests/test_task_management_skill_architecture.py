@@ -82,15 +82,34 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         skill_text = skill_path.read_text(encoding="utf-8")
 
         self.assertIn("Use `task_sys.close` when a `task_sys.side_frame` is completed in side.", skill_text)
-        self.assertIn("When a `task_sys.parent_frame` completes the source task, call `task_sys.close`.", skill_text)
-        self.assertIn("If replying to an IM source, first call `message.send(reply_to=...)`.", skill_text)
-        self.assertIn("If no reply is needed for an IM source, first call `message.mark(..., disposition=absorbed)`.", skill_text)
+        self.assertIn("When a `task_sys.parent_frame` completes required frame work, call `task_sys.close`.", skill_text)
+        self.assertIn("For IM source frames, use message tools for required message reads, sends, and disposition work.", skill_text)
+        self.assertIn(
+            "Use `message.send(target_identity_id=...)` when the IM task requires a new explicit actor or external target.",
+            skill_text,
+        )
+        self.assertIn(
+            "Use `message.send(reply_to=...)` when replying to a processable inbound IM message; the runtime resolves the original sender through the normal target-identity path.",
+            skill_text,
+        )
+        self.assertIn("Use `message.mark(..., disposition=absorbed)` only when no reply is needed.", skill_text)
+        self.assertNotIn("source-" + "bound", skill_text)
         self.assertIn("Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.", skill_text)
         self.assertNotIn("checkpoint", skill_text.lower())
         stale_finish = "finish with exactly one Task Sys side " + "result"
         stale_label = "Task Sys side " + "result"
         self.assertNotIn(stale_finish, skill_text)
         self.assertNotIn(stale_label, skill_text)
+
+    def test_task_sys_close_surfaces_use_frame_work_not_source_bound_work(self) -> None:
+        close_action = tool_router.get_action_definition("task_sys", "close")
+        surface_text = "\n".join((close_action.description, *close_action.use_when))
+        self.assertIn("required frame work", surface_text)
+        self.assertNotIn("source-" + "bound work", surface_text)
+
+        impl_text = (ROOT / "scripts" / "env" / "tools" / "task_sys" / "_impl.py").read_text(encoding="utf-8")
+        self.assertIn("required task work", impl_text)
+        self.assertNotIn("source-" + "bound task", impl_text)
 
     def test_runtime_role_guidance_prefers_task_sys_tools(self) -> None:
         for path in sorted((ROOT / "tools" / "launcher" / "assets" / "roles").glob("*/AGENTS.md")):
@@ -150,6 +169,27 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             text = path.read_text(encoding="utf-8")
             for token in forbidden:
                 with self.subTest(path=path, token=token):
+                    self.assertNotIn(token, text)
+
+    def test_im_message_frame_capability_surfaces_do_not_teach_source_bound_only_rules(self) -> None:
+        surfaces = [
+            ROOT / "tools" / "launcher" / ("task_sys_" + "runtime.py"),
+            ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md",
+            ROOT / "scripts" / "env" / "tools" / "task_sys" / "tool.py",
+            ROOT / "scripts" / "env" / "tools" / "task_sys" / "_impl.py",
+        ]
+        stale_tokens = (
+            "Current-source IM " + "closure",
+            "Do not start a new IM " + "conversation",
+            "Do not send to target_identity_id " + "from side",
+            "Only after the source-" + "bound IM action succeeds",
+            "source-" + "bound work",
+            "source-" + "bound task",
+        )
+        for path in surfaces:
+            text = path.read_text(encoding="utf-8")
+            for token in stale_tokens:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
                     self.assertNotIn(token, text)
 
 

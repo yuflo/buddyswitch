@@ -29,6 +29,20 @@ process.on('beforeExit', async function () {
   await testChain;
 });
 
+function identityRef(identityId) {
+  return { id: identityId, type: identityId.indexOf('ext-') === 0 ? 'external' : 'actor' };
+}
+
+function imMessage({ id, sender, target, content, replyTo = null }) {
+  return {
+    id,
+    sender_identity: identityRef(sender),
+    target_identity: identityRef(target),
+    content,
+    reply_to: replyTo,
+  };
+}
+
 function createRenderElements() {
   const node = () => ({
     textContent: '',
@@ -95,13 +109,12 @@ test('actor payload sync chooses first actor and clears stale selection', () => 
   state.selectedActorId = 'act-missing';
   state.openTuiMessage = 'Terminal opened.';
   state.openTuiCommand = 'attach command';
-  app.recordImProjectedMessage(state, {
+  app.recordImProjectedMessage(state, imMessage({
     id: 'msg-stale',
-    from_identity_id: 'act-missing',
-    to_identity_id: 'ext-web',
+    sender: 'act-missing',
+    target: 'ext-web',
     content: 'stale',
-    reply_to: null,
-  });
+  }));
 
   app.applyActorsPayload(state, {
     actors: [
@@ -277,13 +290,12 @@ test('actor selection clears stale feedback before fetch completes', async () =>
       { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
       { actor_id: 'act-new', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
-    app.recordImProjectedMessage(state, {
+    app.recordImProjectedMessage(state, imMessage({
       id: 'msg-old',
-      from_identity_id: 'act-old',
-      to_identity_id: 'ext-web',
+      sender: 'act-old',
+      target: 'ext-web',
       content: 'old actor message',
-      reply_to: null,
-    });
+    }));
     elements.messageBanner.textContent = 'Created act-old.';
 
     const selection = app.selectActor(state, elements, 'act-new');
@@ -833,7 +845,7 @@ test('open tui pending disables only open tui', () => {
   );
 });
 
-test('im event URL is connection-wide with bounded wait only', () => {
+test('im event URL is external-session-wide with bounded wait only', () => {
   assert.equal(
     app.buildImEventsUrl(15000),
     '/api/im/events?wait_ms=15000'
@@ -917,20 +929,19 @@ test('failed pending send is removed and draft can be restored by caller', () =>
 
 test('record projected IM messages keeps sent and reply directions', () => {
   const state = app.createState();
-  const sentEcho = app.recordImProjectedMessage(state, {
+  const sentEcho = app.recordImProjectedMessage(state, imMessage({
     id: 'msg-sent-1',
-    from_identity_id: 'ext-1',
-    to_identity_id: 'act-market-1',
+    sender: 'ext-1',
+    target: 'act-market-1',
     content: 'ping',
-    reply_to: null,
-  });
-  const actorReply = app.recordImProjectedMessage(state, {
+  }));
+  const actorReply = app.recordImProjectedMessage(state, imMessage({
     id: 'msg-reply-1',
-    from_identity_id: 'act-market-1',
-    to_identity_id: 'ext-1',
+    sender: 'act-market-1',
+    target: 'ext-1',
     content: 'pong',
-    reply_to: 'msg-sent-1',
-  });
+    replyTo: 'msg-sent-1',
+  }));
 
   assert.equal(sentEcho, true);
   assert.equal(actorReply, true);
@@ -958,13 +969,12 @@ test('record projected IM messages keeps sent and reply directions', () => {
 
 test('clearing im conversation records owner identity and removes stale rows', () => {
   const state = app.createState();
-  app.recordImProjectedMessage(state, {
+  app.recordImProjectedMessage(state, imMessage({
     id: 'msg-stale',
-    from_identity_id: 'act-market-old',
-    to_identity_id: 'ext-web',
+    sender: 'act-market-old',
+    target: 'ext-web',
     content: 'stale',
-    reply_to: null,
-  });
+  }));
 
   app.clearImConversation(state, 'act-market-new');
 
@@ -983,20 +993,19 @@ test('direct conversation payload replaces local render cache with persisted his
 
   app.applyImConversationPayload(state, {
     messages: [
-      {
+      imMessage({
         id: 'msg-sent-1',
-        from_identity_id: 'ext-web',
-        to_identity_id: 'act-market-1',
+        sender: 'ext-web',
+        target: 'act-market-1',
         content: 'ping',
-        reply_to: null,
-      },
-      {
+      }),
+      imMessage({
         id: 'msg-reply-1',
-        from_identity_id: 'act-market-1',
-        to_identity_id: 'ext-web',
+        sender: 'act-market-1',
+        target: 'ext-web',
         content: 'pong',
-        reply_to: 'msg-sent-1',
-      },
+        replyTo: 'msg-sent-1',
+      }),
     ],
   }, 'act-market-1');
 
@@ -1041,13 +1050,12 @@ test('selected actor conversation treats missing direct conversation as empty hi
         },
       },
     };
-    app.recordImProjectedMessage(state, {
+    app.recordImProjectedMessage(state, imMessage({
       id: 'msg-stale',
-      from_identity_id: 'act-market-old',
-      to_identity_id: 'ext-web',
+      sender: 'act-market-old',
+      target: 'ext-web',
       content: 'stale',
-      reply_to: null,
-    });
+    }));
 
     await app.refreshSelectedActorConversation(state);
 
@@ -1063,13 +1071,12 @@ test('selected actor conversation treats missing direct conversation as empty hi
 test('fetched im message appends projected reply without browser cursor state', () => {
   const state = app.createState();
 
-  app.recordImProjectedMessage(state, {
+  app.recordImProjectedMessage(state, imMessage({
     id: 'msg-reply-1',
-    from_identity_id: 'act-market-1',
-    to_identity_id: 'ext-web',
+    sender: 'act-market-1',
+    target: 'ext-web',
     content: 'pong',
-    reply_to: null,
-  });
+  }));
 
   assert.equal(Object.prototype.hasOwnProperty.call(state, 'imEventCursor'), false);
   assert.deepEqual(state.imConversation.map((entry) => [entry.id, entry.direction, entry.content]), [
@@ -1077,32 +1084,30 @@ test('fetched im message appends projected reply without browser cursor state', 
   ]);
 });
 
-test('connection-wide fetched event messages only append when they touch selected actor', () => {
+test('external-session-wide fetched event messages only append when they touch selected actor', () => {
   const state = app.createState();
   state.selectedActorId = 'act-market-selected';
   state.imConversationIdentityId = 'act-market-selected';
 
   const offScopeRecorded = app.recordSelectedActorEventMessage(
     state,
-    {
+    imMessage({
       id: 'msg-dev',
-      from_identity_id: 'act-dev-other',
-      to_identity_id: 'ext-web',
+      sender: 'act-dev-other',
+      target: 'ext-web',
       content: 'dev pong',
-      reply_to: null,
-    },
+    }),
     'act-market-selected'
   );
 
   const selectedRecorded = app.recordSelectedActorEventMessage(
     state,
-    {
+    imMessage({
       id: 'msg-market',
-      from_identity_id: 'act-market-selected',
-      to_identity_id: 'ext-web',
+      sender: 'act-market-selected',
+      target: 'ext-web',
       content: 'market pong',
-      reply_to: null,
-    },
+    }),
     'act-market-selected'
   );
 
@@ -1113,7 +1118,7 @@ test('connection-wide fetched event messages only append when they touch selecte
   ]);
 });
 
-test('polling connection-wide events acks off-selected actor message without rendering it', async () => {
+test('polling external-session-wide events acks off-selected actor message without rendering it', async () => {
   const originalFetch = global.fetch;
   const calls = [];
   global.fetch = async function (url, options) {
@@ -1135,13 +1140,12 @@ test('polling connection-wide events acks off-selected actor message without ren
         json: async function () {
           return {
             ok: true,
-            message: {
+            message: imMessage({
               id: 'msg-dev',
-              from_identity_id: 'act-dev-other',
-              to_identity_id: 'ext-web',
+              sender: 'act-dev-other',
+              target: 'ext-web',
               content: 'dev pong',
-              reply_to: null,
-            },
+            }),
           };
         },
       };

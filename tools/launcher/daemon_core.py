@@ -29,9 +29,10 @@ import side_thread_lifecycle  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
 from task_sys_runtime import cleanup_task_sys_side_lease as task_sys_cleanup_task_sys_side_lease  # noqa: E402
 from task_sys_runtime import execute_instruction as task_sys_execute_instruction  # noqa: E402
+from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from env.domain import task_sys  # noqa: E402
+from env.repos import identities as identity_repo  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime import actor_profile  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 
 
@@ -1216,17 +1217,49 @@ def derive_daemon_runtime_env(context: DaemonContext) -> dict[str, str]:
         "BUDDYSWITCH_INSTANCE_ROOT": str(context.instance_root),
         "BUDDYSWITCH_INSTANCE_JSON": str(context.instance_json),
         "BUDDYSWITCH_WORKSPACE_DIR": str(context.workspace_dir),
+        "BUDDYSWITCH_ACTOR_ID": context.actor_id,
+        "BUDDYSWITCH_ROLE_ID": context.role,
     }
 
 
-def actor_address_for_context(context: DaemonContext) -> actor_profile.ActorAddress:
-    record = actor_profile.runtime_actor_record_from_dispatch(
-        actor_id=context.actor_id,
-        role_id=context.role,
-        instance_json=context.instance_json,
-        instance_payload=context.instance_payload,
+def identity_route_payload(value: Any, field: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} must be an object")
+    extra_keys = set(value) - {"identity_id", "role_id"}
+    if extra_keys:
+        raise ValueError(f"{field} contains unsupported fields: {sorted(extra_keys)}")
+    identity_id = value.get("identity_id")
+    role_id = value.get("role_id")
+    if not isinstance(identity_id, str) or ACTOR_ID_PATTERN.fullmatch(identity_id.strip()) is None:
+        raise ValueError(f"{field}.identity_id must be a valid actor identity id")
+    if not isinstance(role_id, str) or ROLE_ID_PATTERN.fullmatch(role_id.strip()) is None:
+        raise ValueError(f"{field}.role_id must be a valid role id")
+    return {"identity_id": identity_id.strip(), "role_id": role_id.strip()}
+
+
+def identity_route_for_context(context: DaemonContext) -> dict[str, str]:
+    return identity_route_payload(
+        {"identity_id": context.actor_id, "role_id": context.role},
+        "context.identity_route",
     )
-    return actor_profile.resolve_actor_profile(record).actor_address
+
+
+def ensure_actor_identity_profile(context: DaemonContext, identity_route: dict[str, str]) -> dict[str, Any]:
+    existing = identity_repo.get_actor_identity_profile(identity_route["identity_id"])
+    if isinstance(existing, dict):
+        if existing.get("role_id") != identity_route["role_id"]:
+            raise ValueError(
+                "actor identity profile role mismatch: "
+                f"{identity_route['identity_id']} has {existing.get('role_id')}, "
+                f"instance has {identity_route['role_id']}"
+            )
+        return existing
+    return identity_repo.save_actor_identity_profile(
+        {
+            "identity": {"id": identity_route["identity_id"], "type": "actor"},
+            "role_id": identity_route["role_id"],
+        }
+    )
 
 
 def central_daemon_socket_path(context: DaemonContext) -> Path:
@@ -1243,7 +1276,7 @@ def central_daemon_socket_path(context: DaemonContext) -> Path:
 
 def register_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.ActorAddress,
+    identity_route: dict[str, str],
     *,
     notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
@@ -1255,7 +1288,8 @@ def register_daemon_actor(
     if subscriptions:
         endpoint["subscriptions"] = subscriptions
     return daemon_client.register_actor(
-        actor_address=actor_address.to_payload(),
+        identity_id=identity_route["identity_id"],
+        role_id=identity_route["role_id"],
         endpoint=endpoint,
         heartbeat={"kind": "central_daemon_rpc"},
         socket_path=central_daemon_socket_path(context),
@@ -1264,22 +1298,23 @@ def register_daemon_actor(
 
 def unregister_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.ActorAddress,
+    identity_route: dict[str, str],
 ) -> dict[str, Any]:
     return daemon_client.unregister_actor(
-        actor_address=actor_address.to_payload(),
+        identity_id=identity_route["identity_id"],
+        role_id=identity_route["role_id"],
         socket_path=central_daemon_socket_path(context),
     )
 
 
 def safe_unregister_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.ActorAddress,
+    identity_route: dict[str, str],
     *,
     state: DaemonState | None = None,
 ) -> dict[str, Any]:
     try:
-        result = unregister_daemon_actor(context, actor_address)
+        result = unregister_daemon_actor(context, identity_route)
     except Exception as exc:
         message = str(exc)
         if state is not None and state.payload.get("last_error") is None:
@@ -1296,10 +1331,10 @@ def safe_unregister_daemon_actor(
 
 def heartbeat_daemon_actor(
     context: DaemonContext,
-    actor_address: actor_profile.ActorAddress,
+    identity_route: dict[str, str],
 ) -> dict[str, Any]:
     return daemon_client.heartbeat_actor(
-        actor_address=actor_address.to_payload(),
+        identity_id=identity_route["identity_id"],
         socket_path=central_daemon_socket_path(context),
     )
 
@@ -1328,12 +1363,13 @@ def start_daemon_mailbox(
     *,
     context: DaemonContext,
     state: DaemonState,
-    actor_address: actor_profile.ActorAddress,
+    identity_route: dict[str, str],
     handlers: list[Any] | tuple[Any, ...],
 ) -> daemon_mailbox.DaemonMailboxServer:
     server = daemon_mailbox.DaemonMailboxServer(
         socket_path=daemon_mailbox.mailbox_socket_path(context.instance_root),
-        local_actor_address=actor_address,
+        local_identity_id=identity_route["identity_id"],
+        local_role_id=identity_route["role_id"],
         handlers=handlers,
         context=context,
         state=state,
@@ -1388,7 +1424,8 @@ def dispatch_notification(
     runtime = DaemonRuntime(context=context, state=state, client=client)
     trigger = daemon_triggers.normalize_app_server_notification(
         notification,
-        target_actor_address=actor_address_for_context(context).to_payload(),
+        target_identity_id=context.actor_id,
+        target_role_id=context.role,
     )
     _append_daemon_event(
         context,
@@ -1525,14 +1562,18 @@ def sweep_due_scheduled_triggers(
     now: str | None = None,
 ) -> dict[str, Any]:
     timestamp = _format_utc_timestamp(_parse_utc_timestamp(now or _utc_now()))
-    actor_address = actor_address_for_context(context).to_payload()
+    identity_route = identity_route_for_context(context)
     swept_count = 0
     delivered_count = 0
     failed_count = 0
     results: list[dict[str, Any]] = []
     for schedule in state.due_schedules(now=timestamp):
         schedule_id = schedule["schedule_id"]
-        trigger = daemon_triggers.normalize_scheduled_trigger(schedule, target_actor_address=actor_address)
+        trigger = daemon_triggers.normalize_scheduled_trigger(
+            schedule,
+            target_identity_id=identity_route["identity_id"],
+            target_role_id=identity_route["role_id"],
+        )
         dispatch_result = dispatch_trigger(context, state, runtime, trigger, handlers)
         swept_count += 1
         if (
@@ -1826,7 +1867,7 @@ def start_daemon(
 
 def stop_daemon(instance_json: Path) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
-    actor_address = actor_address_for_context(context)
+    identity_route = identity_route_for_context(context)
     state = DaemonState.load(
         instance_root=context.instance_root,
         actor_id=context.actor_id,
@@ -1838,7 +1879,7 @@ def stop_daemon(instance_json: Path) -> dict[str, Any]:
     if pid is not None and _pid_is_live(pid):
         terminated = _terminate_pid(pid)
     _remove_path(pid_path)
-    unregister = safe_unregister_daemon_actor(context, actor_address, state=state)
+    unregister = safe_unregister_daemon_actor(context, identity_route, state=state)
     _append_daemon_event(context, "daemon_stopped", pid=pid, terminated=bool(terminated))
     payload = {
         "ok": True,
@@ -1859,7 +1900,8 @@ def run_daemon(
     context = load_daemon_context(instance_json)
     os.environ.update(derive_daemon_runtime_env(context))
     runtime_files.refresh_runtime_roots_from_env()
-    actor_address = actor_address_for_context(context)
+    identity_route = identity_route_for_context(context)
+    ensure_actor_identity_profile(context, identity_route)
     state = DaemonState.load(
         instance_root=context.instance_root,
         actor_id=context.actor_id,
@@ -1883,13 +1925,13 @@ def run_daemon(
             mailbox_server = start_daemon_mailbox(
                 context=context,
                 state=state,
-                actor_address=actor_address,
+                identity_route=identity_route,
                 handlers=daemon_handlers,
             )
             if notify_subscriptions is None:
-                register_daemon_actor(context, actor_address)
+                register_daemon_actor(context, identity_route)
             else:
-                register_daemon_actor(context, actor_address, notify_subscriptions=notify_subscriptions)
+                register_daemon_actor(context, identity_route, notify_subscriptions=notify_subscriptions)
             registered = True
             while True:
                 try:
@@ -1901,7 +1943,7 @@ def run_daemon(
                         DaemonRuntime(context=context, state=state, client=client),
                         daemon_handlers,
                     )
-                    heartbeat_daemon_actor(context, actor_address)
+                    heartbeat_daemon_actor(context, identity_route)
                     continue
                 except app_server.AppServerError as exc:
                     state.record_error(origin_turn_id=None, message=str(exc))
@@ -1918,7 +1960,7 @@ def run_daemon(
         return 1
     finally:
         if registered:
-            safe_unregister_daemon_actor(context, actor_address, state=state)
+            safe_unregister_daemon_actor(context, identity_route, state=state)
         if mailbox_server is not None:
             mailbox_server.close()
     return 0

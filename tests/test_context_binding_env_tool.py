@@ -154,7 +154,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-context-active",
             "Context Track",
-            owner_actor={"actor_id": actor_id, "role_id": "dev"},
+            owner_identity=actor_id,
             outcome="Context outcome",
             now={"next": "seed", "blocker": None},
         )
@@ -204,7 +204,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-context-archived",
             "Archived Track",
-            owner_actor={"actor_id": self._runtime_actor_id(role="pm", label="act-pm-context"), "role_id": "pm"},
+            owner_identity=self._runtime_actor_id(role="pm", label="act-pm-context"),
             outcome="Archived outcome",
             now={"next": "archived", "blocker": None},
         )
@@ -357,7 +357,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("track-scoped", str(snapshot.get("track_comment_support")).lower())
         self.assertIn("browser", str(snapshot.get("search_boundary")).lower())
 
-    def test_context_candidate_tracks_use_owner_actor_and_exact_actor_relation(self) -> None:
+    def test_context_candidate_tracks_use_owner_identity_and_exact_actor_relation(self) -> None:
         self._seed_context_state()
         instance_json = self._instance_json()
         payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
@@ -370,13 +370,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if not isinstance(row, dict):
                 continue
             self.assertIn("owner_identity_id", row)
-            self.assertNotIn("owner_actor", row)
+            self.assertNotIn("owner_identity", row)
             self.assertNotIn("owner_role", row)
-            self.assertNotIn("created_by_actor", row)
-            self.assertIn(row.get("active_actor_relation"), {"owner", "collaborator"})
+            self.assertNotIn("created_by_identity", row)
+            self.assertIn(row.get("current_identity_relation"), {"owner", "collaborator"})
             self.assertIn(row.get("active_role_relation"), {"owner", "collaborator"})
             if row.get("track_id") == "track-context-active":
-                self.assertEqual(row.get("active_actor_relation"), "owner")
+                self.assertEqual(row.get("current_identity_relation"), "owner")
             self.assertNotIn("current_role", row)
             self.assertNotIn("next_role", row)
             self.assertNotIn("participant", row)
@@ -470,15 +470,15 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("art-task-dev-context-note-r1", ids)
         self.assertNotIn("art-context-owner-draft-untracked", ids)
 
-    def test_context_candidates_show_only_active_actor_private_drafts(self) -> None:
-        owner_actor = "act-dev-context-draft-owner"
+    def test_context_candidates_show_only_current_identity_private_drafts(self) -> None:
+        owner_identity = "act-dev-context-draft-owner"
         other_actor = "act-dev-context-draft-other"
-        owner_instance = self._instance_json(actor_id=owner_actor, role="dev")
+        owner_instance = self._instance_json(actor_id=owner_identity, role="dev")
         other_instance = self._instance_json(actor_id=other_actor, role="dev")
 
         own_draft = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="dev",
             tool="artifact",
             action="create_revision",
@@ -509,7 +509,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         owner_summary = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="dev",
             tool="context",
             action="summarize",
@@ -526,7 +526,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         owner_full = self._dispatch(
             instance_json=owner_instance,
-            actor_id=owner_actor,
+            actor_id=owner_identity,
             role="dev",
             tool="context",
             action="get",
@@ -546,33 +546,29 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         pm = {"role_id": "pm", "actor_id": self._runtime_actor_id(role="pm", label="act-pm-context")}
         design = {"role_id": "design", "actor_id": self._runtime_actor_id(role="design", label="act-design-context")}
         market = {"role_id": "market", "actor_id": self._runtime_actor_id(role="market", label="act-market-context")}
-        dev_participant = {"kind": "actor", "actor_address": dev}
-        pm_participant = {"kind": "actor", "actor_address": pm}
-        design_participant = {"kind": "actor", "actor_address": design}
-        market_participant = {"kind": "actor", "actor_address": market}
+        dev_identity = {"id": dev["actor_id"], "type": "actor"}
+        pm_identity = {"id": pm["actor_id"], "type": "actor"}
+        design_identity = {"id": design["actor_id"], "type": "actor"}
+        market_identity = {"id": market["actor_id"], "type": "actor"}
         root = message_service.send_im_message(
-            sender_participant=pm_participant,
-            to=dev_participant,
+            sender_identity=pm_identity,
+            target_identity=dev_identity,
             content="Need proof asset",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         reply = message_service.send_im_message(
-            sender_participant=design_participant,
-            to=dev_participant,
+            sender_identity=design_identity,
+            target_identity=dev_identity,
             content="Screenshot ready",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         message_service.send_im_message(
-            sender_participant=dev_participant,
-            to=pm_participant,
+            sender_identity=dev_identity,
+            target_identity=pm_identity,
             content="Sent by dev only",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
         message_service.send_im_message(
-            sender_participant=market_participant,
-            to=pm_participant,
+            sender_identity=market_identity,
+            target_identity=pm_identity,
             content="Not dev inbox",
-            wake_actor=lambda _payload: {"wake_status": "submitted"},
         )
 
         instance_json = self._instance_json()
@@ -595,11 +591,21 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertEqual(row.get("to_identity_id"), dev["actor_id"])
-            self.assertIn(row.get("from_identity_id"), [pm["actor_id"], design["actor_id"]])
+            target_identity = row.get("target_identity")
+            sender_identity = row.get("sender_identity")
+            self.assertIsInstance(target_identity, dict)
+            self.assertIsInstance(sender_identity, dict)
+            assert isinstance(target_identity, dict)
+            assert isinstance(sender_identity, dict)
+            self.assertEqual(target_identity.get("id"), dev["actor_id"])
+            self.assertEqual(target_identity.get("type"), "actor")
+            self.assertIn(sender_identity.get("id"), [pm["actor_id"], design["actor_id"]])
+            self.assertEqual(sender_identity.get("type"), "actor")
             self.assertEqual(row.get("visible_to_identity_id"), dev["actor_id"])
             self.assertNotIn("from_actor_address", row)
             self.assertNotIn("to_actor_address", row)
+            self.assertNotIn("from_identity_id", row)
+            self.assertNotIn("to_identity_id", row)
             self.assertNotIn("content", row)
         self.assertGreaterEqual(cues.get("count", 0), 2)
         message_source = payload.get("context_sources", {}).get("messages", {})

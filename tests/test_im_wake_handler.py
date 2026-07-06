@@ -20,18 +20,19 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import im_wake_handler  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
 
 @dataclass
 class _Context:
-    actor_address: ActorAddress
+    actor_id: str
+    role: str
 
 
 @dataclass
 class _Trigger:
     type: str
-    target_actor_address: dict[str, str]
+    target_identity_id: str
+    target_role_id: str
     payload: dict[str, str]
 
 
@@ -67,14 +68,15 @@ class ImWakeHandlerTests(unittest.TestCase):
         self._tmp_dir.cleanup()
         super().tearDown()
 
-    def _actor(self) -> ActorAddress:
-        return ActorAddress(role_id="market", actor_id="act-market-test")
+    def _identity_route(self) -> dict[str, str]:
+        return {"identity_id": "act-market-test", "role_id": "market"}
 
-    def _trigger(self, actor: ActorAddress | None = None) -> _Trigger:
-        target = actor or self._actor()
+    def _trigger(self, route: dict[str, str] | None = None) -> _Trigger:
+        target = route or self._identity_route()
         return _Trigger(
             type="im.message.created",
-            target_actor_address=target.to_payload(),
+            target_identity_id=target["identity_id"],
+            target_role_id=target["role_id"],
             payload={
                 "message_id": "msg-abc123",
                 "conversation_id": "conv-abc123",
@@ -90,11 +92,11 @@ class ImWakeHandlerTests(unittest.TestCase):
         ]
 
     def test_im_message_ingests_task_without_parent_or_side_prompt(self) -> None:
-        actor = self._actor()
+        route = self._identity_route()
         runtime = _Runtime()
         handler = im_wake_handler.ImMessageCreatedHandler()
 
-        result = handler.handle(_Context(actor), None, runtime, self._trigger(actor))
+        result = handler.handle(_Context(actor_id=route["identity_id"], role=route["role_id"]), None, runtime, self._trigger(route))
 
         self.assertEqual(result.status, "handled")
         records = self._task_records()
@@ -102,7 +104,7 @@ class ImWakeHandlerTests(unittest.TestCase):
         record = records[0]
         self.assertEqual(record["source_type"], "im.message.created")
         self.assertEqual(record["source_ref"], {"message_id": "msg-abc123", "conversation_id": "conv-abc123", "event_id": "imev-abc123"})
-        self.assertEqual(record["actor_target"], actor.to_payload())
+        self.assertEqual(record["actor_target"], {"actor_id": route["identity_id"], "role_id": route["role_id"]})
         self.assertEqual(record["inbound_context"]["message_id"], "msg-abc123")
         self.assertEqual(record["status"], "side_processing")
         self.assertEqual(record["active_processor"], "side")
@@ -113,17 +115,18 @@ class ImWakeHandlerTests(unittest.TestCase):
 
     def test_wrong_target_actor_fails(self) -> None:
         handler = im_wake_handler.ImMessageCreatedHandler()
-        wrong = ActorAddress(role_id="market", actor_id="act-market-other")
+        wrong = {"identity_id": "act-market-other", "role_id": "market"}
 
-        result = handler.handle(_Context(self._actor()), None, _Runtime(), self._trigger(wrong))
+        route = self._identity_route()
+        result = handler.handle(_Context(actor_id=route["identity_id"], role=route["role_id"]), None, _Runtime(), self._trigger(wrong))
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wrong target actor", result.message)
+        self.assertIn("wrong target identity", result.message)
 
     def test_handler_does_not_handle_unrelated_event(self) -> None:
         handler = im_wake_handler.ImMessageCreatedHandler()
 
-        self.assertFalse(handler.handles(_Trigger("example.ready", self._actor().to_payload(), {"message_id": "msg-abc123"})))
+        self.assertFalse(handler.handles(_Trigger("example.ready", "act-market-test", "market", {"message_id": "msg-abc123"})))
 
 
 if __name__ == "__main__":

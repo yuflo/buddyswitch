@@ -30,7 +30,7 @@ _DISCOVERY_EXCLUDED_TOOLS: set[str] = set()
 
 class ContextServiceContext(TypedDict):
     active_role: str
-    active_actor: dict[str, Any]
+    current_identity: dict[str, Any]
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -38,7 +38,7 @@ class ContextServiceContext(TypedDict):
     manifest_path: Path | None
 
 
-def _reject_payload(*, action: str, active_actor: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
+def _reject_payload(*, action: str, current_identity: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
     correctable_fields: list[str] | None = None
     if "unsupported payload fields:" in message:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
@@ -52,7 +52,7 @@ def _reject_payload(*, action: str, active_actor: dict[str, Any], active_role: s
     return tool_results.rejection(
         tool="context",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_CONTEXT_PAYLOAD",
         message=message,
@@ -71,7 +71,7 @@ def _reject_payload(*, action: str, active_actor: dict[str, Any], active_role: s
     )
 
 
-def _require_allowed_fields(action: str, args: dict[str, Any], active_actor: dict[str, Any], active_role: str) -> dict[str, Any] | None:
+def _require_allowed_fields(action: str, args: dict[str, Any], current_identity: dict[str, Any], active_role: str) -> dict[str, Any] | None:
     _, action_name = action.split(".", 1)
     allowed = set()
     for row in _ACTION_DEFINITION_MAP.get("actions", []):
@@ -82,7 +82,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_actor: dic
     if unknown:
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
         )
@@ -178,14 +178,14 @@ def _classify_source_root(root: Path, *, limit: int = 20) -> tuple[str, list[str
 def _source_workspace_rejection(
     *,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     message: str,
 ) -> dict[str, Any]:
     return tool_results.rejection(
         tool="context",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_CONTEXT_SOURCE_WORKSPACE",
         message=message,
@@ -256,13 +256,13 @@ def _build_source_workspace(
     return source_workspace
 
 
-def _actor_identity_id(active_actor: dict[str, Any]) -> str | None:
-    actor_id = active_actor.get("actor_id") if isinstance(active_actor, dict) else None
-    return actor_id if isinstance(actor_id, str) and actor_id else None
+def _actor_identity_id(current_identity: dict[str, Any]) -> str | None:
+    identity_id = current_identity.get("id") if isinstance(current_identity, dict) else None
+    return identity_id if isinstance(identity_id, str) and identity_id else None
 
 
-def _candidate_track_row(*, track: dict[str, Any], active_actor: dict[str, Any]) -> dict[str, Any]:
-    relation = "owner" if track.get("owner_identity_id") == _actor_identity_id(active_actor) else "collaborator"
+def _candidate_track_row(*, track: dict[str, Any], current_identity: dict[str, Any]) -> dict[str, Any]:
+    relation = "owner" if track.get("owner_identity_id") == _actor_identity_id(current_identity) else "collaborator"
     return {
         "track_id": track.get("id"),
         "title": track.get("title"),
@@ -272,7 +272,7 @@ def _candidate_track_row(*, track: dict[str, Any], active_actor: dict[str, Any])
         "now": track.get("now"),
         "acceptance_criteria": track.get("acceptance_criteria"),
         "non_goals": track.get("non_goals"),
-        "active_actor_relation": relation,
+        "current_identity_relation": relation,
         "active_role_relation": relation,
         "updated_at": track.get("updated_at"),
     }
@@ -328,7 +328,7 @@ def _visible_tasks(
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
     tasks = context.rules.task_sys.list_tasks(
-        actor_target={"actor_id": context["actor_id"], "role_id": active_role},
+        actor_target={"actor_id": context["current_identity"]["id"], "role_id": active_role},
     )
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
@@ -353,9 +353,9 @@ def _candidate_artifact_rows(
 ) -> list[dict[str, Any]]:
     normalized_track_filter = track_filter.strip() if isinstance(track_filter, str) and track_filter.strip() else None
     rows: list[dict[str, Any]] = []
-    active_actor = context["active_actor"]
+    current_identity = context["current_identity"]
     for artifact in context.repos.artifact.list_artifacts():
-        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
+        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, current_identity)
         if not bool(decision.get("allowed")):
             continue
         if not _context_artifact_row_allowed(
@@ -372,12 +372,12 @@ def _candidate_artifact_rows(
         relation_counts = context.rules.artifact_relations.relation_counts_for_artifact(
             artifact_id=artifact_id,
             active_role=active_role,
-            active_actor_address=context.actor_address.to_payload(),
+            current_identity_address=context["current_identity"],
         )
         rows.append(
             context.rules.artifact_visibility.artifact_list_row(
                 artifact,
-                active_actor,
+                current_identity,
                 comment_counts=comment_counts,
                 relation_counts=relation_counts,
             )
@@ -482,12 +482,6 @@ def _current_identity_id(context: ContextServiceContext) -> str | None:
     raw_identity = context.get("current_identity") if hasattr(context, "get") else None
     if isinstance(raw_identity, dict) and isinstance(raw_identity.get("id"), str) and raw_identity["id"].strip():
         return raw_identity["id"].strip()
-    actor_address = getattr(context, "actor_address", None)
-    actor_id = getattr(actor_address, "actor_id", None)
-    if isinstance(actor_id, str) and actor_id.strip():
-        return actor_id.strip()
-    if isinstance(actor_address, dict) and isinstance(actor_address.get("actor_id"), str) and actor_address["actor_id"].strip():
-        return actor_address["actor_id"].strip()
     return None
 
 
@@ -496,14 +490,12 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
     if active_identity_id is None:
         inbox: list[dict[str, Any]] = []
     else:
-        actor_address = context.actor_address.to_payload()
-        events = context.repos.message.list_im_events_for_participant(
-            {"kind": "actor", "actor_address": actor_address}
-        )
+        events = context.repos.message.list_im_events_for_identity(context["current_identity"])
         inbox = [
             row
             for row in events
-            if row.get("to_identity_id") == active_identity_id
+            if isinstance(row.get("target_identity"), dict)
+            and row["target_identity"].get("id") == active_identity_id
             and row.get("visible_to_identity_id") == active_identity_id
         ]
         inbox.sort(
@@ -519,8 +511,8 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
             "event_id": row.get("event_id"),
             "message_id": row.get("message_id"),
             "conversation_id": row.get("conversation_id"),
-            "from_identity_id": row.get("from_identity_id"),
-            "to_identity_id": row.get("to_identity_id"),
+            "sender_identity": row.get("sender_identity") if isinstance(row.get("sender_identity"), dict) else None,
+            "target_identity": row.get("target_identity") if isinstance(row.get("target_identity"), dict) else None,
             "visible_to_identity_id": row.get("visible_to_identity_id"),
             "reply_to": row.get("reply_to"),
             "created_at": row.get("created_at"),
@@ -532,7 +524,7 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
         "latest_inbox": latest,
         "inbox_source_of_truth": "message.list",
         "conversation_source_of_truth": "message.conversation",
-        "target_discovery": "Use message.contacts to discover online target identities.",
+        "target_discovery": "Use message.contacts only when you need a target identities discovery view; message.send resolves explicit actor or external target_identity_id values through IM target rules.",
     }
 
 
@@ -592,7 +584,7 @@ def _current_context_sections(
     )
 
     writable_surfaces = _build_writable_surfaces(instance_payload)
-    candidate_tracks = [_candidate_track_row(track=row, active_actor=context["active_actor"]) for row in visible_tracks]
+    candidate_tracks = [_candidate_track_row(track=row, current_identity=context["current_identity"]) for row in visible_tracks]
     candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {
@@ -675,7 +667,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "artifact.list / artifact.get via runtime env tools",
         },
         "messages": {
-            "description": "Central IM messages: participant events through message.list, bidirectional visible context through message.conversation.",
+            "description": "Central IM messages: identity-scoped events through message.list, bidirectional visible context through message.conversation.",
             "scope": "active actor Central IM events and direct conversation communication",
             "source_of_truth": "message.list and message.conversation via runtime env tools",
         },
@@ -705,8 +697,8 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
 def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.get"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_allowed_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -721,14 +713,16 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
     except Exception as exc:
         return _source_workspace_rejection(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=str(exc),
         )
+    extra_sections = dict(sections)
+    extra_sections.pop("current_identity", None)
     return tool_results.success(
         tool="context",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary="Returned full runtime context sections plus source_workspace facts, writable_surfaces facts, full tool catalog, and full operation semantics.",
         state_changed=False,
@@ -738,15 +732,15 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
             "Use task/track/artifact tools with explicit ids.",
             "Use context.summarize for compact orientation.",
         ],
-        extra=sections,
+        extra=extra_sections,
     )
 
 
 def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.summarize"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_allowed_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -761,7 +755,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     except Exception as exc:
         return _source_workspace_rejection(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=str(exc),
         )
@@ -775,7 +769,6 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "recent_updates": sections["recent_updates"],
         "message_cues": sections["message_cues"],
         "context_sources": context_sources_desc(),
-        "current_identity": sections["current_identity"],
         "writable_surfaces": sections["writable_surfaces"],
         "tool_affordances": tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
         "capability_snapshot": sections["capability_snapshot"],
@@ -785,7 +778,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     return tool_results.success(
         tool="context",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary="Returned compact context orientation with source_workspace facts, writable_surfaces facts, candidate ids, and first-pass tool affordances.",
         state_changed=False,
@@ -802,15 +795,15 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
 def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
     action = "context.list_sources"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_allowed_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_allowed_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
     return tool_results.success(
         tool="context",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary="Returned read-only context source descriptors, including source_workspace orientation semantics.",
         state_changed=False,

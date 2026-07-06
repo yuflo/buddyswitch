@@ -325,7 +325,7 @@ def _reject(
     *,
     tool: str | None,
     action: str | None,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     code: str,
     message: str,
@@ -342,7 +342,7 @@ def _reject(
     return tool_results.rejection(
         tool=fallback_tool,
         action=semantic_action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code=code,
         message=message,
@@ -362,14 +362,14 @@ def _active_task_required_rejection(
     *,
     tool: str,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
 ) -> dict[str, Any]:
     semantic_action = _semantic_action(tool=tool, action=action)
     return tool_results.rejection(
         tool=tool,
         action=semantic_action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_TASK_SYS_ACTIVE_TASK_REQUIRED",
         message="Task Sys active task is required for this env tool action",
@@ -432,14 +432,14 @@ def _active_task_required_rejection(
 def _has_active_task_binding(
     *,
     active_role: str,
-    active_actor: Mapping[str, Any],
+    current_identity: Mapping[str, Any],
     instance_json: Path,
     instance_payload: Mapping[str, object],
 ) -> bool:
     del instance_json, instance_payload
     from env.domain import task_sys
 
-    actor_id = active_actor.get("actor_id")
+    actor_id = current_identity.get("id")
     if not isinstance(actor_id, str) or not actor_id.strip():
         return False
     return task_sys.has_active_task_for_actor({"actor_id": actor_id, "role_id": active_role})
@@ -455,11 +455,21 @@ def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) 
         raise TypeError(f"{_tool_module_name(tool)}.invoke must return an object")
     response.setdefault("tool", tool)
     response.setdefault("action", _semantic_action(tool=tool, action=action))
-    active_actor = getattr(context, "active_actor", None)
-    if active_actor is not None and hasattr(active_actor, "to_payload"):
-        response["active_actor"] = active_actor.to_payload()
-    response["active_role"] = getattr(getattr(context, "active_role", None), "role_id", context.get("active_role"))
+    current_identity = getattr(context, "current_identity", None)
+    if current_identity is not None and hasattr(current_identity, "to_payload"):
+        response["current_identity"] = current_identity.to_payload()
+    response["active_role"] = getattr(context, "role_id", context.get("active_role"))
     return response
+
+
+def _actor_identity_profile_from_dispatch(*, actor_id: str, active_role: str) -> Any:
+    from env.domain.identity import ActorIdentityProfile
+    from env.domain.identity import actor_identity
+
+    return ActorIdentityProfile(
+        identity=actor_identity(actor_id),
+        role_id=active_role,
+    )
 
 
 def dispatch_env_tool_request(
@@ -472,25 +482,16 @@ def dispatch_env_tool_request(
     manifest: dict[str, Any],
     manifest_path: Path | None = None,
 ) -> dict[str, Any]:
-    from env.tool_runtime import actor_profile
-
-    instance_record = actor_profile.runtime_actor_record_from_dispatch(
-        actor_id=actor_id,
-        role_id=active_role,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    )
-    runtime_actor = actor_profile.resolve_actor_profile(instance_record)
-    active_actor = runtime_actor.active_actor.to_payload()
+    runtime_actor = _actor_identity_profile_from_dispatch(actor_id=actor_id, active_role=active_role)
+    current_identity = runtime_actor.identity.to_payload()
     active_role = runtime_actor.role_id
-    actor_id = runtime_actor.actor_id
 
     raw_tool = payload.get("tool")
     if not isinstance(raw_tool, str) or not raw_tool.strip():
         return _reject(
             tool=None,
             action=None,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             code="E_ENV_TOOL",
             message="env.tool payload.tool must be a non-empty string",
@@ -512,10 +513,10 @@ def dispatch_env_tool_request(
     if tool not in known_tools:
         if tool in known_packages:
             return _reject(
-                tool=tool,
-                action=None,
-                active_actor=active_actor,
-                active_role=active_role,
+                    tool=tool,
+                    action=None,
+                    current_identity=current_identity,
+                    active_role=active_role,
                 code="E_ENV_TOOL_CATALOG",
                 message=f"env.tool package '{tool}' exists but its definition is unavailable",
                 permission_boundary="env.tool.catalog",
@@ -531,7 +532,7 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=None,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             code="E_ENV_TOOL",
             message=f"unsupported env.tool payload.tool: {tool}",
@@ -552,7 +553,7 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=None,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             code="E_ENV_TOOL",
             message="env.tool payload.action must be a non-empty string",
@@ -571,7 +572,7 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             code="E_ENV_TOOL",
             message=f"unsupported env.tool payload.action for {tool}: {action}",
@@ -591,12 +592,13 @@ def dispatch_env_tool_request(
     from env.tool_runtime import auth_feedback
     from env.tool_runtime import role_auth
 
-    auth_decision = role_auth.authorize(action_definition.required_permission, runtime_actor.auth_subject, manifest)
+    auth_decision = role_auth.authorize(action_definition.required_permission, runtime_actor.role_id, manifest)
     if not auth_decision.allowed:
         return auth_feedback.role_auth_rejection(
             tool=tool,
             action=action,
-            active_actor=runtime_actor.active_actor,
+            current_identity=current_identity,
+            active_role=runtime_actor.role_id,
             decision=auth_decision,
         )
 
@@ -605,7 +607,7 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             code="E_ENV_TOOL_PAYLOAD",
             message="env.tool payload.args must be an object",
@@ -622,8 +624,8 @@ def dispatch_env_tool_request(
 
     from env.tool_runtime.context import ToolContext
 
-    context = ToolContext.from_actor_profile(
-        actor_profile=runtime_actor,
+    context = ToolContext.from_identity_profile(
+        actor_identity_profile=runtime_actor,
         instance_json=instance_json,
         instance_payload=dict(instance_payload),
         manifest=dict(manifest),
@@ -631,14 +633,14 @@ def dispatch_env_tool_request(
     )
     if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED and not _has_active_task_binding(
         active_role=active_role,
-        active_actor=active_actor,
+        current_identity=current_identity,
         instance_json=instance_json,
         instance_payload=instance_payload,
     ):
         return _active_task_required_rejection(
             tool=tool,
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
         )
 
@@ -648,7 +650,7 @@ def dispatch_env_tool_request(
         return _reject(
             tool=tool,
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             code="E_ENV_TOOL_DISPATCH",
             message=f"failed to invoke env tool {tool}.{action}: {exc}",

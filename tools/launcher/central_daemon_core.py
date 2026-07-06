@@ -20,7 +20,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_mailbox  # noqa: E402
-from env.tool_runtime.actor_profile import ROLE_ID_PATTERN, ActorAddress  # noqa: E402
+from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
 
@@ -57,11 +57,17 @@ def _require_object(value: Any, field: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _actor_address(value: Any) -> ActorAddress:
-    try:
-        return ActorAddress.from_payload(value)
-    except Exception as exc:
-        raise CentralDaemonError("invalid_actor_address", str(exc)) from exc
+def _actor_identity_id(value: Any, field: str = "identity_id") -> str:
+    if not isinstance(value, str) or ACTOR_ID_PATTERN.fullmatch(value.strip()) is None:
+        raise CentralDaemonError("invalid_identity_id", f"{field} must be a valid actor identity id")
+    return value.strip()
+
+
+def _actor_identity_route(params: dict[str, Any]) -> dict[str, str]:
+    return {
+        "identity_id": _actor_identity_id(params.get("identity_id")),
+        "role_id": _require_role_id(params.get("role_id")),
+    }
 
 
 def _require_role_id(value: Any) -> str:
@@ -81,7 +87,8 @@ def _normalize_row(row: Any) -> dict[str, Any] | None:
     if not isinstance(row, dict):
         return None
     try:
-        address = ActorAddress.from_payload(row.get("actor_address"))
+        identity_id = _actor_identity_id(row.get("identity_id"))
+        role_id = _require_role_id(row.get("role_id"))
     except Exception:
         return None
     endpoint = row.get("endpoint")
@@ -89,7 +96,9 @@ def _normalize_row(row: Any) -> dict[str, Any] | None:
     status = row.get("status")
     last_seen_at = row.get("last_seen_at")
     return {
-        "actor_address": address.to_payload(),
+        "identity_id": identity_id,
+        "identity": {"id": identity_id, "type": "actor"},
+        "role_id": role_id,
         "endpoint": dict(endpoint) if isinstance(endpoint, dict) else {},
         "heartbeat": dict(heartbeat) if isinstance(heartbeat, dict) else {},
         "status": status if status in {"online", "registered_offline"} else "registered_offline",
@@ -142,19 +151,19 @@ class CentralDaemonService:
 
     def _upsert_actor(self, row: dict[str, Any]) -> dict[str, Any]:
         registry = self._load_registry()
-        actor_id = row["actor_address"]["actor_id"]
+        identity_id = row["identity_id"]
         actors = [
             existing
             for existing in registry["actors"]
-            if existing.get("actor_address", {}).get("actor_id") != actor_id
+            if existing.get("identity_id") != identity_id
         ]
         actors.append(row)
         self._save_registry({"actors": actors})
         return row
 
-    def _record_for_address(self, address: ActorAddress) -> dict[str, Any] | None:
+    def _record_for_identity_id(self, identity_id: str) -> dict[str, Any] | None:
         for row in self._load_registry()["actors"]:
-            if row.get("actor_address") == address.to_payload():
+            if row.get("identity_id") == identity_id:
                 return row
         return None
 
@@ -179,8 +188,8 @@ class CentralDaemonService:
                 return self._heartbeat(params)
             if method == "daemon.registry":
                 return self._load_registry()
-            if method == "contacts.list":
-                return self._contacts(params)
+            if method == "actor_directory.list_online":
+                return self._list_online_actors(params)
             if method == "actor.check_reachability":
                 return self._reachability(params)
             if method == "signal.deliver":
@@ -225,14 +234,16 @@ class CentralDaemonService:
             }
 
     def _register(self, params: dict[str, Any]) -> dict[str, Any]:
-        address = _actor_address(params.get("actor_address"))
+        route = _actor_identity_route(params)
         endpoint = _require_object(params.get("endpoint"), "endpoint")
         heartbeat_raw = params.get("heartbeat")
         heartbeat = dict(heartbeat_raw) if isinstance(heartbeat_raw, dict) else {"kind": "central_daemon_rpc"}
         status_raw = params.get("status")
         status = status_raw if status_raw in {"online", "registered_offline"} else "online"
         row = {
-            "actor_address": address.to_payload(),
+            "identity_id": route["identity_id"],
+            "identity": {"id": route["identity_id"], "type": "actor"},
+            "role_id": route["role_id"],
             "endpoint": endpoint,
             "heartbeat": heartbeat,
             "status": status,
@@ -241,11 +252,13 @@ class CentralDaemonService:
         return {"record": self._upsert_actor(row)}
 
     def _unregister(self, params: dict[str, Any]) -> dict[str, Any]:
-        address = _actor_address(params.get("actor_address"))
-        row = self._record_for_address(address)
+        route = _actor_identity_route(params)
+        row = self._record_for_identity_id(route["identity_id"])
         if row is None:
             row = {
-                "actor_address": address.to_payload(),
+                "identity_id": route["identity_id"],
+                "identity": {"id": route["identity_id"], "type": "actor"},
+                "role_id": route["role_id"],
                 "endpoint": {},
                 "heartbeat": {},
                 "status": "registered_offline",
@@ -256,46 +269,45 @@ class CentralDaemonService:
         return {"record": self._upsert_actor(row)}
 
     def _heartbeat(self, params: dict[str, Any]) -> dict[str, Any]:
-        address = _actor_address(params.get("actor_address"))
-        row = self._record_for_address(address)
+        identity_id = _actor_identity_id(params.get("identity_id"))
+        row = self._record_for_identity_id(identity_id)
         if row is None:
-            raise CentralDaemonError("never_registered", "actor address has never registered")
+            raise CentralDaemonError("never_registered", "actor identity has never registered")
         row = dict(row, status="online", last_seen_at=self.now())
         return {"record": self._upsert_actor(row)}
 
-    def _contacts(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _list_online_actors(self, params: dict[str, Any]) -> dict[str, Any]:
         role_filter = params.get("role_id")
         normalized_role = _require_role_id(role_filter) if isinstance(role_filter, str) and role_filter.strip() else None
-        contacts: list[dict[str, Any]] = []
+        actors: list[dict[str, Any]] = []
         for row in self._load_registry()["actors"]:
             if row.get("status") != "online":
                 continue
-            address = ActorAddress.from_payload(row["actor_address"])
-            if normalized_role is not None and address.role_id != normalized_role:
+            if normalized_role is not None and row.get("role_id") != normalized_role:
                 continue
-            contacts.append(dict(row))
-        return {"contacts": contacts, "count": len(contacts)}
+            actors.append(dict(row))
+        return {"actors": actors, "count": len(actors)}
 
     def _reachability(self, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            address = ActorAddress.from_payload(params.get("target_actor_address"))
+            identity_id = _actor_identity_id(params.get("target_identity_id"), "target_identity_id")
         except Exception as exc:
             return {
-                "reachability_status": "invalid_actor_address",
-                "target_actor_address": None,
+                "reachability_status": "invalid_identity_id",
+                "target_identity_id": None,
                 "reason": str(exc),
             }
-        row = self._record_for_address(address)
+        row = self._record_for_identity_id(identity_id)
         if row is None:
             return {
                 "reachability_status": "never_registered",
-                "target_actor_address": address.to_payload(),
+                "target_identity_id": identity_id,
                 "record": None,
             }
         status = "online" if row.get("status") == "online" else "registered_offline"
         return {
             "reachability_status": status,
-            "target_actor_address": address.to_payload(),
+            "target_identity_id": identity_id,
             "record": row,
         }
 
@@ -311,13 +323,13 @@ class CentralDaemonService:
                 "handling_status": "ignored",
                 "signal_error": str(exc),
             }
-        reachability = self._reachability({"target_actor_address": signal["target_actor_address"]})
+        reachability = self._reachability({"target_identity_id": signal["target_identity_id"]})
         if reachability["reachability_status"] != "online":
             return {
                 "delivery_status": "target_not_online",
                 "handling_status": "ignored",
                 "reachability_status": reachability["reachability_status"],
-                "target_actor_address": signal["target_actor_address"],
+                "target_identity_id": signal["target_identity_id"],
             }
         record = reachability.get("record")
         endpoint = record.get("endpoint") if isinstance(record, dict) else None
@@ -326,7 +338,7 @@ class CentralDaemonService:
                 "delivery_status": "delivery_failed",
                 "handling_status": "ignored",
                 "signal_error": "target endpoint is not daemon_mailbox_socket",
-                "target_actor_address": signal["target_actor_address"],
+                "target_identity_id": signal["target_identity_id"],
                 "signal": signal,
             }
         socket_raw = endpoint.get("socket_path")
@@ -335,7 +347,7 @@ class CentralDaemonService:
                 "delivery_status": "delivery_failed",
                 "handling_status": "ignored",
                 "signal_error": "target mailbox socket_path is required",
-                "target_actor_address": signal["target_actor_address"],
+                "target_identity_id": signal["target_identity_id"],
                 "signal": signal,
             }
         envelope = daemon_client.request_mailbox(
@@ -349,7 +361,7 @@ class CentralDaemonService:
                 "delivery_status": "delivery_failed",
                 "handling_status": "ignored",
                 "signal_error": error.get("message") if isinstance(error.get("message"), str) else "mailbox delivery failed",
-                "target_actor_address": signal["target_actor_address"],
+                "target_identity_id": signal["target_identity_id"],
                 "signal": signal,
             }
         result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
@@ -357,7 +369,7 @@ class CentralDaemonService:
         return {
             "delivery_status": "delivered",
             "handling_status": handling_status,
-            "target_actor_address": signal["target_actor_address"],
+            "target_identity_id": signal["target_identity_id"],
             "signal": signal,
             "handling_result": result,
         }

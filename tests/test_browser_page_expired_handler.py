@@ -41,7 +41,7 @@ def load_module(path: Path) -> Any:
 
 
 class FakeContext:
-    actor_address = {"role_id": "dev", "actor_id": "act-dev-browser"}
+    identity_route = {"role_id": "dev", "actor_id": "act-dev-browser"}
     actor_id = "act-dev-browser"
     role = "dev"
     instance_payload = {"browser_port": 9444}
@@ -146,7 +146,7 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         self,
         *,
         page_id: object = "page-idle-1",
-        target_actor_address: dict[str, str] | None = None,
+        target_identity_route: dict[str, str] | None = None,
         due_at: str | None = None,
     ) -> Any:
         source_context = {"schedule_id": "schedule-1"}
@@ -155,7 +155,8 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         return self.triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.page.expired",
-            target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
+            target_identity_id=(target_identity_route or {"actor_id": "act-dev-browser"})["actor_id"],
+            target_role_id=(target_identity_route or {"role_id": "dev"})["role_id"],
             origin_id="schedule-1",
             correlation_id=None,
             payload={"page_id": page_id},
@@ -419,11 +420,11 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             FakeContext(),
             state=object(),
             runtime=FakeRuntime(),
-            trigger=self._trigger(target_actor_address={"role_id": "pm", "actor_id": "act-pm-browser"}),
+            trigger=self._trigger(target_identity_route={"role_id": "pm", "actor_id": "act-pm-browser"}),
         )
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wrong target actor", result.message)
+        self.assertIn("wrong target identity", result.message)
 
     def test_run_mcp_tool_waits_for_initialize_before_tool_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -471,11 +472,12 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
         self._original_read_page_targets = lifecycle.read_page_targets
         self.addCleanup(setattr, lifecycle, "read_page_targets", self._original_read_page_targets)
 
-    def _trigger(self, *, reason: str = "page_idle_empty", target_actor_address: dict[str, str] | None = None) -> Any:
+    def _trigger(self, *, reason: str = "page_idle_empty", target_identity_route: dict[str, str] | None = None) -> Any:
         return self.triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.cockpit.release",
-            target_actor_address=target_actor_address or {"role_id": "dev", "actor_id": "act-dev-browser"},
+            target_identity_id=(target_identity_route or {"actor_id": "act-dev-browser"})["actor_id"],
+            target_role_id=(target_identity_route or {"role_id": "dev"})["role_id"],
             origin_id="schedule-release",
             correlation_id=None,
             payload={"reason": reason},
@@ -710,11 +712,11 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
                 context,
                 state=object(),
                 runtime=FakeRuntime(),
-                trigger=self._trigger(target_actor_address={"role_id": "pm", "actor_id": "act-pm-browser"}),
+                trigger=self._trigger(target_identity_route={"role_id": "pm", "actor_id": "act-pm-browser"}),
             )
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wrong target actor", result.message)
+        self.assertIn("wrong target identity", result.message)
 
 
 if __name__ == "__main__":

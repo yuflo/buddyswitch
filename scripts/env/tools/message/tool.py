@@ -14,14 +14,14 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
         title='Central IM Messages',
-        description='Message tools cover online actor contact discovery, Central IM sends, exact processable inbound reads, replies, conversation context, and disposition marking.',
+        description='Message tools cover optional actor discovery views, Central IM target-identity sends through the IM target resolver, exact processable inbound reads, replies, conversation context, and disposition marking.',
         scope='Central IM identity messaging for the active actor',
-        capability_boundary='Messages use identity-addressed Central IM conversations, messages, events, and per-identity dispositions. External identities are valid conversation peers but are not actor contacts.',
+        capability_boundary='Messages use identity-addressed Central IM conversations, messages, events, and per-identity dispositions. Actor and external identities are valid Central IM direct targets when resolved by IM target rules; message.contacts is a read-only view and does not decide message.send permission.',
         object_model=(
             'Messages are Central IM conversation records with actor or external identity ids, durable message rows, identity-visible events, and per-identity dispositions. They do not mutate tracks, artifacts, tasks, comments, browser state, or actor private files.'
         ),
         use_when=(
-            'You need Central IM messaging between the active actor identity and another actor identity or an external identity already present in a direct conversation.',
+            'You need Central IM messaging between the active actor identity and another actor or external identity by explicit target_identity_id, or a reply_to wrapper for one processable inbound IM message.',
         ),
         do_not_use_when=(
             'You need object-level discussion; use comment tool actions.',
@@ -30,7 +30,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='contacts',
                 title='message.contacts',
-                description='List online actor identity contacts for direct sends; the active actor identity is not sendable as self.',
+                description='List optional actor discovery target identities backed by actor runtime presence; this read-only view does not decide message.send permission, and the active actor identity is not sendable as self.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -38,7 +38,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'role': {
                             'type': 'string',
-                            'description': 'Optional manifest role id filter for online actor contacts.',
+                            'description': 'Optional manifest role id filter for actor discovery targets backed by actor runtime presence.',
                         },
                     },
                 },
@@ -50,13 +50,13 @@ def _build_definition() -> ToolDefinition:
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.contacts',
                 authority='message.actor_contact_discovery',
-                visibility='online actor contact summary',
+                visibility='optional actor discovery view',
                 durability='none',
-                result_content_level='actor identity contact rows',
-                success_effect='Returns online actor identities discovered through central daemon contacts.',
+                result_content_level='actor identity discovery rows',
+                success_effect='Returns optional actor discovery identities projected from actor runtime presence.',
                 failure_state_guarantee='Rejected contact reads do not mutate runtime state.',
                 reads=(
-                    'central daemon online contacts',
+                    'actor runtime presence',
                 ),
                 writes=(),
                 does_not_write=(
@@ -71,14 +71,14 @@ def _build_definition() -> ToolDefinition:
                     'env.tool role-action policy allows this action for the active role',
                 ),
                 returns=(
-                    'contacts',
+                    'actors',
                     'count',
                 ),
                 use_when=(
-                    'You need contact discovery for a target actor identity before message.send.',
+                    'You need an optional actor contact discovery view for possible actor target identities.',
                 ),
                 do_not_use_when=(
-                    'You already have a target identity id or need to read Central IM events.',
+                    'message.send already has an explicit actor or external target_identity_id, or you need to read Central IM events.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -93,9 +93,13 @@ def _build_definition() -> ToolDefinition:
                 name='send',
                 title='message.send',
                 description=(
-                    'Send one Central IM message: provide target_identity_id for a new actor-directed message, '
-                    'or provide reply_to only to reply inside the existing direct conversation. For actor-to-actor '
-                    "handoffs, make the content actionable from the recipient's visible context; include the relevant "
+                    'Send one Central IM message. Use target_identity_id for an explicit target send. Use reply_to '
+                    'when replying to one processable inbound message; the reply wrapper resolves the original sender '
+                    'into target_identity_id, validates it through the same IM target resolver, writes through the '
+                    'unified send path, then marks the original message replied after durable send success. The IM '
+                    'target resolver checks identity profiles and actor runtime reachability for actor targets; '
+                    'external identities can be direct Central IM targets when an external profile exists. For actor-to-actor handoffs, make '
+                    "the content actionable from the recipient's visible context; include the relevant "
                     'source intent, concrete inputs, and requested output instead of relying on private '
                     'message/conversation ids.'
                 ),
@@ -106,7 +110,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'target_identity_id': {
                             'type': 'string',
-                            'description': 'Target actor identity id. Required only for a new actor-directed message; omit it when replying with reply_to.',
+                            'description': 'Explicit target identity id for target sends. Omit it when using reply_to; the reply wrapper resolves the original sender into target_identity_id and uses the same IM target resolver.',
                         },
                         'content': {
                             'type': 'string',
@@ -114,7 +118,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'reply_to': {
                             'type': 'string',
-                            'description': 'Optional processable inbound message id addressed to the active actor identity. When reply_to is provided, Central IM derives the other direct identity, which can be external or actor, and success marks that original message as replied after delivery.',
+                            'description': 'Processable inbound message id addressed to the active actor identity. The reply wrapper resolves the original sender into target_identity_id, validates it through the same IM target resolver, writes through the unified send path, and marks that original message replied after durable send success.',
                         },
                     },
                 },
@@ -128,20 +132,28 @@ def _build_definition() -> ToolDefinition:
                 authority='message.central_im_channel',
                 visibility='sender and recipient Central IM conversation visibility',
                 durability='durable',
-                result_content_level='message id and delivery status',
-                success_effect='Creates one durable Central IM message; target_identity_id is only required for new actor-directed messages, and when reply_to is provided the original processable inbound message transitions to replied.',
-                failure_state_guarantee='Reachability and payload rejections do not mutate state; delivery failures clean up the created message or report delivery cleanup uncertainty; reply disposition save failure can leave the delivered reply durable while the original remains in its previous disposition.',
+                result_content_level='message id, target identity, delivery status, and actor_handling_status for actor targets',
+                success_effect=(
+                    'Creates one durable Central IM message. For actor targets, the runtime projection may submit '
+                    'one target actor local inbound event after the Central IM write and return actor_handling_status. '
+                    'Explicit target sends and reply wrapper sends both use the same IM target resolver before the '
+                    'unified send path. When reply_to is provided the original processable inbound message transitions '
+                    'to replied after durable send success. Target identities are accepted only after the IM target '
+                    'resolver validates identity profiles and actor runtime reachability for actor targets.'
+                ),
+                failure_state_guarantee='IM target resolver, reply wrapper, and payload rejections do not mutate state; reply disposition save failure can leave the accepted Central IM reply durable while the original remains in its previous disposition.',
                 reads=(
-                    'Central IM direct conversation when reply_to is provided',
-                    'central daemon actor reachability for actor targets',
+                    'reply source message when reply_to is provided',
+                    'identity profiles for target identities',
+                    'actor runtime reachability for actor targets',
                 ),
                 writes=(
                     'Central IM message',
+                    'target actor local inbound event when the final target identity is actor',
                     'original message replied disposition when reply_to succeeds',
                 ),
                 does_not_write=(
                     'tracks',
-                    'tasks',
                     'artifacts',
                     'comments',
                     'actor_private files',
@@ -149,20 +161,23 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=(
                     'content is non-empty',
-                    'target_identity_id is provided for a new actor-directed message',
-                    'reply_to, when provided without target_identity_id, references a processable inbound direct message visible to the active actor',
+                    'exactly one of target_identity_id or reply_to is provided',
+                    'IM target resolver accepts the final target_identity_id',
+                    'reply_to, when provided, references a processable inbound message addressed to the active actor',
                 ),
                 returns=(
                     'message_id',
+                    'target_identity',
                     'delivery_status',
+                    'actor_handling_status',
                     'original_message_id and original_final_disposition when reply_to is provided',
                 ),
                 use_when=(
-                    'You need to deliver a new Central IM message to a specific actor identity.',
-                    'You need to reply to one processable inbound message, including external-origin messages, using only reply_to.',
+                    'You need to create a new Central IM message from the active actor identity to a specific actor or external target identity.',
+                    'You need to reply to one processable inbound message, including external-origin messages, using reply_to so the runtime resolves the original sender through the normal target-identity path.',
                 ),
                 do_not_use_when=(
-                    'You are starting a new actor-directed conversation and do not have a target identity id (use message.contacts).',
+                    'You are starting a new target-identity conversation and do not have an explicit target identity id.',
                     'You need Track discussion; use track.add_comment instead of Central IM.',
                     'Use message.mark(absorbed) when no reply is needed.',
                     'Use task_sys.need_parent when a task_sys.side_frame needs parent handling.',
@@ -198,7 +213,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.get',
-                authority='message.active_actor_exact_message',
+                authority='message.current_identity_exact_message',
                 visibility='active actor exact processable inbound message',
                 durability='none',
                 result_content_level='full message row with disposition metadata',
@@ -271,7 +286,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.mark',
-                authority='message.active_actor_message_disposition',
+                authority='message.current_identity_message_disposition',
                 visibility='active actor exact processable inbound message disposition',
                 durability='durable',
                 result_content_level='updated message disposition metadata',
@@ -415,7 +430,7 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.conversation',
-                authority='message.active_actor_conversation',
+                authority='message.current_identity_conversation',
                 visibility='active actor visible direct conversation messages',
                 durability='none',
                 result_content_level='message rows',

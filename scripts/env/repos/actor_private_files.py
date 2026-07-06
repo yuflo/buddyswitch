@@ -49,13 +49,13 @@ def normalize_logical_prefix(value: Any, *, active_role: str, role_ids: set[str]
     return normalize_logical_name(value, active_role=active_role, role_ids=role_ids)
 
 
-def active_actor_private_root(*, active_role: str, instance_payload: dict[str, Any] | None = None) -> Path:
+def current_identity_private_root(*, active_role: str, instance_payload: dict[str, Any] | None = None) -> Path:
     runtime_files.require_id(active_role, "role")
     return runtime_files.actor_private_dir(instance_payload)
 
 
-def ensure_active_actor_private_root(*, active_role: str, instance_payload: dict[str, Any] | None = None) -> Path:
-    root = active_actor_private_root(active_role=active_role, instance_payload=instance_payload)
+def ensure_current_identity_private_root(*, active_role: str, instance_payload: dict[str, Any] | None = None) -> Path:
+    root = current_identity_private_root(active_role=active_role, instance_payload=instance_payload)
     if root.exists() and root.is_symlink():
         raise ActorPrivateBoundaryError("active actor private file root cannot be a symlink")
     try:
@@ -97,7 +97,7 @@ def _updated_at_from_stat(path: Path) -> str:
     return datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
 
 
-def file_summary(path: Path, *, logical_name: str, owner_actor: dict[str, Any]) -> dict[str, Any]:
+def file_summary(path: Path, *, logical_name: str, owner_identity: dict[str, Any]) -> dict[str, Any]:
     stat = path.stat()
     content_type, _ = mimetypes.guess_type(path.name)
     return {
@@ -105,8 +105,8 @@ def file_summary(path: Path, *, logical_name: str, owner_actor: dict[str, Any]) 
         "size_bytes": stat.st_size,
         "updated_at": _updated_at_from_stat(path),
         "content_type": content_type or "application/octet-stream",
-        "visibility": "active_actor_private",
-        "owner_actor": dict(owner_actor),
+        "visibility": "current_identity_private",
+        "owner_identity": dict(owner_identity),
     }
 
 
@@ -139,7 +139,7 @@ def state_summary(*, root: Path) -> dict[str, Any]:
 def list_private_file_summaries(
     *,
     root: Path,
-    owner_actor: dict[str, Any],
+    owner_identity: dict[str, Any],
     recursive: bool,
     limit: int,
     logical_prefix: str | None = None,
@@ -154,7 +154,7 @@ def list_private_file_summaries(
         logical_name = path.relative_to(root).as_posix()
         if isinstance(logical_prefix, str) and not logical_name.startswith(logical_prefix):
             continue
-        rows.append(file_summary(path, logical_name=logical_name, owner_actor=owner_actor))
+        rows.append(file_summary(path, logical_name=logical_name, owner_identity=owner_identity))
     rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("logical_name") or "")), reverse=True)
     return rows[:limit]
 

@@ -119,8 +119,8 @@ Web-interface APIs should fall into one of these families:
      third-party callers, and the Web interface.
    - The Web interface differs only by server-owned auth context; it does not
      own a separate IM route family.
-   - `ExternalImSession` owns external participant and actor-directed IM
-     application semantics: connection identity, actor discovery, message send,
+   - `ExternalImSession` owns external session and actor-directed IM
+     application semantics: external identity, actor discovery, message send,
      events, replies, explicit ack, direct conversations, and disposition.
 
 3. Control-plane APIs
@@ -156,10 +156,10 @@ Track:
 
 IM:
 
-- External participant semantics belong to `External IM Session`.
+- External session semantics belong to `External IM Session`.
 - `/api/im/*` is the single IM HTTP product contract for local channel
   adapters, third-party callers, and the Web console.
-- Web Management supplies a server-owned Web IM connection for browser calls,
+- Web Management supplies a server-owned external IM session for browser calls,
   but message, event, ack, reply, conversation, and disposition semantics still
   flow through `ExternalImSession`.
 - The Web console must not invent actor-owned message state or a separate IM

@@ -41,18 +41,18 @@ class _FakeBuddySwitchImApi:
         self.events_by_key: dict[str, list[dict[str, Any]]] = {}
         self.messages: dict[str, dict[str, Any]] = {}
 
-    def create_connection(self, *, display_name: str) -> dict[str, Any]:
-        connection_key = f"imck-{len(self.created) + 1}"
-        self.created.append({"display_name": display_name, "connection_key": connection_key})
-        return {"ok": True, "connection_key": connection_key}
+    def create_external_session(self, *, display_name: str) -> dict[str, Any]:
+        external_session_key = f"imsk-{len(self.created) + 1}"
+        self.created.append({"display_name": display_name, "external_session_key": external_session_key})
+        return {"ok": True, "external_session_key": external_session_key}
 
-    def list_actors(self, *, connection_key: str) -> dict[str, Any]:
+    def list_actors(self, *, external_session_key: str) -> dict[str, Any]:
         return {"ok": True, "actors": list(self.actors), "count": len(self.actors)}
 
     def send_message(
         self,
         *,
-        connection_key: str,
+        external_session_key: str,
         target_identity_id: str,
         content: str,
         reply_to: str | None = None,
@@ -60,7 +60,7 @@ class _FakeBuddySwitchImApi:
         message_id = f"msg-in-{len(self.sent) + 1}"
         self.sent.append(
             {
-                "connection_key": connection_key,
+                "external_session_key": external_session_key,
                 "target_identity_id": target_identity_id,
                 "content": content,
                 "reply_to": reply_to,
@@ -73,29 +73,29 @@ class _FakeBuddySwitchImApi:
             "event_id": f"imev-in-{len(self.sent)}",
         }
 
-    def read_events(self, *, connection_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
-        acked_ids = {row["event_id"] for row in self.acked if row["connection_key"] == connection_key}
+    def read_events(self, *, external_session_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
+        acked_ids = {row["event_id"] for row in self.acked if row["external_session_key"] == external_session_key}
         return {
             "ok": True,
             "events": [
                 dict(row)
-                for row in self.events_by_key.get(connection_key, [])
+                for row in self.events_by_key.get(external_session_key, [])
                 if str(row.get("event_id") or "") not in acked_ids
             ],
         }
 
-    def get_message(self, *, connection_key: str, message_id: str) -> dict[str, Any]:
+    def get_message(self, *, external_session_key: str, message_id: str) -> dict[str, Any]:
         self.fetched_message_ids.append(message_id)
         if message_id not in self.messages:
             return {"ok": False, "error": {"code": "E_IM_NOT_FOUND", "message": "message not found"}}
         return {"ok": True, "message": dict(self.messages[message_id])}
 
-    def ack_event(self, *, connection_key: str, event_id: str) -> dict[str, Any]:
-        self.ack_calls.append({"connection_key": connection_key, "event_id": event_id})
+    def ack_event(self, *, external_session_key: str, event_id: str) -> dict[str, Any]:
+        self.ack_calls.append({"external_session_key": external_session_key, "event_id": event_id})
         failures = self.ack_failures.get(event_id)
         if failures:
             return failures.pop(0)
-        self.acked.append({"connection_key": connection_key, "event_id": event_id})
+        self.acked.append({"external_session_key": external_session_key, "event_id": event_id})
         return {"ok": True, "event_id": event_id}
 
 
@@ -105,10 +105,10 @@ class _BlockingReadApi(_FakeBuddySwitchImApi):
         self.read_started = threading.Event()
         self.release_read = threading.Event()
 
-    def read_events(self, *, connection_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
+    def read_events(self, *, external_session_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
         self.read_started.set()
         self.release_read.wait(timeout=2)
-        return super().read_events(connection_key=connection_key, limit=limit, wait_ms=wait_ms)
+        return super().read_events(external_session_key=external_session_key, limit=limit, wait_ms=wait_ms)
 
 
 class _LateReplyApi(_FakeBuddySwitchImApi):
@@ -117,12 +117,12 @@ class _LateReplyApi(_FakeBuddySwitchImApi):
         self.first_read = threading.Event()
         self.read_calls = 0
 
-    def read_events(self, *, connection_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
+    def read_events(self, *, external_session_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
         self.read_calls += 1
         if self.read_calls == 1:
             self.first_read.set()
             return {"ok": True, "events": []}
-        return super().read_events(connection_key=connection_key, limit=limit, wait_ms=wait_ms)
+        return super().read_events(external_session_key=external_session_key, limit=limit, wait_ms=wait_ms)
 
 
 class _FakeImsg:
@@ -186,6 +186,10 @@ def _actor(role_id: str, identity_id: str, *, status: str = "online") -> dict[st
     }
 
 
+def _actor_reply_identity(identity_id: str = "act-market-demo") -> dict[str, Any]:
+    return {"sender_identity": {"id": identity_id, "type": "actor"}}
+
+
 def _row(
     *,
     sender: str = "user-a@example.com",
@@ -236,7 +240,7 @@ class ImessageChannelTests(unittest.TestCase):
             store = imessage_channel.ImessageChannelStateStore(Path(temp_root) / "state.json")
             self.assertEqual(store.load(), {"schema_version": 2, "contacts": {}})
 
-    def test_first_sender_message_creates_connection_and_reuses_it(self) -> None:
+    def test_first_sender_message_creates_external_session_and_reuses_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
 
@@ -245,10 +249,10 @@ class ImessageChannelTests(unittest.TestCase):
 
         self.assertEqual(first["status"], "needs_actor")
         self.assertEqual(second["status"], "needs_actor")
-        self.assertEqual([row["connection_key"] for row in api.created], ["imck-1"])
+        self.assertEqual([row["external_session_key"] for row in api.created], ["imsk-1"])
         self.assertEqual([row["text"] for row in imsg.sent], [PROMPT, PROMPT])
 
-    def test_two_senders_keep_connections_choices_routes_and_dedupe_isolated(self) -> None:
+    def test_two_senders_keep_external_sessions_choices_routes_and_dedupe_isolated(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(sender="a@example.com", text="/actors", guid="guid-a1", chat_id="1"))
@@ -259,13 +263,13 @@ class ImessageChannelTests(unittest.TestCase):
             duplicate = controller.handle_inbound_message(_row(sender="a@example.com", text="ping", guid="guid-a3", chat_id="1"))
             state = controller.state_store.load()
 
-        self.assertEqual([row["connection_key"] for row in api.created], ["imck-1", "imck-2"])
+        self.assertEqual([row["external_session_key"] for row in api.created], ["imsk-1", "imsk-2"])
         self.assertEqual(sent["status"], "delivered")
         self.assertEqual(prompted["status"], "needs_actor")
         self.assertEqual(duplicate["status"], "duplicate")
-        self.assertEqual(api.sent[0]["connection_key"], "imck-1")
-        self.assertEqual(state["contacts"]["sender:a@example.com"]["active_actor_id"], "act-market-demo")
-        self.assertNotIn("active_actor_id", state["contacts"]["sender:b@example.com"])
+        self.assertEqual(api.sent[0]["external_session_key"], "imsk-1")
+        self.assertEqual(state["contacts"]["sender:a@example.com"]["active_identity_id"], "act-market-demo")
+        self.assertNotIn("active_identity_id", state["contacts"]["sender:b@example.com"])
         self.assertIn("msg-in-1", state["contacts"]["sender:a@example.com"]["routes"])
         self.assertEqual(state["contacts"]["sender:b@example.com"]["routes"], {})
         self.assertEqual(imsg.sent[-1]["route"], {"chat_id": "2", "sender": "b@example.com"})
@@ -301,7 +305,7 @@ class ImessageChannelTests(unittest.TestCase):
             state = controller.state_store.load()
 
         self.assertEqual(result["status"], "actor_selected")
-        self.assertEqual(state["contacts"]["sender:user-a@example.com"]["active_actor_id"], "act-dev-second")
+        self.assertEqual(state["contacts"]["sender:user-a@example.com"]["active_identity_id"], "act-dev-second")
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent[-1]["text"], "act-dev-second")
 
@@ -343,19 +347,19 @@ class ImessageChannelTests(unittest.TestCase):
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
             controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
             controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
-            api.events_by_key["imck-1"] = [
+            api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             first = controller.poll_outbound_once(wait_ms=0)
@@ -367,8 +371,8 @@ class ImessageChannelTests(unittest.TestCase):
             imsg.sent[-1],
             {"route": {"chat_id": "9", "sender": "user-a@example.com"}, "text": "[Message From act-market-demo]\n\npong"},
         )
-        self.assertEqual(api.ack_calls, [{"connection_key": "imck-1", "event_id": "imev-reply-1"}])
-        self.assertEqual(api.acked, [{"connection_key": "imck-1", "event_id": "imev-reply-1"}])
+        self.assertEqual(api.ack_calls, [{"external_session_key": "imsk-1", "event_id": "imev-reply-1"}])
+        self.assertEqual(api.acked, [{"external_session_key": "imsk-1", "event_id": "imev-reply-1"}])
 
     def test_poll_outbound_does_not_mark_event_sent_when_imessage_send_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -376,19 +380,19 @@ class ImessageChannelTests(unittest.TestCase):
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
             controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
             controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
-            api.events_by_key["imck-1"] = [
+            api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             with self.assertRaises(imessage_channel.ChannelError):
@@ -404,19 +408,19 @@ class ImessageChannelTests(unittest.TestCase):
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
             controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
             controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
-            api.events_by_key["imck-1"] = [
+            api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
             api.ack_failures["imev-reply-1"] = [
                 {"ok": False, "error": {"code": "E_ACK", "message": "temporary ack failure"}}
@@ -433,11 +437,11 @@ class ImessageChannelTests(unittest.TestCase):
         self.assertEqual(
             api.ack_calls,
             [
-                {"connection_key": "imck-1", "event_id": "imev-reply-1"},
-                {"connection_key": "imck-1", "event_id": "imev-reply-1"},
+                {"external_session_key": "imsk-1", "event_id": "imev-reply-1"},
+                {"external_session_key": "imsk-1", "event_id": "imev-reply-1"},
             ],
         )
-        self.assertEqual(api.acked, [{"connection_key": "imck-1", "event_id": "imev-reply-1"}])
+        self.assertEqual(api.acked, [{"external_session_key": "imsk-1", "event_id": "imev-reply-1"}])
         self.assertEqual(state["contacts"]["sender:user-a@example.com"]["sent_outbound_event_ids"], ["imev-reply-1"])
 
     def test_poll_outbound_acks_unrouteable_event_after_fetch(self) -> None:
@@ -445,19 +449,19 @@ class ImessageChannelTests(unittest.TestCase):
             controller, api, imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(text="hello", guid="guid-seed", chat_id="9"))
             imsg.sent.clear()
-            api.events_by_key["imck-1"] = [
+            api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-unrouteable",
                     "message_id": "msg-unrouteable",
                     "reply_to": "msg-missing",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-unrouteable"] = {
                 "id": "msg-unrouteable",
                 "content": "orphan pong",
                 "reply_to": "msg-missing",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             result = controller.poll_outbound_once(wait_ms=0)
@@ -465,20 +469,20 @@ class ImessageChannelTests(unittest.TestCase):
         self.assertEqual(result["sent"], 0)
         self.assertEqual(imsg.sent, [])
         self.assertEqual(api.fetched_message_ids, ["msg-unrouteable"])
-        self.assertEqual(api.ack_calls, [{"connection_key": "imck-1", "event_id": "imev-unrouteable"}])
-        self.assertEqual(api.acked, [{"connection_key": "imck-1", "event_id": "imev-unrouteable"}])
+        self.assertEqual(api.ack_calls, [{"external_session_key": "imsk-1", "event_id": "imev-unrouteable"}])
+        self.assertEqual(api.acked, [{"external_session_key": "imsk-1", "event_id": "imev-unrouteable"}])
 
     def test_poll_outbound_does_not_ack_when_message_fetch_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(text="hello", guid="guid-seed", chat_id="9"))
             imsg.sent.clear()
-            api.events_by_key["imck-1"] = [
+            api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-missing-message",
                     "message_id": "msg-missing",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
 
@@ -529,19 +533,19 @@ class ImessageChannelTests(unittest.TestCase):
 
             self.assertTrue(imsg.watch_started.wait(timeout=1), "inbound watch did not start")
             self.assertTrue(api.first_read.wait(timeout=1), "first outbound poll did not happen")
-            api.events_by_key["imck-1"] = [
+            api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
 
             self.assertTrue(
@@ -580,19 +584,19 @@ class ImessageChannelTests(unittest.TestCase):
                 ),
                 "actor list was not prompt while outbound read was blocked",
             )
-            api.events_by_key["imck-1"] = [
+            api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-reply-1",
                     "message_id": "msg-reply-1",
                     "reply_to": "msg-in-1",
-                    "from_identity_id": "act-market-demo",
+                    **_actor_reply_identity(),
                 }
             ]
             api.messages["msg-reply-1"] = {
                 "id": "msg-reply-1",
                 "content": "pong",
                 "reply_to": "msg-in-1",
-                "from_identity_id": "act-market-demo",
+                **_actor_reply_identity(),
             }
             api.release_read.set()
 
@@ -706,10 +710,12 @@ class ImessageChannelResidueTests(unittest.TestCase):
         source = (ROOT / "tools" / "launcher" / "imessage_channel.py").read_text(encoding="utf-8")
 
         self.assertNotIn("env.services.messages", source)
+        self.assertNotIn("env.services.im_delivery", source)
         self.assertNotIn("env.repos.messages", source)
         self.assertNotIn("send_im_message", source)
-        self.assertNotIn("send_external_connection_message", source)
-        self.assertNotIn("read_external_connection_events", source)
+        self.assertNotIn("send_external_session_message", source)
+        self.assertNotIn("read_external_session_events", source)
+        self.assertNotIn("ack_external_session_event", source)
 
     def test_no_retired_imessage_surface(self) -> None:
         retired_terms = (
@@ -726,7 +732,6 @@ class ImessageChannelResidueTests(unittest.TestCase):
             ROOT / "buddyswitch-codex",
             ROOT / "tools" / "launcher",
             ROOT / "tests",
-            ROOT / "docs" / "spec",
         ]
         hits: list[str] = []
         for path in live_paths:
@@ -781,16 +786,12 @@ class ImessageChannelResidueTests(unittest.TestCase):
         live_roots = [
             ROOT / "tools" / "launcher",
             ROOT / "tests",
-            ROOT / "docs" / "spec",
         ]
-        excluded = ROOT / "docs" / "spec" / "imessage-channel-im-api-boundary-optimization"
         hits: list[str] = []
         for path in live_roots:
             files = [path] if path.is_file() else [row for row in path.rglob("*") if row.is_file()]
             for file_path in files:
                 if "__pycache__" in file_path.parts:
-                    continue
-                if excluded in file_path.parents:
                     continue
                 text = file_path.read_text(encoding="utf-8", errors="ignore")
                 for line_number, line in enumerate(text.splitlines(), start=1):
@@ -800,14 +801,6 @@ class ImessageChannelResidueTests(unittest.TestCase):
                         if pattern.search(line):
                             hits.append(f"{file_path.relative_to(ROOT)}:{line_number}: {line.strip()}")
         self.assertEqual(hits, [])
-
-    def test_smoke_runbook_covers_delayed_control_regression(self) -> None:
-        source = (ROOT / "docs" / "spec" / "imessage-channel-smoke-runbook.md").read_text(encoding="utf-8")
-
-        self.assertIn("Immediately send /actors before the actor reply arrives.", source)
-        self.assertIn("Confirm the actor list returns promptly.", source)
-        self.assertIn("Confirm the original actor reply still arrives once in the same chat.", source)
-
 
 def _create_chat_db(path: Path, *, chat_id: int) -> None:
     with sqlite3.connect(path) as db:

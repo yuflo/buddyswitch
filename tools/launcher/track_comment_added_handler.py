@@ -20,14 +20,13 @@ from env.domain import track_comments as track_comment_rules  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as track_comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
 
 
-def _context_actor_address(context: Any) -> ActorAddress:
-    value = getattr(context, "actor_address", None)
-    if isinstance(value, ActorAddress):
-        return value
-    return daemon_core.actor_address_for_context(context)
+def _context_identity_route(context: Any) -> dict[str, str]:
+    return {
+        "identity_id": runtime_files.require_id(getattr(context, "actor_id", ""), "context.actor_id"),
+        "role_id": runtime_files.require_id(getattr(context, "role", ""), "context.role"),
+    }
 
 
 class TrackCommentAddedHandler:
@@ -58,18 +57,24 @@ class TrackCommentAddedHandler:
             "thread_id": runtime_files.require_id(payload.get("thread_id"), "thread_id"),
         }
 
-    def _ensure_target_actor(self, context: Any, trigger: Any) -> ActorAddress:
-        local_actor = _context_actor_address(context)
-        target_actor = ActorAddress.from_payload(getattr(trigger, "target_actor_address", None))
-        if target_actor != local_actor:
-            raise PermissionError("wrong target actor for Track comment trigger")
-        return target_actor
+    def _ensure_target_identity(self, context: Any, trigger: Any) -> dict[str, str]:
+        local_route = _context_identity_route(context)
+        target_route = {
+            "identity_id": runtime_files.require_id(getattr(trigger, "target_identity_id", ""), "trigger.target_identity_id"),
+            "role_id": runtime_files.require_id(getattr(trigger, "target_role_id", ""), "trigger.target_role_id"),
+        }
+        if target_route != local_route:
+            raise PermissionError("wrong target identity for Track comment trigger")
+        return target_route
 
-    def _source_actor_address(self, trigger: Any) -> ActorAddress:
+    def _source_identity_route(self, trigger: Any) -> dict[str, str]:
         source_context = getattr(trigger, "source_context", None)
         if not isinstance(source_context, dict):
             raise ValueError("track comment trigger source_context must be an object")
-        return ActorAddress.from_payload(source_context.get("source_actor_address"))
+        return {
+            "identity_id": runtime_files.require_id(source_context.get("source_identity_id"), "source_context.source_identity_id"),
+            "role_id": runtime_files.require_id(source_context.get("source_role_id"), "source_context.source_role_id"),
+        }
 
     def _comment(self, *, track_id: str, comment_id: str, thread_id: str) -> dict[str, Any]:
         comment = track_comment_repo.get_track_comment(track_id, comment_id)
@@ -99,27 +104,28 @@ class TrackCommentAddedHandler:
 
     def _handle_track_comment_added(self, context: Any, runtime: Any, trigger: Any) -> daemon_core.HandlerResult:
         try:
-            target_actor = self._ensure_target_actor(context, trigger)
-            source_actor = self._source_actor_address(trigger)
+            target_identity = self._ensure_target_identity(context, trigger)
+            source_identity = self._source_identity_route(trigger)
             payload = self._payload(trigger)
             comment = self._comment(**payload)
             reply_to_comment = self._reply_to_comment(comment)
             if not track_comment_rules.target_is_intended_recipient(
-                target_actor,
+                target_identity,
                 comment,
                 reply_to_comment=reply_to_comment,
-                identity_routes={target_actor.actor_id: target_actor.to_payload()},
+                identity_routes={target_identity["identity_id"]: target_identity},
             ):
-                raise PermissionError("target actor is not an intended recipient for this Track comment")
+                raise PermissionError("target identity is not an intended recipient for this Track comment")
             self._ensure_track_readable(payload["track_id"])
 
             result = task_sys_ingress.ingest_track_comment(
-                actor_id=target_actor.actor_id,
-                role_id=target_actor.role_id,
+                actor_id=target_identity["identity_id"],
+                role_id=target_identity["role_id"],
                 track_id=payload["track_id"],
                 comment_id=payload["comment_id"],
                 thread_id=payload["thread_id"],
-                source_actor_address=source_actor.to_payload(),
+                source_identity_id=source_identity["identity_id"],
+                source_role_id=source_identity["role_id"],
             )
             execute = getattr(runtime, "execute_task_sys_instruction", None)
             if not callable(execute):

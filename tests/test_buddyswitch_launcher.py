@@ -7703,6 +7703,20 @@ exec "$real_git" "$@"
             state_task = shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-keep.json"
             state_task.parent.mkdir(parents=True, exist_ok=True)
             state_task.write_text('{"id":"task-keep"}\n', encoding="utf-8")
+            identity_profile = (
+                shared_root
+                / "state"
+                / "buddyswitch"
+                / "objects"
+                / "identities"
+                / "actors"
+                / "act-pm-delete.json"
+            )
+            identity_profile.parent.mkdir(parents=True, exist_ok=True)
+            identity_profile.write_text(
+                json.dumps({"identity": {"id": "act-pm-delete", "type": "actor"}, "role_id": "pm"}) + "\n",
+                encoding="utf-8",
+            )
             self._add_test_worktree(target_workspace)
 
             env = os.environ.copy()
@@ -7723,6 +7737,7 @@ exec "$real_git" "$@"
             self.assertFalse(target_root.exists())
             self.assertTrue(other_root.exists())
             self.assertTrue(state_task.exists())
+            self.assertTrue(identity_profile.exists())
             worktree_list = subprocess.run(
                 ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
                 cwd=ROOT,

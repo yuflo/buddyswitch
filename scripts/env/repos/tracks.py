@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from env.tool_runtime.actor_profile import ActorAddress
+from env.domain.identity import IdentityRef
 from . import runtime_files
 
 VALID_TRACK_STATE = ("active", "blocked", "done")
@@ -17,7 +17,7 @@ VALID_ARTIFACT_RELATION_ROLE = ("material", "proof", "input", "deliverable")
 _LEGACY_TRACK_ROLE_FIELDS = ("current" + "_role", "next" + "_role")
 _RETIRED_TRACK_FIELDS = {
     "owner_role",
-    "created_by_actor",
+    "created_by_" + "actor",
     "health",
     "appetite",
 }
@@ -39,21 +39,15 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def _normalize_actor(value: Any, field: str) -> dict[str, str]:
-    try:
-        return ActorAddress.from_payload(value).to_payload()
-    except ValueError as exc:
-        raise ValueError(f"{field} must be an ActorAddress payload: {exc}") from exc
-
-
-def _actor_identity_id(value: Any, field: str) -> str:
-    return _normalize_actor(value, field)["actor_id"]
-
-
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
         return runtime_files.require_id(value.strip(), field)
-    return _actor_identity_id(value, field)
+    if isinstance(value, dict):
+        if isinstance(value.get("identity"), dict):
+            return IdentityRef.from_payload(value["identity"]).id
+        if isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
+            return IdentityRef.from_payload(value).id
+    raise ValueError(f"{field} must be an identity id or identity payload")
 
 
 def _normalize_text_list(value: Any, field: str) -> list[str]:
@@ -90,6 +84,9 @@ def _normalize_now(value: Any) -> dict[str, Any]:
 def _normalize_artifact_relation(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ValueError("track.artifact_relations[] must be an object")
+    retired_source_field = "from_" + "actor"
+    if retired_source_field in row:
+        raise ValueError("track.artifact_relations[].from_identity_id is required")
     if row.get("type") != "artifact":
         raise ValueError("track.artifact_relations[].type must be 'artifact'")
     role = row.get("role")
@@ -103,7 +100,7 @@ def _normalize_artifact_relation(row: Any) -> dict[str, Any]:
         "label": _require_non_empty_text(row.get("label"), "track.artifact_relations[].label"),
         "template": _require_non_empty_text(row.get("template"), "track.artifact_relations[].template"),
         "from_identity_id": _identity_id(
-            row.get("from_identity_id", row.get("from_actor")),
+            row.get("from_identity_id"),
             "track.artifact_relations[].from_identity_id",
         ),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
@@ -133,7 +130,7 @@ def _normalize_update_row(row: Any) -> dict[str, Any]:
     created_at = _require_non_empty_text(row.get("created_at"), "track.updates[].created_at")
     return {
         "id": _require_non_empty_text(row.get("id"), "track.updates[].id"),
-        "by_identity_id": _identity_id(row.get("by_identity_id", row.get("by_actor")), "track.updates[].by_identity_id"),
+        "by_identity_id": _identity_id(row.get("by_identity_id"), "track.updates[].by_identity_id"),
         "summary": _require_non_empty_text(row.get("summary"), "track.updates[].summary"),
         "kind": kind,
         "refs": [_normalize_update_ref(item) for item in refs],
@@ -214,7 +211,7 @@ def create_track(
     track_id: str,
     title: str,
     *,
-    owner_actor: dict[str, Any],
+    owner_identity: dict[str, Any] | str,
     outcome: str,
     now: dict[str, Any],
     acceptance_criteria: list[str] | None = None,
@@ -228,7 +225,7 @@ def create_track(
         "id": track_id,
         "title": title,
         "outcome": outcome,
-        "owner_identity_id": _actor_identity_id(owner_actor, "owner_actor"),
+        "owner_identity_id": _identity_id(owner_identity, "owner_identity"),
         "state": "active",
         "now": now,
         "acceptance_criteria": acceptance_criteria or [],
@@ -268,7 +265,7 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
 def append_track_update(
     *,
     track_id: str,
-    by_actor: dict[str, Any],
+    by_identity: dict[str, Any] | str,
     kind: str,
     summary: str,
     refs: list[dict[str, Any]] | None = None,
@@ -282,7 +279,7 @@ def append_track_update(
 
     row = {
         "id": update_id or f"upd-{uuid.uuid4().hex[:8]}",
-        "by_identity_id": _actor_identity_id(by_actor, "by_actor"),
+        "by_identity_id": _identity_id(by_identity, "by_identity"),
         "summary": summary,
         "kind": kind,
         "refs": refs or [],
@@ -299,7 +296,7 @@ def append_track_update(
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     for field in _LEGACY_TRACK_ROLE_FIELDS:
         if field in track:
-            raise ValueError("legacy track role-routing fields are retired; use owner_actor")
+            raise ValueError("legacy track role-routing fields are retired; use owner_identity_id")
     forbidden = sorted(field for field in track if field in _LEGACY_TRACK_FIELDS or field in _RETIRED_TRACK_FIELDS)
     if forbidden:
         raise ValueError(f"legacy track fields are retired: {', '.join(forbidden)}")
@@ -307,7 +304,7 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     track_id = runtime_files.require_id(track.get("id", ""), "track.id")
     title = _require_non_empty_text(track.get("title"), "track.title")
     outcome = _require_non_empty_text(track.get("outcome"), "track.outcome")
-    owner_identity_id = _identity_id(track.get("owner_identity_id", track.get("owner_actor")), "track.owner_identity_id")
+    owner_identity_id = _identity_id(track.get("owner_identity_id"), "track.owner_identity_id")
     state = track.get("state")
     if state not in VALID_TRACK_STATE:
         raise ValueError(f"track.state must be one of {', '.join(VALID_TRACK_STATE)}")

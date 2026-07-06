@@ -21,7 +21,7 @@ import external_im_session  # noqa: E402
 
 
 JsonResponse = tuple[int, dict[str, Any]]
-WebConnectionProvider = Callable[[], dict[str, Any]]
+WebExternalSessionProvider = Callable[[], dict[str, Any]]
 
 
 class ImHttpRouter:
@@ -29,15 +29,17 @@ class ImHttpRouter:
         self,
         *,
         actor_lister: Callable[[str | None], list[dict[str, Any]]],
-        wake_actor: Callable[[dict[str, Any]], dict[str, Any]],
+        actor_reachability_checker: Callable[..., dict[str, Any]] | None = None,
+        actor_delivery_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         im_session: Any | None = None,
-        web_connection_provider: WebConnectionProvider | None = None,
+        web_external_session_provider: WebExternalSessionProvider | None = None,
     ) -> None:
         self._session = im_session or external_im_session.ExternalImSession(
             actor_lister=actor_lister,
-            wake_actor=wake_actor,
+            actor_reachability_checker=actor_reachability_checker,
+            actor_delivery_handler=actor_delivery_handler,
         )
-        self._web_connection_provider = web_connection_provider
+        self._web_external_session_provider = web_external_session_provider
 
     def handle(
         self,
@@ -50,12 +52,12 @@ class ImHttpRouter:
         route = parsed.path
         query = parse_qs(parsed.query)
         normalized_method = method.upper()
-        if normalized_method == "POST" and route == "/api/im/connections":
+        if normalized_method == "POST" and route == "/api/im/external-sessions":
             try:
                 payload = _json_body(body)
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": str(exc)}}
-            result = self._session.create_connection(display_name=str(payload.get("display_name") or ""))
+            result = self._session.create_external_session(display_name=str(payload.get("display_name") or ""))
             return (200 if result.get("ok") is True else 400), result
         if not route.startswith("/api/im/"):
             return _not_found()
@@ -65,7 +67,7 @@ class ImHttpRouter:
         auth = self._authenticate(headers)
         if auth.get("ok") is not True:
             return 401, auth
-        connection = auth["connection"]
+        external_session = auth["external_session"]
 
         if normalized_method == "GET" and route == "/api/im/session":
             return 200, _session_response(auth)
@@ -81,7 +83,7 @@ class ImHttpRouter:
             if "from" in payload:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "from is derived from authentication"}}
             result = self._session.send_message(
-                connection=connection,
+                external_session=external_session,
                 target_identity_id=payload.get("target_identity_id"),
                 content=str(payload.get("content") or ""),
                 reply_to=payload.get("reply_to") if payload.get("reply_to") is not None else None,
@@ -90,9 +92,9 @@ class ImHttpRouter:
 
         if normalized_method == "GET" and route == "/api/im/events":
             if "cursor" in query:
-                return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "cursor is internal to the connection"}}
+                return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "cursor is internal to the external session"}}
             result = self._session.read_events(
-                connection=connection,
+                external_session=external_session,
                 limit=_int_query_value(query, "limit", 50),
                 wait_ms=_int_query_value(query, "wait_ms", 0),
             )
@@ -104,14 +106,14 @@ class ImHttpRouter:
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                 return 400, {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": str(exc)}}
             result = self._session.ack_event(
-                connection=connection,
+                external_session=external_session,
                 event_id=str(payload.get("event_id") or ""),
             )
             return (200 if result.get("ok") is True else 400), result
 
         if normalized_method == "GET" and route == "/api/im/conversations/direct":
             result = self._session.get_direct_conversation(
-                connection=connection,
+                external_session=external_session,
                 identity_id=_first_query_value(query, "identity_id"),
                 limit=_int_query_value(query, "limit", 20),
             )
@@ -122,20 +124,20 @@ class ImHttpRouter:
             suffix = route[len(message_prefix) :]
             if normalized_method == "GET" and suffix.endswith("/replies"):
                 message_id = suffix[: -len("/replies")]
-                result = self._session.list_replies(connection=connection, message_id=message_id)
+                result = self._session.list_replies(external_session=external_session, message_id=message_id)
                 return (200 if result.get("ok") is True else 404), result
             if normalized_method == "PATCH" and suffix.endswith("/disposition"):
                 message_id = suffix[: -len("/disposition")]
                 payload = _json_body(body)
                 result = self._session.update_disposition(
-                    connection=connection,
+                    external_session=external_session,
                     message_id=message_id,
                     disposition=str(payload.get("disposition") or ""),
                     reason=payload.get("reason") if payload.get("reason") is not None else None,
                 )
                 return (200 if result.get("ok") is True else 400), result
             if normalized_method == "GET" and "/" not in suffix:
-                result = self._session.get_message(connection=connection, message_id=suffix)
+                result = self._session.get_message(external_session=external_session, message_id=suffix)
                 return (200 if result.get("ok") is True else 404), result
 
         return _not_found()
@@ -147,19 +149,19 @@ class ImHttpRouter:
         prefix = "Bearer "
         if auth_value:
             if not auth_value.startswith(prefix):
-                return _auth_error("Authorization: Bearer connection_key is required")
-            return self._session.authenticate(auth_value[len(prefix) :])
-        if self._web_connection_provider is None:
-            return _auth_error("Authorization: Bearer connection_key is required")
-        record = self._web_connection_provider()
+                return _auth_error("Authorization: Bearer external_session_key is required")
+            return self._session.authenticate_external_session_key(auth_value[len(prefix) :])
+        if self._web_external_session_provider is None:
+            return _auth_error("Authorization: Bearer external_session_key is required")
+        record = self._web_external_session_provider()
         identity = record.get("identity") if isinstance(record, dict) else None
-        connection = record.get("connection") if isinstance(record, dict) else None
-        if not isinstance(identity, dict) or not isinstance(connection, dict):
-            return _auth_error("Web IM connection is unavailable")
+        external_session = record.get("external_session") if isinstance(record, dict) else None
+        if not isinstance(identity, dict) or not isinstance(external_session, dict):
+            return _auth_error("Web IM external session is unavailable")
         resolved = {
             "ok": True,
             "identity": identity,
-            "connection": connection,
+            "external_session": external_session,
         }
         client_kind = record.get("client_kind")
         if isinstance(client_kind, str) and client_kind.strip():

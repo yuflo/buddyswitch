@@ -11,7 +11,7 @@ _SUCCESS_CANONICAL_FIELDS = {
     "ok",
     "tool",
     "action",
-    "active_actor",
+    "current_identity",
     "active_role",
     "effect_summary",
     "state_changed",
@@ -31,7 +31,7 @@ _REJECTION_CANONICAL_FIELDS = {
     "ok",
     "tool",
     "action",
-    "active_actor",
+    "current_identity",
     "active_role",
     "error",
     "permission_boundary",
@@ -84,15 +84,14 @@ def _require_list(value: Any, field: str) -> list[Any]:
     return value
 
 
-def _active_actor_payload(active_actor: dict[str, Any], active_role: str) -> dict[str, Any]:
-    if not isinstance(active_actor, dict):
-        raise ValueError("active_actor must be an object with actor_id and role_id")
-    actor_id = _require_non_empty_text(active_actor.get("actor_id"), "active_actor.actor_id")
-    role_id = _require_non_empty_text(active_actor.get("role_id"), "active_actor.role_id")
-    expected_role = _role_id_text(active_role)
-    if role_id != expected_role:
-        raise ValueError("active_actor.role_id must match active_role")
-    return {"actor_id": actor_id, "role_id": role_id}
+def _current_identity_payload(current_identity: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(current_identity, dict):
+        raise ValueError("current_identity must be an object with id and type")
+    identity_id = _require_non_empty_text(current_identity.get("id"), "current_identity.id")
+    identity_type = _require_non_empty_text(current_identity.get("type"), "current_identity.type")
+    if identity_type not in {"actor", "external"}:
+        raise ValueError("current_identity.type must be actor or external")
+    return {"id": identity_id, "type": identity_type}
 
 
 def _merge_extra(payload: dict[str, Any], extra: dict[str, Any], canonical_fields: set[str]) -> None:
@@ -227,7 +226,8 @@ def success(
     *,
     tool: str,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any] | None = None,
+    active_actor: dict[str, Any] | None = None,
     active_role: str,
     effect_summary: str,
     state_changed: bool,
@@ -243,11 +243,16 @@ def success(
     follow_up_affordances: list[dict[str, Any]] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if current_identity is None and active_actor is not None:
+        if isinstance(active_actor, dict) and isinstance(active_actor.get("actor_id"), str):
+            current_identity = {"id": active_actor["actor_id"], "type": "actor"}
+        elif isinstance(active_actor, dict) and isinstance(active_actor.get("id"), str):
+            current_identity = dict(active_actor)
     payload: dict[str, Any] = {
         "ok": True,
         "tool": tool,
         "action": action,
-        "active_actor": _active_actor_payload(active_actor, active_role),
+        "current_identity": _current_identity_payload(current_identity),
         "active_role": _role_id_text(active_role),
         "effect_summary": _require_non_empty_text(effect_summary, "effect_summary"),
         "state_changed": _require_bool(state_changed, "state_changed"),
@@ -279,7 +284,7 @@ def rejection(
     *,
     tool: str,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     code: str,
     message: str,
@@ -305,7 +310,7 @@ def rejection(
         "ok": False,
         "tool": tool,
         "action": action,
-        "active_actor": _active_actor_payload(active_actor, active_role),
+        "current_identity": _current_identity_payload(current_identity),
         "active_role": _role_id_text(active_role),
         "error": {
             "code": code,

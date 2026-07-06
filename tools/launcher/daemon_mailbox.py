@@ -19,7 +19,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime.actor_profile import ActorAddress  # noqa: E402
+from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 import daemon_triggers  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
@@ -28,20 +28,25 @@ from runtime_kernel import protocol  # noqa: E402
 SIGNAL_ALLOWED_KEYS = {
     "signal_id",
     "type",
-    "source_actor_address",
-    "target_actor_address",
+    "source_identity_id",
+    "source_role_id",
+    "target_identity_id",
+    "target_role_id",
     "payload",
     "created_at",
 }
 
 
-def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
-    if isinstance(value, ActorAddress):
-        return value.to_payload()
-    try:
-        return ActorAddress.from_payload(value).to_payload()
-    except Exception as exc:
-        raise ValueError(f"{field} must be a valid actor_address") from exc
+def _actor_identity_id(value: Any, field: str) -> str:
+    if not isinstance(value, str) or ACTOR_ID_PATTERN.fullmatch(value.strip()) is None:
+        raise ValueError(f"{field} must be a valid actor identity id")
+    return value.strip()
+
+
+def _role_id(value: Any, field: str) -> str:
+    if not isinstance(value, str) or ROLE_ID_PATTERN.fullmatch(value.strip()) is None:
+        raise ValueError(f"{field} must be a valid role id")
+    return value.strip()
 
 
 def _non_empty_string(value: Any, field: str) -> str:
@@ -60,8 +65,10 @@ def daemon_signal_envelope(
     *,
     signal_id: str,
     signal_type: str,
-    source_actor_address: ActorAddress | dict[str, Any],
-    target_actor_address: ActorAddress | dict[str, Any],
+    source_identity_id: str,
+    source_role_id: str,
+    target_identity_id: str,
+    target_role_id: str,
     payload: dict[str, Any],
     created_at: str,
 ) -> dict[str, Any]:
@@ -70,8 +77,10 @@ def daemon_signal_envelope(
     return {
         "signal_id": runtime_files.require_id(signal_id, "signal_id"),
         "type": _non_empty_string(signal_type, "type"),
-        "source_actor_address": _actor_address_payload(source_actor_address, "source_actor_address"),
-        "target_actor_address": _actor_address_payload(target_actor_address, "target_actor_address"),
+        "source_identity_id": _actor_identity_id(source_identity_id, "source_identity_id"),
+        "source_role_id": _role_id(source_role_id, "source_role_id"),
+        "target_identity_id": _actor_identity_id(target_identity_id, "target_identity_id"),
+        "target_role_id": _role_id(target_role_id, "target_role_id"),
         "payload": dict(payload),
         "created_at": _non_empty_string(created_at, "created_at"),
     }
@@ -92,8 +101,10 @@ def validate_daemon_signal(signal: Any) -> dict[str, Any]:
     return daemon_signal_envelope(
         signal_id=signal.get("signal_id", ""),
         signal_type=signal.get("type", ""),
-        source_actor_address=signal.get("source_actor_address"),
-        target_actor_address=signal.get("target_actor_address"),
+        source_identity_id=signal.get("source_identity_id"),
+        source_role_id=signal.get("source_role_id"),
+        target_identity_id=signal.get("target_identity_id"),
+        target_role_id=signal.get("target_role_id"),
         payload=signal.get("payload"),
         created_at=signal.get("created_at", ""),
     )
@@ -104,7 +115,8 @@ class DaemonMailboxServer:
         self,
         *,
         socket_path: Path,
-        local_actor_address: ActorAddress | dict[str, Any],
+        local_identity_id: str,
+        local_role_id: str,
         handlers: list[Any] | tuple[Any, ...],
         context: Any | None = None,
         state: Any | None = None,
@@ -113,9 +125,8 @@ class DaemonMailboxServer:
         now: Any | None = None,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve(strict=False)
-        self.local_actor_address = ActorAddress.from_payload(
-            _actor_address_payload(local_actor_address, "local_actor_address")
-        )
+        self.local_identity_id = _actor_identity_id(local_identity_id, "local_identity_id")
+        self.local_role_id = _role_id(local_role_id, "local_role_id")
         self.handlers = list(handlers or [])
         self.context = context
         self.state = state
@@ -234,8 +245,7 @@ class DaemonMailboxServer:
             signal = validate_daemon_signal(params.get("signal"))
         except Exception as exc:
             return self._response(request_id, code="invalid_signal", message=str(exc))
-        to_actor = ActorAddress.from_payload(signal["target_actor_address"])
-        if to_actor != self.local_actor_address:
+        if signal["target_identity_id"] != self.local_identity_id:
             return self._response(request_id, code="wrong_target_actor", message="signal target does not match local actor")
         trigger = daemon_triggers.normalize_cross_actor_signal(signal)
         return self._dispatch_trigger(request_id, trigger)
@@ -293,9 +303,9 @@ class DaemonMailboxServer:
         return self._dispatch_task_sys(request_id, "cleanup_side_lease", {"task_id": task_id})
 
     def _normalize_local_trigger_request(self, params: dict[str, Any]) -> daemon_triggers.DaemonTrigger:
-        actor_payload = _actor_address_payload(params.get("actor_address"), "actor_address")
-        actor_address = ActorAddress.from_payload(actor_payload)
-        if actor_address != self.local_actor_address:
+        identity_id = _actor_identity_id(params.get("identity_id"), "identity_id")
+        role_id = _role_id(params.get("role_id"), "role_id")
+        if identity_id != self.local_identity_id:
             raise PermissionError("signal target does not match local actor")
         trigger_type = _non_empty_string(params.get("type"), "type")
         payload = params.get("payload")
@@ -306,7 +316,8 @@ class DaemonMailboxServer:
             raise ValueError("source_context must be an object")
         return daemon_triggers.normalize_local_trigger(
             trigger_type=trigger_type,
-            target_actor_address=actor_payload,
+            target_identity_id=identity_id,
+            target_role_id=role_id,
             origin_id=_optional_non_empty_string(params.get("origin_id"), "origin_id"),
             correlation_id=_optional_non_empty_string(params.get("correlation_id"), "correlation_id"),
             payload=dict(payload),

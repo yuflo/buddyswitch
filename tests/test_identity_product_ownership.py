@@ -40,13 +40,13 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase
         created = track_repo.create_track(
             "track-identity-owner",
             "Identity-owned Track",
-            owner_actor=actor,
+            owner_identity=actor["actor_id"],
             outcome="Prove identity ownership.",
             now={"next": "Write the test.", "blocker": None},
         )
         updated, _row = track_repo.append_track_update(
             track_id="track-identity-owner",
-            by_actor=actor,
+            by_identity=actor["actor_id"],
             kind="progress",
             summary="Identity update.",
             refs=[],
@@ -80,11 +80,11 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase
         artifact = artifact_repo.create_artifact_revision(
             artifact_id="art-identity-owner",
             title="Identity artifact",
-            created_by_actor=creator,
+            created_by_identity=creator["actor_id"],
             body="Artifact body.",
             template="note",
             summary="Artifact summary.",
-            author_actors=[coauthor],
+            author_identities=[coauthor["actor_id"]],
         )
 
         self.assertEqual(artifact["created_by_identity_id"], creator["actor_id"])
@@ -99,14 +99,14 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase
 
         comment = comment_repo.create_track_comment(
             track_id="track-comment-identity",
-            by_actor=author,
+            by_identity=author["actor_id"],
             content="Identity comment.",
-            mentioned_actors=[mentioned],
+            mentioned_identities=[mentioned["actor_id"]],
         )
         resolved = comment_repo.resolve_track_comment_thread(
             track_id="track-comment-identity",
             comment_id=comment["id"],
-            resolved_by_actor=resolver,
+            resolved_by_identity=resolver["actor_id"],
             resolution_summary="Resolved by identity.",
         )[0]
 

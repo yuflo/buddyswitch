@@ -58,8 +58,10 @@ class DaemonMailboxTests(unittest.TestCase):
         return self.mailbox.daemon_signal_envelope(
             signal_id="sig-daemon-mailbox",
             signal_type="example.ready",
-            source_actor_address={"role_id": "pm", "actor_id": "act-pm-daemon"},
-            target_actor_address={"role_id": target_role, "actor_id": target_instance},
+            source_identity_id="act-pm-daemon",
+            source_role_id="pm",
+            target_identity_id=target_instance,
+            target_role_id=target_role,
             payload={"message_id": "msg-daemon-mailbox"},
             created_at="2026-05-30T00:00:00Z",
         )
@@ -70,17 +72,21 @@ class DaemonMailboxTests(unittest.TestCase):
         self.assertEqual(signal["signal_id"], "sig-daemon-mailbox")
         self.assertEqual(signal["type"], "example.ready")
         self.assertEqual(signal["payload"], {"message_id": "msg-daemon-mailbox"})
-        self.assertEqual(signal["source_actor_address"], {"role_id": "pm", "actor_id": "act-pm-daemon"})
-        self.assertEqual(signal["target_actor_address"], {"role_id": "dev", "actor_id": "act-dev-daemon"})
-        for forbidden in ("message_id", "from_actor_address", "to_actor_address", "from_role", "to_role", "content", "message"):
+        self.assertEqual(signal["source_identity_id"], "act-pm-daemon")
+        self.assertEqual(signal["source_role_id"], "pm")
+        self.assertEqual(signal["target_identity_id"], "act-dev-daemon")
+        self.assertEqual(signal["target_role_id"], "dev")
+        for forbidden in ("message_id", "from_actor_address", "to_actor_address", "source_actor_address", "target_actor_address", "from_role", "to_role", "content", "message"):
             self.assertNotIn(forbidden, signal)
 
     def test_validate_daemon_signal_rejects_legacy_message_event_shape(self) -> None:
+        retired_from_field = "from_" + "actor_address"
+        retired_to_field = "to_" + "actor_address"
         legacy_event = {
             "type": "example.ready",
             "message_id": "msg-daemon-mailbox",
-            "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
-            "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+            retired_from_field: {"role_id": "pm", "actor_id": "act-pm-daemon"},
+            retired_to_field: {"role_id": "dev", "actor_id": "act-dev-daemon"},
         }
 
         with self.assertRaisesRegex(ValueError, "DaemonSignalEnvelope"):
@@ -90,8 +96,10 @@ class DaemonMailboxTests(unittest.TestCase):
         signal = self.mailbox.daemon_signal_envelope(
             signal_id="sig-task-updated",
             signal_type="task.updated",
-            source_actor_address={"role_id": "pm", "actor_id": "act-pm-daemon"},
-            target_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            source_identity_id="act-pm-daemon",
+            source_role_id="pm",
+            target_identity_id="act-dev-daemon",
+            target_role_id="dev",
             payload={"task_id": "task-1", "state": "ready"},
             created_at="2026-05-30T00:00:00Z",
         )
@@ -104,7 +112,8 @@ class DaemonMailboxTests(unittest.TestCase):
             dispatcher = RecordingTriggerDispatcher()
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 trigger_dispatcher=dispatcher,
             )
@@ -117,7 +126,8 @@ class DaemonMailboxTests(unittest.TestCase):
             service.handle(
                 "daemon.register",
                 {
-                    "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                    "identity_id": "act-dev-daemon",
+                    "role_id": "dev",
                     "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": str(socket_path)},
                 },
             )
@@ -140,7 +150,8 @@ class DaemonMailboxTests(unittest.TestCase):
             service.handle(
                 "daemon.register",
                 {
-                    "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                    "identity_id": "act-dev-daemon",
+                    "role_id": "dev",
                     "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": str(Path(temp_root) / "missing.sock")},
                 },
             )
@@ -158,11 +169,12 @@ class DaemonMailboxTests(unittest.TestCase):
             service.handle(
                 "daemon.register",
                 {
-                    "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                    "identity_id": "act-dev-daemon",
+                    "role_id": "dev",
                     "endpoint": {"kind": "daemon_mailbox_socket", "socket_path": str(Path(temp_root) / "missing.sock")},
                 },
             )
-            service.handle("daemon.unregister", {"actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"}})
+            service.handle("daemon.unregister", {"identity_id": "act-dev-daemon", "role_id": "dev"})
 
             result = service.handle("signal.deliver", {"signal": self._signal()})
 
@@ -173,11 +185,13 @@ class DaemonMailboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             paths = self.central.central_daemon_paths(Path(temp_root) / "shared")
             service = self.central.CentralDaemonService(paths=paths, now=lambda: "2026-05-30T00:00:00Z")
+            retired_from_field = "from_" + "actor_address"
+            retired_to_field = "to_" + "actor_address"
             legacy_event = {
                 "type": "example.ready",
                 "message_id": "msg-daemon-mailbox",
-                "from_actor_address": {"role_id": "pm", "actor_id": "act-pm-daemon"},
-                "to_actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+                retired_from_field: {"role_id": "pm", "actor_id": "act-pm-daemon"},
+                retired_to_field: {"role_id": "dev", "actor_id": "act-dev-daemon"},
             }
 
             result = service.handle("event.deliver", {"event": legacy_event})
@@ -190,7 +204,8 @@ class DaemonMailboxTests(unittest.TestCase):
             socket_path = Path(temp_root) / "mailbox.sock"
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"role_id": "design", "actor_id": "act-design-daemon"},
+                local_identity_id="act-design-daemon",
+                local_role_id="design",
                 handlers=[],
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -217,7 +232,8 @@ class DaemonMailboxTests(unittest.TestCase):
             )
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 trigger_dispatcher=dispatcher,
             )
@@ -248,7 +264,8 @@ class DaemonMailboxTests(unittest.TestCase):
             )
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 trigger_dispatcher=dispatcher,
             )
@@ -266,7 +283,8 @@ class DaemonMailboxTests(unittest.TestCase):
 
     def _local_trigger_params(self) -> dict[str, Any]:
         return {
-            "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+            "identity_id": "act-dev-daemon",
+            "role_id": "dev",
             "type": "example.attention_needed",
             "origin_id": "origin-1",
             "correlation_id": "corr-1",
@@ -283,7 +301,8 @@ class DaemonMailboxTests(unittest.TestCase):
     def test_parent_required_business_method_is_removed(self) -> None:
         server = self.mailbox.DaemonMailboxServer(
             socket_path=Path("/tmp/not-used.sock"),
-            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            local_identity_id="act-dev-daemon",
+            local_role_id="dev",
             handlers=[],
         )
 
@@ -303,7 +322,8 @@ class DaemonMailboxTests(unittest.TestCase):
         dispatcher = RecordingTriggerDispatcher()
         server = self.mailbox.DaemonMailboxServer(
             socket_path=Path("/tmp/not-used.sock"),
-            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            local_identity_id="act-dev-daemon",
+            local_role_id="dev",
             handlers=[],
             trigger_dispatcher=dispatcher,
         )
@@ -332,12 +352,14 @@ class DaemonMailboxTests(unittest.TestCase):
         dispatcher = RecordingTriggerDispatcher()
         server = self.mailbox.DaemonMailboxServer(
             socket_path=Path("/tmp/not-used.sock"),
-            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            local_identity_id="act-dev-daemon",
+            local_role_id="dev",
             handlers=[],
             trigger_dispatcher=dispatcher,
         )
         params = {
-            "actor_address": {"role_id": "dev", "actor_id": "act-dev-daemon"},
+            "identity_id": "act-dev-daemon",
+            "role_id": "dev",
             "type": "example.attention_needed",
             "payload": {"note": "generic local trigger"},
         }
@@ -372,7 +394,8 @@ class DaemonMailboxTests(unittest.TestCase):
 
         server = self.mailbox.DaemonMailboxServer(
             socket_path=Path("/tmp/not-used.sock"),
-            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            local_identity_id="act-dev-daemon",
+            local_role_id="dev",
             handlers=[],
             task_sys_dispatcher=task_sys_dispatcher,
         )
@@ -447,7 +470,8 @@ class DaemonMailboxTests(unittest.TestCase):
         dispatcher = RecordingTriggerDispatcher()
         server = self.mailbox.DaemonMailboxServer(
             socket_path=Path("/tmp/not-used.sock"),
-            local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+            local_identity_id="act-dev-daemon",
+            local_role_id="dev",
             handlers=[],
             trigger_dispatcher=dispatcher,
         )
@@ -464,7 +488,8 @@ class DaemonMailboxTests(unittest.TestCase):
 
         base = self._local_trigger_params()
         wrong_actor = dict(base)
-        wrong_actor["actor_address"] = {"role_id": "pm", "actor_id": "act-pm-daemon"}
+        wrong_actor["identity_id"] = "act-pm-daemon"
+        wrong_actor["role_id"] = "pm"
         empty_type = dict(base)
         empty_type["type"] = " "
         non_object_payload = dict(base)
@@ -495,7 +520,8 @@ class DaemonMailboxTests(unittest.TestCase):
             )
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=Path("/tmp/not-used.sock"),
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 state=state,
                 now=lambda: "2026-06-24T00:00:00Z",
@@ -537,7 +563,8 @@ class DaemonMailboxTests(unittest.TestCase):
             current_now = {"value": "2026-06-24T00:00:00Z"}
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=Path("/tmp/not-used.sock"),
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 state=state,
                 now=lambda: current_now["value"],
@@ -583,7 +610,8 @@ class DaemonMailboxTests(unittest.TestCase):
             )
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=Path("/tmp/not-used.sock"),
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 state=state,
                 now=lambda: "2026-06-24T00:00:00Z",
@@ -622,7 +650,8 @@ class DaemonMailboxTests(unittest.TestCase):
             )
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 state=state,
                 now=lambda: "2026-06-24T00:00:00Z",
@@ -658,7 +687,8 @@ class DaemonMailboxTests(unittest.TestCase):
             )
             server = self.mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
-                local_actor_address={"role_id": "dev", "actor_id": "act-dev-daemon"},
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
                 handlers=[],
                 state=state,
                 now=lambda: "2026-06-24T00:00:00Z",

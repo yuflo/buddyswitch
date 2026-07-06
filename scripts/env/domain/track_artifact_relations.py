@@ -6,9 +6,9 @@ from __future__ import annotations
 import uuid
 from typing import Any, TypedDict
 
+from env.domain.identity import IdentityRef
 from env.repos import artifacts as artifact_repo
 from env.repos import tracks as track_repo
-from env.tool_runtime.actor_profile import ActorAddress
 
 
 class MaterialRelationResult(TypedDict):
@@ -23,31 +23,22 @@ class ProofRelationResult(TypedDict):
     superseded_artifact_id: str | None
 
 
-def _actor_payload(value: dict[str, Any]) -> dict[str, str]:
-    return ActorAddress.from_payload(value).to_payload()
-
-
-def _actor_payload_or_none(value: Any) -> dict[str, str] | None:
-    if not isinstance(value, dict):
-        return None
-    try:
-        return ActorAddress.from_payload(value).to_payload()
-    except ValueError:
-        return None
-
-
-def _actor_identity_id(value: ActorAddress | dict[str, Any]) -> str:
-    if isinstance(value, ActorAddress):
-        return value.actor_id
-    return _actor_payload(value)["actor_id"]
+def _identity_id(value: Any, field: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return track_repo.runtime_files.require_id(value.strip(), field)
+    if isinstance(value, dict):
+        if isinstance(value.get("identity"), dict):
+            return IdentityRef.from_payload(value["identity"]).id
+        if isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
+            return IdentityRef.from_payload(value).id
+    raise ValueError(f"{field} must be an identity id or identity payload")
 
 
 def _relation_identity_id(row: dict[str, Any]) -> str | None:
     identity_id = row.get("from_identity_id")
     if isinstance(identity_id, str) and identity_id:
         return identity_id
-    actor = _actor_payload_or_none(row.get("from_actor"))
-    return actor.get("actor_id") if isinstance(actor, dict) else None
+    return None
 
 
 def _load_track(track_id: str) -> dict[str, Any]:
@@ -59,23 +50,23 @@ def _load_track(track_id: str) -> dict[str, Any]:
     return track
 
 
-def _load_owned_artifact(artifact_id: str, actor: ActorAddress) -> dict[str, Any]:
+def _load_owned_artifact(artifact_id: str, identity_id: str) -> dict[str, Any]:
     artifact = artifact_repo.get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    if artifact.get("created_by_identity_id") != actor.actor_id:
-        raise ValueError(f"artifact '{artifact_id}' is owned by another actor")
+    if artifact.get("created_by_identity_id") != identity_id:
+        raise ValueError(f"artifact '{artifact_id}' is owned by another identity")
     if not isinstance(artifact.get("template"), str) or not artifact.get("template"):
         raise ValueError("artifact.template is required for track artifact relation")
     return artifact
 
 
-def _same_relation_slot(*, row: dict[str, Any], role: str, label: str, template: str, actor: ActorAddress) -> bool:
+def _same_relation_slot(*, row: dict[str, Any], role: str, label: str, template: str, identity_id: str) -> bool:
     return (
         row.get("role") == role
         and row.get("label") == label
         and row.get("template") == template
-        and _relation_identity_id(row) == actor.actor_id
+        and _relation_identity_id(row) == identity_id
     )
 
 
@@ -85,7 +76,7 @@ def _relation_row(
     role: str,
     label: str,
     template: str,
-    from_actor: dict[str, str],
+    from_identity: dict[str, Any] | str,
     summary: str,
 ) -> dict[str, Any]:
     return {
@@ -95,7 +86,7 @@ def _relation_row(
         "role": role,
         "label": label,
         "template": template,
-        "from_identity_id": _actor_identity_id(from_actor),
+        "from_identity_id": _identity_id(from_identity, "from_identity"),
         "summary": summary,
         "current": True,
         "created_at": track_repo.now_iso(),
@@ -108,7 +99,7 @@ def _next_relation_rows(
     artifact: dict[str, Any],
     role: str,
     label: str,
-    actor: ActorAddress,
+    identity_id: str,
     summary: str,
 ) -> tuple[list[dict[str, Any]], str | None]:
     template = str(artifact.get("template") or "")
@@ -118,7 +109,7 @@ def _next_relation_rows(
         if not isinstance(row, dict):
             continue
         next_row = dict(row)
-        if _same_relation_slot(row=row, role=role, label=label, template=template, actor=actor):
+        if _same_relation_slot(row=row, role=role, label=label, template=template, identity_id=identity_id):
             if bool(row.get("current")):
                 existing_artifact_id = row.get("artifact_id")
                 if existing_artifact_id == artifact.get("id"):
@@ -134,7 +125,7 @@ def _next_relation_rows(
             role=role,
             label=label,
             template=template,
-            from_actor=actor.to_payload(),
+            from_identity=identity_id,
             summary=summary,
         )
     )
@@ -146,18 +137,18 @@ def add_material_relation(
     track_id: str,
     artifact_id: str,
     label: str,
-    from_actor: dict[str, Any],
+    from_identity: dict[str, Any] | str,
     summary: str,
 ) -> MaterialRelationResult:
     track = _load_track(track_id)
-    actor = ActorAddress.from_payload(_actor_payload(from_actor))
-    artifact = _load_owned_artifact(artifact_id, actor)
+    identity_id = _identity_id(from_identity, "from_identity")
+    artifact = _load_owned_artifact(artifact_id, identity_id)
     rows, superseded_artifact_id = _next_relation_rows(
         track=track,
         artifact=artifact,
         role="material",
         label=label,
-        actor=actor,
+        identity_id=identity_id,
         summary=summary,
     )
 
@@ -177,18 +168,18 @@ def add_proof_relation(
     track_id: str,
     artifact_id: str,
     label: str,
-    from_actor: dict[str, Any],
+    from_identity: dict[str, Any] | str,
     summary: str,
 ) -> ProofRelationResult:
     track = _load_track(track_id)
-    actor = ActorAddress.from_payload(_actor_payload(from_actor))
-    artifact = _load_owned_artifact(artifact_id, actor)
+    identity_id = _identity_id(from_identity, "from_identity")
+    artifact = _load_owned_artifact(artifact_id, identity_id)
     rows, superseded_artifact_id = _next_relation_rows(
         track=track,
         artifact=artifact,
         role="proof",
         label=label,
-        actor=actor,
+        identity_id=identity_id,
         summary=summary,
     )
 

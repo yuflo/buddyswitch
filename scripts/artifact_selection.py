@@ -43,18 +43,6 @@ def _as_int(value: Any) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _as_actor(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    actor_id = value.get("actor_id")
-    role_id = value.get("role_id")
-    if not isinstance(actor_id, str) or not actor_id:
-        return None
-    if not isinstance(role_id, str) or not role_id:
-        return None
-    return {"actor_id": actor_id, "role_id": role_id}
-
-
 def _extract_artifacts(track_artifact_index: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(track_artifact_index, dict):
         return []
@@ -133,7 +121,7 @@ def select_artifacts_for_run(
                 "artifact_id": artifact_id,
                 "revision": _as_int(artifact.get("revision")),
                 "selection_reason": "current track-related artifact for required upstream template",
-                "created_by_actor": _as_actor(artifact.get("created_by_actor")),
+                "created_by_identity_id": _as_str(artifact.get("created_by_identity_id")),
             }
         )
         reasons.append(f"Selected current track-related artifact for required template '{template}': {artifact_id}")

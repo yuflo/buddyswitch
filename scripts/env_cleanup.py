@@ -38,7 +38,8 @@ def _runtime_relative_path(path: Path) -> str:
 
 TRACK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACKS_DIR)
 ARTIFACT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.ARTIFACT_OBJECTS_DIR)
-MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
+MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.STATE_ROOT / "im" / "messages")
+RETIRED_MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
 COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACK_COMMENTS_DIR)
 ACTOR_PRIVATE_RELATIVE_DIR = "private"
 
@@ -226,6 +227,27 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
 
+def _identity_id_from_ref(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, dict):
+        if isinstance(value.get("id"), str) and value["id"].strip():
+            return value["id"].strip()
+        identity = value.get("identity")
+        if isinstance(identity, dict) and isinstance(identity.get("id"), str) and identity["id"].strip():
+            return identity["id"].strip()
+    return None
+
+
+def _role_from_actor_identity_id(identity_id: str) -> str | None:
+    if not identity_id.startswith("act-"):
+        return None
+    role_id, separator, _suffix = identity_id.removeprefix("act-").partition("-")
+    if not separator or not role_id:
+        return None
+    return role_id
+
+
 def append_warning(warnings: list[str] | None, message: str) -> None:
     if warnings is None:
         return
@@ -333,22 +355,43 @@ def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dic
             continue
 
         msg_id = payload.get("id")
-        from_actor = payload.get("from_actor_address")
-        to_actor = payload.get("to_actor_address")
-        from_role = from_actor.get("role_id") if isinstance(from_actor, dict) else None
-        to_role = to_actor.get("role_id") if isinstance(to_actor, dict) else None
         if not isinstance(msg_id, str) or not msg_id:
             invalid.append({"path": relative, "reason": "message object is missing id"})
             continue
-        if not isinstance(from_role, str) or not from_role:
-            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing from_actor_address.role_id"})
+        conversation_id = payload.get("conversation_id")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing conversation_id"})
+            continue
+        sender_identity_id = _identity_id_from_ref(payload.get("sender_identity"))
+        target_identity_id = _identity_id_from_ref(payload.get("target_identity"))
+        if sender_identity_id is None:
+            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing sender_identity.id"})
+            continue
+        if target_identity_id is None:
+            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing target_identity.id"})
             continue
 
         valid.append({
             "id": msg_id,
-            "from_role": from_role,
-            "to_role": to_role,
+            "conversation_id": conversation_id,
+            "sender_identity_id": sender_identity_id,
+            "target_identity_id": target_identity_id,
+            "from_role": _role_from_actor_identity_id(sender_identity_id),
+            "to_role": _role_from_actor_identity_id(target_identity_id),
             "object_path": relative,
+        })
+    for path in iter_files(root, RETIRED_MESSAGE_OBJECTS_RELATIVE_DIR):
+        relative = rel(root, path)
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            invalid.append({"path": relative, "reason": f"invalid retired message object JSON: {exc}"})
+            continue
+        msg_id = payload.get("id")
+        label = f"message '{msg_id}'" if isinstance(msg_id, str) and msg_id else "message object"
+        invalid.append({
+            "path": relative,
+            "reason": f"{label} uses retired message object schema; current IM messages live under {MESSAGE_OBJECTS_RELATIVE_DIR}",
         })
     return valid, invalid
 

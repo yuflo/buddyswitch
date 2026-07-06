@@ -23,7 +23,7 @@ class ArtifactSelectionTests(unittest.TestCase):
                 {
                     "artifact_id": "art-prd-r1",
                     "template": "brief",
-                    "created_by_actor": {"actor_id": "act-pm-selection", "role_id": "pm"},
+                    "created_by_identity_id": "act-pm-selection",
                     "revision": 1,
                     "updated_at": "2026-05-15T10:00:00+00:00",
                     "current": True,
@@ -31,7 +31,7 @@ class ArtifactSelectionTests(unittest.TestCase):
                 {
                     "artifact_id": "art-proof-r1",
                     "template": "proof",
-                    "created_by_actor": {"actor_id": "act-test-selection", "role_id": "test"},
+                    "created_by_identity_id": "act-test-selection",
                     "revision": 1,
                     "updated_at": "2026-05-15T11:00:00+00:00",
                     "current": True,
@@ -49,10 +49,7 @@ class ArtifactSelectionTests(unittest.TestCase):
         ids = [row["artifact_id"] for row in selected["selected_inputs"]]
         self.assertEqual(ids, ["art-prd-r1", "art-proof-r1"])
         self.assertEqual(selected["selection_mode"], "template-current-v1")
-        self.assertEqual(
-            selected["selected_inputs"][0]["created_by_actor"],
-            {"actor_id": "act-pm-selection", "role_id": "pm"},
-        )
+        self.assertEqual(selected["selected_inputs"][0]["created_by_identity_id"], "act-pm-selection")
         self.assertNotIn("created_by", selected["selected_inputs"][0])
 
     def test_selection_dedupes_repeated_required_templates(self) -> None:

@@ -746,7 +746,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
         return triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.page.expired",
-            target_actor_address={"role_id": role, "actor_id": actor_id},
+            target_identity_id=actor_id,
+            target_role_id=role,
             origin_id="schedule-page",
             correlation_id=None,
             payload={"page_id": page_id},
@@ -757,7 +758,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
         return triggers.DaemonTrigger(
             source="scheduled_trigger",
             type="browser.cockpit.release",
-            target_actor_address={"role_id": role, "actor_id": actor_id},
+            target_identity_id=actor_id,
+            target_role_id=role,
             origin_id="schedule-release",
             correlation_id=None,
             payload={"reason": "page_idle_empty"},
@@ -769,7 +771,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
             pass
 
         context = Context()
-        context.actor_address = {"role_id": role, "actor_id": actor_id}
         context.actor_id = actor_id
         context.role = role
         context.instance_root = instance_root
@@ -788,7 +789,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
         )
         server = daemon_mailbox.DaemonMailboxServer(
             socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
-            local_actor_address={"role_id": role, "actor_id": actor_id},
+            local_identity_id=actor_id,
+            local_role_id=role,
             handlers=[],
             state=state,
             now=lambda: "2026-06-24T00:00:00Z",

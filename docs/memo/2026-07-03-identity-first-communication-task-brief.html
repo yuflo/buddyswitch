@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task B - Communication Identity Cutover Brief</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --surface: #ffffff;
+      --soft: #f0f2ef;
+      --ink: #171a1c;
+      --muted: #626b73;
+      --line: #d9ded8;
+      --accent: #0f766e;
+      --accent-soft: #d9efea;
+      --warn: #9a5b00;
+      --warn-soft: #fff0cc;
+      --danger: #a43e3e;
+      --danger-soft: #f8dddd;
+      --ok: #26733f;
+      --ok-soft: #dff0e4;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.5;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .page {
+      width: min(1240px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 48px;
+    }
+
+    .hero,
+    section {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .hero {
+      padding: 24px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr);
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 50px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 820px;
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .metric {
+      min-height: 92px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      padding: 14px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 21px;
+      line-height: 1.1;
+      margin-bottom: 8px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .decision-box {
+      height: 100%;
+      border: 1px solid #b9d9d2;
+      border-radius: 8px;
+      background: var(--accent-soft);
+      padding: 18px;
+    }
+
+    .decision-box h2,
+    section h2,
+    .panel h3 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+
+    .decision-box p {
+      margin: 10px 0 0;
+      color: #275650;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: #fff;
+      border: 1px solid #b9d9d2;
+      color: #184d47;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .toc {
+      position: sticky;
+      top: 0;
+      z-index: 4;
+      margin: 16px 0 22px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(247, 247, 244, .94);
+      backdrop-filter: blur(8px);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .toc a {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px 10px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    section {
+      margin-top: 22px;
+      padding: 22px;
+    }
+
+    section > header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    section > header p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      max-width: 820px;
+    }
+
+    .label {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 9px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .two-col,
+    .three-col {
+      display: grid;
+      gap: 14px;
+    }
+
+    .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .panel h3 { font-size: 16px; }
+
+    .panel p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .panel ul,
+    .panel ol {
+      padding-left: 18px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .panel li + li { margin-top: 6px; }
+
+    .ok { background: var(--ok-soft); border-color: #b9d8c0; }
+    .warn { background: var(--warn-soft); border-color: #ead18f; }
+    .danger { background: var(--danger-soft); border-color: #e5b5b5; }
+
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .matrix th,
+    .matrix td {
+      border: 1px solid var(--line);
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .matrix th {
+      background: var(--soft);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .node {
+      min-height: 128px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: var(--soft);
+      position: relative;
+    }
+
+    .node::after {
+      content: ">";
+      position: absolute;
+      right: -13px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-weight: 700;
+    }
+
+    .node:last-child::after { content: ""; }
+
+    .node strong {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .node span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    code,
+    .mono {
+      font-family: var(--mono);
+      font-size: .94em;
+    }
+
+    .evidence {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fafafa;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #3b4147;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .delete-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .delete-item {
+      border: 1px solid #e5b5b5;
+      border-radius: 8px;
+      background: var(--danger-soft);
+      padding: 11px 12px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .footer-note {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .two-col,
+      .three-col,
+      .flow,
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .node::after {
+        content: "v";
+        right: 14px;
+        top: auto;
+        bottom: -20px;
+        transform: none;
+      }
+
+      .delete-list {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero" aria-labelledby="title">
+      <div>
+        <p class="eyebrow">Task B / System Explainer · 2026-07-04</p>
+        <h1 id="title">Communication / IM Identity Cutover</h1>
+        <p class="lead">
+          这个 HTML 专门审核 B：在 Task A 已建立唯一 identity owner 的前提下，
+          把 runtime、daemon、IM、mailbox、Track、Artifact、Comment、Web 等通信相关链路
+          切到只引用 identity，删除 <code>ActorAddress</code> 和 IM participant 私有身份 schema。
+        </p>
+        <div class="status-grid" aria-label="task summary">
+          <div class="metric">
+            <strong>依赖 A</strong>
+            <span>不重新定义 identity，只消费 A 的 identity profile contract。</span>
+          </div>
+          <div class="metric">
+            <strong>删除通信旧形状</strong>
+            <span><code>actor_address</code> 与 IM participant 身份 schema 清零。</span>
+          </div>
+          <div class="metric">
+            <strong>不开放 external</strong>
+            <span>actor -> external 主动发送仍不是本任务能力。</span>
+          </div>
+        </div>
+      </div>
+      <aside class="decision-box" aria-label="decision">
+        <div>
+          <h2>审核结论</h2>
+          <p>
+            B 应独立成通信 cutover 任务说明。它的核心不是设计 identity profile，
+            而是让所有通信路径消费 identity，删除 actor-only 地址和 IM 私有 participant 身份。
+          </p>
+        </div>
+        <div class="tag-row">
+          <span class="tag">depends on A</span>
+          <span class="tag">communication cutover</span>
+          <span class="tag">delete participant schema</span>
+          <span class="tag">no external send yet</span>
+        </div>
+      </aside>
+    </section>
+
+    <nav class="toc" aria-label="sections">
+      <a href="#objective">目标</a>
+      <a href="#dependency">依赖 A</a>
+      <a href="#current">现状</a>
+      <a href="#target">目标流程</a>
+      <a href="#impact">影响面</a>
+      <a href="#non-goals">不做</a>
+      <a href="#acceptance">验收</a>
+      <a href="#audit">遗漏审查</a>
+    </nav>
+
+    <section id="objective">
+      <header>
+        <div>
+          <h2>1. 任务目标</h2>
+          <p>B 的目标是通信链路引用 identity，而不是在通信模块里再维护 actor/external 静态身份资料。</p>
+        </div>
+        <span class="label">Objective</span>
+      </header>
+      <div class="three-col">
+        <article class="panel ok">
+          <h3>runtime / daemon cutover</h3>
+          <p>注册、心跳、可达性、signal、wake、mailbox 都用 identity 表达 source/target。</p>
+          <div class="evidence">target_actor_address -> target_identity</div>
+        </article>
+        <article class="panel ok">
+          <h3>IM participant 删除</h3>
+          <p>IM 不再使用 <code>kind + actor_address / external_id</code> 表达身份。</p>
+          <div class="evidence">sender_identity / target_identity / viewer_identity</div>
+        </article>
+        <article class="panel ok">
+          <h3>product surface 清理</h3>
+          <p>Track、Artifact、Comment、Context、Web 只传 identity 或 identity_id。</p>
+          <div class="evidence">active_actor / actor_address -> identity</div>
+        </article>
+      </div>
+    </section>
+
+    <section id="dependency">
+      <header>
+        <div>
+          <h2>2. 对 Task A 的依赖</h2>
+          <p>B 的前提是 A 已经定义唯一静态身份 owner。B 不允许补一套临时 identity schema。</p>
+        </div>
+        <span class="label">Dependency</span>
+      </header>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>A 提供</th>
+            <th>B 如何使用</th>
+            <th>B 禁止做什么</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>IdentityRef</code></td>
+            <td>所有 source/target/viewer 都用同一 payload。</td>
+            <td>不在 IM/daemon/runtime 内重新定义 <code>kind</code> 或 <code>actor_id + role_id</code>。</td>
+          </tr>
+          <tr>
+            <td><code>ActorIdentityProfile</code></td>
+            <td>需要 actor 静态资料时查 identity profile。</td>
+            <td>不在 daemon registry、web row、IM contact row 复制 role/label 静态资料。</td>
+          </tr>
+          <tr>
+            <td><code>ExternalIdentityProfile</code></td>
+            <td>external connection / channel 只保存连接事实。</td>
+            <td>不再用 IM participant 的 <code>external_id</code> 作为身份 schema。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="evidence">Companion A: docs/memo/2026-07-04-identity-global-convergence-brief.html</p>
+    </section>
+
+    <section id="current">
+      <header>
+        <div>
+          <h2>3. 当前通信问题</h2>
+          <p>当前 actor -> external 卡点来自通信入口把 target 解释成 reachable actor，而不是全局 identity。</p>
+        </div>
+        <span class="label">Current Path</span>
+      </header>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>当前路径</th>
+            <th>问题</th>
+            <th>B 的替换方向</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>actor send target</td>
+            <td><code>target_identity_id</code> 先被 actor runtime 解析成 reachable actor。</td>
+            <td>先做 identity validation，再按规则判断是否允许 actor-directed delivery。</td>
+          </tr>
+          <tr>
+            <td>daemon registry</td>
+            <td>用 <code>actor_address</code> 作为可达性和投递 key。</td>
+            <td>registry 用 <code>identity</code> 作为 key，只保存 delivery state。</td>
+          </tr>
+          <tr>
+            <td>daemon signal / mailbox</td>
+            <td><code>source_actor_address</code> / <code>target_actor_address</code> 只能表达 actor-only。</td>
+            <td><code>source_identity</code> / <code>target_identity</code>。</td>
+          </tr>
+          <tr>
+            <td>IM participant</td>
+            <td><code>{"kind":"actor","actor_address":...}</code> 和 <code>{"kind":"external","external_id":...}</code> 是 IM 私有身份 schema。</td>
+            <td>IM service/repo 参数直接改成 identity。</td>
+          </tr>
+          <tr>
+            <td>product surfaces</td>
+            <td>Track、Artifact、Comment、Context、Web 继续传播 actor 静态结构。</td>
+            <td>只传播 identity / identity_id；需要静态资料时查 A。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="target">
+      <header>
+        <div>
+          <h2>4. 目标通信流程</h2>
+          <p>B 完成后，通信链路只搬运 identity 和领域事实，不再搬运 actor/external 静态身份结构。</p>
+        </div>
+        <span class="label">Target Flow</span>
+      </header>
+      <div class="flow" aria-label="target flow diagram">
+        <div class="node">
+          <strong>Caller</strong>
+          <span>提交 target identity id 或 reply_to。</span>
+        </div>
+        <div class="node">
+          <strong>IM Product</strong>
+          <span>使用 sender/target/viewer identity 建 message/event/state。</span>
+        </div>
+        <div class="node">
+          <strong>Delivery Resolver</strong>
+          <span>按 identity type 和当前规则判断可投递性。</span>
+        </div>
+        <div class="node">
+          <strong>Daemon / Channel</strong>
+          <span>actor identity 查 online endpoint；external channel 后续单独补。</span>
+        </div>
+        <div class="node">
+          <strong>Product Surfaces</strong>
+          <span>所有通知/可见性/上下文只引用 identity。</span>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:14px">
+        <article class="panel">
+          <h3>IM service API</h3>
+          <div class="evidence">send_im_message(
+  sender_identity=IdentityRef(...),
+  target_identity=IdentityRef(...) | None,
+  reply_to=...
+)
+
+read_im_events(viewer_identity=IdentityRef(...))
+get_im_direct_conversation(viewer_identity=..., target_identity=...)</div>
+        </article>
+        <article class="panel">
+          <h3>Daemon delivery state</h3>
+          <div class="evidence">{
+  "identity": {"id": "act-...", "type": "actor"},
+  "endpoint": {...},
+  "heartbeat": {...},
+  "status": "online",
+  "last_seen_at": "..."
+}</div>
+        </article>
+      </div>
+    </section>
+
+    <section id="impact">
+      <header>
+        <div>
+          <h2>5. 影响面</h2>
+          <p>B 的影响面覆盖通信主路径和所有会承接消息通知/上下文的 product surface。</p>
+        </div>
+        <span class="label">Impact</span>
+      </header>
+      <div class="three-col">
+        <article class="panel">
+          <h3>Runtime / daemon</h3>
+          <ul>
+            <li><code>scripts/env/tool_runtime/context.py</code></li>
+            <li><code>scripts/env/tool_runtime/daemon_client.py</code></li>
+            <li><code>tools/launcher/central_daemon_core.py</code></li>
+            <li><code>tools/launcher/daemon_mailbox.py</code></li>
+            <li><code>tools/launcher/daemon_triggers.py</code></li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h3>IM product</h3>
+          <ul>
+            <li><code>scripts/env/services/messages.py</code></li>
+            <li><code>scripts/env/repos/messages.py</code></li>
+            <li><code>scripts/env/tool_runtime/im_client.py</code></li>
+            <li><code>tools/launcher/external_im_session.py</code></li>
+            <li><code>tools/launcher/im_http_router.py</code></li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h3>Product / channels</h3>
+          <ul>
+            <li>Track / comment notification</li>
+            <li>Artifact visibility and context summaries</li>
+            <li>Web Management actor/IM paths</li>
+            <li>iMessage channel selection and reply bridge</li>
+          </ul>
+        </article>
+      </div>
+      <div class="delete-list" aria-label="B terms to remove">
+        <div class="delete-item">ActorAddress</div>
+        <div class="delete-item">actor_address</div>
+        <div class="delete-item">target_actor_address</div>
+        <div class="delete-item">source_actor_address</div>
+        <div class="delete-item">from_actor_address</div>
+        <div class="delete-item">to_actor_address</div>
+        <div class="delete-item">identity_from_im_participant</div>
+        <div class="delete-item">participant.actor_address</div>
+        <div class="delete-item">participant.external_id</div>
+        <div class="delete-item">IM kind participant identity schema</div>
+      </div>
+    </section>
+
+    <section id="non-goals">
+      <header>
+        <div>
+          <h2>6. 不在 B 中开放</h2>
+          <p>B 清理通信底座，不扩大 actor/external 产品通信能力。</p>
+        </div>
+        <span class="label">Non-goals</span>
+      </header>
+      <div class="two-col">
+        <article class="panel warn">
+          <h3>external 主动发送仍不开放</h3>
+          <ul>
+            <li><code>message.send(target_identity_id="ext-...")</code> 不作为可用能力交付。</li>
+            <li>iMessage / external channel 主动发出 route 不在 B 内补齐。</li>
+            <li>external contacts 是否进入 actor contacts 视图不在 B 内决定。</li>
+          </ul>
+        </article>
+        <article class="panel warn">
+          <h3>identity 静态资料不在 B 设计</h3>
+          <ul>
+            <li>B 不定义 <code>ActorIdentityProfile</code> 字段。</li>
+            <li>B 不维护 role label / display name / created_at。</li>
+            <li>B 缺静态资料时查 A 的 identity owner，不在本地复制。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="acceptance">
+      <header>
+        <div>
+          <h2>7. B 的验收标准</h2>
+          <p>验收重点是通信路径无旧身份 schema 残留，且现有行为不偷变。</p>
+        </div>
+        <span class="label">Acceptance</span>
+      </header>
+      <div class="two-col">
+        <article class="panel ok">
+          <h3>行为验收</h3>
+          <ol>
+            <li>actor -> actor message 主路径仍创建 durable IM message、event、state。</li>
+            <li>daemon 能按 actor identity 查 online endpoint 并提交 wake/mailbox delivery。</li>
+            <li>external -> actor -> <code>reply_to</code> external 现有回路仍通过。</li>
+            <li>actor -> external 主动发送仍被拒绝，且不创建 IM message/conversation/event/state。</li>
+            <li>Track / Artifact / Comment / Context / Web 可见性和通知仍能基于 identity 工作。</li>
+          </ol>
+        </article>
+        <article class="panel danger">
+          <h3>残留验收</h3>
+          <div class="evidence">rg -n "ActorAddress|actor_address|target_actor_address|source_actor_address|from_actor_address|to_actor_address|identity_from_im_participant|participant\\.actor_address|participant\\.external_id|\\\"kind\\\"\\s*:\\s*\\\"actor\\\"|\\\"kind\\\"\\s*:\\s*\\\"external\\\"" scripts tools tests buddyswitch</div>
+          <p>期望：除专门 residue test 的 forbidden-term 列表外无 live 命中。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="audit">
+      <header>
+        <div>
+          <h2>8. 遗漏审查</h2>
+          <p>按 B 的任务边界逐项确认：哪些属于 B，哪些明确转给 A 或后续 external delivery。</p>
+        </div>
+        <span class="label">Completeness</span>
+      </header>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>审查项</th>
+            <th>是否覆盖</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>runtime / daemon identity 引用</td>
+            <td>覆盖</td>
+            <td>注册、心跳、可达性、signal、wake、mailbox 都在 B。</td>
+          </tr>
+          <tr>
+            <td>IM participant 私有身份 schema 删除</td>
+            <td>覆盖</td>
+            <td>repo/service/tool runtime/external session/http router 都在 B。</td>
+          </tr>
+          <tr>
+            <td>product surface 残留清理</td>
+            <td>覆盖</td>
+            <td>Track、Artifact、Comment、Context、Web、iMessage 引用方式在 B。</td>
+          </tr>
+          <tr>
+            <td>actor/external 静态 profile 字段设计</td>
+            <td>不在 B</td>
+            <td>由 Task A 负责，B 只消费。</td>
+          </tr>
+          <tr>
+            <td>actor -> external 主动发送</td>
+            <td>不在 B</td>
+            <td>后续 external delivery/channel route 任务单独设计。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <p class="footer-note">
+      Companion artifact: <a href="2026-07-04-identity-global-convergence-brief.html">Task A identity global convergence brief</a>.
+    </p>
+  </main>
+</body>
+</html>

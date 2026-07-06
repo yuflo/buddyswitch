@@ -20,8 +20,8 @@ _ACTION_ALLOWED_FIELDS = {
 }
 
 
-def _active_actor(context: Any) -> dict[str, Any]:
-    value = context.get("active_actor") if isinstance(context, dict) else getattr(context, "active_actor", None)
+def _current_identity(context: Any) -> dict[str, Any]:
+    value = context.get("current_identity") if hasattr(context, "get") else getattr(context, "current_identity", None)
     if isinstance(value, dict):
         return value
     to_payload = getattr(value, "to_payload", None)
@@ -29,11 +29,20 @@ def _active_actor(context: Any) -> dict[str, Any]:
         payload = to_payload()
         if isinstance(payload, dict):
             return payload
+    active_actor = context.get("active_actor") if hasattr(context, "get") else getattr(context, "active_actor", None)
+    if isinstance(active_actor, dict):
+        actor_id = active_actor.get("actor_id")
+        if isinstance(actor_id, str) and actor_id.strip():
+            return {"id": actor_id.strip(), "type": "actor"}
+        identity_id = active_actor.get("id")
+        identity_type = active_actor.get("type")
+        if isinstance(identity_id, str) and identity_id.strip() and isinstance(identity_type, str) and identity_type.strip():
+            return {"id": identity_id.strip(), "type": identity_type.strip()}
     return {}
 
 
 def _active_role(context: Any) -> str:
-    value = context.get("active_role") if isinstance(context, dict) else getattr(context, "active_role", None)
+    value = context.get("active_role") if hasattr(context, "get") else getattr(context, "role_id", None)
     if isinstance(value, str):
         return value
     role_id = getattr(value, "role_id", None)
@@ -41,9 +50,9 @@ def _active_role(context: Any) -> str:
 
 
 def _actor_target(context: Any) -> dict[str, str]:
-    actor = _active_actor(context)
-    actor_id = actor.get("actor_id")
-    role_id = actor.get("role_id") or _active_role(context)
+    identity = _current_identity(context)
+    actor_id = identity.get("id")
+    role_id = _active_role(context)
     if not isinstance(actor_id, str) or not actor_id.strip():
         raise ValueError("active actor_id is required")
     if not isinstance(role_id, str) or not role_id.strip():
@@ -68,7 +77,7 @@ def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context
     return tool_results.rejection(
         tool="task_sys",
         action=f"task_sys.{action}",
-        active_actor=_active_actor(context),
+        current_identity=_current_identity(context),
         active_role=_active_role(context),
         code="E_TASK_SYS_PAYLOAD",
         message=message,
@@ -118,7 +127,7 @@ def _read_success(action: str, context: Any, *, effect_summary: str, extra: dict
     return tool_results.success(
         tool="task_sys",
         action=f"task_sys.{action}",
-        active_actor=_active_actor(context),
+        current_identity=_current_identity(context),
         active_role=_active_role(context),
         effect_summary=effect_summary,
         state_changed=False,
@@ -126,7 +135,7 @@ def _read_success(action: str, context: Any, *, effect_summary: str, extra: dict
         read_scope="actor-owned task sys task records",
         allowed_next_actions=[
             "Use task_sys.get for full task detail.",
-            "Use task_sys.close when the active frame completed the source-bound task.",
+            "Use task_sys.close when the active frame completed the required task work.",
             "Use task_sys.need_parent when side processing requires parent work.",
         ],
         extra=extra,
@@ -185,7 +194,7 @@ def _success(
     return tool_results.success(
         tool="task_sys",
         action=f"task_sys.{action}",
-        active_actor=_active_actor(context),
+        current_identity=_current_identity(context),
         active_role=_active_role(context),
         effect_summary=effect_summary,
         state_changed=bool(result.get("state_changed", True)),

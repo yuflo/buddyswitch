@@ -26,7 +26,7 @@ _ACTION_DEFINITION_MAP = {
 
 class TrackServiceContext(TypedDict):
     active_role: str
-    active_actor: dict[str, Any]
+    current_identity: dict[str, Any]
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -62,7 +62,7 @@ def _allowed(action: str) -> set[str]:
 def _reject_payload(
     *,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     message: str,
     field_errors: list[dict[str, Any]] | None = None,
@@ -98,7 +98,7 @@ def _reject_payload(
     return tool_results.rejection(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_TRACK_PAYLOAD",
         message=message,
@@ -118,12 +118,12 @@ def _reject_payload(
     )
 
 
-def _reject_archived(*, action: str, active_actor: dict[str, Any], active_role: str, track_id: str) -> dict[str, Any]:
+def _reject_archived(*, action: str, current_identity: dict[str, Any], active_role: str, track_id: str) -> dict[str, Any]:
     message = f"track '{track_id}' is archived and cannot be used via {action}"
     return tool_results.rejection(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_TRACK_ARCHIVED",
         message=message,
@@ -139,11 +139,11 @@ def _reject_archived(*, action: str, active_actor: dict[str, Any], active_role: 
     )
 
 
-def _reject_authority(*, action: str, active_actor: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
+def _reject_authority(*, action: str, current_identity: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
     return tool_results.rejection(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_TRACK_AUTHORITY",
         message=message,
@@ -155,14 +155,14 @@ def _reject_authority(*, action: str, active_actor: dict[str, Any], active_role:
         retryable=False,
         retry_guidance="Ask the exact Track owner identity to perform this action.",
         allowed_next_actions=["Use track.list to inspect current state."],
-        correctable_fields=["active_actor"],
+        correctable_fields=["current_identity"],
     )
 
 
 def _reject_refs(
     *,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     message: str,
     field_errors: list[dict[str, Any]] | None = None,
@@ -170,7 +170,7 @@ def _reject_refs(
     return tool_results.rejection(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_TRACK_UPDATE_REFS",
         message=message,
@@ -190,7 +190,7 @@ def _reject_refs(
 def _reject_track_comment_payload(
     *,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     message: str,
     correctable_fields: list[str] | None = None,
@@ -199,7 +199,7 @@ def _reject_track_comment_payload(
     return tool_results.rejection(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_TRACK_COMMENT_PAYLOAD",
         message=message,
@@ -219,7 +219,7 @@ def _reject_track_comment_payload(
 def _reject_track_comment_scope(
     *,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     code: str,
     boundary: str,
@@ -230,7 +230,7 @@ def _reject_track_comment_scope(
     return tool_results.rejection(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code=code,
         message=message,
@@ -246,10 +246,10 @@ def _reject_track_comment_scope(
     )
 
 
-def _delivery_row_from_result(target_actor: dict[str, str], result: dict[str, Any]) -> dict[str, Any]:
+def _delivery_row_from_result(target_identity: dict[str, str], result: dict[str, Any]) -> dict[str, Any]:
     status = result.get("delivery_status") if isinstance(result.get("delivery_status"), str) else "delivery_failed"
     row: dict[str, Any] = {
-        "target_identity_id": target_actor["actor_id"],
+        "target_identity_id": target_identity["identity_id"],
         "delivery_status": status,
     }
     for key in ("handling_status", "reachability_status", "signal_error"):
@@ -302,13 +302,14 @@ def _deliver_track_comment_added(
                 track_id=payload["track_id"],
                 comment_id=payload["comment_id"],
                 thread_id=payload["thread_id"],
-                target_actor_address=target,
+                target_identity_id=target["identity_id"],
+                target_role_id=target["role_id"],
             )
             results.append(_delivery_row_from_result(target, result))
         except Exception as exc:
             results.append(
                 {
-                    "target_identity_id": target["actor_id"],
+                    "target_identity_id": target["identity_id"],
                     "delivery_status": "delivery_failed",
                     "handling_status": "ignored",
                     "signal_error": str(exc),
@@ -317,11 +318,11 @@ def _deliver_track_comment_added(
     return _delivery_metadata(results)
 
 
-def _reject_artifact_scope(*, action: str, active_actor: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
+def _reject_artifact_scope(*, action: str, current_identity: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
     return tool_results.rejection(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         code="E_TRACK_ARTIFACT_SCOPE",
         message=message,
@@ -340,52 +341,50 @@ def _reject_artifact_scope(*, action: str, active_actor: dict[str, Any], active_
     )
 
 
-def _require_fields(action: str, args: dict[str, Any], active_actor: dict[str, Any], active_role: str) -> dict[str, Any] | None:
+def _require_fields(action: str, args: dict[str, Any], current_identity: dict[str, Any], active_role: str) -> dict[str, Any] | None:
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=f"unsupported payload fields: {', '.join(unknown)}",
         )
     return None
 
 
-def _require_track_id(action: str, args: dict[str, Any], active_actor: dict[str, Any], active_role: str) -> tuple[str | None, dict[str, Any] | None]:
+def _require_track_id(action: str, args: dict[str, Any], current_identity: dict[str, Any], active_role: str) -> tuple[str | None, dict[str, Any] | None]:
     track_id = args.get("track_id")
     if not isinstance(track_id, str) or not track_id.strip():
-        return None, _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="track_id is required")
+        return None, _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="track_id is required")
     return track_id.strip(), None
 
 
-def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
+def _identity_route_payload(value: Any, field: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an object")
-    unknown = sorted(key for key in value if key not in {"actor_id", "role_id"})
+    unknown = sorted(key for key in value if key not in {"identity_id", "role_id"})
     if unknown:
         raise ValueError(f"{field} contains unsupported fields: {', '.join(unknown)}")
-    actor_id = value.get("actor_id")
+    identity_id = value.get("identity_id")
     role_id = value.get("role_id")
-    if not isinstance(actor_id, str) or not actor_id.strip():
-        raise ValueError(f"{field}.actor_id must be a non-empty string")
+    if not isinstance(identity_id, str) or not identity_id.strip():
+        raise ValueError(f"{field}.identity_id must be a non-empty string")
     if not isinstance(role_id, str) or not role_id.strip():
         raise ValueError(f"{field}.role_id must be a non-empty string")
-    return {"actor_id": actor_id.strip(), "role_id": role_id.strip()}
+    return {"identity_id": identity_id.strip(), "role_id": role_id.strip()}
 
 
-def _active_identity_id(active_actor: dict[str, Any]) -> str | None:
-    try:
-        return _actor_address_payload(active_actor, "active_actor")["actor_id"]
-    except ValueError:
-        return None
+def _active_identity_id(current_identity: dict[str, Any]) -> str | None:
+    identity_id = current_identity.get("id") if isinstance(current_identity, dict) else None
+    return identity_id if isinstance(identity_id, str) and identity_id else None
 
 
 def _comment_author_identity_id(comment: dict[str, Any]) -> str | None:
     identity_id = comment.get("by_identity_id")
     if isinstance(identity_id, str) and identity_id:
         return identity_id
-    actor = comment.get("by_actor")
+    actor = comment.get("by_identity")
     if isinstance(actor, dict) and isinstance(actor.get("actor_id"), str):
         return actor["actor_id"]
     return None
@@ -395,14 +394,14 @@ def _require_owner_identity(
     *,
     action: str,
     track: dict[str, Any],
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
 ) -> dict[str, Any] | None:
-    if track.get("owner_identity_id") == _active_identity_id(active_actor):
+    if track.get("owner_identity_id") == _active_identity_id(current_identity):
         return None
     return _reject_authority(
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         message=(
             "only the exact Track owner identity can mutate requirement facts, lifecycle, "
@@ -422,40 +421,43 @@ def _normalize_text_list_payload(value: Any, field: str) -> list[str]:
     return rows
 
 
-def _actor_routes_for_mentions(*, context: Any, active_actor: dict[str, Any]) -> dict[str, dict[str, str]]:
+def _identity_routes_for_mentions(*, context: Any, current_identity: dict[str, Any], active_role: str) -> dict[str, dict[str, str]]:
     routes: dict[str, dict[str, str]] = {}
-    try:
-        active_route = _actor_address_payload(active_actor, "active_actor")
-    except ValueError:
-        active_route = None
+    current_identity_id = current_identity.get("id")
+    active_route = None
+    if isinstance(current_identity_id, str) and current_identity_id.strip():
+        active_route = {"identity_id": current_identity_id.strip(), "role_id": active_role}
     if active_route is not None:
-        routes[active_route["actor_id"]] = active_route
+        routes[active_route["identity_id"]] = active_route
 
     daemon = getattr(context, "daemon", None)
-    list_contacts = getattr(daemon, "list_contacts", None)
-    if not callable(list_contacts):
+    list_online_actors = getattr(daemon, "list_online_actors", None)
+    if not callable(list_online_actors):
         return routes
     try:
-        raw = list_contacts(role_id=None)
+        raw = list_online_actors(role_id=None)
     except Exception:
         return routes
-    rows = raw.get("contacts") if isinstance(raw, dict) and isinstance(raw.get("contacts"), list) else []
+    rows = raw.get("actors") if isinstance(raw, dict) and isinstance(raw.get("actors"), list) else []
     for row in rows:
-        actor_address = row.get("actor_address") if isinstance(row, dict) else None
-        if not isinstance(actor_address, dict):
-            continue
         try:
-            route = _actor_address_payload(actor_address, "contact.actor_address")
+            route = _identity_route_payload(
+                {
+                    "identity_id": row.get("identity_id") if isinstance(row, dict) else None,
+                    "role_id": row.get("role_id") if isinstance(row, dict) else None,
+                },
+                "contact.identity_route",
+            )
         except ValueError:
             continue
-        routes[route["actor_id"]] = route
+        routes[route["identity_id"]] = route
     return routes
 
 
 def _normalize_mentioned_identity_ids(
     *,
     mentioned_identity_ids: Any,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     action: str,
     context: Any,
@@ -465,7 +467,7 @@ def _normalize_mentioned_identity_ids(
     if not isinstance(mentioned_identity_ids, list):
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="mentioned_identity_ids must be a list",
             correctable_fields=["mentioned_identity_ids"],
@@ -478,7 +480,7 @@ def _normalize_mentioned_identity_ids(
                 }
             ],
         )
-    resolvable_routes = _actor_routes_for_mentions(context=context, active_actor=active_actor)
+    resolvable_routes = _identity_routes_for_mentions(context=context, current_identity=current_identity, active_role=active_role)
     normalized: list[str] = []
     routes: dict[str, dict[str, str]] = dict(resolvable_routes)
     seen: set[str] = set()
@@ -486,7 +488,7 @@ def _normalize_mentioned_identity_ids(
         if not isinstance(row, str) or not row.strip():
             return _reject_track_comment_payload(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 message="mentioned_identity_ids entries must be non-empty strings",
                 correctable_fields=["mentioned_identity_ids"],
@@ -496,7 +498,7 @@ def _normalize_mentioned_identity_ids(
         if route is None:
             return _reject_track_comment_payload(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 message=f"mentioned_identity_ids[{index}] must be a reachable actor identity id",
                 correctable_fields=["mentioned_identity_ids"],
@@ -504,7 +506,7 @@ def _normalize_mentioned_identity_ids(
                     {
                         "path": f"mentioned_identity_ids[{index}]",
                         "message": "actor identity id must resolve to an active actor route",
-                        "example": active_actor.get("actor_id") if isinstance(active_actor.get("actor_id"), str) else "act-example",
+                        "example": current_identity.get("id") if isinstance(current_identity.get("id"), str) else "act-example",
                     }
                 ],
             )
@@ -518,14 +520,14 @@ def _normalize_mentioned_identity_ids(
 def _attachment_projection_for_ref(
     *,
     artifact_id: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     context: TrackServiceContext,
 ) -> tuple[int, list[dict[str, Any]]]:
     artifact = context.repos.artifact.get_artifact(artifact_id)
     if not isinstance(artifact, dict):
         return 0, []
-    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_actor)
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, current_identity)
     if not bool(decision.get("allowed")):
         return 0, []
     attachments = context.rules.artifact_visibility.attachment_summary_rows(artifact)
@@ -535,7 +537,7 @@ def _attachment_projection_for_ref(
 def _project_track_artifact_ref(
     *,
     ref: dict[str, Any],
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     context: TrackServiceContext,
 ) -> dict[str, Any]:
@@ -547,7 +549,7 @@ def _project_track_artifact_ref(
         return projected
     attachment_count, attachments = _attachment_projection_for_ref(
         artifact_id=artifact_id,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         context=context,
     )
@@ -559,7 +561,7 @@ def _project_track_artifact_ref(
 def _track_comment_cues(
     *,
     track_id: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     context: TrackServiceContext,
 ) -> dict[str, Any]:
     comments = context.repos.track_comment.comments_for_track(track_id)
@@ -577,7 +579,7 @@ def _track_comment_cues(
         return content[:120]
 
     def _mentions_me(row: dict[str, Any]) -> bool:
-        active_identity_id = _active_identity_id(active_actor)
+        active_identity_id = _active_identity_id(current_identity)
         mentions = row.get("mentioned_identity_ids")
         if not isinstance(mentions, list):
             return False
@@ -590,7 +592,7 @@ def _track_comment_cues(
         parent = by_id.get(reply_to)
         if not isinstance(parent, dict):
             return False
-        return _comment_author_identity_id(parent) == _active_identity_id(active_actor)
+        return _comment_author_identity_id(parent) == _active_identity_id(current_identity)
 
     recent = sorted(
         comments,
@@ -646,9 +648,9 @@ def _track_page(
     context: TrackServiceContext,
 ) -> dict[str, Any]:
     page = dict(track)
-    active_actor = context["active_actor"]
+    current_identity = context["current_identity"]
     projected_relations = [
-        _project_track_artifact_ref(ref=row, active_actor=active_actor, active_role=active_role, context=context)
+        _project_track_artifact_ref(ref=row, current_identity=current_identity, active_role=active_role, context=context)
         for row in track.get("artifact_relations", [])
         if isinstance(row, dict)
     ]
@@ -658,7 +660,7 @@ def _track_page(
     page["updates"] = [row for row in track.get("updates", []) if isinstance(row, dict)]
     track_id = track.get("id")
     if isinstance(track_id, str) and track_id:
-        page["comment_cues"] = _track_comment_cues(track_id=track_id, active_actor=active_actor, context=context)
+        page["comment_cues"] = _track_comment_cues(track_id=track_id, current_identity=current_identity, context=context)
     return page
 
 
@@ -679,8 +681,8 @@ def _track_summary(track: dict[str, Any]) -> dict[str, Any]:
 def list_tracks_for_active_role(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.list"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
@@ -697,7 +699,7 @@ def list_tracks_for_active_role(*, args: dict[str, Any], context: TrackServiceCo
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Returned {len(payload_rows)} non-archived track page summary row(s).",
         state_changed=False,
@@ -714,27 +716,27 @@ def list_tracks_for_active_role(*, args: dict[str, Any], context: TrackServiceCo
 def open_track_for_active_role(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.open"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
     track = context.repos.track.get_track(track_id)
     if track is None:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"track not found: {track_id}")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=f"track not found: {track_id}")
     if track.get("archived_at") is not None:
-        return _reject_archived(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id)
+        return _reject_archived(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id)
 
     page = _track_page(track, active_role=active_role, context=context)
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Opened one shared track page '{track_id}'.",
         state_changed=False,
@@ -751,17 +753,17 @@ def open_track_for_active_role(*, args: dict[str, Any], context: TrackServiceCon
 def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.add_comment"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    _, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    _, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
 
@@ -769,7 +771,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     if not isinstance(content, str) or not content.strip():
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="content must be a non-empty string",
             correctable_fields=["content"],
@@ -779,7 +781,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     if reply_to is not None and (not isinstance(reply_to, str) or not reply_to.strip()):
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="reply_to must be a non-empty string when provided",
             correctable_fields=["reply_to"],
@@ -787,7 +789,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
 
     mentioned_identity_payload = _normalize_mentioned_identity_ids(
         mentioned_identity_ids=args.get("mentioned_identity_ids"),
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         action=action,
         context=context,
@@ -795,7 +797,6 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     if isinstance(mentioned_identity_payload, dict):
         return mentioned_identity_payload
     mentioned_identity_ids, identity_routes = mentioned_identity_payload
-    mentioned_actor_routes = [identity_routes[identity_id] for identity_id in mentioned_identity_ids]
 
     reply_to_comment: dict[str, Any] | None = None
     try:
@@ -803,24 +804,24 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
             comment = context.repos.track_comment.reply_to_track_comment(
                 track_id=track_id,
                 reply_to=reply_to.strip(),
-                by_actor=active_actor,
+                by_identity=current_identity,
                 content=content.strip(),
-                mentioned_actors=mentioned_actor_routes,
+                mentioned_identities=mentioned_identity_ids,
             )
             reply_to_comment = context.repos.track_comment.get_track_comment(track_id, reply_to.strip())
         else:
             comment = context.repos.track_comment.create_track_comment(
                 track_id=track_id,
-                by_actor=active_actor,
+                by_identity=current_identity,
                 content=content.strip(),
-                mentioned_actors=mentioned_actor_routes,
+                mentioned_identities=mentioned_identity_ids,
             )
     except ValueError as exc:
         message = str(exc)
         if "reply_to comment" in message:
             return _reject_track_comment_scope(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 code="E_TRACK_COMMENT_REPLY_SCOPE",
                 boundary="track_comment.reply_to_scope",
@@ -830,7 +831,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
             )
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=message,
         )
@@ -845,7 +846,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Added one durable Track comment on track '{track_id}'.",
         state_changed=True,
@@ -860,17 +861,17 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
 def list_comments_on_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.list_comments"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    _, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    _, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
 
@@ -878,7 +879,7 @@ def list_comments_on_track(*, args: dict[str, Any], context: TrackServiceContext
     if not isinstance(status_filter, str) or status_filter not in {"open", "resolved", "all"}:
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="status must be one of open|resolved|all",
             correctable_fields=["status"],
@@ -920,7 +921,7 @@ def list_comments_on_track(*, args: dict[str, Any], context: TrackServiceContext
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Returned {len(matched)} Track comment(s) for track '{track_id}'.",
         state_changed=False,
@@ -939,21 +940,21 @@ def list_comments_on_track(*, args: dict[str, Any], context: TrackServiceContext
 def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.resolve_comment_thread"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    track, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    track, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
-    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    owner_error = _require_owner_identity(action=action, track=track, current_identity=current_identity, active_role=active_role)
     if owner_error is not None:
         return owner_error
 
@@ -961,7 +962,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
     if not isinstance(comment_id, str) or not comment_id.strip():
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="comment_id must be a non-empty string",
             correctable_fields=["comment_id"],
@@ -971,7 +972,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
     if not isinstance(resolution_summary, str) or not resolution_summary.strip():
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="resolution_summary must be a non-empty string",
             correctable_fields=["resolution_summary"],
@@ -981,7 +982,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
         resolved_rows = context.repos.track_comment.resolve_track_comment_thread(
             track_id=track_id,
             comment_id=comment_id.strip(),
-            resolved_by_actor=active_actor,
+            resolved_by_identity=current_identity,
             resolution_summary=resolution_summary.strip(),
         )
     except ValueError as exc:
@@ -989,7 +990,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
         if "already resolved" in message:
             return _reject_track_comment_scope(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 code="E_TRACK_COMMENT_STATE",
                 boundary="track_comment.state",
@@ -1000,7 +1001,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
         if "different track" in message or "not found" in message:
             return _reject_track_comment_scope(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 code="E_TRACK_COMMENT_THREAD_SCOPE",
                 boundary="track_comment.thread_scope",
@@ -1010,7 +1011,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
             )
         return _reject_track_comment_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=message,
         )
@@ -1019,7 +1020,7 @@ def resolve_comment_thread_on_track(*, args: dict[str, Any], context: TrackServi
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Resolved Track comment thread containing comment '{comment_id.strip()}' with {len(updated_ids)} durable row update(s).",
         state_changed=True,
@@ -1041,13 +1042,13 @@ def _normalize_now_payload(
     *,
     action: str,
     value: Any,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
 ) -> dict[str, Any] | dict[str, Any]:
     if not isinstance(value, dict):
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="now must be an object with required field next and optional blocker",
             field_errors=[_now_field_error()],
@@ -1055,7 +1056,7 @@ def _normalize_now_payload(
     if not isinstance(value.get("next"), str) or not value.get("next", "").strip():
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="now.next is required",
             field_errors=[_now_field_error()],
@@ -1064,7 +1065,7 @@ def _normalize_now_payload(
     if blocker is not None and not isinstance(blocker, str):
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="now.blocker must be a string or null",
             field_errors=[_now_field_error()],
@@ -1072,15 +1073,15 @@ def _normalize_now_payload(
     return {"next": value.get("next", "").strip(), "blocker": blocker}
 
 
-def create_track_for_active_actor(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+def create_track_for_current_identity(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.create"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
@@ -1089,10 +1090,10 @@ def create_track_for_active_actor(*, args: dict[str, Any], context: TrackService
     outcome = args.get("outcome")
     now = args.get("now")
     if not isinstance(title, str) or not title.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="title is required")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="title is required")
     if not isinstance(outcome, str) or not outcome.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="outcome is required")
-    normalized_now = _normalize_now_payload(action=action, value=now, active_actor=active_actor, active_role=active_role)
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="outcome is required")
+    normalized_now = _normalize_now_payload(action=action, value=now, current_identity=current_identity, active_role=active_role)
     if isinstance(normalized_now, dict) and normalized_now.get("ok") is False:
         return normalized_now
 
@@ -1100,25 +1101,25 @@ def create_track_for_active_actor(*, args: dict[str, Any], context: TrackService
         acceptance_criteria = _normalize_text_list_payload(args.get("acceptance_criteria", []), "acceptance_criteria")
         non_goals = _normalize_text_list_payload(args.get("non_goals", []), "non_goals")
     except ValueError as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=str(exc))
 
     try:
         track = context.repos.track.create_track(
             track_id,
             title.strip(),
             outcome=outcome.strip(),
-            owner_actor=active_actor,
+            owner_identity=current_identity,
             now=normalized_now,
             acceptance_criteria=acceptance_criteria,
             non_goals=non_goals,
         )
     except ValueError as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=str(exc))
 
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Created one active Track page '{track_id}' owned by the active actor.",
         state_changed=True,
@@ -1137,37 +1138,37 @@ def create_track_for_active_actor(*, args: dict[str, Any], context: TrackService
 def _load_non_archived_track(
     *,
     action: str,
-    active_actor: dict[str, Any],
+    current_identity: dict[str, Any],
     active_role: str,
     track_id: str,
     context: TrackServiceContext,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     track = context.repos.track.get_track(track_id)
     if track is None:
-        return None, _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"track not found: {track_id}")
+        return None, _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=f"track not found: {track_id}")
     if track.get("archived_at") is not None:
-        return None, _reject_archived(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id)
+        return None, _reject_archived(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id)
     return track, None
 
 
 def update_requirements_for_owner(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.update_requirements"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    track, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    track, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
-    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    owner_error = _require_owner_identity(action=action, track=track, current_identity=current_identity, active_role=active_role)
     if owner_error is not None:
         return owner_error
 
@@ -1176,7 +1177,7 @@ def update_requirements_for_owner(*, args: dict[str, Any], context: TrackService
         if field in args:
             value = args.get(field)
             if not isinstance(value, str) or not value.strip():
-                return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"{field} must be a non-empty string")
+                return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=f"{field} must be a non-empty string")
             patch[field] = value.strip()
     try:
         if "acceptance_criteria" in args:
@@ -1184,20 +1185,20 @@ def update_requirements_for_owner(*, args: dict[str, Any], context: TrackService
         if "non_goals" in args:
             patch["non_goals"] = _normalize_text_list_payload(args.get("non_goals"), "non_goals")
     except ValueError as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=str(exc))
 
     if not patch:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="at least one requirement field is required")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="at least one requirement field is required")
 
     try:
         updated = context.repos.track.update_track(track_id, patch)
     except ValueError as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=str(exc))
 
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Updated requirement facts on Track '{track_id}'.",
         state_changed=True,
@@ -1212,21 +1213,21 @@ def update_requirements_for_owner(*, args: dict[str, Any], context: TrackService
 def update_status_for_owner(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.update_status"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    track, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    track, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
-    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
+    owner_error = _require_owner_identity(action=action, track=track, current_identity=current_identity, active_role=active_role)
     if owner_error is not None:
         return owner_error
 
@@ -1234,23 +1235,23 @@ def update_status_for_owner(*, args: dict[str, Any], context: TrackServiceContex
     if state not in context.repos.track.VALID_TRACK_STATE:
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=f"state must be one of {', '.join(context.repos.track.VALID_TRACK_STATE)}",
         )
-    normalized_now = _normalize_now_payload(action=action, value=args.get("now"), active_actor=active_actor, active_role=active_role)
+    normalized_now = _normalize_now_payload(action=action, value=args.get("now"), current_identity=current_identity, active_role=active_role)
     if isinstance(normalized_now, dict) and normalized_now.get("ok") is False:
         return normalized_now
 
     try:
         updated = context.repos.track.update_track(track_id, {"state": state, "now": normalized_now})
     except ValueError as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=str(exc))
 
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Updated owner status on Track '{track_id}'.",
         state_changed=True,
@@ -1265,17 +1266,17 @@ def update_status_for_owner(*, args: dict[str, Any], context: TrackServiceContex
 def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.add_material"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    track, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    track, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
@@ -1284,31 +1285,31 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
     if not isinstance(artifact_id, str) or not artifact_id.strip():
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="artifact_id is required; create a draft via artifact.create_revision first",
         )
 
     label = args.get("label")
     if not isinstance(label, str) or not label.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="label is required")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="label is required")
     summary = args.get("summary", "")
     if not isinstance(summary, str):
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="summary must be a string")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="summary must be a string")
 
     try:
         relation_result = context.rules.track_artifact_relations.add_material_relation(
             track_id=track_id,
             artifact_id=artifact_id.strip(),
             label=label.strip(),
-            from_actor=active_actor,
+            from_identity=current_identity,
             summary=summary,
         )
     except ValueError as exc:
         message = str(exc)
-        if "owned by another actor" in message:
-            return _reject_artifact_scope(action=action, active_actor=active_actor, active_role=active_role, message=message)
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=message)
+        if "owned by another identity" in message:
+            return _reject_artifact_scope(action=action, current_identity=current_identity, active_role=active_role, message=message)
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=message)
     updated_track = relation_result["track"]
     related_artifact = relation_result["artifact"]
     superseded_artifact_id = relation_result["superseded_artifact_id"]
@@ -1329,7 +1330,7 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=(
             f"Related artifact '{related_artifact['id']}' as current material on track '{track_id}'."
@@ -1353,17 +1354,17 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
 def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.add_update"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    _, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    _, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
 
@@ -1374,18 +1375,18 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
     if kind not in context.repos.track.VALID_UPDATE_KIND:
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message=f"kind must be one of {', '.join(context.repos.track.VALID_UPDATE_KIND)}",
         )
     if not isinstance(summary, str) or not summary.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="summary is required")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="summary is required")
 
     refs_arg = args.get("refs", [])
     if not isinstance(refs_arg, list):
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="refs must be a list",
             field_errors=[_refs_field_error()],
@@ -1395,7 +1396,7 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
         if not isinstance(row, dict) or row.get("type") != "artifact":
             return _reject_refs(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 message="refs entries must be artifact refs",
                 field_errors=[_refs_field_error()],
@@ -1404,7 +1405,7 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
         if not isinstance(ref_id, str) or not ref_id.strip():
             return _reject_refs(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 message="artifact ref id is required",
                 field_errors=[_refs_field_error()],
@@ -1412,13 +1413,13 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
         normalized_ref_id = ref_id.strip()
         decision = context.rules.artifact_visibility.artifact_ref_decision_for_track_update(
             artifact_id=normalized_ref_id,
-            active_actor=active_actor,
+            current_identity=current_identity,
             track_id=track_id,
         )
         if not bool(decision.get("ok")):
             return _reject_refs(
                 action=action,
-                active_actor=active_actor,
+                current_identity=current_identity,
                 active_role=active_role,
                 message=str(decision.get("message") or "artifact ref failed track update scope checks"),
             )
@@ -1427,18 +1428,18 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
     try:
         track, update = context.repos.track.append_track_update(
             track_id=track_id,
-            by_actor=active_actor,
+            by_identity=current_identity,
             kind=kind,
             summary=summary.strip(),
             refs=refs,
         )
     except ValueError as exc:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=str(exc))
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=str(exc))
 
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=f"Added one '{kind}' update to track '{track_id}'.",
         state_changed=True,
@@ -1453,17 +1454,17 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
 def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.add_proof"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
-    track, track_error = _load_non_archived_track(action=action, active_actor=active_actor, active_role=active_role, track_id=track_id, context=context)
+    track, track_error = _load_non_archived_track(action=action, current_identity=current_identity, active_role=active_role, track_id=track_id, context=context)
     if track_error is not None:
         return track_error
     assert isinstance(track, dict)
@@ -1472,31 +1473,31 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
     if not isinstance(artifact_id, str) or not artifact_id.strip():
         return _reject_payload(
             action=action,
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=active_role,
             message="artifact_id is required; create a draft via artifact.create_revision first",
         )
 
     label = args.get("label")
     if not isinstance(label, str) or not label.strip():
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="label is required")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="label is required")
     summary = args.get("summary", "")
     if not isinstance(summary, str):
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message="summary must be a string")
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message="summary must be a string")
 
     try:
         relation_result = context.rules.track_artifact_relations.add_proof_relation(
             track_id=track_id,
             artifact_id=artifact_id.strip(),
             label=label.strip(),
-            from_actor=active_actor,
+            from_identity=current_identity,
             summary=summary,
         )
     except ValueError as exc:
         message = str(exc)
-        if "owned by another actor" in message:
-            return _reject_artifact_scope(action=action, active_actor=active_actor, active_role=active_role, message=message)
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=message)
+        if "owned by another identity" in message:
+            return _reject_artifact_scope(action=action, current_identity=current_identity, active_role=active_role, message=message)
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=message)
     updated_track = relation_result["track"]
     related_artifact = relation_result["artifact"]
     superseded_artifact_id = relation_result["superseded_artifact_id"]
@@ -1517,7 +1518,7 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=(
             f"Related artifact '{related_artifact['id']}' as current proof on track '{track_id}'."
@@ -1542,20 +1543,20 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
 def archive_track_for_owner(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.archive"
     active_role = context["active_role"]
-    active_actor = context["active_actor"]
-    payload_error = _require_fields(action, args, active_actor, active_role)
+    current_identity = context["current_identity"]
+    payload_error = _require_fields(action, args, current_identity, active_role)
     if payload_error is not None:
         return payload_error
 
-    track_id, error = _require_track_id(action, args, active_actor, active_role)
+    track_id, error = _require_track_id(action, args, current_identity, active_role)
     if error is not None:
         return error
     assert isinstance(track_id, str)
 
     track = context.repos.track.get_track(track_id)
     if track is None:
-        return _reject_payload(action=action, active_actor=active_actor, active_role=active_role, message=f"track not found: {track_id}")
-    owner_error = _require_owner_identity(action=action, track=track, active_actor=active_actor, active_role=active_role)
+        return _reject_payload(action=action, current_identity=current_identity, active_role=active_role, message=f"track not found: {track_id}")
+    owner_error = _require_owner_identity(action=action, track=track, current_identity=current_identity, active_role=active_role)
     if owner_error is not None:
         return owner_error
 
@@ -1567,7 +1568,7 @@ def archive_track_for_owner(*, args: dict[str, Any], context: TrackServiceContex
     return tool_results.success(
         tool="track",
         action=action,
-        active_actor=active_actor,
+        current_identity=current_identity,
         active_role=active_role,
         effect_summary=(
             f"Archived track '{track_id}'." if state_changed else f"Track '{track_id}' was already archived."
@@ -1587,7 +1588,7 @@ _ACTION_HANDLERS = {
     'add_proof': add_proof_to_track,
     'add_update': add_update_to_track,
     'archive': archive_track_for_owner,
-    'create': create_track_for_active_actor,
+    'create': create_track_for_current_identity,
     'list': list_tracks_for_active_role,
     'list_comments': list_comments_on_track,
     'open': open_track_for_active_role,

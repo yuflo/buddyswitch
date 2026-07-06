@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IM Target Resolver Architecture Brief</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f6f2;
+      --panel: #ffffff;
+      --ink: #171717;
+      --muted: #62625d;
+      --line: #d8d7cf;
+      --soft: #efeee8;
+      --identity: #0f766e;
+      --daemon: #4338ca;
+      --im: #1d4ed8;
+      --external: #b45309;
+      --good: #166534;
+      --warn: #b45309;
+      --bad: #b91c1c;
+      --code: #111827;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.46;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 26px 0 48px;
+    }
+
+    header {
+      display: grid;
+      gap: 16px;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      max-width: 980px;
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 14px;
+      font-size: 21px;
+      line-height: 1.22;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 15px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: .92em;
+      color: var(--code);
+    }
+
+    .eyebrow {
+      color: var(--im);
+      font-size: 12px;
+      font-weight: 760;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    section,
+    .summary-card,
+    .node,
+    .matrix-cell,
+    .decision,
+    .evidence,
+    .callout {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    section { padding: 18px; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .summary-card {
+      min-height: 124px;
+      padding: 14px;
+    }
+
+    .summary-card strong,
+    .matrix-cell strong,
+    .node strong,
+    .decision strong {
+      display: block;
+      margin: 8px 0 7px;
+      line-height: 1.2;
+    }
+
+    .summary-card strong { font-size: 18px; }
+    .matrix-cell strong,
+    .node strong,
+    .decision strong { font-size: 15px; }
+
+    .summary-card p,
+    .matrix-cell p,
+    .node p,
+    .decision p,
+    .evidence p,
+    .callout p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 740;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .label.good { color: var(--good); border-color: rgba(22, 101, 52, .28); background: rgba(22, 101, 52, .08); }
+    .label.warn { color: var(--warn); border-color: rgba(180, 83, 9, .30); background: rgba(180, 83, 9, .08); }
+    .label.bad { color: var(--bad); border-color: rgba(185, 28, 28, .26); background: rgba(185, 28, 28, .08); }
+    .label.identity { color: var(--identity); border-color: rgba(15, 118, 110, .28); background: rgba(15, 118, 110, .08); }
+    .label.daemon { color: var(--daemon); border-color: rgba(67, 56, 202, .26); background: rgba(67, 56, 202, .08); }
+    .label.im { color: var(--im); border-color: rgba(29, 78, 216, .26); background: rgba(29, 78, 216, .08); }
+    .label.external { color: var(--external); border-color: rgba(180, 83, 9, .30); background: rgba(180, 83, 9, .08); }
+
+    .decision {
+      padding: 16px;
+      border-left: 5px solid var(--good);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: minmax(170px, .9fr) 40px minmax(240px, 1.15fr) 40px minmax(190px, 1fr);
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .flow-column {
+      display: grid;
+      gap: 10px;
+    }
+
+    .arrow {
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 28px;
+      font-weight: 760;
+    }
+
+    .node {
+      min-height: 112px;
+      padding: 13px;
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .matrix.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .matrix-cell {
+      padding: 14px;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    li + li { margin-top: 4px; }
+
+    .callout {
+      padding: 14px;
+      border-left: 5px solid var(--warn);
+    }
+
+    .evidence-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .evidence { padding: 12px; }
+
+    .path {
+      display: block;
+      margin-top: 7px;
+      color: var(--code);
+      overflow-wrap: anywhere;
+      font-size: 12px;
+    }
+
+    .codeblock {
+      display: block;
+      margin-top: 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f9faf8;
+      color: var(--code);
+      overflow-x: auto;
+      white-space: pre;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    footer {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 940px) {
+      .summary-grid,
+      .matrix,
+      .matrix.three,
+      .evidence-grid,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow {
+        min-height: 28px;
+        transform: rotate(90deg);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">System / Flow Explainer</p>
+      <h1>方案二：不建设 contact 层，只建设一个 IM target resolver</h1>
+      <p class="lead">这份 memo 更新了前一版表达：统一点不是新的联系人投影层，而是发送前唯一目标解析函数。<code>message.contacts</code> 只是列表视图，不能成为权威规则层。</p>
+      <div class="summary-grid">
+        <div class="summary-card">
+          <span class="label good">新结论</span>
+          <strong>少一层架构</strong>
+          <p>不用新增权威联系人层。发送前只需要 <code>resolve_im_send_target(...)</code>。</p>
+        </div>
+        <div class="summary-card">
+          <span class="label identity">唯一事实</span>
+          <strong>identity first</strong>
+          <p>actor / external 都先从 identity 模块解析，不再出现两套身份入口。</p>
+        </div>
+        <div class="summary-card">
+          <span class="label daemon">保留边界</span>
+          <strong>daemon 只做 actor runtime</strong>
+          <p>actor 在线、heartbeat、mailbox endpoint 留在 central daemon registry。</p>
+        </div>
+        <div class="summary-card">
+          <span class="label external">保留边界</span>
+          <strong>session 只做 API 会话</strong>
+          <p><code>external_session</code> 只保存 auth key 和 cursor，不承载 reach 规则。</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="stack">
+      <section>
+        <h2>核心判断</h2>
+        <div class="decision">
+          <span class="label good">preferred</span>
+          <strong>更简单的架构是：target resolution 是唯一发送前权威；contact 只是读取视图。</strong>
+          <p>当前问题不是缺一个 contact registry，而是 actor 发送入口把 <code>target_identity_id</code> 解释成 actor runtime row。把这个入口改成统一 target resolver，就能同时保持 identity 统一、daemon 边界清晰、external session 不被误用，并且删除 send path 对 actor 列表/row shape 的依赖。</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>目标流程</h2>
+        <div class="flow" aria-label="IM target resolver architecture">
+          <div class="flow-column">
+            <div class="node">
+              <span class="label im">Sender input</span>
+              <strong><code>target_identity_id</code></strong>
+              <p>actor 或 external 从自己的 send surface 发起消息，输入的是目标 identity id。</p>
+            </div>
+            <div class="node">
+              <span class="label identity">Identity module</span>
+              <strong>解析静态身份</strong>
+              <p>确认目标是合法 <code>act-*</code> 或 <code>ext-*</code>，并读取对应 profile。</p>
+            </div>
+          </div>
+
+          <div class="arrow">→</div>
+
+          <div class="flow-column">
+            <div class="node">
+              <span class="label im">Single resolver</span>
+              <strong><code>resolve_im_send_target</code></strong>
+              <p>唯一发送前规则入口。它不返回 contact row，只返回可写入 IM 的目标 identity 或明确错误。</p>
+              <code class="codeblock">resolve_im_send_target(
+  sender_identity,
+  target_identity_id
+) -&gt; { ok, target_identity }</code>
+            </div>
+            <div class="node">
+              <span class="label daemon">Actor branch</span>
+              <strong>identity exists + daemon online</strong>
+              <p>如果目标是 actor，resolver 先确认 actor identity profile 存在，再调用 <code>daemon.check_reachability(target_identity_id)</code> 确认 online。</p>
+            </div>
+            <div class="node">
+              <span class="label external">External branch</span>
+              <strong>identity exists + IM writable</strong>
+              <p>如果目标是 external，resolver 确认 external identity profile 存在，并允许写入其 IM visible event；不模拟在线进程。</p>
+            </div>
+          </div>
+
+          <div class="arrow">→</div>
+
+          <div class="flow-column">
+            <div class="node">
+              <span class="label im">Message write</span>
+              <strong><code>send_im_message</code></strong>
+              <p>resolver 通过后，写入统一 conversation、message、event、state。</p>
+            </div>
+            <div class="node">
+              <span class="label daemon">Actor delivery</span>
+              <strong>actor target 才 wake actor</strong>
+              <p>这是 target-side delivery，不回流污染 sender-side resolver。</p>
+            </div>
+            <div class="node">
+              <span class="label external">External read</span>
+              <strong>external target 通过 read/ack 消费</strong>
+              <p>external client 读取 visible event；是否及时读取不属于 sender reach。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>概念删减</h2>
+        <div class="matrix">
+          <div class="matrix-cell">
+            <span class="label bad">删掉</span>
+            <strong>联系人层作为架构权威</strong>
+            <p>不再把 contact 建成独立事实源或发送规则源。否则会引入新的状态漂移点。</p>
+            <ul>
+              <li>不新增权威联系人表</li>
+              <li>不让发送路径依赖联系人行结构</li>
+              <li>不让 external session 伪装 contact 状态</li>
+            </ul>
+          </div>
+          <div class="matrix-cell">
+            <span class="label good">保留</span>
+            <strong><code>message.contacts</code> 作为视图</strong>
+            <p>它可以列出可选目标，但不是规则权威。发送是否允许必须以 resolver 为准。</p>
+            <ul>
+              <li>用于发现目标</li>
+              <li>可按 role / identity type 做过滤</li>
+              <li>可以复用 identity / daemon 查询能力，但不能参与 send target 判断</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>send path 的减法</h2>
+        <div class="matrix">
+          <div class="matrix-cell">
+            <span class="label bad">从发送路径删除</span>
+            <strong>列表/row shape 依赖</strong>
+            <p>发送给一个明确目标时，不再先拉在线 actor 列表，也不再遍历 actor rows。</p>
+            <ul>
+              <li><code>_online_actor_rows()</code> 不服务 <code>message.send</code></li>
+              <li><code>list_online_actors()</code> 不服务 send target 判断</li>
+              <li><code>actor_rows</code> 不作为 resolver 输入</li>
+              <li><code>identity_for_current_send_target(actor_rows, ...)</code> 被替换</li>
+            </ul>
+          </div>
+          <div class="matrix-cell">
+            <span class="label good">发送路径保留</span>
+            <strong>直接目标判断</strong>
+            <p>发送路径只做明确目标的身份和可写入判断，不理解列表视图。</p>
+            <ul>
+              <li>actor：<code>get_actor_identity_profile(...)</code> + <code>check_reachability(...)</code></li>
+              <li>external：<code>get_external_profile(...)</code> + IM writable</li>
+              <li>通过后只返回 <code>target_identity</code></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>模块边界</h2>
+        <div class="matrix three">
+          <div class="matrix-cell">
+            <span class="label identity">Identity</span>
+            <strong>拥有静态身份</strong>
+            <p>actor / external 的 profile、type、display name 等静态身份事实唯一归这里。</p>
+          </div>
+          <div class="matrix-cell">
+            <span class="label daemon">Central daemon</span>
+            <strong>拥有 actor runtime presence</strong>
+            <p>只回答 actor 是否在线、mailbox endpoint 在哪里。它不认识 external user。</p>
+          </div>
+          <div class="matrix-cell">
+            <span class="label im">IM service</span>
+            <strong>拥有 send target resolution</strong>
+            <p>接收 <code>target_identity_id</code>，解析成可写入 IM 的目标 identity。</p>
+          </div>
+          <div class="matrix-cell">
+            <span class="label external">External session</span>
+            <strong>拥有 API auth / cursor</strong>
+            <p>只服务 external client 调用和事件读取位置，不定义谁可达。</p>
+          </div>
+          <div class="matrix-cell">
+            <span class="label im">Message write</span>
+            <strong>拥有 durable IM state</strong>
+            <p>conversation、message、event、message state 仍保持 identity-addressed。</p>
+          </div>
+          <div class="matrix-cell">
+            <span class="label warn">Delivery</span>
+            <strong>拥有 target-side handling</strong>
+            <p>actor wake 与 external read/ack 是写入后的分支，不进入 resolver。</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>现状到目标</h2>
+        <div class="matrix">
+          <div class="matrix-cell">
+            <span class="label warn">现在</span>
+            <strong>actor send target 被解释成 actor runtime row</strong>
+            <p>这导致 <code>ext-*</code> 在发送前就被拒绝，因为它不是 daemon 里的在线 actor。</p>
+            <code class="codeblock">ActorImClient.send
+  -&gt; _online_actor_rows()
+  -&gt; identity_for_current_send_target(actor_rows, target_identity_id)
+  -&gt; reject ext-*</code>
+          </div>
+          <div class="matrix-cell">
+            <span class="label good">目标</span>
+            <strong>actor send target 被解释成 IM target identity</strong>
+            <p>actor / external 都走同一个 resolver。差异只在 resolver 内部查什么事实。</p>
+            <code class="codeblock">ActorImClient.send
+  -&gt; resolve_im_send_target(sender_identity, target_identity_id)
+  -&gt; send_im_message(sender_identity, target_identity)
+  -&gt; post-write delivery</code>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>external 的“可达”怎么更简单</h2>
+        <div class="callout">
+          <p>在 <code>/api/im/*</code> 这一层，external 不是在线进程，所以不要给它造 daemon-style online。它的发送前判断应简化为：identity 存在、type 是 external、IM policy 允许写入该 identity 的 visible event。后续客户端什么时候读取，是 external-side read/ack，不属于 sender reach。</p>
+          <ul>
+            <li>actor target：identity 存在 + actor runtime online。</li>
+            <li>external target：identity 存在 + IM 可写入 external visible event。</li>
+            <li>channel adapter 的真实外部投递，仍在更外层处理，不进入本次 resolver。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>验收标准</h2>
+        <div class="matrix">
+          <div class="matrix-cell">
+            <span class="label good">结构验收</span>
+            <strong>少概念</strong>
+            <ul>
+              <li>没有新的 contact 权威表。</li>
+              <li>没有把 <code>ext-*</code> 写进 central daemon registry。</li>
+              <li>没有让 <code>external_session</code> 承担 reach。</li>
+              <li>只有一个发送前 resolver。</li>
+              <li>resolver 不接收 <code>actor_rows</code>。</li>
+            </ul>
+          </div>
+          <div class="matrix-cell">
+            <span class="label good">行为验收</span>
+            <strong>统一入口</strong>
+            <ul>
+              <li><code>message.send(target_identity_id=act-...)</code> 走 resolver。</li>
+              <li><code>message.send(target_identity_id=ext-...)</code> 走同一个 resolver。</li>
+              <li><code>message.contacts</code> 不决定发送规则。</li>
+              <li><code>list_online_actors</code> 不再参与发送目标判断。</li>
+              <li>actor delivery 与 external read/ack 仍在写入后分支。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>代码证据</h2>
+        <div class="evidence-grid">
+          <div class="evidence">
+            <span class="label daemon">actor runtime</span>
+            <p>central daemon registry 的 row shape 是 actor process runtime record。</p>
+            <code class="path">tools/launcher/central_daemon_core.py:86</code>
+            <code class="path">tools/launcher/central_daemon_core.py:236</code>
+          </div>
+          <div class="evidence">
+            <span class="label warn">current coupling</span>
+            <p>actor-side IM client 当前通过 daemon <code>list_online_actors</code> 取得发送目标候选。</p>
+            <code class="path">scripts/env/tool_runtime/im_client.py:17</code>
+            <code class="path">scripts/env/tool_runtime/im_client.py:98</code>
+          </div>
+          <div class="evidence">
+            <span class="label bad">external rejected</span>
+            <p>当前 resolver 明确把 <code>ext-*</code> 判定为当前 reach policy 下不可达。</p>
+            <code class="path">scripts/env/services/messages.py:85</code>
+          </div>
+          <div class="evidence">
+            <span class="label external">session boundary</span>
+            <p><code>external_session</code> 已收束为 key / identity / cursor，不应重新变成 contact 或 reach registry。</p>
+            <code class="path">scripts/env/services/messages.py:111</code>
+            <code class="path">scripts/env/repos/messages.py:79</code>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        Artifact job: simplify the actor/external messaging architecture by replacing the proposed contact layer with one sender-facing IM target resolver.
+      </footer>
+    </div>
+  </main>
+</body>
+</html>

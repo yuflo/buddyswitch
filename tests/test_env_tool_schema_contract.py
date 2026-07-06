@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -283,17 +284,30 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             str(row)
             for row in (
                 message_send_action.description,
+                message_send["properties"]["target_identity_id"].get("description"),
                 message_send["properties"]["reply_to"].get("description"),
+                message_send_action.result_content_level,
                 message_send_action.success_effect,
                 message_send_action.failure_state_guarantee,
+                message_send_action.writes,
+                message_send_action.returns,
+                message_send_action.preconditions,
+                message_send_action.use_when,
                 message_send_action.do_not_use_when,
             )
         ).lower()
         for snippet in (
             "central im message",
+            "target identity",
+            "im target resolver",
+            "reply wrapper",
+            "same im target resolver",
+            "original sender into target_identity_id",
+            "unified send path",
+            "actor runtime reachability",
+            "identity profiles",
             "reply_to",
             "processable inbound",
-            "target_identity_id is only required for new actor-directed messages",
             "external",
             "active actor",
             "replied",
@@ -301,8 +315,18 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             "previous disposition",
             "message.mark(absorbed)",
             "task_sys.need_parent",
+            "actor_handling_status",
+            "target actor local inbound event",
+            "target_identity",
         ):
             self.assertIn(snippet, send_contract_text)
+        self.assertNotIn("actor-directed", send_contract_text)
+        self.assertNotIn("reach policy", send_contract_text)
+        self.assertNotIn("use message.contacts", send_contract_text)
+        self.assertNotIn("central im derives the other " + "direct identity", send_contract_text)
+        self.assertNotIn("reply inside the existing " + "direct conversation", send_contract_text)
+        self.assertNotIn("target_identity_id is only required for a new " + "target-identity message", send_contract_text)
+        self.assertNotIn("tasks", message_send_action.does_not_write)
         mark_contract_text = " ".join(
             str(row)
             for row in (
@@ -324,6 +348,11 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("parent prompt first", mark_contract_text)
         self.assertIn("identity", str(message_contacts_action.description).lower())
         self.assertIn("self", str(message_contacts_action.description).lower())
+        message_contacts_contract = json.dumps(asdict(message_contacts_action), ensure_ascii=True, sort_keys=True).lower()
+        self.assertIn("actor runtime presence", message_contacts_contract)
+        self.assertIn("optional actor discovery", message_contacts_contract)
+        self.assertIn("read-only view", message_contacts_contract)
+        self.assertIn("does not decide message.send permission", message_contacts_contract)
 
         self.assertEqual(message_conversation_action.kind, "read")
         self.assertEqual(message_conversation_action.mutates, "none")

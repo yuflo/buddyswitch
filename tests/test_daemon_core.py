@@ -19,6 +19,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from env.repos import identities as identity_repo  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
@@ -31,6 +32,7 @@ RUNTIME_ENV_KEYS = (
     "BUDDYSWITCH_INSTANCE_JSON",
     "BUDDYSWITCH_WORKSPACE_DIR",
     "BUDDYSWITCH_ACTOR_ID",
+    "BUDDYSWITCH_ROLE_ID",
 )
 
 
@@ -72,7 +74,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
         root.mkdir(parents=True, exist_ok=True)
         return root
 
-    def test_daemon_registration_projects_actor_address_and_registry_facts(self) -> None:
+    def test_daemon_registration_projects_identity_route_and_registry_facts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = self._instance_root(temp_root)
             workspace_dir = instance_root / "workspace"
@@ -94,29 +96,33 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 encoding="utf-8",
             )
             context = self.core.load_daemon_context(instance_json)
-            actor_address = self.core.actor_address_for_context(context)
+            identity_route = self.core.identity_route_for_context(context)
             calls: list[dict[str, Any]] = []
             original_register = self.core.daemon_client.register_actor
 
             def fake_register_actor(**kwargs: Any) -> dict[str, Any]:
                 calls.append(kwargs)
-                return {"record": {"actor_address": kwargs["actor_address"], "endpoint": kwargs["endpoint"]}}
+                return {
+                    "record": {
+                        "identity_id": kwargs["identity_id"],
+                        "role_id": kwargs["role_id"],
+                        "endpoint": kwargs["endpoint"],
+                    }
+                }
 
             self.addCleanup(setattr, self.core.daemon_client, "register_actor", original_register)
             self.core.daemon_client.register_actor = fake_register_actor
 
-            row = self.core.register_daemon_actor(context, actor_address)["record"]
+            row = self.core.register_daemon_actor(context, identity_route)["record"]
 
-            self.assertEqual(
-                row["actor_address"],
-                {"role_id": "dev", "actor_id": "act-dev-daed00000001"},
-            )
+            self.assertEqual(row["identity_id"], "act-dev-daed00000001")
+            self.assertEqual(row["role_id"], "dev")
             self.assertEqual(row["endpoint"]["kind"], "daemon_mailbox_socket")
             self.assertEqual(row["endpoint"]["socket_path"], str(self.core.daemon_mailbox.mailbox_socket_path(context.instance_root)))
             self.assertEqual(calls[0]["heartbeat"], {"kind": "central_daemon_rpc"})
             self.assertEqual(calls[0]["socket_path"], self.core.central_daemon_socket_path(context))
 
-    def test_daemon_reachability_client_uses_explicit_actor_address(self) -> None:
+    def test_daemon_reachability_client_uses_explicit_identity_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = self._instance_root(temp_root)
             workspace_dir = instance_root / "workspace"
@@ -138,9 +144,9 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 encoding="utf-8",
             )
             context = self.core.load_daemon_context(instance_json)
-            actor_address = self.core.actor_address_for_context(context)
+            identity_route = self.core.identity_route_for_context(context)
 
-            self.assertEqual(actor_address.to_payload(), {"role_id": "dev", "actor_id": "act-dev-daed00000001"})
+            self.assertEqual(identity_route, {"identity_id": "act-dev-daed00000001", "role_id": "dev"})
             self.assertNotIn("to_role", self.core.register_daemon_actor.__code__.co_varnames)
 
     def test_missing_state_initializes_empty_valid_state(self) -> None:
@@ -433,6 +439,8 @@ class DaemonCoreBindingTests(DaemonCoreTestCase):
                     "BUDDYSWITCH_INSTANCE_ROOT": str(instance["instance_root"]),
                     "BUDDYSWITCH_INSTANCE_JSON": str(instance["instance_json"]),
                     "BUDDYSWITCH_WORKSPACE_DIR": str(instance["workspace_dir"]),
+                    "BUDDYSWITCH_ACTOR_ID": "act-dev-daed00000001",
+                    "BUDDYSWITCH_ROLE_ID": "dev",
                 },
             )
 
@@ -582,6 +590,22 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertEqual(env["BUDDYSWITCH_INSTANCE_JSON"], str(instance["instance_json"]))
             self.assertEqual(env["BUDDYSWITCH_WORKSPACE_DIR"], str(instance["instance_root"] / "workspace"))
 
+    def test_start_daemon_passes_actor_identity_env_to_child_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            _commands, popen_kwargs = self._patch_process_start([4330])
+            self._patch_pid_live({4330})
+            self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4330)
+
+            payload = self.core.start_daemon(instance["instance_json"])
+
+            self.assertTrue(payload["started"])
+            env = popen_kwargs[0].get("env")
+            self.assertIsInstance(env, dict)
+            assert isinstance(env, dict)
+            self.assertEqual(env["BUDDYSWITCH_ACTOR_ID"], "act-dev-daed00000001")
+            self.assertEqual(env["BUDDYSWITCH_ROLE_ID"], "dev")
+
     def test_start_daemon_replaces_stale_pid_before_starting_new_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
@@ -662,15 +686,15 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.addCleanup(setattr, self.core, "_terminate_pid", original_terminate)
             self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
             self.core._terminate_pid = lambda pid: terminated.append(pid) or True
-            self.core.unregister_daemon_actor = lambda context, actor_address: unregistered.append(
-                {"context": context, "actor_address": actor_address.to_payload()}
-            ) or {"record": {"actor_address": actor_address.to_payload()}}
+            self.core.unregister_daemon_actor = lambda context, identity_route: unregistered.append(
+                {"context": context, "identity_route": dict(identity_route)}
+            ) or {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
             payload = self.core.stop_daemon(instance["instance_json"])
 
             self.assertTrue(payload["terminated"])
             self.assertEqual(terminated, [4321])
-            self.assertEqual(unregistered[0]["actor_address"], {"role_id": "dev", "actor_id": "act-dev-daed00000001"})
+            self.assertEqual(unregistered[0]["identity_route"], {"identity_id": "act-dev-daed00000001", "role_id": "dev"})
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
 
     def test_stop_daemon_does_not_fail_when_central_unregister_is_unavailable(self) -> None:
@@ -686,7 +710,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
             self.core._terminate_pid = lambda pid: terminated.append(pid) or True
 
-            def fail_unregister(_context: object, _actor_address: object) -> dict[str, object]:
+            def fail_unregister(_context: object, _identity_route: object) -> dict[str, object]:
                 raise RuntimeError("central daemon unavailable")
 
             self.core.unregister_daemon_actor = fail_unregister
@@ -700,6 +724,33 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
             state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIn("central daemon unavailable", state["last_error"]["message"])
+
+    def test_stop_daemon_preserves_actor_identity_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(Path(temp_root))
+            os.environ["BUDDYSWITCH_STATE_ROOT"] = str(Path(temp_root) / "state")
+            os.environ["BUDDYSWITCH_ACTOR_ID"] = "act-dev-daed00000001"
+            runtime_files.refresh_runtime_roots_from_env()
+            expected_profile = identity_repo.save_actor_identity_profile(
+                {"identity": {"id": "act-dev-daed00000001", "type": "actor"}, "role_id": "dev"}
+            )
+            self.core.daemon_pid_file(instance["instance_root"]).parent.mkdir(parents=True, exist_ok=True)
+            self.core.daemon_pid_file(instance["instance_root"]).write_text("4321\n", encoding="utf-8")
+            self._patch_pid_live({4321})
+            original_terminate = self.core._terminate_pid
+            original_unregister = self.core.unregister_daemon_actor
+            self.addCleanup(setattr, self.core, "_terminate_pid", original_terminate)
+            self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
+            self.core._terminate_pid = lambda _pid: True
+            self.core.unregister_daemon_actor = lambda _context, identity_route: {
+                "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
+            }
+
+            payload = self.core.stop_daemon(instance["instance_json"])
+
+            self.assertTrue(payload["terminated"])
+            self.assertEqual(identity_repo.get_actor_identity_profile("act-dev-daed00000001"), expected_profile)
 
     def test_daemon_status_reports_paths_live_state_and_last_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -970,17 +1021,17 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             calls["mailbox_started"].append(kwargs)
             return FakeMailbox()
 
-        def fake_register(context: object, actor_address: object) -> dict[str, object]:
-            calls["registered"].append(getattr(actor_address, "to_payload")())
-            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+        def fake_register(context: object, identity_route: dict[str, str]) -> dict[str, object]:
+            calls["registered"].append(dict(identity_route))
+            return {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
-        def fake_heartbeat(context: object, actor_address: object) -> dict[str, object]:
-            calls["heartbeat"].append(getattr(actor_address, "to_payload")())
-            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+        def fake_heartbeat(context: object, identity_route: dict[str, str]) -> dict[str, object]:
+            calls["heartbeat"].append(dict(identity_route))
+            return {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
-        def fake_unregister(context: object, actor_address: object) -> dict[str, object]:
-            calls["unregistered"].append(getattr(actor_address, "to_payload")())
-            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+        def fake_unregister(context: object, identity_route: dict[str, str]) -> dict[str, object]:
+            calls["unregistered"].append(dict(identity_route))
+            return {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
         self.addCleanup(setattr, self.core, "start_daemon_mailbox", original_start_mailbox)
         self.addCleanup(setattr, self.core, "register_daemon_actor", original_register)
@@ -1022,6 +1073,51 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.assertEqual(runtime_files.STATE_ROOT, expected_resolved_state_root)
             self.assertEqual(observed_roots, [expected_resolved_state_root])
             self.assertEqual(len(communication["mailbox_closed"]), 1)
+
+    def test_run_daemon_ensures_actor_identity_profile_before_registering_reachability(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            fake_client = FakeRunDaemonClient(notifications=[StopDaemonLoop("stop")])
+            self._patch_app_server_client(fake_client)
+            communication = self._patch_daemon_communication()
+            observed_profile_at_register: list[dict[str, object] | None] = []
+            fake_register = self.core.register_daemon_actor
+
+            def observing_register(context: object, identity_route: dict[str, str]) -> dict[str, object]:
+                observed_profile_at_register.append(identity_repo.get_actor_identity_profile(identity_route["identity_id"]))
+                return fake_register(context, identity_route)
+
+            self.core.register_daemon_actor = observing_register
+
+            with self.assertRaises(StopDaemonLoop):
+                self.core.run_daemon(instance["instance_json"], handlers=[])
+
+            profile = identity_repo.get_actor_identity_profile("act-dev-daed00000001")
+            self.assertEqual(
+                profile,
+                {"identity": {"id": "act-dev-daed00000001", "type": "actor"}, "role_id": "dev"},
+            )
+            self.assertEqual(observed_profile_at_register, [profile])
+            self.assertEqual(len(communication["mailbox_closed"]), 1)
+
+    def test_run_daemon_rejects_conflicting_existing_actor_identity_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(Path(temp_root))
+            os.environ["BUDDYSWITCH_STATE_ROOT"] = str(Path(temp_root) / "state")
+            os.environ["BUDDYSWITCH_ACTOR_ID"] = "act-dev-daed00000001"
+            runtime_files.refresh_runtime_roots_from_env()
+            identity_repo.save_actor_identity_profile(
+                {"identity": {"id": "act-dev-daed00000001", "type": "actor"}, "role_id": "pm"}
+            )
+            fake_client = FakeRunDaemonClient(notifications=[])
+            self._patch_app_server_client(fake_client)
+            communication = self._patch_daemon_communication()
+
+            with self.assertRaisesRegex(ValueError, "actor identity profile role mismatch"):
+                self.core.run_daemon(instance["instance_json"], handlers=[])
+
+            self.assertEqual(communication["registered"], [])
 
     def test_run_daemon_continues_after_notification_idle_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
