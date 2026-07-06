@@ -54,22 +54,41 @@ class ExternalImSession:
         content: str,
         reply_to: Any = None,
     ) -> dict[str, Any]:
-        target_response = self._send_target_identity(external_session, target_identity_id)
-        if target_response.get("ok") is not True:
-            return target_response
-        result = message_service.send_external_session_message(
-            external_session=external_session,
-            target_identity=target_response["identity"],
-            content=content,
-            reply_to=reply_to if reply_to is not None else None,
-        )
+        has_target = isinstance(target_identity_id, str) and bool(target_identity_id.strip())
+        has_reply = isinstance(reply_to, str) and bool(reply_to.strip())
+        if has_target and has_reply:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "E_IM_PAYLOAD",
+                    "message": "provide either target_identity_id or reply_to, not both",
+                },
+            }
+        explicit_target: dict[str, Any] | None = None
+        if has_reply:
+            result = message_service.send_external_session_reply(
+                external_session=external_session,
+                reply_to=reply_to.strip(),
+                content=content,
+                actor_reachability_checker=self._actor_reachability_checker,
+            )
+        else:
+            target_response = self._send_target_identity(external_session, target_identity_id)
+            if target_response.get("ok") is not True:
+                return target_response
+            explicit_target = target_response["identity"]
+            result = message_service.send_external_session_message(
+                external_session=external_session,
+                target_identity=explicit_target,
+                content=content,
+            )
         result_target = result.get("target_identity")
         handling_target = (
             {"id": result_target["id"], "type": result_target["type"]}
             if isinstance(result_target, dict)
             and isinstance(result_target.get("id"), str)
             and isinstance(result_target.get("type"), str)
-            else target_response["identity"]
+            else explicit_target
         )
         return message_service.attach_post_write_delivery_status(
             result,

@@ -178,9 +178,8 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(message["message"]["content"], "ping")
 
-        actor_reply = message_service.send_im_message(
-            sender_identity=actor_identity,
-            to=auth["identity"],
+        actor_reply = message_service.send_im_reply(
+            sender_identity=actor_identity["identity"],
             content="pong",
             reply_to=message_id,
         )
@@ -336,6 +335,59 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(sent.get("ok"), msg=sent)
         self.assertEqual(list_calls, [])
         self.assertEqual(reachability_calls, [actor_identity["identity_id"]])
+
+    def test_external_http_reply_uses_wrapper_without_target_identity(self) -> None:
+        actor_identity = self._actor_identity()
+        handling_calls: list[dict[str, object]] = []
+        router = im_http_router.ImHttpRouter(
+            actor_lister=lambda _role_id: [{**actor_identity, "status": "online"}],
+            actor_reachability_checker=lambda *, target_identity_id: {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {**actor_identity, "status": "online"},
+            },
+            actor_delivery_handler=lambda payload: handling_calls.append(dict(payload)) or {"actor_handling_status": "submitted"},
+        )
+        status, created = router.handle("POST", "/api/im/external-sessions", b'{"display_name":"local smoke"}', {})
+        self.assertEqual(status, 200)
+        key = created["external_session_key"]
+        auth = message_service.authenticate_external_session_key(key)
+        self.assertTrue(auth["ok"], msg=auth)
+        root = message_service.send_im_message(
+            sender_identity=actor_identity["identity"],
+            target_identity=auth["identity"],
+            content="actor ping",
+        )
+
+        status, reply = router.handle(
+            "POST",
+            "/api/im/messages",
+            json.dumps(
+                {
+                    "reply_to": root["message"]["id"],
+                    "content": "external pong",
+                }
+            ).encode("utf-8"),
+            {"Authorization": f"Bearer {key}"},
+        )
+
+        self.assertEqual(status, 200, msg=reply)
+        self.assertTrue(reply.get("ok"), msg=reply)
+        self.assertEqual(reply["target_identity"], actor_identity["identity"])
+        self.assertEqual(reply["message"]["reply_to"], root["message"]["id"])
+        self.assertEqual(reply["actor_handling_status"], "submitted")
+        self.assertEqual(
+            handling_calls,
+            [
+                {
+                    "type": "im.message.created",
+                    "target_identity_id": actor_identity["identity_id"],
+                    "message_id": reply["message"]["id"],
+                    "conversation_id": reply["message"]["conversation_id"],
+                    "event_id": reply["event_id"],
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

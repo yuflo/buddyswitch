@@ -1265,9 +1265,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertNotIn("target_" + "role_id", wake_im_actor.call_args.args[0])
         sent_message_id = sent["message"]["id"]
 
-        reply = message_service.send_im_message(
+        reply = message_service.send_im_reply(
             sender_identity={"id": actor_route["actor_id"], "type": "actor"},
-            to=web_identity,
             content="pong",
             reply_to=sent_message_id,
         )
@@ -1375,9 +1374,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
             (market_actor, "market pong"),
             (dev_actor, "dev pong"),
         ):
-            reply = message_service.send_im_message(
+            reply = message_service.send_im_reply(
                 sender_identity={"id": actor_route["actor_id"], "type": "actor"},
-                to=web_identity,
                 content=content,
                 reply_to=sent_by_actor[actor_route["actor_id"]]["message"]["id"],
             )

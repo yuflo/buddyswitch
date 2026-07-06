@@ -35,26 +35,38 @@ class ActorImClient:
 
     def send(self, args: dict[str, Any]) -> dict[str, Any]:
         target_identity_id = args.get("target_identity_id")
-        reply_to = args.get("reply_to") if isinstance(args.get("reply_to"), str) else None
-        if isinstance(target_identity_id, str) and target_identity_id.strip():
+        reply_to = args.get("reply_to")
+        has_target = isinstance(target_identity_id, str) and bool(target_identity_id.strip())
+        has_reply = isinstance(reply_to, str) and bool(reply_to.strip())
+        if has_target and has_reply:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "E_IM_PAYLOAD",
+                    "message": "message.send accepts either target_identity_id or reply_to, not both",
+                },
+            }
+        explicit_target: dict[str, Any] | None = None
+        if has_reply:
+            result = message_service.send_im_reply(
+                sender_identity=self._identity,
+                reply_to=reply_to.strip(),
+                content=str(args.get("content") or ""),
+                actor_reachability_checker=getattr(self._context.daemon, "check_reachability", None),
+            )
+        else:
             target_response = self._send_target_identity(target_identity_id)
             if target_response.get("ok") is not True:
                 return target_response
-            target = target_response["target_identity"]
-        elif reply_to is not None:
-            target = None
-        else:
-            target_response = self._send_target_identity(target_identity_id)
-            return target_response
-        result = message_service.send_im_message(
-            sender_identity=self._identity,
-            to=target if isinstance(target, dict) else None,
-            content=str(args.get("content") or ""),
-            reply_to=reply_to,
-        )
+            explicit_target = target_response["target_identity"]
+            result = message_service.send_im_message(
+                sender_identity=self._identity,
+                target_identity=explicit_target,
+                content=str(args.get("content") or ""),
+            )
         return message_service.attach_post_write_delivery_status(
             result,
-            target_identity=self._result_target_identity(result, target if isinstance(target, dict) else None),
+            target_identity=self._result_target_identity(result, explicit_target),
             actor_delivery_handler=getattr(self._context.daemon, "wake_im_actor", None),
         )
 

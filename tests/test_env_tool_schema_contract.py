@@ -301,11 +301,14 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             "central im message",
             "target identity",
             "im target resolver",
+            "reply wrapper",
+            "same im target resolver",
+            "original sender into target_identity_id",
+            "unified send path",
             "actor runtime reachability",
             "identity profiles",
             "reply_to",
             "processable inbound",
-            "target_identity_id is only required for a new target-identity message",
             "external",
             "active actor",
             "replied",
@@ -321,6 +324,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("actor-directed", send_contract_text)
         self.assertNotIn("reach policy", send_contract_text)
         self.assertNotIn("use message.contacts", send_contract_text)
+        self.assertNotIn("central im derives the other " + "direct identity", send_contract_text)
+        self.assertNotIn("reply inside the existing " + "direct conversation", send_contract_text)
+        self.assertNotIn("target_identity_id is only required for a new " + "target-identity message", send_contract_text)
         self.assertNotIn("tasks", message_send_action.does_not_write)
         mark_contract_text = " ".join(
             str(row)

@@ -447,6 +447,10 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "exact processable inbound reads",
             "disposition marking",
             "reply_to",
+            "reply wrapper",
+            "original sender into target_identity_id",
+            "same im target resolver",
+            "unified send path",
             "external",
             "external identities are valid central im direct targets",
             "replied",
@@ -475,6 +479,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "target runtime actor actor id",
             "actor contact projection",
             "already present in a direct conversation",
+            "central im derives the other " + "direct identity",
+            "reply inside the existing " + "direct conversation",
+            "target_identity_id is only required for a new " + "target-identity message",
             "before message.send",
         )
         for token in forbidden:

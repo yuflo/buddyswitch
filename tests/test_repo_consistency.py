@@ -665,6 +665,49 @@ print(json.dumps({{
         disallowed = [line for line in hits if not is_allowed_hit(line)]
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
 
+    def test_im_reply_wrapper_convergence_has_no_old_core_reply_branch_residue(self) -> None:
+        targets = [
+            "scripts/env/services/messages.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/task_sys_" + "runtime.py",
+            "scripts/env/tools/message/tool.py",
+            "buddyswitch/skills/shared/task-management/SKILL.md",
+            "tests/test_im_product_core.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_im_external_reply_loop.py",
+            "tests/test_web_management.py",
+            "tests/test_task_sys_runtime_executor.py",
+            "tests/test_env_tool_schema_contract.py",
+            "tests/test_env_tool_semantic_contract.py",
+            "tests/test_task_management_skill_architecture.py",
+            "tests/test_context_binding_env_tool.py",
+        ]
+        patterns = [
+            r"\b_resolve_reply_" + r"conversation\b",
+            r"\b_direct_conversation_" + r"identity_ids\b",
+            r"reply target cannot be " + r"derived from the " + r"direct conversation",
+            r"reply_to must stay in the same " + r"direct conversation",
+            r"Central IM derives the other " + r"direct identity",
+            r"central im derives the other " + r"direct identity",
+            r"reply_to only to reply inside the existing " + r"direct conversation",
+            r"reply inside the existing " + r"direct conversation",
+            r"target_identity_id is only required for a new " + r"target-identity message",
+        ]
+        multiline_patterns = [
+            r"send_im_message\([\s\S]{0,500}\bto\s*=\s*None[\s\S]{0,500}\breply_to\s*=",
+            r"send_im_message\([\s\S]{0,500}\breply_to\s*=[\s\S]{0,500}\bto\s*=\s*None",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_patterns:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        for pattern in patterns:
+            hits.extend(self._scan_targets(pattern, targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
     def test_im_send_paths_do_not_use_actor_list_as_target_resolver(self) -> None:
         targets = [
             "scripts/env/tool_runtime/im_client.py",

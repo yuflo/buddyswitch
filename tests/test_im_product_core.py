@@ -358,9 +358,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         response = message_service.send_im_message(
             sender_identity=sender,
-            to=target["identity"],
+            target_identity=target["identity"],
             content="  ping  ",
-            reply_to=None,
         )
 
         self.assertTrue(response.get("ok"), msg=response)
@@ -427,6 +426,94 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(all(event["message_id"] == message_id for event in events))
         self.assertTrue(all(event["conversation_id"] == conversation_id for event in events))
 
+    def test_send_im_reply_normalizes_original_sender_to_target_identity_and_marks_replied(self) -> None:
+        _created, _external_session, external = self._external_session()
+        actor = self._actor_identity(role="dev", label="act-dev-reply-wrapper")
+        root = message_service.send_im_message(
+            sender_identity=external,
+            target_identity=actor["identity"],
+            content="ping",
+        )
+
+        reply = message_service.send_im_reply(
+            sender_identity=actor["identity"],
+            reply_to=root["message"]["id"],
+            content="pong",
+            actor_reachability_checker=lambda *, target_identity_id: {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {"identity_id": target_identity_id},
+            },
+        )
+
+        self.assertTrue(reply.get("ok"), msg=reply)
+        self.assertEqual(reply["target_identity"], external)
+        self.assertEqual(reply["message"]["reply_to"], root["message"]["id"])
+        self.assertEqual(reply["message"]["conversation_id"], root["message"]["conversation_id"])
+        self.assertEqual(reply["original_message_id"], root["message"]["id"])
+        self.assertEqual(reply["original_final_disposition"], "replied")
+        state_path = (
+            self.runtime_state_root
+            / "im"
+            / "message_states"
+            / f"{root['message']['id']}--{actor['identity_id']}.json"
+        )
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["disposition"], "replied")
+
+    def test_send_im_reply_rejects_message_not_addressed_to_sender(self) -> None:
+        sender = self._actor_identity(role="pm", label="act-pm-reply-guard")
+        intended = self._actor_identity(role="dev", label="act-dev-reply-guard")
+        outsider = self._actor_identity(role="test", label="act-test-reply-guard")
+        root = message_service.send_im_message(
+            sender_identity=sender["identity"],
+            target_identity=intended["identity"],
+            content="private request",
+        )
+        before_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
+
+        reply = message_service.send_im_reply(
+            sender_identity=outsider["identity"],
+            reply_to=root["message"]["id"],
+            content="bad reply",
+            actor_reachability_checker=lambda *, target_identity_id: {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {"identity_id": target_identity_id},
+            },
+        )
+
+        self.assertFalse(reply.get("ok"), msg=reply)
+        self.assertEqual(reply["error"]["code"], "E_IM_REPLY_TARGET")
+        after_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
+        self.assertEqual(after_messages, before_messages)
+
+    def test_send_im_reply_to_offline_actor_rejects_before_write(self) -> None:
+        source = self._actor_identity(role="pm", label="act-pm-offline-reply")
+        active = self._actor_identity(role="dev", label="act-dev-offline-reply")
+        root = message_service.send_im_message(
+            sender_identity=source["identity"],
+            target_identity=active["identity"],
+            content="need reply",
+        )
+        before_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
+
+        reply = message_service.send_im_reply(
+            sender_identity=active["identity"],
+            reply_to=root["message"]["id"],
+            content="reply",
+            actor_reachability_checker=lambda *, target_identity_id: {
+                "reachability_status": "offline",
+                "target_identity_id": target_identity_id,
+                "record": {"identity_id": target_identity_id},
+            },
+        )
+
+        self.assertFalse(reply.get("ok"), msg=reply)
+        self.assertEqual(reply["error"]["code"], "E_IM_TARGET")
+        after_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
+        self.assertEqual(after_messages, before_messages)
+
     def test_send_im_message_returns_final_target_identity_for_explicit_and_reply_to_targets(self) -> None:
         _created, external_session, external = self._external_session(display_name="target identity response")
         actor = self._actor_identity(role="market", label="act-market-target-response")
@@ -438,22 +525,25 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             target_identity=actor["identity"],
             content="ping",
         )
-        actor_external_reply = message_service.send_im_message(
+        actor_external_reply = message_service.send_im_reply(
             sender_identity=actor["identity"],
-            to=None,
             content="pong",
             reply_to=external_root["message"]["id"],
         )
         actor_root = message_service.send_im_message(
             sender_identity=pm["identity"],
-            to=dev["identity"],
+            target_identity=dev["identity"],
             content="handoff",
         )
-        actor_reply = message_service.send_im_message(
+        actor_reply = message_service.send_im_reply(
             sender_identity=dev["identity"],
-            to=None,
             content="received",
             reply_to=actor_root["message"]["id"],
+            actor_reachability_checker=lambda *, target_identity_id: {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {"identity_id": target_identity_id},
+            },
         )
 
         self.assertTrue(external_root.get("ok"), msg=external_root)
@@ -476,9 +566,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             content="ping",
         )
         self.assertEqual(external_session["last_event_id"], initial_cursor)
-        actor_reply = message_service.send_im_message(
-            sender_identity=actor,
-            to=sender_ref,
+        actor_reply = message_service.send_im_reply(
+            sender_identity=actor["identity"],
             content="pong",
             reply_to=send_response["message"]["id"],
         )
@@ -546,10 +635,9 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         actor = self._actor_identity()
         before = external_session_a["last_event_id"]
         actor_reply = message_service.send_im_message(
-            sender_identity=actor,
-            to=sender_b,
+            sender_identity=actor["identity"],
+            target_identity=sender_b,
             content="private pong",
-            reply_to=None,
         )
 
         ack = message_service.ack_external_session_event(
@@ -571,15 +659,13 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             content="ping",
         )
         before = external_session["last_event_id"]
-        first_reply = message_service.send_im_message(
-            sender_identity=actor,
-            to=sender_ref,
+        first_reply = message_service.send_im_reply(
+            sender_identity=actor["identity"],
             content="pong one",
             reply_to=root["message"]["id"],
         )
-        second_reply = message_service.send_im_message(
-            sender_identity=actor,
-            to=sender_ref,
+        second_reply = message_service.send_im_reply(
+            sender_identity=actor["identity"],
             content="pong two",
             reply_to=root["message"]["id"],
         )
@@ -612,9 +698,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         def create_message_later() -> None:
             time.sleep(0.05)
             created.append(
-                message_service.send_im_message(
-                    sender_identity=target,
-                    to=sender_ref,
+                message_service.send_im_reply(
+                    sender_identity=target["identity"],
                     content="pong after wait",
                     reply_to=root["message"]["id"],
                 )
@@ -644,14 +729,12 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         actor = self._actor_identity()
         root = message_service.send_im_message(
             sender_identity=external,
-            to=actor,
+            target_identity=actor["identity"],
             content="ping",
-            reply_to=None,
         )
 
-        reply = message_service.send_im_message(
-            sender_identity=actor,
-            to=external_ref,
+        reply = message_service.send_im_reply(
+            sender_identity=actor["identity"],
             content="pong",
             reply_to=root["message"]["id"],
         )
@@ -677,13 +760,11 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         actor = self._actor_identity()
         root = message_service.send_im_message(
             sender_identity=external,
-            to=actor,
+            target_identity=actor["identity"],
             content="ping",
-            reply_to=None,
         )
-        reply = message_service.send_im_message(
-            sender_identity=actor,
-            to=external_ref,
+        reply = message_service.send_im_reply(
+            sender_identity=actor["identity"],
             content="pong",
             reply_to=root["message"]["id"],
         )
@@ -735,13 +816,11 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         actor = self._actor_identity()
         root = message_service.send_im_message(
             sender_identity=external,
-            to=actor,
+            target_identity=actor["identity"],
             content="ping",
-            reply_to=None,
         )
-        reply = message_service.send_im_message(
-            sender_identity=actor,
-            to=external_ref,
+        reply = message_service.send_im_reply(
+            sender_identity=actor["identity"],
             content="pong",
             reply_to=root["message"]["id"],
         )

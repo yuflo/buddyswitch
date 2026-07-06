@@ -14,7 +14,7 @@ description: Use when processing Task Sys side frames, parent-thread decisions, 
 - When a `task_sys.parent_frame` completes required frame work, call `task_sys.close`.
 - For IM source frames, use message tools for required message reads, sends, and disposition work.
 - Use `message.send(target_identity_id=...)` when the IM task requires a new explicit actor or external target.
-- Use `message.send(reply_to=...)` when the IM task is a reply to a processable inbound message.
+- Use `message.send(reply_to=...)` when replying to a processable inbound IM message; the runtime resolves the original sender through the normal target-identity path.
 - Use `message.mark(..., disposition=absorbed)` only when no reply is needed.
 - Exact payload schemas, effects, rejection meanings, and recovery guidance come from native tool schemas and `context.get.tool_catalog['task_sys']`.
 - Diagnostic fallback: `python3 scripts/turn_runtime.py status`.

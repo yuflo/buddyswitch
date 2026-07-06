@@ -127,9 +127,8 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(fetched.get("ok"), msg=fetched)
         self.assertEqual(fetched["message"]["content"], "ping")
 
-        actor_reply = message_service.send_im_message(
-            sender_identity=actor_identity,
-            to=identity,
+        actor_reply = message_service.send_im_reply(
+            sender_identity=actor_identity["identity"],
             content="pong",
             reply_to=message_id,
         )
@@ -239,9 +238,8 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(sent.get("ok"), msg=sent)
         self.assertEqual(external_session["last_event_id"], initial_cursor)
-        actor_reply = message_service.send_im_message(
-            sender_identity=actor_identity,
-            to=identity,
+        actor_reply = message_service.send_im_reply(
+            sender_identity=actor_identity["identity"],
             content="pong",
             reply_to=sent["message"]["id"],
         )
@@ -268,9 +266,8 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             reply_to=None,
         )
         self.assertTrue(sent.get("ok"), msg=sent)
-        actor_reply = message_service.send_im_message(
-            sender_identity=actor_identity,
-            to=identity,
+        actor_reply = message_service.send_im_reply(
+            sender_identity=actor_identity["identity"],
             content="pong",
             reply_to=sent["message"]["id"],
         )
@@ -283,6 +280,44 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(ack.get("ok"), msg=ack)
         self.assertNotIn("actor_handling_status", events)
         self.assertNotIn("task_sys", str(events))
+
+    def test_session_reply_uses_reply_wrapper_without_explicit_target_identity(self) -> None:
+        actor_identity = self._actor_identity(role="market", label="reply-wrapper")
+        handling_calls: list[dict[str, Any]] = []
+        session = self._session(
+            [{**actor_identity, "status": "online"}],
+            handling_calls=handling_calls,
+        )
+        _key, external_session, identity = self._external_session(session)
+        root = message_service.send_im_message(
+            sender_identity=actor_identity["identity"],
+            target_identity=identity,
+            content="ping from actor",
+        )
+
+        reply = session.send_message(
+            external_session=external_session,
+            target_identity_id=None,
+            content="pong from external",
+            reply_to=root["message"]["id"],
+        )
+
+        self.assertTrue(reply.get("ok"), msg=reply)
+        self.assertEqual(reply["target_identity"], actor_identity["identity"])
+        self.assertEqual(reply["message"]["reply_to"], root["message"]["id"])
+        self.assertEqual(reply["actor_handling_status"], "submitted")
+        self.assertEqual(
+            handling_calls,
+            [
+                {
+                    "type": "im.message.created",
+                    "target_identity_id": actor_identity["identity_id"],
+                    "message_id": reply["message"]["id"],
+                    "conversation_id": reply["message"]["conversation_id"],
+                    "event_id": reply["event_id"],
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

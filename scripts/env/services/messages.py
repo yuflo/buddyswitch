@@ -228,52 +228,29 @@ def _im_reply_target_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_REPLY_TARGET", "message": message}}
 
 
-def _direct_conversation_identity_ids(message_repo: Any, conversation: dict[str, Any]) -> list[str] | None:
-    if conversation.get("type") != "direct":
-        return None
-    identity_ids = conversation.get("identity_ids")
-    if isinstance(identity_ids, list) and len(identity_ids) == 2:
-        try:
-            return [message_repo.im_identity_id_for_row(row, "conversation.identity_ids[]") for row in identity_ids]
-        except ValueError:
-            return None
-    return None
-
-
-def _resolve_reply_conversation(
+def _resolve_reply_target_identity_id(
     *,
     message_repo: Any,
-    sender: dict[str, Any],
-    target: dict[str, Any] | None,
+    sender: dict[str, str],
     reply_to_id: str,
 ) -> dict[str, Any]:
     original_message = message_repo.get_im_message(reply_to_id)
     if original_message is None:
         return _im_reply_target_error("reply_to message not found")
-    conversation = message_repo.get_im_conversation(str(original_message.get("conversation_id") or ""))
-    if conversation is None:
-        return _im_reply_target_error("reply_to conversation not found")
-    identity_ids = _direct_conversation_identity_ids(message_repo, conversation)
-    if identity_ids is None:
-        return _im_reply_target_error("reply_to conversation is not a direct conversation")
-    sender_key = _identity_id(sender)
-    identity_set = set(identity_ids)
-    if sender_key not in identity_set:
-        return _im_reply_target_error("active sender is not in the reply_to conversation")
-    if target is None:
-        other = [row for row in identity_ids if row != sender_key]
-        if len(other) != 1:
-            return _im_reply_target_error("reply target cannot be derived from the direct conversation")
-        target = _identity_ref(other[0], "reply target")
-    else:
-        target_key = _identity_id(target)
-        if {sender_key, target_key} != identity_set:
-            return _im_reply_target_error("reply_to must stay in the same direct conversation")
+    try:
+        original_sender = _identity_ref(original_message.get("sender_identity"), "reply_to.sender_identity")
+        original_target = _identity_ref(original_message.get("target_identity"), "reply_to.target_identity")
+    except ValueError as exc:
+        return _im_reply_target_error(str(exc))
+    if original_target["id"] != sender["id"]:
+        return _im_reply_target_error("reply_to message is not addressed to the sender identity")
+    original_id = original_message.get("id")
+    if not isinstance(original_id, str) or not original_id.strip():
+        return _im_reply_target_error("reply_to message id is invalid")
     return {
         "ok": True,
-        "target": target,
-        "conversation_id": str(conversation["id"]),
-        "created_at": str(conversation.get("created_at") or message_repo.runtime_files.now_iso()),
+        "target_identity_id": original_sender["id"],
+        "reply_to": original_id.strip(),
     }
 
 
@@ -296,7 +273,7 @@ def _mark_reply_source_replied(
 def send_im_message(
     *,
     sender_identity: dict[str, Any],
-    to: dict[str, Any] | None,
+    target_identity: dict[str, Any],
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:
@@ -313,33 +290,20 @@ def send_im_message(
         return _im_payload_error("reply_to must be a non-empty string")
     reply_to_id = reply_to.strip() if isinstance(reply_to, str) else None
     try:
-        target = _identity_ref(to, "target_identity") if isinstance(to, dict) and to else None
+        target = _identity_ref(target_identity, "target_identity")
     except ValueError as exc:
         return _im_payload_error(str(exc))
+    if target["id"] == sender["id"]:
+        return _im_payload_error("target_identity must not be the sender identity")
 
     now = message_repo.runtime_files.now_iso()
-    if reply_to_id is not None:
-        resolved = _resolve_reply_conversation(
-            message_repo=message_repo,
-            sender=sender,
-            target=target,
-            reply_to_id=reply_to_id,
-        )
-        if resolved.get("ok") is not True:
-            return resolved
-        target = resolved["target"]
-        conversation_id = str(resolved["conversation_id"])
-        created_at = str(resolved.get("created_at") or now)
+    existing = message_repo.find_im_direct_conversation([sender, target])
+    if existing is None:
+        conversation_id = _new_im_id("conv")
+        created_at = now
     else:
-        if target is None:
-            return _im_payload_error("to is required for a new message")
-        existing = message_repo.find_im_direct_conversation([sender, target])
-        if existing is None:
-            conversation_id = _new_im_id("conv")
-            created_at = now
-        else:
-            conversation_id = str(existing["id"])
-            created_at = str(existing.get("created_at") or now)
+        conversation_id = str(existing["id"])
+        created_at = str(existing.get("created_at") or now)
     message_id = _new_im_id("msg")
     event_id = _new_im_id("imev")
     sequence = message_repo.next_im_sequence()
@@ -391,13 +355,6 @@ def send_im_message(
                 "sequence": sequence,
             }
         )
-    original_reply_state = None
-    if reply_to_id is not None:
-        original_reply_state = _mark_reply_source_replied(
-            message_repo=message_repo,
-            identity=sender,
-            message_id=reply_to_id,
-        )
 
     response = {
         "ok": True,
@@ -411,11 +368,57 @@ def send_im_message(
         "delivery_status": "accepted",
         "next_cursor": event_id,
     }
-    if reply_to_id is not None:
-        response["original_message_id"] = reply_to_id
-        response["original_final_disposition"] = (
-            original_reply_state.get("disposition") if isinstance(original_reply_state, dict) else None
-        )
+    return response
+
+
+def send_im_reply(
+    *,
+    sender_identity: dict[str, Any],
+    reply_to: str,
+    content: str,
+    actor_reachability_checker: ActorReachabilityChecker | None = None,
+) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    try:
+        sender = _identity_ref(sender_identity, "sender_identity")
+    except ValueError as exc:
+        return _im_payload_error(str(exc))
+    reply_to_id = reply_to.strip() if isinstance(reply_to, str) and reply_to.strip() else ""
+    if not reply_to_id:
+        return _im_payload_error("reply_to must be a non-empty string")
+    reply_target = _resolve_reply_target_identity_id(
+        message_repo=message_repo,
+        sender=sender,
+        reply_to_id=reply_to_id,
+    )
+    if reply_target.get("ok") is not True:
+        return reply_target
+    target_response = resolve_im_send_target(
+        sender_identity=sender,
+        target_identity_id=reply_target["target_identity_id"],
+        actor_reachability_checker=actor_reachability_checker,
+    )
+    if target_response.get("ok") is not True:
+        return target_response
+    result = send_im_message(
+        sender_identity=sender,
+        target_identity=target_response["target_identity"],
+        content=content,
+        reply_to=reply_target["reply_to"],
+    )
+    if result.get("ok") is not True:
+        return result
+    original_reply_state = _mark_reply_source_replied(
+        message_repo=message_repo,
+        identity=sender,
+        message_id=reply_target["reply_to"],
+    )
+    response = dict(result)
+    response["original_message_id"] = reply_target["reply_to"]
+    response["original_final_disposition"] = (
+        original_reply_state.get("disposition") if isinstance(original_reply_state, dict) else None
+    )
     return response
 
 
@@ -501,7 +504,6 @@ def send_external_session_message(
     external_session: dict[str, Any],
     target_identity: dict[str, Any],
     content: str,
-    reply_to: str | None = None,
 ) -> dict[str, Any]:
     try:
         sender = _external_session_identity_ref(external_session)
@@ -513,9 +515,30 @@ def send_external_session_message(
         return _im_payload_error(str(exc))
     result = send_im_message(
         sender_identity=sender,
-        to=target,
+        target_identity=target,
         content=content,
+    )
+    external_response = dict(result)
+    external_response.pop("next_cursor", None)
+    return external_response
+
+
+def send_external_session_reply(
+    *,
+    external_session: dict[str, Any],
+    reply_to: str,
+    content: str,
+    actor_reachability_checker: ActorReachabilityChecker | None = None,
+) -> dict[str, Any]:
+    try:
+        sender = _external_session_identity_ref(external_session)
+    except ValueError as exc:
+        return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
+    result = send_im_reply(
+        sender_identity=sender,
         reply_to=reply_to,
+        content=content,
+        actor_reachability_checker=actor_reachability_checker,
     )
     external_response = dict(result)
     external_response.pop("next_cursor", None)

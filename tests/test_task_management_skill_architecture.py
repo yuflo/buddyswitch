@@ -88,7 +88,10 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             "Use `message.send(target_identity_id=...)` when the IM task requires a new explicit actor or external target.",
             skill_text,
         )
-        self.assertIn("Use `message.send(reply_to=...)` when the IM task is a reply to a processable inbound message.", skill_text)
+        self.assertIn(
+            "Use `message.send(reply_to=...)` when replying to a processable inbound IM message; the runtime resolves the original sender through the normal target-identity path.",
+            skill_text,
+        )
         self.assertIn("Use `message.mark(..., disposition=absorbed)` only when no reply is needed.", skill_text)
         self.assertNotIn("source-" + "bound", skill_text)
         self.assertIn("Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.", skill_text)
@@ -170,7 +173,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
 
     def test_im_message_frame_capability_surfaces_do_not_teach_source_bound_only_rules(self) -> None:
         surfaces = [
-            ROOT / "tools" / "launcher" / "task_sys_runtime.py",
+            ROOT / "tools" / "launcher" / ("task_sys_" + "runtime.py"),
             ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md",
             ROOT / "scripts" / "env" / "tools" / "task_sys" / "tool.py",
             ROOT / "scripts" / "env" / "tools" / "task_sys" / "_impl.py",

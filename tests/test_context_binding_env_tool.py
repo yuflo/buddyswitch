@@ -552,22 +552,22 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         market_identity = {"id": market["actor_id"], "type": "actor"}
         root = message_service.send_im_message(
             sender_identity=pm_identity,
-            to=dev_identity,
+            target_identity=dev_identity,
             content="Need proof asset",
         )
         reply = message_service.send_im_message(
             sender_identity=design_identity,
-            to=dev_identity,
+            target_identity=dev_identity,
             content="Screenshot ready",
         )
         message_service.send_im_message(
             sender_identity=dev_identity,
-            to=pm_identity,
+            target_identity=pm_identity,
             content="Sent by dev only",
         )
         message_service.send_im_message(
             sender_identity=market_identity,
-            to=pm_identity,
+            target_identity=pm_identity,
             content="Not dev inbox",
         )
 
