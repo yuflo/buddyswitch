@@ -15,13 +15,13 @@ import subprocess
 import sys
 import threading
 from typing import Any
+from urllib.parse import urlencode
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-from env import cdp_browser_session as browser_session  # noqa: E402
 from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 
 
@@ -42,20 +42,49 @@ PAGE_SCOPED_USE_TOOLS = {
     "press_key",
 }
 BROWSER_SESSION_TOOL_DESCRIPTIONS = {
-    "new_page": "BuddySwitch chrome-devtools-cockpit opens or reuses a managed browser-session page, registers idle TTL, and does not activate the foreground browser.",
-    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect managed browser-session pages, target ids, current-page state, URLs, titles, and idle state before opening more pages.",
-    "select_page": "BuddySwitch selects an existing browser-session page without foreground activation and refreshes current-page idle state.",
-    "take_snapshot": "Use after list_pages/select_page to inspect the selected browser-session page content.",
-    "take_screenshot": "Use after list_pages/select_page to capture the selected browser-session page.",
-    "navigate_page": "Page-scoped browser-session action; navigation refreshes managed browser idle state.",
-    "click": "Page-scoped browser-session action; interaction refreshes managed browser idle state.",
-    "type_text": "Page-scoped browser-session action; interaction refreshes managed browser idle state.",
-    "evaluate_script": "Page-scoped browser-session action; evaluation refreshes managed browser idle state.",
-    "wait_for": "Page-scoped browser-session action; waiting refreshes managed browser idle state.",
-    "fill": "Page-scoped browser-session action; form filling refreshes managed browser idle state.",
-    "press_key": "Page-scoped browser-session action; keyboard input refreshes managed browser idle state.",
+    "new_page": "BuddySwitch chrome-devtools-cockpit forwards page creation to upstream Chrome DevTools MCP new_page with background=true and records the returned selected MCP pageId as BuddySwitch current/selected projection.",
+    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect upstream MCP pageId values, selected-page state, URLs, titles, and BuddySwitch current/selected projection.",
+    "select_page": "BuddySwitch selects the requested upstream MCP pageId without foreground activation and records it as the selected upstream MCP pageId lifecycle projection.",
+    "take_snapshot": "Use after list_pages/select_page to inspect the selected upstream MCP pageId content.",
+    "take_screenshot": "Use after list_pages/select_page to capture the selected upstream MCP pageId.",
+    "navigate_page": "Page-scoped upstream MCP action; navigation refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "click": "Page-scoped upstream MCP action; interaction refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "type_text": "Page-scoped upstream MCP action; interaction refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "evaluate_script": "Page-scoped upstream MCP action; evaluation refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "wait_for": "Page-scoped upstream MCP action; waiting refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "fill": "Page-scoped upstream MCP action; form filling refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "press_key": "Page-scoped upstream MCP action; keyboard input refreshes BuddySwitch selected upstream MCP pageId projection.",
+}
+SEARCH_ENGINES = ("google", "web", "reddit", "x")
+SEARCH_PAGE_TOOL = {
+    "name": "search_page",
+    "description": (
+        "BuddySwitch chrome-devtools-cockpit.search_page builds a supported search URL and forwards it "
+        "to upstream Chrome DevTools MCP new_page with background=true, then records the returned "
+        "selected MCP pageId as BuddySwitch current/selected projection."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["query"],
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Non-empty search query text.",
+            },
+            "engine": {
+                "type": "string",
+                "description": "Optional search engine.",
+                "enum": list(SEARCH_ENGINES),
+            },
+        },
+    },
 }
 SELECTED_URL_RE = re.compile(r"(https?://\S+)\s+\[selected\]", re.IGNORECASE)
+SELECTED_PAGE_LINE_RE = re.compile(
+    r"^\s*(?P<page_id>\d+)\s*:\s*(?P<url>\S+)(?:\s+.*?)?\s+\[selected\]\s*$",
+    re.IGNORECASE,
+)
 LIFECYCLE_WARNING_PREFIX = "Browser lifecycle warning:"
 
 
@@ -67,7 +96,14 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         help="Command used to start the upstream Chrome DevTools MCP server.",
     )
     parser.add_argument("--instance-root", help="BuddySwitch instance root for browser lifecycle state.")
+    parser.add_argument("--broker-socket", help="Runtime broker Unix socket path for product-mode browser acquisition.")
     return parser.parse_known_args(argv)
+
+
+def apply_broker_socket_arg(args: argparse.Namespace) -> None:
+    raw = getattr(args, "broker_socket", None)
+    if isinstance(raw, str) and raw.strip():
+        os.environ["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = raw.strip()
 
 
 def build_upstream_argv(args: argparse.Namespace, passthrough_args: list[str], browser_url: str) -> list[str]:
@@ -174,11 +210,14 @@ def load_static_tools() -> list[dict[str, Any]]:
 
 
 def tools_list_response(request: dict[str, Any]) -> dict[str, Any]:
+    tools = load_static_tools()
+    if not any(tool.get("name") == SEARCH_PAGE_TOOL["name"] for tool in tools):
+        tools.append(copy.deepcopy(SEARCH_PAGE_TOOL))
     return patch_tool_list_message(
         {
             "jsonrpc": request.get("jsonrpc", "2.0"),
             "id": request.get("id"),
-            "result": {"tools": load_static_tools()},
+            "result": {"tools": tools},
         }
     )
 
@@ -221,60 +260,55 @@ def _idle_hint_from_result(result: dict[str, Any] | None) -> str:
 def _refresh_current_idle_hint(
     *,
     root: Path,
-    target_id: str,
+    page_id: object,
     target_url: str | None = None,
-    page_id: object | None = None,
 ) -> str:
     result = browser_lifecycle.refresh_current_page_idle(
         instance_root=root,
-        target_id=target_id,
-        target_url=target_url,
         page_id=page_id,
+        target_url=target_url,
     )
     return _idle_hint_from_result(result)
 
 
-def _browser_session_open_text(result: browser_session.BrowserSessionOpenResult) -> str:
-    action = "opened" if result.kind == "opened" else "reused"
-    lines = [
-        f"BuddySwitch browser-session {action} page.",
-        f"state: {result.kind}",
-        f"target_url: {result.target_url}",
-        f"target_id: {result.target_id or '<unknown>'}",
-    ]
-    if result.page_count is not None:
-        if result.projected_page_count is not None and result.projected_page_count != result.page_count:
-            lines.append(f"page_count: {result.page_count} -> {result.projected_page_count}")
-        else:
-            lines.append(f"page_count: {result.page_count}")
-    if (
-        result.kind == "opened"
-        and result.projected_page_count is not None
-        and result.projected_page_count >= browser_session.BROWSER_PAGE_HINT_THRESHOLD
-    ):
-        lines.append(browser_session.BROWSER_PAGE_HINT_TEMPLATE.format(count=result.projected_page_count))
-    if result.idle_refreshed:
-        idle = f"Browser page idle refreshed: {result.idle_seconds}s" if result.idle_seconds is not None else "Browser page idle refreshed"
-        if result.idle_expires_at:
-            idle = f"{idle}; idle_expires_at: {result.idle_expires_at}"
-        lines.append(f"{idle}.")
-    return "\n".join(lines)
+def _normalize_search_query(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    query = value.strip()
+    return query or None
 
 
-def _browser_session_error_text(result: browser_session.BrowserSessionOpenResult) -> str:
-    lines = [
-        "BuddySwitch browser-session did not open a page.",
-        f"state: {result.kind}",
-    ]
-    if result.target_url:
-        lines.append(f"target_url: {result.target_url}")
-    if result.target_id:
-        lines.append(f"target_id: {result.target_id}")
-    if result.page_count is not None:
-        lines.append(f"page_count: {result.page_count}")
-    if result.message:
-        lines.append(result.message)
-    return "\n".join(lines)
+def _normalize_search_engine(value: object) -> str | None:
+    if value is None:
+        return "google"
+    if not isinstance(value, str):
+        return None
+    engine = value.strip().lower()
+    if not engine:
+        return "google"
+    if engine not in SEARCH_ENGINES:
+        return None
+    return engine
+
+
+def _build_search_url(query: str, engine: str) -> str:
+    if engine in {"google", "web"}:
+        return f"https://www.google.com/search?{urlencode({'q': query})}"
+    if engine == "reddit":
+        return f"https://www.reddit.com/search/?{urlencode({'q': query})}"
+    if engine == "x":
+        return f"https://x.com/search?{urlencode({'q': query, 'src': 'typed_query'})}"
+    raise ValueError(f"unsupported search engine: {engine}")
+
+
+def _new_page_message(message: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+    rewritten = copy.deepcopy(message)
+    rewritten_params = rewritten.setdefault("params", {})
+    rewritten_params["name"] = "new_page"
+    rewritten_arguments = dict(arguments)
+    rewritten_arguments["background"] = True
+    rewritten_params["arguments"] = rewritten_arguments
+    return rewritten
 
 
 def _format_utc(value: datetime) -> str:
@@ -296,58 +330,49 @@ def _parse_utc(value: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _target_id(target: dict[str, Any]) -> str | None:
-    for key in ("id", "targetId"):
-        value = target.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
 def _browser_session_state_text(*, browser_url: str, instance_root: str | None) -> str:
-    try:
-        targets = browser_lifecycle.read_page_targets(browser_url)
-    except Exception as exc:
-        detail = str(exc).replace(browser_url, "browser endpoint")
-        return f"BuddySwitch browser-session state:\n- unavailable: {detail}"
+    del browser_url
     root = _instance_root_path(instance_root)
-    idle_state: dict[str, Any] = {}
-    if root is not None:
-        try:
-            idle_state = browser_lifecycle._read_page_idle_state(root)
-        except Exception:
-            idle_state = {}
-    current_target_id = idle_state.get("current_target_id")
-    current_target_id = current_target_id.strip() if isinstance(current_target_id, str) and current_target_id.strip() else None
-    idle_targets = idle_state.get("targets")
-    idle_targets = idle_targets if isinstance(idle_targets, dict) else {}
+    if root is None:
+        return "BuddySwitch browser page resource projection:\n- unavailable: instance root missing"
+    try:
+        idle_state = browser_lifecycle._read_page_idle_state(root)
+    except Exception as exc:
+        return f"BuddySwitch browser page resource projection:\n- unavailable: {exc}"
+    current_page_id = idle_state.get("current_page_id")
+    current_page_id = current_page_id.strip() if isinstance(current_page_id, str) and current_page_id.strip() else None
+    selected_page_id = idle_state.get("selected_page_id")
+    selected_page_id = selected_page_id.strip() if isinstance(selected_page_id, str) and selected_page_id.strip() else None
+    idle_pages = idle_state.get("pages")
+    idle_pages = idle_pages if isinstance(idle_pages, dict) else {}
 
     lines = [
-        "BuddySwitch browser-session state:",
-        f"- current_target_id: {current_target_id or '<none>'}",
+        "BuddySwitch browser page resource projection:",
+        f"- current_page_id: {current_page_id or '<none>'}",
+        f"- selected_page_id: {selected_page_id or '<none>'}",
         "- pages:",
     ]
-    if not targets:
+    if not idle_pages:
         lines.append("  - <none>")
         return "\n".join(lines)
-    for target in targets:
-        target_id = _target_id(target) or "<unknown>"
-        title = target.get("title")
-        url = target.get("url")
-        target_idle = idle_targets.get(target_id)
-        target_idle = target_idle if isinstance(target_idle, dict) else {}
-        last_used_at = target_idle.get("last_used_at")
+    for page_id, page_state in sorted(idle_pages.items()):
+        if not isinstance(page_state, dict):
+            continue
+        title = page_state.get("title")
+        url = page_state.get("url")
+        last_used_at = page_state.get("last_used_at")
         expires_at = None
         parsed_last_used = _parse_utc(last_used_at) if isinstance(last_used_at, str) else None
         if parsed_last_used is not None:
             expires_at = _format_utc(parsed_last_used + timedelta(seconds=browser_lifecycle.BROWSER_PAGE_IDLE_SECONDS))
         lines.extend(
             [
-                f"  - target_id: {target_id}",
+                f"  - page_id: {page_id}",
                 f"    title: {title if isinstance(title, str) and title else '<untitled>'}",
                 f"    url: {url if isinstance(url, str) and url else '<unknown>'}",
-                f"    current: {'true' if target_id == current_target_id else 'false'}",
-                f"    idle_tracked: {'true' if target_idle else 'false'}",
+                f"    current: {'true' if page_id == current_page_id else 'false'}",
+                f"    selected: {'true' if page_id == selected_page_id else 'false'}",
+                "    idle_tracked: true",
             ]
         )
         if isinstance(last_used_at, str) and last_used_at.strip():
@@ -360,8 +385,8 @@ def _browser_session_state_text(*, browser_url: str, instance_root: str | None) 
 def _schedule_release_if_no_tracked_pages(root: Path) -> str | None:
     try:
         state = browser_lifecycle._read_page_idle_state(root)
-        targets = state.get("targets")
-        if isinstance(targets, dict) and targets:
+        pages = state.get("pages")
+        if isinstance(pages, dict) and pages:
             return None
         browser_lifecycle.schedule_browser_cockpit_release(
             instance_root=root,
@@ -375,15 +400,13 @@ def _schedule_release_if_no_tracked_pages(root: Path) -> str | None:
 def _refresh_page_idle_hint(
     *,
     root: Path,
-    target_id: str,
+    page_id: object,
     target_url: str | None = None,
-    page_id: object | None = None,
 ) -> str:
     result = browser_lifecycle.refresh_page_idle(
         instance_root=root,
-        target_id=target_id,
-        target_url=target_url,
         page_id=page_id,
+        target_url=target_url,
     )
     return _idle_hint_from_result(result)
 
@@ -403,6 +426,28 @@ def mutate_tool_call(
     if not isinstance(arguments, dict):
         return message, None, None
 
+    if name == "search_page":
+        query = _normalize_search_query(arguments.get("query"))
+        if query is None:
+            return None, tool_error_response(
+                message,
+                "BuddySwitch blocked search_page because query must be a non-empty string.",
+            ), None
+        engine = _normalize_search_engine(arguments.get("engine"))
+        if engine is None:
+            return None, tool_error_response(
+                message,
+                f"BuddySwitch blocked search_page because engine must be one of: {', '.join(SEARCH_ENGINES)}.",
+            ), None
+        target_url = _build_search_url(query, engine)
+        return _new_page_message(
+            message,
+            {
+                "url": target_url,
+                "background": True,
+            },
+        ), None, {"kind": "new_page", "source_tool": "search_page", "query": query, "engine": engine}
+
     if name == "new_page":
         if "isolatedContext" in arguments:
             return None, tool_error_response(
@@ -411,23 +456,7 @@ def mutate_tool_call(
                 "does not apply background creation to isolated browser contexts. This keeps the "
                 "chrome-devtools-cockpit path non-activating.",
             ), None
-        if _instance_root_path(instance_root) is None:
-            return None, tool_error_response(
-                message,
-                "BuddySwitch blocked new_page because chrome-devtools-cockpit requires --instance-root "
-                "to register browser lifecycle state before opening pages.",
-            ), None
-        root = _instance_root_path(instance_root)
-        assert root is not None
-        target_url = arguments.get("url")
-        result = browser_session.open_or_reuse_page(
-            instance_root=root,
-            browser_url=browser_url,
-            target_url=target_url if isinstance(target_url, str) else "",
-        )
-        if result.kind in {"opened", "reused"}:
-            return None, tool_success_response(message, _browser_session_open_text(result)), None
-        return None, tool_error_response(message, _browser_session_error_text(result)), None
+        return _new_page_message(message, arguments), None, {"kind": "new_page"}
 
     if name == "list_pages":
         return message, None, {"kind": "list_pages"}
@@ -501,7 +530,7 @@ def patch_tool_list_message(message: dict[str, Any]) -> dict[str, Any]:
             patch_schema_property(
                 tool,
                 "background",
-                "Ignored by BuddySwitch because chrome-devtools-cockpit opens managed browser-session pages without foreground activation.",
+                "BuddySwitch forces this to true for chrome-devtools-cockpit page creation.",
             )
             patch_schema_property(
                 tool,
@@ -552,20 +581,20 @@ def selected_url_from_response(message: dict[str, Any]) -> str | None:
     return match.group(1).strip()
 
 
-def unique_page_target_for_url(browser_url: str, target_url: str) -> str | None:
-    targets = browser_lifecycle.read_page_targets(browser_url)
-    matches = [
-        target.get("id")
-        for target in targets
-        if isinstance(target, dict)
-        and target.get("type") == "page"
-        and target.get("url") == target_url
-        and isinstance(target.get("id"), str)
-        and target.get("id")
-    ]
-    if len(matches) != 1:
-        return None
-    return str(matches[0])
+def selected_page_from_new_page_response(message: dict[str, Any]) -> dict[str, str] | None:
+    for line in tool_response_text(message).splitlines():
+        match = SELECTED_PAGE_LINE_RE.match(line)
+        if not match:
+            continue
+        page_id = match.group("page_id").strip()
+        target_url = match.group("url").strip()
+        if not page_id:
+            return None
+        selected_page = {"page_id": page_id}
+        if target_url:
+            selected_page["url"] = target_url
+        return selected_page
+    return None
 
 
 def _tool_response_succeeded(message: dict[str, Any]) -> bool:
@@ -585,11 +614,30 @@ def patch_tool_response_page_use_metadata(
     if isinstance(page_hint, str) and page_hint:
         patched = patch_tool_response_hint(patched, page_hint)
     kind = metadata.get("kind")
-    if kind != "new_page" and not _tool_response_succeeded(message):
+    if not _tool_response_succeeded(message):
         return patched
     root = _instance_root_path(instance_root)
     if root is None:
         return patched
+    if kind == "new_page":
+        selected_page = selected_page_from_new_page_response(message)
+        if selected_page is None:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened page id was not readable from upstream new_page response; browser idle was not refreshed.",
+            )
+        try:
+            hint = _refresh_current_idle_hint(
+                root=root,
+                page_id=selected_page["page_id"],
+                target_url=selected_page.get("url"),
+            )
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened page idle was not refreshed: {exc}",
+            )
+        return patch_tool_response_hint(patched, hint)
     if kind == "list_pages":
         if not _tool_response_succeeded(message):
             return patched
@@ -600,34 +648,17 @@ def patch_tool_response_page_use_metadata(
         return patched
     if kind == "select_page":
         page_id = metadata.get("page_id")
-        target_id: str | None = None
-        target_url: str | None = None
-        try:
-            target_id = browser_lifecycle.target_id_for_page_id(root, page_id)
-        except Exception:
-            target_id = None
-        if target_id is None:
-            target_url = selected_url_from_response(message)
-            if target_url is None:
-                return patch_tool_response_hint(
-                    patched,
-                    f"{LIFECYCLE_WARNING_PREFIX} selected page target was not resolved; browser idle was not refreshed.",
-                )
-            try:
-                target_id = unique_page_target_for_url(browser_url, target_url)
-            except Exception:
-                target_id = None
-            if target_id is None:
-                return patch_tool_response_hint(
-                    patched,
-                    f"{LIFECYCLE_WARNING_PREFIX} selected page URL was ambiguous or missing in Chrome target list; browser idle was not refreshed.",
-                )
+        if page_id is None:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} selected page id is missing; browser idle was not refreshed.",
+            )
+        target_url = selected_url_from_response(message)
         try:
             hint = _refresh_current_idle_hint(
                 root=root,
-                target_id=target_id,
-                target_url=target_url,
                 page_id=page_id,
+                target_url=target_url,
             )
         except Exception as exc:
             return patch_tool_response_hint(
@@ -637,19 +668,19 @@ def patch_tool_response_page_use_metadata(
         return patch_tool_response_hint(patched, hint)
     if kind == "current_page":
         try:
-            target_id = browser_lifecycle.current_target_id(root)
+            page_id = browser_lifecycle.selected_page_id(root)
         except Exception as exc:
             return patch_tool_response_hint(
                 patched,
-                f"{LIFECYCLE_WARNING_PREFIX} current page target was not readable; browser idle was not refreshed: {exc}",
+                f"{LIFECYCLE_WARNING_PREFIX} selected page was not readable; browser idle was not refreshed: {exc}",
             )
-        if target_id is None:
+        if page_id is None:
             return patch_tool_response_hint(
                 patched,
-                f"{LIFECYCLE_WARNING_PREFIX} current page target is unknown; browser idle was not refreshed.",
+                f"{LIFECYCLE_WARNING_PREFIX} selected page is unknown; browser idle was not refreshed.",
             )
         try:
-            hint = _refresh_page_idle_hint(root=root, target_id=target_id)
+            hint = _refresh_page_idle_hint(root=root, page_id=page_id)
         except Exception as exc:
             return patch_tool_response_hint(
                 patched,
@@ -995,6 +1026,7 @@ def run_proxy(args: argparse.Namespace, passthrough_args: list[str], instance_ro
 
 def main(argv: list[str] | None = None) -> int:
     args, passthrough_args = parse_args(sys.argv[1:] if argv is None else argv)
+    apply_broker_socket_arg(args)
     return run_proxy(args, passthrough_args, args.instance_root)
 
 

@@ -301,10 +301,6 @@ class BrowserAccess:
         del backend, engine
         return {"query": query, "requested": True}
 
-    def open_browser(self, query: str, engine: str | None = None) -> dict[str, Any]:
-        del engine
-        return {"query": query, "opened": True}
-
     def issue_evidence_token(self, target_type: str, target_id: str, mode: str | None = None) -> dict[str, Any]:
         return {
             "target_type": target_type,

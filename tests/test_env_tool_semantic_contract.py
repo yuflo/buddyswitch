@@ -39,7 +39,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
     "evidence": {"issue_browser", "approve_downgrade"},
-    "search": {"status", "request", "open_browser"},
+    "search": {"status", "request"},
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
     "task_sys": {"list", "get", "close", "need_parent"},
 }
@@ -76,7 +76,6 @@ _EXPECTED_ACTIVE_TASK_REQUIRED_ACTIONS = {
     "evidence.issue_browser",
     "evidence.approve_downgrade",
     "search.request",
-    "search.open_browser",
     "track.create",
     "track.add_comment",
     "track.resolve_comment_thread",
@@ -193,8 +192,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("artifact", "list_attachments", ("attachment", "summary", "get_attachment")),
             ("artifact", "get_attachment", ("attachment_id", "content_base64", "artifact_id")),
             ("track", "add_comment", ("discussion", "track", "message")),
-            ("search", "request", ("target_url", "without opening", "open_browser")),
-            ("search", "open_browser", ("browser", "open", "payload")),
+            ("search", "request", ("target_url", "without opening", "search_page")),
             ("evidence", "issue_browser", ("artifact", "token", "downgrade")),
             ("evidence", "approve_downgrade", ("downgrade", "reason", "browser")),
             ("context", "get", ("full", "catalog", "summarize")),
@@ -594,7 +592,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             manifest={"roles": [{"id": "market"}]},
             manifest_path=ROOT / "buddyswitch" / "manifest.toml",
         )
-        self.assertNotEqual((canonical.get("error") or {}).get("code"), "E_ENV_TOOL", msg=canonical)
+        self.assertFalse(canonical.get("ok"), msg=canonical)
+        self.assertEqual((canonical.get("error") or {}).get("code"), "E_ENV_TOOL", msg=canonical)
+        self.assertIn("open_browser", str((canonical.get("error") or {}).get("message", "")))
 
 
 if __name__ == "__main__":

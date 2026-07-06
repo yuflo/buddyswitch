@@ -866,6 +866,41 @@ class DaemonState:
             },
         )
 
+    def cancel_pending_schedules_by_source_owner(self, owner: str, *, now: str | None = None) -> list[dict[str, Any]]:
+        if not isinstance(owner, str) or not owner.strip():
+            raise ValueError("owner must be a non-empty string")
+        normalized_owner = owner.strip()
+        timestamp = _format_utc_timestamp(_parse_utc_timestamp(now or _utc_now()))
+        schedule_ids = [
+            item for item in self.payload.get("scheduled_trigger_ids", []) if isinstance(item, str) and item
+        ]
+        schedules = self.payload.get("scheduled_triggers")
+        if not isinstance(schedules, dict):
+            schedules = {}
+        canceled: list[dict[str, Any]] = []
+        for schedule_id in schedule_ids:
+            row = schedules.get(schedule_id)
+            if not isinstance(row, dict):
+                continue
+            source_context = row.get("source_context")
+            if not isinstance(source_context, dict):
+                continue
+            if row.get("status") != "pending" or source_context.get("owner") != normalized_owner:
+                continue
+            row.update(
+                {
+                    "status": "canceled",
+                    "updated_at": timestamp,
+                    "canceled_at": timestamp,
+                }
+            )
+            schedules[schedule_id] = row
+            canceled.append(dict(row))
+        if canceled:
+            self.payload["scheduled_triggers"] = schedules
+            self.save()
+        return canceled
+
 
 class DaemonContext:
     def __init__(

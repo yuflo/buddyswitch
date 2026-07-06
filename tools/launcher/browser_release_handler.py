@@ -70,10 +70,10 @@ def _browser_endpoint(payload: dict[str, Any]) -> str | None:
     return f"http://127.0.0.1:{port}"
 
 
-def _page_idle_targets(instance_root: Path) -> dict[str, Any]:
+def _page_idle_pages(instance_root: Path) -> dict[str, Any]:
     state = browser_lifecycle._read_page_idle_state(instance_root)
-    targets = state.get("targets")
-    return dict(targets) if isinstance(targets, dict) else {}
+    pages = state.get("pages")
+    return dict(pages) if isinstance(pages, dict) else {}
 
 
 def _parent_turn_is_running(runtime: Any) -> bool:
@@ -133,16 +133,14 @@ class BrowserReleaseHandler:
             root = _instance_root(context)
             if root is None:
                 return _skip("instance_root_missing")
-            if _page_idle_targets(root):
-                return _skip("page_idle_targets_remain")
+            if _page_idle_pages(root):
+                return _skip("page_idle_pages_remain")
             instance_payload = _fresh_instance_payload(context)
             actor_id = instance_payload.get("actor_id")
             if not isinstance(actor_id, str) or not actor_id.strip():
                 actor_id = local_actor["actor_id"]
             endpoint = _browser_endpoint(instance_payload)
-            if endpoint is None:
-                return _skip("browser_port_missing")
-            if _has_real_user_page(endpoint):
+            if endpoint is not None and _has_real_user_page(endpoint):
                 return _skip("real_user_page_present")
             result = browser_runtime_manager.release(
                 instance_root=root,

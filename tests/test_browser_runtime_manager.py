@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import contextlib
+import io
 import os
 import signal
 import socket
@@ -14,12 +16,15 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.launcher import browser_runtime_manager as manager  # noqa: E402
+from tools.launcher import daemon_core  # noqa: E402
 
 
 def free_port() -> int:
@@ -84,6 +89,16 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             encoding="utf-8",
         )
         return instance_json
+
+    def _daemon_state(self, instance_root: Path, actor_id: str = "act-dev-browser") -> Any:
+        return daemon_core.DaemonState.load(
+            instance_root=instance_root,
+            actor_id=actor_id,
+            main_thread_id="thr-main",
+        )
+
+    def _saved_daemon_state(self, instance_root: Path) -> dict[str, Any]:
+        return json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
 
     def _write_fake_chrome(self, path: Path, argv_path: Path) -> None:
         path.write_text(
@@ -272,6 +287,266 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             self.assertFalse((runtime_browser_dir / "page_idle.lock").exists())
             instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
             self.assertIsNone(instance_payload["browser_port"])
+
+    def test_release_cancels_browser_owned_pending_schedules_after_runtime_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            instance_root = temp_root_path / "instances" / "act-dev-browser"
+            port = free_port()
+            instance_json = self._write_instance(instance_root, browser_port=port)
+            runtime_browser_dir = instance_root / "runtime" / "browser"
+            runtime_browser_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_browser_dir / "page_idle.json").write_text("{}", encoding="utf-8")
+            (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
+            state = self._daemon_state(instance_root)
+            page_expired = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:00Z",
+            )
+            cockpit_release = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.cockpit.release",
+                payload={"reason": "idle_empty"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:01Z",
+            )
+            task_schedule = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="task.example",
+                payload={"task_id": "task-1"},
+                source_context={"owner": "task"},
+                now="2026-07-04T00:00:02Z",
+            )
+
+            result = manager.release(instance_root=instance_root, actor_id="act-dev-browser", reason="page_idle_empty")
+
+            self.assertTrue(result.get("ok"), msg=result)
+            self.assertEqual(result.get("canceled_browser_schedule_ids"), [page_expired["schedule_id"], cockpit_release["schedule_id"]])
+            self.assertEqual(result.get("canceled_browser_schedule_count"), 2)
+            self.assertFalse((runtime_browser_dir / "page_idle.json").exists())
+            self.assertFalse((runtime_browser_dir / "page_idle.lock").exists())
+            instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            self.assertIsNone(instance_payload["browser_port"])
+            saved = self._saved_daemon_state(instance_root)
+            self.assertEqual(saved["scheduled_triggers"][page_expired["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][cockpit_release["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][task_schedule["schedule_id"]]["status"], "pending")
+
+    def test_stop_cancels_browser_owned_pending_schedules_when_runtime_is_inactive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_instance(instance_root, browser_port=None)
+            state = self._daemon_state(instance_root)
+            page_expired = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:00Z",
+            )
+            task_schedule = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="task.example",
+                payload={"task_id": "task-1"},
+                source_context={"owner": "task"},
+                now="2026-07-04T00:00:01Z",
+            )
+
+            result = manager.stop(instance_root=instance_root, actor_id="act-dev-browser")
+
+            self.assertTrue(result.get("ok"), msg=result)
+            self.assertEqual(result.get("canceled_browser_schedule_ids"), [page_expired["schedule_id"]])
+            self.assertEqual(result.get("canceled_browser_schedule_count"), 1)
+            saved = self._saved_daemon_state(instance_root)
+            self.assertEqual(saved["scheduled_triggers"][page_expired["schedule_id"]]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"][task_schedule["schedule_id"]]["status"], "pending")
+
+    def test_release_cleans_owned_profile_listener_when_pid_marker_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            instance_root = temp_root_path / "instances" / "act-dev-browser"
+            port = free_port()
+            instance_json = self._write_instance(instance_root, browser_port=port)
+            chrome_bin = temp_root_path / "fake-chrome.py"
+            chrome_argv = temp_root_path / "chrome-argv.jsonl"
+            self._write_fake_chrome(chrome_bin, chrome_argv)
+            chrome_proc = self._start_fake_chrome(
+                chrome_bin,
+                port=port,
+                profile_dir=instance_root / "browser" / "profile",
+                log_file=instance_root / "browser" / "chrome.log",
+            )
+            (instance_root / "browser" / "chrome.pid").unlink(missing_ok=True)
+
+            result = manager.release(instance_root=instance_root, actor_id="act-dev-browser", reason="test_cleanup")
+
+            self.assertTrue(result.get("ok"), msg=result)
+            self.assertEqual(result.get("handled"), True)
+            self.assertEqual(result.get("ownership"), "owned")
+            self.assertTrue(wait_until(lambda: not pid_alive(chrome_proc.pid)), "release must stop profile-owned Chrome without a pid marker")
+            instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            self.assertIsNone(instance_payload["browser_port"])
+
+    def test_cli_release_cleans_owned_profile_listener_when_pid_marker_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            instance_root = temp_root_path / "instances" / "act-dev-browser"
+            port = free_port()
+            self._write_instance(instance_root, browser_port=port)
+            chrome_bin = temp_root_path / "fake-chrome.py"
+            chrome_argv = temp_root_path / "chrome-argv.jsonl"
+            self._write_fake_chrome(chrome_bin, chrome_argv)
+            chrome_proc = self._start_fake_chrome(
+                chrome_bin,
+                port=port,
+                profile_dir=instance_root / "browser" / "profile",
+                log_file=instance_root / "browser" / "chrome.log",
+            )
+            (instance_root / "browser" / "chrome.pid").unlink(missing_ok=True)
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = manager.main(
+                    [
+                        "release",
+                        "--instance-root",
+                        str(instance_root),
+                        "--actor-id",
+                        "act-dev-browser",
+                        "--reason",
+                        "test_cleanup",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(payload.get("ok"), msg=payload)
+            self.assertEqual(payload.get("handled"), True)
+            self.assertEqual(payload.get("ownership"), "owned")
+            self.assertTrue(wait_until(lambda: not pid_alive(chrome_proc.pid)), "CLI release must stop profile-owned Chrome without a pid marker")
+
+    def test_release_cleans_owned_profile_listener_when_browser_port_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            instance_root = temp_root_path / "instances" / "act-dev-browser"
+            port = free_port()
+            instance_json = self._write_instance(instance_root, browser_port=None)
+            chrome_bin = temp_root_path / "fake-chrome.py"
+            chrome_argv = temp_root_path / "chrome-argv.jsonl"
+            self._write_fake_chrome(chrome_bin, chrome_argv)
+            chrome_proc = self._start_fake_chrome(
+                chrome_bin,
+                port=port,
+                profile_dir=instance_root / "browser" / "profile",
+                log_file=instance_root / "browser" / "chrome.log",
+            )
+
+            result = manager.release(instance_root=instance_root, actor_id="act-dev-browser", reason="orphan_repair")
+
+            self.assertTrue(result.get("ok"), msg=result)
+            self.assertEqual(result.get("handled"), True)
+            self.assertEqual(result.get("ownership"), "orphaned_owned")
+            self.assertTrue(wait_until(lambda: not pid_alive(chrome_proc.pid)), "release must stop profile-owned Chrome even when browser_port is missing")
+            instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            self.assertIsNone(instance_payload["browser_port"])
+
+    def test_profile_owned_processes_matches_canonical_user_data_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            real_root = temp_root_path / "real-root"
+            alias_root = temp_root_path / "alias-root"
+            real_profile = real_root / "instances" / "act-dev-browser" / "browser" / "profile"
+            real_profile.mkdir(parents=True, exist_ok=True)
+            os.symlink(real_root, alias_root)
+            alias_profile = alias_root / "instances" / "act-dev-browser" / "browser" / "profile"
+            canonical_profile = alias_profile.resolve(strict=False)
+            self.assertNotEqual(str(alias_profile), str(canonical_profile))
+            process = manager.ProcessInfo(
+                pid=424242,
+                pgid=424242,
+                command_line=f"Google Chrome --user-data-dir={canonical_profile} --remote-debugging-port=9222",
+            )
+
+            with (
+                mock.patch.object(manager, "_all_processes", return_value=[process]),
+                mock.patch.object(manager, "_pid_alive", return_value=True),
+            ):
+                owned = manager._profile_owned_processes(alias_profile)
+
+            self.assertEqual([row.pid for row in owned], [process.pid])
+
+    def test_release_failure_preserves_state_until_process_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            instance_root = temp_root_path / "instances" / "act-dev-browser"
+            port = free_port()
+            instance_json = self._write_instance(instance_root, browser_port=port)
+            chrome_bin = temp_root_path / "fake-chrome.py"
+            chrome_argv = temp_root_path / "chrome-argv.jsonl"
+            self._write_fake_chrome(chrome_bin, chrome_argv)
+            chrome_proc = self._start_fake_chrome(
+                chrome_bin,
+                port=port,
+                profile_dir=instance_root / "browser" / "profile",
+                log_file=instance_root / "browser" / "chrome.log",
+            )
+            browser_dir = instance_root / "browser"
+            runtime_browser_dir = instance_root / "runtime" / "browser"
+            browser_dir.mkdir(parents=True, exist_ok=True)
+            runtime_browser_dir.mkdir(parents=True, exist_ok=True)
+            pid_file = browser_dir / "chrome.pid"
+            page_idle_file = runtime_browser_dir / "page_idle.json"
+            pid_file.write_text(f"{chrome_proc.pid}\n", encoding="utf-8")
+            page_idle_file.write_text('{"pages": {}}\n', encoding="utf-8")
+            state = self._daemon_state(instance_root)
+            browser_schedule = state.create_schedule(
+                delay_seconds=600,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-1"},
+                source_context={"owner": "browser"},
+                now="2026-07-04T00:00:00Z",
+            )
+
+            with (
+                mock.patch.object(manager, "_terminate_pid", lambda _pid: None),
+                mock.patch.object(manager, "_terminate_pgid", lambda _pgid: False),
+            ):
+                result = manager.release(instance_root=instance_root, actor_id="act-dev-browser", reason="test_cleanup")
+
+            self.assertFalse(result.get("ok"), msg=result)
+            self.assertTrue(pid_alive(chrome_proc.pid), "test setup must leave Chrome alive when termination fails")
+            self.assertTrue(pid_file.exists(), "failed release must preserve pid marker for diagnosis")
+            self.assertTrue(page_idle_file.exists(), "failed release must preserve page idle state for diagnosis")
+            instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            self.assertEqual(instance_payload["browser_port"], port)
+            saved = self._saved_daemon_state(instance_root)
+            self.assertEqual(saved["scheduled_triggers"][browser_schedule["schedule_id"]]["status"], "pending")
+
+    def test_status_reports_orphaned_owned_browser_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            instance_root = temp_root_path / "instances" / "act-dev-browser"
+            port = free_port()
+            self._write_instance(instance_root, browser_port=None)
+            chrome_bin = temp_root_path / "fake-chrome.py"
+            chrome_argv = temp_root_path / "chrome-argv.jsonl"
+            self._write_fake_chrome(chrome_bin, chrome_argv)
+            self._start_fake_chrome(
+                chrome_bin,
+                port=port,
+                profile_dir=instance_root / "browser" / "profile",
+                log_file=instance_root / "browser" / "chrome.log",
+            )
+
+            result = manager.status(instance_root=instance_root, actor_id="act-dev-browser")
+
+            self.assertTrue(result.get("ok"), msg=result)
+            self.assertFalse(result.get("ready"), msg=result)
+            self.assertEqual(result.get("browser_port"), None)
+            self.assertEqual(result.get("ownership"), "orphaned_owned")
 
     def test_release_clears_foreign_endpoint_without_killing_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

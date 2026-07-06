@@ -6,7 +6,7 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 
 ## Required Behavior
 
-- Start browser discovery from `chrome-devtools-cockpit`. When a focused search query needs URL construction, `search__open_browser` may wrap the query, but browser page ownership and follow-up inspection remain in cockpit/browser-session.
+- Start browser discovery from `chrome-devtools-cockpit`; use `chrome-devtools-cockpit.search_page` for browser-native search page opening when starting from a query, then continue with cockpit page ownership and follow-up inspection. Use `search__request` only for non-opening URL planning and `search__status` for capability status.
 - Use `track.open` as the shared publication context before cross-role handoff decisions.
 - Publish market-facing evidence outputs through `track.add_material` / `track.add_proof` when they should become shared track artifacts.
 - Write market deliverables via `artifact.create_revision` using `template` + markdown `body`; draft creation stays private until `track.add_material` / `track.add_proof` publishes it to a track.

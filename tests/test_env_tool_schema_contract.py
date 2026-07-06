@@ -132,8 +132,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         context_summarize = catalog.get_action_definition("context", "summarize").input_schema
         evidence_issue = catalog.get_action_definition("evidence", "issue_browser").input_schema
         evidence_approve = catalog.get_action_definition("evidence", "approve_downgrade").input_schema
+        self.assertEqual(set(catalog.supported_actions("search")), {"request", "status"})
         search_request = catalog.get_action_definition("search", "request").input_schema
-        search_open = catalog.get_action_definition("search", "open_browser").input_schema
         message_send_action = catalog.get_action_definition("message", "send")
         message_send = message_send_action.input_schema
         message_contacts_action = catalog.get_action_definition("message", "contacts")
@@ -240,7 +240,6 @@ class EnvToolSchemaContractTests(unittest.TestCase):
 
         self.assertEqual(search_request["properties"]["backend"].get("enum"), ["browser", "search_api"])
         self.assertEqual(search_request["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
-        self.assertEqual(search_open["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
 
         self.assertEqual(message_send.get("required", []), ["content"])
         self.assertNotIn("to_role", message_send.get("properties", {}))

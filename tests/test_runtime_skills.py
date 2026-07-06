@@ -23,6 +23,8 @@ import runtime_skills  # noqa: E402
 
 class RuntimeSkillsTests(unittest.TestCase):
     _OLD_FLAG_PATTERNS = (
+        "search__open_browser",
+        "search.open_browser",
         "search open-browser --query",
         "search open_browser --query",
         "--query",
@@ -246,10 +248,14 @@ class RuntimeSkillsTests(unittest.TestCase):
             text = self._market_skill_text(skill_id)
             lowered = text.lower()
             with self.subTest(skill=skill_id):
-                self.assertIn("search__open_browser", lowered)
                 self.assertIn("chrome-devtools-cockpit", lowered)
-                self.assertIn("query-to-url wrapper", lowered)
+                self.assertIn("chrome-devtools-cockpit.search_page", lowered)
+                self.assertIn("search__request", lowered)
+                self.assertIn("search__status", lowered)
+                self.assertIn("url planning without opening", lowered)
                 self.assertIn("native buddyswitch env mcp tools", lowered)
+                self.assertNotIn("search__open_browser", lowered)
+                self.assertNotIn("search.open_browser", lowered)
                 self.assertNotIn("use native `search__open_browser`", lowered)
                 self.assertNotIn("start discovery from native `search__open_browser`", lowered)
                 self.assertNotIn("python3 scripts/env/client.py", lowered)

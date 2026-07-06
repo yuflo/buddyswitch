@@ -269,7 +269,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         else:
             self.assertNotIn(repo_root_resolved, config_text.replace(str(repo_git_common_dir), ""))
 
-    def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path) -> None:
+    def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path, *, broker_socket: str) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
         self.assertIn("--", argv)
         separator_index = argv.index("--")
@@ -279,6 +279,9 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         upstream_index = argv.index("--upstream-command")
         self.assertEqual(argv[upstream_index + 1], "npx chrome-devtools-mcp@1.1.1")
         self.assertIn(f"--instance-root={instance_root}", argv)
+        self.assertIn("--broker-socket", argv)
+        broker_index = argv.index("--broker-socket")
+        self.assertEqual(argv[broker_index + 1], broker_socket)
         self.assertFalse(any(str(item).startswith("--browser-url") for item in argv), msg=argv)
         self.assertNotIn("chrome-devtools-mcp@latest", argv)
 
@@ -1737,20 +1740,22 @@ exec "$real_git" "$@"
                 (workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists()
             )
 
-    def test_search_open_browser_helper_stays_inside_runtime_sparse_surface(self) -> None:
+    def test_search_env_tool_does_not_project_browser_open_helper(self) -> None:
         workspace_text = (ROOT / "tools" / "launcher" / "workspace.sh").read_text(encoding="utf-8")
         search_text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
 
         self.assertRegex(workspace_text, r"(?m)^scripts/env/$")
         self.assertRegex(workspace_text, r"(?m)^tools$")
-        self.assertIn('request_runtime_broker("browser.open_url"', search_text)
-        self.assertIn("browser_client.open_url", search_text)
+        self.assertNotIn('request_runtime_broker("browser.open_url"', search_text)
+        self.assertNotIn("browser_client.open_url", search_text)
+        self.assertNotIn("def open_browser_for_active_instance", search_text)
+        self.assertNotIn("'open_browser': open_browser_for_active_instance", search_text)
         self.assertNotIn("from env import cdp_browser_" + "session as browser_session", search_text)
-        self.assertNotIn("browser_session." + "open_or_reuse_page", search_text)
+        self.assertNotIn("browser_" + "session." + "open_or_" + "reuse_page", search_text)
         self.assertNotIn("ensure_" + "browser_url_for_instance", search_text)
         self.assertNotIn("browser_url_from_" + "instance_payload", search_text)
         self.assertNotIn("cdp_background_page.py", search_text)
-        self.assertNotIn("Target.createTarget", search_text)
+        self.assertNotIn("Target." + "createTarget", search_text)
         self.assertNotIn("BUDDYSWITCH_SEARCH_BROWSER_" + "ENSURE_COMMAND", search_text)
         self.assertNotIn("tools" + "/launcher", search_text)
         self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
@@ -2040,9 +2045,11 @@ exec "$real_git" "$@"
 
             self.assertEqual(completed.returncode, 2, msg=completed.stderr)
             self.assertIn("Native Codex web_search is disabled in BuddySwitch product sessions.", completed.stderr)
-            self.assertIn("Use chrome-devtools-cockpit for browser-native discovery.", completed.stderr)
+            self.assertIn("Use chrome-devtools-cockpit.search_page for browser-native search page opening.", completed.stderr)
+            self.assertIn("Use search__request only for non-opening URL planning.", completed.stderr)
             self.assertIn("search__status", completed.stderr)
-            self.assertIn("Use search__open_browser only for search query URL construction.", completed.stderr)
+            self.assertNotIn("search__open_browser", completed.stderr)
+            self.assertNotIn("search.open_browser", completed.stderr)
             self.assertIn("python3 scripts/turn_runtime.py status", completed.stderr)
             self.assertNotIn("Use native BuddySwitch env MCP tool: search__open_browser", completed.stderr)
             self.assertNotIn("python3 scripts/env/client.py", completed.stderr)
@@ -2478,6 +2485,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
 
             for relative_path in (
@@ -3157,6 +3165,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
 
     def test_input_creates_task_sys_task_when_thread_idle(self) -> None:
@@ -5382,7 +5391,7 @@ exec "$real_git" "$@"
             (runtime_browser_dir / "cockpit-upstream.pid").write_text(f"{upstream_proc.pid}\n", encoding="utf-8")
             (runtime_browser_dir / "cockpit-upstream.pgid").write_text(f"{upstream_pgid}\n", encoding="utf-8")
             (runtime_browser_dir / "page_idle.json").write_text(
-                json.dumps({"targets": {}, "page_id_to_target_id": {}}, ensure_ascii=True) + "\n",
+                json.dumps({"pages": {}}, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
@@ -5404,6 +5413,86 @@ exec "$real_git" "$@"
             self.assertFalse((runtime_browser_dir / "page_idle.lock").exists())
             stored = json.loads(instance_json.read_text(encoding="utf-8"))
             self.assertIsNone(stored["browser_port"])
+
+    def test_stop_json_cancels_browser_owned_pending_schedules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_root = Path(str(ctx["instance_root"]))
+            daemon_state_path = instance_root / "runtime" / "daemon" / "state.json"
+            daemon_state = json.loads(daemon_state_path.read_text(encoding="utf-8"))
+            daemon_state["scheduled_trigger_ids"] = ["schedule-1", "schedule-2", "schedule-3"]
+            daemon_state["scheduled_triggers"] = {
+                "schedule-1": {
+                    "schedule_id": "schedule-1",
+                    "type": "browser.page.expired",
+                    "payload": {"target_id": "target-1"},
+                    "source_context": {"owner": "browser"},
+                    "status": "pending",
+                    "created_at": "2026-07-04T00:00:00Z",
+                    "updated_at": "2026-07-04T00:00:00Z",
+                    "due_at": "2026-07-04T00:10:00Z",
+                    "delivered_at": None,
+                    "canceled_at": None,
+                    "last_error": None,
+                    "dispatch_result": None,
+                },
+                "schedule-2": {
+                    "schedule_id": "schedule-2",
+                    "type": "browser.cockpit.release",
+                    "payload": {"reason": "idle_empty"},
+                    "source_context": {"owner": "browser"},
+                    "status": "pending",
+                    "created_at": "2026-07-04T00:00:01Z",
+                    "updated_at": "2026-07-04T00:00:01Z",
+                    "due_at": "2026-07-04T00:10:01Z",
+                    "delivered_at": None,
+                    "canceled_at": None,
+                    "last_error": None,
+                    "dispatch_result": None,
+                },
+                "schedule-3": {
+                    "schedule_id": "schedule-3",
+                    "type": "task.example",
+                    "payload": {"task_id": "task-1"},
+                    "source_context": {"owner": "task"},
+                    "status": "pending",
+                    "created_at": "2026-07-04T00:00:02Z",
+                    "updated_at": "2026-07-04T00:00:02Z",
+                    "due_at": "2026-07-04T00:10:02Z",
+                    "delivered_at": None,
+                    "canceled_at": None,
+                    "last_error": None,
+                    "dispatch_result": None,
+                },
+            }
+            daemon_state_path.write_text(json.dumps(daemon_state, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", str(ctx["actor_id"]), "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(json.loads(stop_result.stdout), {"actor_id": ctx["actor_id"], "status": "inactive"})
+            saved = json.loads(daemon_state_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"]["schedule-2"]["status"], "canceled")
+            self.assertEqual(saved["scheduled_triggers"]["schedule-3"]["status"], "pending")
+            self.assertFalse(
+                [
+                    row
+                    for row in saved["scheduled_triggers"].values()
+                    if row.get("status") == "pending" and row.get("source_context", {}).get("owner") == "browser"
+                ]
+            )
 
     def test_stop_json_marks_instance_inactive_after_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -6945,6 +7034,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", payload["config_toml"])
             self.assertNotIn("--browser-url", payload["config_toml"])
@@ -7082,6 +7172,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", payload["config_toml"])
             self.assertNotIn("--browser-url", payload["config_toml"])
@@ -7297,6 +7388,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 timeline[cockpit_mcp_index]["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertFalse(any(entry.get("path") == "Target.createTarget" for entry in timeline))
             self.assertFalse(
@@ -7378,6 +7470,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertFalse(any(call.get("path") == "Target.createTarget" for call in calls))
             self.assertFalse(any(call.get("path") == "/json/new" for call in calls))
@@ -10018,11 +10111,8 @@ exit 0
 
     def test_env_browser_release_cleans_owned_runtime_state(self) -> None:
         upstream_proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
-        chrome_proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
         upstream_pgid = os.getpgid(upstream_proc.pid)
-        chrome_pgid = os.getpgid(chrome_proc.pid)
         self.addCleanup(self._terminate_registered_process, upstream_proc.pid, upstream_pgid)
-        self.addCleanup(self._terminate_registered_process, chrome_proc.pid, chrome_pgid)
 
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -10030,6 +10120,19 @@ exit 0
             shared_root = source_home_path / ".codex-buddyswitch"
             actor_id = "act-pm-browser-release"
             instance_root, _ = self._write_instance_record(shared_root, actor_id, browser_port=9333)
+            profile_dir = instance_root / "browser" / "profile"
+            chrome_proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(60)",
+                    "--remote-debugging-port=9333",
+                    f"--user-data-dir={profile_dir}",
+                ],
+                start_new_session=True,
+            )
+            chrome_pgid = os.getpgid(chrome_proc.pid)
+            self.addCleanup(self._terminate_registered_process, chrome_proc.pid, chrome_pgid)
             browser_dir = instance_root / "browser"
             runtime_browser_dir = instance_root / "runtime" / "browser"
             browser_dir.mkdir(parents=True, exist_ok=True)
@@ -10038,7 +10141,7 @@ exit 0
             (runtime_browser_dir / "cockpit-upstream.pid").write_text(f"{upstream_proc.pid}\n", encoding="utf-8")
             (runtime_browser_dir / "cockpit-upstream.pgid").write_text(f"{upstream_pgid}\n", encoding="utf-8")
             (runtime_browser_dir / "page_idle.json").write_text(
-                json.dumps({"targets": {}, "page_id_to_target_id": {}}, ensure_ascii=True) + "\n",
+                json.dumps({"pages": {}}, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
