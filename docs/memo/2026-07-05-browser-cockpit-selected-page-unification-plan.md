@@ -358,7 +358,7 @@ Expected new tests:
 
 ### Phase 5: End-To-End CLI Acceptance
 
-Use real actor CLI simulation without `buddyswitch-user-simulation-testing`.
+Use real actor CLI simulation directly.
 
 Required actor flow:
 

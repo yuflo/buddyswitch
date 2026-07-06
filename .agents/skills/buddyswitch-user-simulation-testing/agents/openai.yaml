@@ -1,4 +1,0 @@
-interface:
-  display_name: "BuddySwitch User Simulation Testing"
-  short_description: "Probe BuddySwitch user paths with cleanup proof"
-  default_prompt: "Use $buddyswitch-user-simulation-testing on docs/memo/<feature-memo>.md or a target behavior/existing evidence path to infer the effect, drive the smallest BuddySwitch user path, capture cleanup proof, and report only an evidence-backed stability conclusion."
