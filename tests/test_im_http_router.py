@@ -16,6 +16,7 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
+from env.repos import identities as identity_repo  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 from tools.launcher import im_http_router  # noqa: E402
@@ -24,6 +25,12 @@ from tools.launcher import im_http_router  # noqa: E402
 class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _actor_identity(self) -> dict[str, str]:
         identity_id = self._runtime_actor_id(role="market", label="target")
+        identity_repo.save_actor_identity_profile(
+            {
+                "identity": {"id": identity_id, "type": "actor"},
+                "role_id": "market",
+            }
+        )
         return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": "market"}
 
     def test_external_http_contract_send_events_get_and_mark(self) -> None:
@@ -39,6 +46,11 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ]
             if role_id in {None, "market"}
             else [],
+            actor_reachability_checker=lambda *, target_identity_id: {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {**actor_identity, "status": "online"},
+            },
             actor_delivery_handler=lambda payload: handling_calls.append(dict(payload)) or {"actor_handling_status": "submitted"},
         )
 
@@ -284,8 +296,46 @@ class ImHttpRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertEqual(status, 400)
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_IM_PAYLOAD")
-        self.assertIn("target_identity_id", payload["error"]["message"])
+        self.assertEqual(payload["error"]["code"], "E_IM_TARGET")
+        self.assertIn("actor identity profile not found", payload["error"]["message"])
+
+    def test_external_http_send_uses_reachability_checker_not_actor_lister(self) -> None:
+        actor_identity = self._actor_identity()
+        list_calls: list[str | None] = []
+        reachability_calls: list[str] = []
+
+        def list_actors(role_id: str | None) -> list[dict[str, object]]:
+            list_calls.append(role_id)
+            return [{**actor_identity, "status": "online"}]
+
+        def check_actor_reachability(*, target_identity_id: str) -> dict[str, object]:
+            reachability_calls.append(target_identity_id)
+            return {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {**actor_identity, "status": "online"},
+            }
+
+        router = im_http_router.ImHttpRouter(
+            actor_lister=list_actors,
+            actor_reachability_checker=check_actor_reachability,
+            actor_delivery_handler=lambda _payload: {"actor_handling_status": "submitted"},
+        )
+        status, created = router.handle("POST", "/api/im/external-sessions", b'{"display_name":"local smoke"}', {})
+        self.assertEqual(status, 200)
+        key = created["external_session_key"]
+
+        status, sent = router.handle(
+            "POST",
+            "/api/im/messages",
+            json.dumps({"target_identity_id": actor_identity["identity_id"], "content": "ping"}).encode("utf-8"),
+            {"Authorization": f"Bearer {key}"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(sent.get("ok"), msg=sent)
+        self.assertEqual(list_calls, [])
+        self.assertEqual(reachability_calls, [actor_identity["identity_id"]])
 
 
 if __name__ == "__main__":

@@ -118,6 +118,12 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_external_send_actor_reply_to_external_visible_once_without_cursor(self) -> None:
         actor_identity_id = self._runtime_actor_id(role="market", label="reply-loop")
+        identities.save_actor_identity_profile(
+            {
+                "identity": {"id": actor_identity_id, "type": "actor"},
+                "role_id": "market",
+            }
+        )
         daemon = _WakeDaemon()
         router = im_http_router.ImHttpRouter(
             actor_lister=lambda _role_id: [
@@ -128,6 +134,11 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "status": "online",
                 }
             ],
+            actor_reachability_checker=lambda *, target_identity_id: {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {"identity_id": actor_identity_id},
+            },
             actor_delivery_handler=daemon.wake_im_actor,
         )
         key = self._create_external_session(router)
@@ -386,15 +397,13 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     self.wake_calls: list[dict[str, Any]] = []
 
                 def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
+                    raise AssertionError("message.send must not call list_online_actors")
+
+                def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
                     return {
-                        "actors": [
-                            {
-                                "identity_id": target_identity_id,
-                                "identity": {"id": target_identity_id, "type": "actor"},
-                                "role_id": target_role_id,
-                                "status": "online",
-                            }
-                        ]
+                        "reachability_status": "online",
+                        "target_identity_id": target_identity_id,
+                        "record": {"identity_id": target_identity_id},
                     }
 
                 def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:

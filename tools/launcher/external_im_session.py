@@ -11,6 +11,7 @@ from env.services import messages as message_service
 
 ActorLister = Callable[[Optional[str]], list[dict[str, Any]]]
 ActorDeliveryHandler = Callable[[dict[str, Any]], dict[str, Any]]
+ActorReachabilityChecker = Callable[..., dict[str, Any]]
 
 
 def _auth_error(message: str) -> dict[str, Any]:
@@ -29,9 +30,11 @@ class ExternalImSession:
         self,
         *,
         actor_lister: ActorLister | None = None,
+        actor_reachability_checker: ActorReachabilityChecker | None = None,
         actor_delivery_handler: ActorDeliveryHandler | None = None,
     ) -> None:
         self._actor_lister = actor_lister or (lambda _role_id: [])
+        self._actor_reachability_checker = actor_reachability_checker
         self._actor_delivery_handler = actor_delivery_handler
 
     def create_external_session(self, *, display_name: str) -> dict[str, Any]:
@@ -51,7 +54,7 @@ class ExternalImSession:
         content: str,
         reply_to: Any = None,
     ) -> dict[str, Any]:
-        target_response = self._actor_target_identity(target_identity_id, field="target_identity_id")
+        target_response = self._send_target_identity(external_session, target_identity_id)
         if target_response.get("ok") is not True:
             return target_response
         result = message_service.send_external_session_message(
@@ -97,7 +100,7 @@ class ExternalImSession:
         identity_response = _external_identity_from_session(external_session)
         if identity_response.get("ok") is not True:
             return identity_response
-        target_response = self._actor_target_identity(identity_id, field="identity_id")
+        target_response = message_service.identity_target_for_direct_conversation(identity_id, field="identity_id")
         if target_response.get("ok") is not True:
             return target_response
         return message_service.get_im_direct_conversation(
@@ -142,9 +145,15 @@ class ExternalImSession:
             reason=reason,
         )
 
-    def _actor_target_identity(self, value: Any, *, field: str) -> dict[str, Any]:
-        return message_service.identity_for_current_send_target(
-            self._actor_lister(None),
-            value,
-            field=field,
+    def _send_target_identity(self, external_session: dict[str, Any], value: Any) -> dict[str, Any]:
+        identity_response = _external_identity_from_session(external_session)
+        if identity_response.get("ok") is not True:
+            return identity_response
+        resolved = message_service.resolve_im_send_target(
+            sender_identity=identity_response["identity"],
+            target_identity_id=value,
+            actor_reachability_checker=self._actor_reachability_checker,
         )
+        if resolved.get("ok") is not True:
+            return resolved
+        return {"ok": True, "identity": resolved["target_identity"]}

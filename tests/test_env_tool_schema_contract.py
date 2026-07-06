@@ -300,7 +300,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         for snippet in (
             "central im message",
             "target identity",
-            "reach policy",
+            "im target resolver",
+            "actor runtime reachability",
+            "identity profiles",
             "reply_to",
             "processable inbound",
             "target_identity_id is only required for a new target-identity message",
@@ -317,6 +319,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         ):
             self.assertIn(snippet, send_contract_text)
         self.assertNotIn("actor-directed", send_contract_text)
+        self.assertNotIn("reach policy", send_contract_text)
+        self.assertNotIn("use message.contacts", send_contract_text)
         self.assertNotIn("tasks", message_send_action.does_not_write)
         mark_contract_text = " ".join(
             str(row)
@@ -341,6 +345,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertIn("self", str(message_contacts_action.description).lower())
         message_contacts_contract = json.dumps(asdict(message_contacts_action), ensure_ascii=True, sort_keys=True).lower()
         self.assertIn("actor runtime presence", message_contacts_contract)
+        self.assertIn("optional actor discovery", message_contacts_contract)
+        self.assertIn("read-only view", message_contacts_contract)
+        self.assertIn("does not decide message.send permission", message_contacts_contract)
 
         self.assertEqual(message_conversation_action.kind, "read")
         self.assertEqual(message_conversation_action.mutates, "none")

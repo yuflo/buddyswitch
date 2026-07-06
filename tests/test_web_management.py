@@ -35,6 +35,16 @@ SPEC.loader.exec_module(WEB_MANAGEMENT)
 NO_PROXY_OPENER = build_opener(ProxyHandler({}))
 
 from env.services import messages as message_service  # noqa: E402
+from env.repos import identities as identity_repo  # noqa: E402
+
+
+def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:
+    identity_repo.save_actor_identity_profile(
+        {
+            "identity": {"id": actor_id, "type": "actor"},
+            "role_id": role_id,
+        }
+    )
 
 
 def _restore_env_value(name: str, value: str | None) -> None:
@@ -421,6 +431,14 @@ class WebManagementUnitTests(unittest.TestCase):
             "event_id": "imev-1",
         }
         with mock.patch.object(
+            WEB_MANAGEMENT.daemon_client,
+            "check_reachability",
+            side_effect=lambda **kwargs: {
+                "reachability_status": "online",
+                "target_identity_id": kwargs["target_identity_id"],
+                "record": {"identity_id": kwargs["target_identity_id"]},
+            },
+        ), mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
             "wake_im_actor",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
@@ -1099,6 +1117,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
     @staticmethod
     def _instance_list_for_identity_routes(identity_routes: list[dict[str, str]]) -> dict[str, object]:
+        for route in identity_routes:
+            save_test_actor_identity_profile(actor_id=route["actor_id"], role_id=route["role_id"])
         return {
             "instances": [
                 {
@@ -1196,6 +1216,14 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         web_identity = session["identity"]
 
         with mock.patch.object(
+            WEB_MANAGEMENT.daemon_client,
+            "check_reachability",
+            side_effect=lambda **kwargs: {
+                "reachability_status": "online",
+                "target_identity_id": kwargs["target_identity_id"],
+                "record": {"identity_id": kwargs["target_identity_id"]},
+            },
+        ), mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
             "wake_im_actor",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
@@ -1298,24 +1326,33 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(session_status, 200)
         web_identity = session["identity"]
         sent_by_actor: dict[str, dict[str, object]] = {}
-        for actor_route, content in (
-            (market_actor, "market ping"),
-            (dev_actor, "dev ping"),
+        with mock.patch.object(
+            WEB_MANAGEMENT.daemon_client,
+            "check_reachability",
+            side_effect=lambda **kwargs: {
+                "reachability_status": "online",
+                "target_identity_id": kwargs["target_identity_id"],
+                "record": {"identity_id": kwargs["target_identity_id"]},
+            },
         ):
-            status, payload = service.handle_api(
-                "POST",
-                "/api/im/messages",
-                json.dumps(
-                    {
-                        "target_identity_id": actor_route["actor_id"],
-                        "content": content,
-                        "reply_to": None,
-                    }
-                ).encode("utf-8"),
-                {},
-            )
-            self.assertEqual(status, 200, msg=payload)
-            sent_by_actor[actor_route["actor_id"]] = payload
+            for actor_route, content in (
+                (market_actor, "market ping"),
+                (dev_actor, "dev ping"),
+            ):
+                status, payload = service.handle_api(
+                    "POST",
+                    "/api/im/messages",
+                    json.dumps(
+                        {
+                            "target_identity_id": actor_route["actor_id"],
+                            "content": content,
+                            "reply_to": None,
+                        }
+                    ).encode("utf-8"),
+                    {},
+                )
+                self.assertEqual(status, 200, msg=payload)
+                sent_by_actor[actor_route["actor_id"]] = payload
 
         for actor_route, content in (
             (market_actor, "market pong"),
@@ -1572,6 +1609,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
     def test_web_im_send_resolves_actor_route_from_instance_list_not_identity_id_text(self) -> None:
         target_identity_id = "act-web-identity-route"
+        save_test_actor_identity_profile(actor_id=target_identity_id, role_id="market")
         runner = FakeRunner()
         runner.add(
             ["instance", "list", "--json"],
@@ -1595,6 +1633,14 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         service = self._service(runner)
 
         with mock.patch.object(
+            WEB_MANAGEMENT.daemon_client,
+            "check_reachability",
+            return_value={
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {"identity_id": target_identity_id},
+            },
+        ), mock.patch.object(
             WEB_MANAGEMENT.daemon_client,
             "wake_im_actor",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},

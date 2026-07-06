@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.services import messages as message_service  # noqa: E402
+from env.repos import identities as identity_repo  # noqa: E402
 from env.repos import messages as message_repo  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -28,6 +29,9 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _actor_identity(self, *, role: str = "market", label: str = "target") -> dict[str, object]:
         identity_id = self._runtime_actor_id(role=role, label=label)
+        identity_repo.save_actor_identity_profile(
+            {"identity": {"id": identity_id, "type": "actor"}, "role_id": role}
+        )
         return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": role}
 
     def _external_session(
@@ -133,19 +137,66 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(all("actor_address" not in row for row in response["actors"]))
 
-    def test_current_send_target_rejects_external_identity_by_reach_policy_without_mutating_state(self) -> None:
+    def test_resolve_im_send_target_accepts_external_identity_without_actor_reachability(self) -> None:
+        actor = self._actor_identity(role="dev", label="act-dev-resolve-external")
         _created, _external_session, external = self._external_session()
-        external_id = str(external["id"])
+        calls: list[dict[str, object]] = []
+
+        def check_actor_reachability(**kwargs: object) -> dict[str, object]:
+            calls.append(dict(kwargs))
+            self.fail("external target resolution must not query actor reachability")
+
+        response = message_service.resolve_im_send_target(
+            sender_identity=actor["identity"],
+            target_identity_id=external["id"],
+            actor_reachability_checker=check_actor_reachability,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response["target_identity"], external)
+        self.assertEqual(calls, [])
+
+    def test_resolve_im_send_target_accepts_existing_online_actor_identity(self) -> None:
+        sender = self._actor_identity(role="dev", label="act-dev-resolve-actor-source")
+        target = self._actor_identity(role="market", label="act-market-resolve-actor-target")
+        target_id = str(target["identity_id"])
+        calls: list[dict[str, object]] = []
+
+        def check_actor_reachability(**kwargs: object) -> dict[str, object]:
+            calls.append(dict(kwargs))
+            return {
+                "reachability_status": "online",
+                "target_identity_id": target_id,
+                "record": {"identity_id": target_id},
+            }
+
+        response = message_service.resolve_im_send_target(
+            sender_identity=sender["identity"],
+            target_identity_id=target_id,
+            actor_reachability_checker=check_actor_reachability,
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response["target_identity"], {"id": target_id, "type": "actor"})
+        self.assertEqual(calls, [{"target_identity_id": target_id}])
+
+    def test_resolve_im_send_target_rejects_offline_actor_without_writing_im_state(self) -> None:
+        sender = self._actor_identity(role="dev", label="act-dev-resolve-offline-source")
+        target = self._actor_identity(role="market", label="act-market-resolve-offline-target")
+        target_id = str(target["identity_id"])
         before = {
             name: sorted(path.name for path in (self.runtime_state_root / "im" / name).glob("*.json"))
             for name in ("conversations", "messages", "events", "message_states")
         }
 
-        response = message_service.identity_for_current_send_target(
-            [],
-            external_id,
-            field="target_identity_id",
-            active_identity_id=self._runtime_actor_id(role="dev", label="act-dev-active"),
+        response = message_service.resolve_im_send_target(
+            sender_identity=sender["identity"],
+            target_identity_id=target_id,
+            actor_reachability_checker=lambda **_kwargs: {
+                "reachability_status": "registered_offline",
+                "target_identity_id": target_id,
+                "record": {"identity_id": target_id},
+            },
         )
 
         after = {
@@ -153,8 +204,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for name in ("conversations", "messages", "events", "message_states")
         }
         self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("error", {}).get("code"), "E_IM_PAYLOAD")
-        self.assertIn("not a reachable target identity", response.get("error", {}).get("message", ""))
+        self.assertEqual(response.get("error", {}).get("code"), "E_IM_TARGET")
+        self.assertIn("not online", response.get("error", {}).get("message", ""))
         self.assertEqual(after, before)
 
     def test_im_repository_rejects_retired_row_fields_without_writing_files(self) -> None:

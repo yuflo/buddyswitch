@@ -625,6 +625,61 @@ print(json.dumps({{
             hits.extend(self._scan_targets(pattern, targets))
         self.assertEqual(hits, [], msg="\n".join(hits))
 
+    def test_im_target_resolver_rebuild_has_no_old_send_resolver_residue(self) -> None:
+        targets = [
+            "scripts/env/services/messages.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/web_management.py",
+            "scripts/env/tools/message/tool.py",
+            "scripts/env/tools/context/_impl.py",
+            "tests/test_im_product_core.py",
+            "tests/test_message_tool_im_client.py",
+            "tests/test_external_im_session.py",
+            "tests/test_im_http_router.py",
+            "tests/test_env_tool_schema_contract.py",
+            "tests/test_env_tool_semantic_contract.py",
+            "tests/test_context_binding_env_tool.py",
+        ]
+        patterns = [
+            r"\bidentity_for_current_send_target\b",
+            r"not a reachable target identity under current reach policy",
+            r"external target_identity_id requires reply_to conversation routing context",
+            r"message\.send.*must.*message\.contacts",
+            r"message\.contacts.*before message\.send",
+            r"contacts.*as.*send.*authority",
+        ]
+        hits: list[str] = []
+        for pattern in patterns:
+            hits.extend(self._scan_targets(pattern, targets))
+
+        def is_allowed_hit(line: str) -> bool:
+            parts = line.split(":", 2)
+            path = parts[0] if parts else ""
+            content = parts[2] if len(parts) == 3 else line
+            if path.startswith("tests/") and ("assertNotIn(" in content or "forbidden" in content):
+                return True
+            return False
+
+        disallowed = [line for line in hits if not is_allowed_hit(line)]
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_im_send_paths_do_not_use_actor_list_as_target_resolver(self) -> None:
+        targets = [
+            "scripts/env/tool_runtime/im_client.py",
+            "tools/launcher/external_im_session.py",
+        ]
+        multiline_patterns = [
+            r"def _send_target_identity[\s\S]{0,800}_online_actor_rows",
+            r"def send_message[\s\S]{0,1000}_actor_lister",
+            r"def send_message[\s\S]{0,1000}list_im_actor_contacts",
+        ]
+        hits: list[str] = []
+        for pattern in multiline_patterns:
+            hits.extend(self._scan_target_text(pattern, targets, flags=re.MULTILINE))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
     def test_im_actor_handling_surfaces_do_not_accept_sender_supplied_role(self) -> None:
         targets = [
             "scripts/env/tool_runtime/daemon_client.py",

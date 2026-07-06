@@ -40,7 +40,7 @@ class ActorImClient:
             target_response = self._send_target_identity(target_identity_id)
             if target_response.get("ok") is not True:
                 return target_response
-            target = target_response["identity"]
+            target = target_response["target_identity"]
         elif reply_to is not None:
             target = None
         else:
@@ -96,11 +96,10 @@ class ActorImClient:
         )
 
     def _send_target_identity(self, value: Any) -> dict[str, Any]:
-        return message_service.identity_for_current_send_target(
-            self._online_actor_rows(role_id=None),
-            value,
-            field="target_identity_id",
-            active_identity_id=self._current_identity_payload().get("id"),
+        return message_service.resolve_im_send_target(
+            sender_identity=self._identity,
+            target_identity_id=value,
+            actor_reachability_checker=getattr(self._context.daemon, "check_reachability", None),
         )
 
     def _result_target_identity(self, result: dict[str, Any], explicit_target: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -117,14 +116,7 @@ class ActorImClient:
             return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "target_identity_id is required"}}
         if identity_id == self._current_identity_payload().get("id"):
             return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "target_identity_id must not be the active actor identity"}}
-        if identity_id.startswith("ext-"):
-            return {"ok": True, "identity": {"id": identity_id, "type": "external"}}
-        return message_service.identity_for_current_send_target(
-            self._online_actor_rows(role_id=None),
-            identity_id,
-            field="target_identity_id",
-            active_identity_id=self._current_identity_payload().get("id"),
-        )
+        return message_service.identity_target_for_direct_conversation(identity_id)
 
     def _online_actor_rows(self, *, role_id: str | None) -> list[dict[str, Any]]:
         list_online_actors = getattr(self._context.daemon, "list_online_actors", None)

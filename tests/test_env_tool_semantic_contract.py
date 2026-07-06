@@ -441,12 +441,14 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             sort_keys=True,
         ).lower()
         required = (
-            "online actor contact discovery",
-            "central im sends",
+            "optional actor discovery",
+            "central im target-identity sends",
+            "im target resolver",
             "exact processable inbound reads",
             "disposition marking",
             "reply_to",
             "external",
+            "external identities are valid central im direct targets",
             "replied",
             "previous disposition",
             "absorbed",
@@ -455,6 +457,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "generic disposition editor",
             "target_identity_id",
             "actor runtime presence",
+            "identity profiles",
+            "actor runtime reachability",
         )
         for token in required:
             with self.subTest(required=token):
@@ -469,6 +473,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "same role id",
             "active role cannot",
             "target runtime actor actor id",
+            "actor contact projection",
+            "already present in a direct conversation",
+            "before message.send",
         )
         for token in forbidden:
             with self.subTest(token=token):

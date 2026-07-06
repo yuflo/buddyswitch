@@ -15,6 +15,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tools.message import _impl as message_impl  # noqa: E402
+from env.repos import identities as identity_repo  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import im_client as im_client_module  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -127,6 +128,14 @@ class MessageToolImClientTests(unittest.TestCase):
 
 
 class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _save_actor_profile(self, *, identity_id: str, role_id: str) -> None:
+        identity_repo.save_actor_identity_profile(
+            {
+                "identity": {"id": identity_id, "type": "actor"},
+                "role_id": role_id,
+            }
+        )
+
     def test_send_with_invalid_target_identity_id_returns_payload_error(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-invalid-target")
         client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=_RecordingWakeDaemon()))
@@ -145,21 +154,22 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_actor_send_calls_message_service_with_identity_only_target(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-send")
         target_id = self._runtime_actor_id(role="pm", label="act-pm-im-target")
+        self._save_actor_profile(identity_id=target_id, role_id="pm")
         captured: dict[str, Any] = {}
         handling_calls: list[dict[str, Any]] = []
 
         class _Daemon:
-            def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
+            def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
+                if target_identity_id != target_id:
+                    raise AssertionError(f"expected {target_id}, got {target_identity_id}")
                 return {
-                    "actors": [
-                        {
-                            "identity_id": target_id,
-                            "identity": {"id": target_id, "type": "actor"},
-                            "role_id": "pm",
-                            "status": "online",
-                        }
-                    ]
+                    "reachability_status": "online",
+                    "target_identity_id": target_id,
+                    "record": {"identity_id": target_id},
                 }
+
+            def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
+                raise AssertionError("message.send must not call list_online_actors")
 
             def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
                 handling_calls.append(dict(payload))
@@ -204,19 +214,50 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ],
         )
 
-    def test_actor_send_external_target_rejection_is_reach_policy_not_actor_signature(self) -> None:
-        actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-ext-policy")
-        daemon = _RecordingWakeDaemon()
+    def test_actor_send_external_target_writes_message_visible_to_external_session(self) -> None:
+        actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-ext-send")
+        created = message_service.create_external_session(display_name="external target")
+        self.assertTrue(created.get("ok"), msg=created)
+        auth = message_service.authenticate_external_session_key(str(created["external_session_key"]))
+        self.assertTrue(auth.get("ok"), msg=auth)
+        external_id = auth["identity"]["id"]
+
+        class _Daemon:
+            def __init__(self) -> None:
+                self.reachability_calls: list[dict[str, object]] = []
+                self.wake_calls: list[dict[str, object]] = []
+
+            def check_reachability(self, *, target_identity_id: str) -> dict[str, object]:
+                self.reachability_calls.append({"target_identity_id": target_identity_id})
+                return {
+                    "reachability_status": "online",
+                    "target_identity_id": target_identity_id,
+                    "record": {"identity_id": target_identity_id},
+                }
+
+            def list_online_actors(self, *, role_id: str | None = None) -> dict[str, object]:
+                raise AssertionError("message.send must not list actors to resolve an explicit target")
+
+            def wake_im_actor(self, payload: dict[str, object]) -> dict[str, object]:
+                self.wake_calls.append(dict(payload))
+                return {"actor_handling_status": "submitted"}
+
+        daemon = _Daemon()
         client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=daemon))
 
-        response = client.send({"target_identity_id": "ext-policy-target", "content": "hello"})
+        response = client.send({"target_identity_id": external_id, "content": "hello external"})
+        events = message_service.read_external_session_events(
+            external_session=auth["external_session"],
+            limit=20,
+            wait_ms=0,
+        )
 
-        self.assertFalse(response.get("ok"), msg=response)
-        message = response.get("error", {}).get("message", "")
-        self.assertIn("reachable target identity", message)
-        self.assertNotIn("requires reply_to conversation routing context", message)
-        self.assertNotIn("actor identity", message)
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response["target_identity"], auth["identity"])
+        self.assertEqual(response["actor_handling_status"], "not_applicable")
+        self.assertEqual(daemon.reachability_calls, [])
         self.assertEqual(daemon.wake_calls, [])
+        self.assertEqual([row["message_id"] for row in events["events"]], [response["message"]["id"]])
 
     def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-reply")

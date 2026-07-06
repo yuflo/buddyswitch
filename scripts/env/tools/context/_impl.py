@@ -524,7 +524,7 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
         "latest_inbox": latest,
         "inbox_source_of_truth": "message.list",
         "conversation_source_of_truth": "message.conversation",
-        "target_discovery": "Use message.contacts to discover actor-runtime-present IM actor target identities.",
+        "target_discovery": "Use message.contacts only when you need a target identities discovery view; message.send resolves explicit actor or external target_identity_id values through IM target rules.",
     }
 
 

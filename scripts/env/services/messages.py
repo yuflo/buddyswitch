@@ -21,6 +21,11 @@ def _im_payload_error(message: str) -> dict[str, Any]:
 
 _BLOCKED_ACTOR_CONTACT_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
 ActorDeliveryHandler = Callable[[dict[str, Any]], dict[str, Any]]
+ActorReachabilityChecker = Callable[..., dict[str, Any]]
+
+
+def _im_target_error(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": "E_IM_TARGET", "message": message}}
 
 
 def _identity_ref(value: Any, field: str = "identity") -> dict[str, str]:
@@ -40,6 +45,18 @@ def _identity_ref(value: Any, field: str = "identity") -> dict[str, str]:
 
 def _identity_id(value: Any, field: str = "identity") -> str:
     return _identity_ref(value, field)["id"]
+
+
+def _actor_profile_exists(identity_id: str) -> bool:
+    from env.repos import identities as identity_repo
+
+    return isinstance(identity_repo.get_actor_identity_profile(identity_id), dict)
+
+
+def _external_profile_exists(identity_id: str) -> bool:
+    from env.repos import identities as identity_repo
+
+    return isinstance(identity_repo.get_external_profile(identity_id), dict)
 
 
 def _actor_contact_from_runtime_row(row: Any) -> dict[str, str] | None:
@@ -82,30 +99,60 @@ def list_im_actor_contacts(actor_rows: list[dict[str, Any]], role_id: str | None
     return {"ok": True, "actors": actors, "count": len(actors)}
 
 
-def identity_for_current_send_target(
-    actor_rows: list[dict[str, Any]],
-    target_identity_id: Any,
+def resolve_im_send_target(
     *,
-    field: str = "target_identity_id",
-    active_identity_id: str | None = None,
+    sender_identity: dict[str, Any],
+    target_identity_id: Any,
+    actor_reachability_checker: ActorReachabilityChecker | None = None,
 ) -> dict[str, Any]:
+    try:
+        sender = _identity_ref(sender_identity, "sender_identity")
+    except ValueError as exc:
+        return _im_payload_error(str(exc))
+    identity_id = target_identity_id.strip() if isinstance(target_identity_id, str) and target_identity_id.strip() else ""
+    if not identity_id:
+        return _im_payload_error("target_identity_id is required")
+    if identity_id == sender["id"]:
+        return _im_payload_error("target_identity_id must not be the sender identity")
+    try:
+        target = _identity_ref(identity_id, "target_identity_id")
+    except ValueError as exc:
+        return _im_payload_error(str(exc))
+    if target["type"] == "external":
+        if not _external_profile_exists(target["id"]):
+            return _im_target_error(f"external identity profile not found: {target['id']}")
+        return {"ok": True, "target_identity": target}
+    if target["type"] == "actor":
+        if not _actor_profile_exists(target["id"]):
+            return _im_target_error(f"actor identity profile not found: {target['id']}")
+        if actor_reachability_checker is None:
+            return _im_target_error("actor reachability checker is required for actor targets")
+        try:
+            reachability = actor_reachability_checker(target_identity_id=target["id"])
+        except Exception as exc:
+            return _im_target_error(str(exc))
+        if not isinstance(reachability, dict):
+            return _im_target_error("actor reachability response must be an object")
+        if reachability.get("reachability_status") != "online":
+            status = reachability.get("reachability_status")
+            return _im_target_error(f"actor target is not online: {status}")
+        return {"ok": True, "target_identity": target}
+    return _im_payload_error("target_identity_id must be actor or external identity")
+
+
+def identity_target_for_direct_conversation(target_identity_id: Any, *, field: str = "target_identity_id") -> dict[str, Any]:
     identity_id = target_identity_id.strip() if isinstance(target_identity_id, str) and target_identity_id.strip() else ""
     if not identity_id:
         return _im_payload_error(f"{field} is required")
-    if isinstance(active_identity_id, str) and active_identity_id.strip() and identity_id == active_identity_id.strip():
-        return _im_payload_error(f"{field} must not be the current actor identity")
-    if identity_id.startswith("ext-"):
-        return _im_payload_error(f"{field} is not a reachable target identity under current reach policy: {identity_id}")
-    for row in actor_rows:
-        actor = _actor_contact_from_runtime_row(row)
-        if actor is None:
-            continue
-        status = _actor_status_from_runtime_row(row)
-        if status in _BLOCKED_ACTOR_CONTACT_STATUSES:
-            continue
-        if actor["identity_id"] == identity_id:
-            return {"ok": True, "identity": actor_identity(identity_id).to_payload()}
-    return _im_payload_error(f"{field} is not a reachable target identity: {identity_id}")
+    try:
+        target = _identity_ref(identity_id, "target_identity_id")
+    except ValueError as exc:
+        return _im_payload_error(str(exc))
+    if target["type"] == "actor" and not _actor_profile_exists(target["id"]):
+        return _im_target_error(f"actor identity profile not found: {target['id']}")
+    if target["type"] == "external" and not _external_profile_exists(target["id"]):
+        return _im_target_error(f"external identity profile not found: {target['id']}")
+    return {"ok": True, "identity": target}
 
 
 def create_external_session(*, display_name: str) -> dict[str, Any]:

@@ -286,6 +286,7 @@ class WebManagementService:
         self._busy_guard = busy_guard or BusyGuard()
         self._im_session = im_session or external_im_session.ExternalImSession(
             actor_lister=self._external_im_actor_rows,
+            actor_reachability_checker=self._check_im_actor_reachability,
             actor_delivery_handler=self._wake_im_actor,
         )
         self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider(
@@ -293,6 +294,7 @@ class WebManagementService:
         )
         self._im_router = im_http_router.ImHttpRouter(
             actor_lister=self._external_im_actor_rows,
+            actor_reachability_checker=self._check_im_actor_reachability,
             actor_delivery_handler=self._wake_im_actor,
             im_session=self._im_session,
             web_external_session_provider=self.ensure_web_im_identity,
@@ -911,6 +913,9 @@ class WebManagementService:
 
     def _wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return daemon_client.wake_im_actor(payload)
+
+    def _check_im_actor_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
+        return daemon_client.check_reachability(target_identity_id=target_identity_id)
 
     def _get_instance_status(self, actor_id: str) -> dict[str, Any]:
         result = self._run_command(["instance", "status", actor_id, "--json"], timeout_seconds=10)

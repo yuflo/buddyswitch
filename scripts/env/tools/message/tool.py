@@ -14,14 +14,14 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
         title='Central IM Messages',
-        description='Message tools cover online actor contact discovery through IM actor contact projection backed by actor runtime presence, Central IM sends, exact processable inbound reads, replies, conversation context, and disposition marking.',
+        description='Message tools cover optional actor discovery views, Central IM target-identity sends through the IM target resolver, exact processable inbound reads, replies, conversation context, and disposition marking.',
         scope='Central IM identity messaging for the active actor',
-        capability_boundary='Messages use identity-addressed Central IM conversations, messages, events, and per-identity dispositions. External identities are valid conversation peers but are not actor contacts.',
+        capability_boundary='Messages use identity-addressed Central IM conversations, messages, events, and per-identity dispositions. Actor and external identities are valid Central IM direct targets when resolved by IM target rules; message.contacts is a read-only view and does not decide message.send permission.',
         object_model=(
             'Messages are Central IM conversation records with actor or external identity ids, durable message rows, identity-visible events, and per-identity dispositions. They do not mutate tracks, artifacts, tasks, comments, browser state, or actor private files.'
         ),
         use_when=(
-            'You need Central IM messaging between the active actor identity and another actor identity or an external identity already present in a direct conversation.',
+            'You need Central IM messaging between the active actor identity and another actor or external identity by explicit target_identity_id, or a reply inside an existing direct conversation.',
         ),
         do_not_use_when=(
             'You need object-level discussion; use comment tool actions.',
@@ -30,7 +30,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='contacts',
                 title='message.contacts',
-                description='List IM actor identity contacts for direct sends, backed by actor runtime presence; the active actor identity is not sendable as self.',
+                description='List optional actor discovery target identities backed by actor runtime presence; this read-only view does not decide message.send permission, and the active actor identity is not sendable as self.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -38,7 +38,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'role': {
                             'type': 'string',
-                            'description': 'Optional manifest role id filter for IM actor contacts backed by actor runtime presence.',
+                            'description': 'Optional manifest role id filter for actor discovery targets backed by actor runtime presence.',
                         },
                     },
                 },
@@ -50,10 +50,10 @@ def _build_definition() -> ToolDefinition:
                 task_requirement=TASK_REQUIREMENT_FREE,
                 required_permission='message.contacts',
                 authority='message.actor_contact_discovery',
-                visibility='online actor contact summary',
+                visibility='optional actor discovery view',
                 durability='none',
-                result_content_level='actor identity contact rows',
-                success_effect='Returns IM actor identities projected from actor runtime presence.',
+                result_content_level='actor identity discovery rows',
+                success_effect='Returns optional actor discovery identities projected from actor runtime presence.',
                 failure_state_guarantee='Rejected contact reads do not mutate runtime state.',
                 reads=(
                     'actor runtime presence',
@@ -75,10 +75,10 @@ def _build_definition() -> ToolDefinition:
                     'count',
                 ),
                 use_when=(
-                    'You need IM actor contact discovery for a target actor identity before message.send.',
+                    'You need an optional actor contact discovery view for possible actor target identities.',
                 ),
                 do_not_use_when=(
-                    'You already have a target identity id or need to read Central IM events.',
+                    'message.send already has an explicit actor or external target_identity_id, or you need to read Central IM events.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -94,8 +94,9 @@ def _build_definition() -> ToolDefinition:
                 title='message.send',
                 description=(
                     'Send one Central IM message: provide target_identity_id for a new target-identity message, '
-                    'or provide reply_to only to reply inside the existing direct conversation. Sender-side reach policy '
-                    'decides whether a new target identity is currently reachable. For actor-to-actor handoffs, make '
+                    'or provide reply_to only to reply inside the existing direct conversation. The IM target resolver '
+                    'checks identity profiles and actor runtime reachability for actor targets; external identities '
+                    'can be direct Central IM targets when an external profile exists. For actor-to-actor handoffs, make '
                     "the content actionable from the recipient's visible context; include the relevant "
                     'source intent, concrete inputs, and requested output instead of relying on private '
                     'message/conversation ids.'
@@ -107,7 +108,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'target_identity_id': {
                             'type': 'string',
-                            'description': 'Target identity id. Required only for a new target-identity message; sender-side reach policy decides whether the identity is currently reachable. Omit it when replying with reply_to.',
+                            'description': 'Target identity id. Required only for a new target-identity message; IM target resolver decides whether the actor or external identity can receive this Central IM message. Omit it when replying with reply_to.',
                         },
                         'content': {
                             'type': 'string',
@@ -134,12 +135,14 @@ def _build_definition() -> ToolDefinition:
                     'Creates one durable Central IM message. For actor targets, the runtime projection may submit '
                     'one target actor local inbound event after the Central IM write and return actor_handling_status. '
                     'target_identity_id is only required for a new target-identity message, and when reply_to is '
-                    'provided the original processable inbound message transitions to replied.'
+                    'provided the original processable inbound message transitions to replied. New target identities '
+                    'are accepted only after the IM target resolver validates identity profiles and actor runtime reachability for actor targets.'
                 ),
-                failure_state_guarantee='Reach policy and payload rejections do not mutate state; reply disposition save failure can leave the accepted Central IM reply durable while the original remains in its previous disposition.',
+                failure_state_guarantee='IM target resolver and payload rejections do not mutate state; reply disposition save failure can leave the accepted Central IM reply durable while the original remains in its previous disposition.',
                 reads=(
                     'Central IM direct conversation when reply_to is provided',
-                    'sender-side reach policy for new target identities',
+                    'identity profiles for new target identities',
+                    'actor runtime reachability for actor targets',
                 ),
                 writes=(
                     'Central IM message',
@@ -156,6 +159,7 @@ def _build_definition() -> ToolDefinition:
                 preconditions=(
                     'content is non-empty',
                     'target_identity_id is provided for a new target-identity message',
+                    'IM target resolver accepts target_identity_id for a new target-identity message',
                     'reply_to, when provided without target_identity_id, references a processable inbound direct message visible to the active actor',
                 ),
                 returns=(
@@ -166,11 +170,11 @@ def _build_definition() -> ToolDefinition:
                     'original_message_id and original_final_disposition when reply_to is provided',
                 ),
                 use_when=(
-                    'You need to create a new Central IM message from the active actor identity to a specific reachable target identity.',
+                    'You need to create a new Central IM message from the active actor identity to a specific actor or external target identity.',
                     'You need to reply to one processable inbound message, including external-origin messages, using only reply_to.',
                 ),
                 do_not_use_when=(
-                    'You are starting a new target-identity conversation and do not have a target identity id (use message.contacts).',
+                    'You are starting a new target-identity conversation and do not have an explicit target identity id.',
                     'You need Track discussion; use track.add_comment instead of Central IM.',
                     'Use message.mark(absorbed) when no reply is needed.',
                     'Use task_sys.need_parent when a task_sys.side_frame needs parent handling.',

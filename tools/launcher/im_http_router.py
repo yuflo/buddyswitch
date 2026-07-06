@@ -29,12 +29,14 @@ class ImHttpRouter:
         self,
         *,
         actor_lister: Callable[[str | None], list[dict[str, Any]]],
+        actor_reachability_checker: Callable[..., dict[str, Any]] | None = None,
         actor_delivery_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         im_session: Any | None = None,
         web_external_session_provider: WebExternalSessionProvider | None = None,
     ) -> None:
         self._session = im_session or external_im_session.ExternalImSession(
             actor_lister=actor_lister,
+            actor_reachability_checker=actor_reachability_checker,
             actor_delivery_handler=actor_delivery_handler,
         )
         self._web_external_session_provider = web_external_session_provider

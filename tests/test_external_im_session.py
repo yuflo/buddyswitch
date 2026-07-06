@@ -16,6 +16,7 @@ if str(ROOT) in sys.path:
     sys.path.remove(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
+from env.repos import identities as identity_repo  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 from tools.launcher import external_im_session  # noqa: E402
@@ -24,6 +25,12 @@ from tools.launcher import external_im_session  # noqa: E402
 class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _actor_identity(self, *, role: str = "market", label: str = "target") -> dict[str, str]:
         identity_id = self._runtime_actor_id(role=role, label=label)
+        identity_repo.save_actor_identity_profile(
+            {
+                "identity": {"id": identity_id, "type": "actor"},
+                "role_id": role,
+            }
+        )
         return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": role}
 
     def _session(
@@ -42,7 +49,26 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 handling_calls.append(dict(payload))
             return {"actor_handling_status": "submitted", "runtime_target": "parent", "error": None}
 
-        return external_im_session.ExternalImSession(actor_lister=list_actors, actor_delivery_handler=handle_actor)
+        def check_actor_reachability(*, target_identity_id: str) -> dict[str, Any]:
+            for row in actor_rows:
+                if row.get("identity_id") == target_identity_id:
+                    status = row.get("status") if isinstance(row.get("status"), str) else "online"
+                    return {
+                        "reachability_status": "online" if status == "online" else "registered_offline",
+                        "target_identity_id": target_identity_id,
+                        "record": dict(row),
+                    }
+            return {
+                "reachability_status": "never_registered",
+                "target_identity_id": target_identity_id,
+                "record": None,
+            }
+
+        return external_im_session.ExternalImSession(
+            actor_lister=list_actors,
+            actor_reachability_checker=check_actor_reachability,
+            actor_delivery_handler=handle_actor,
+        )
 
     def _external_session(self, session: external_im_session.ExternalImSession) -> tuple[str, dict[str, Any], dict[str, Any]]:
         created = session.create_external_session(display_name="local smoke")
@@ -179,8 +205,8 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(missing["error"]["code"], "E_IM_PAYLOAD")
         self.assertIn("target_identity_id", missing["error"]["message"])
         self.assertFalse(unreachable.get("ok"), msg=unreachable)
-        self.assertEqual(unreachable["error"]["code"], "E_IM_PAYLOAD")
-        self.assertIn("not a reachable target identity", unreachable["error"]["message"])
+        self.assertEqual(unreachable["error"]["code"], "E_IM_TARGET")
+        self.assertIn("actor identity profile not found", unreachable["error"]["message"])
 
     def test_session_list_and_send_reject_offline_actor_rows(self) -> None:
         offline_actor = self._actor_identity(role="market", label="offline")
@@ -197,8 +223,8 @@ class ExternalImSessionTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertEqual(actors["actors"], [])
         self.assertFalse(sent.get("ok"), msg=sent)
-        self.assertEqual(sent["error"]["code"], "E_IM_PAYLOAD")
-        self.assertIn("not a reachable target identity", sent["error"]["message"])
+        self.assertEqual(sent["error"]["code"], "E_IM_TARGET")
+        self.assertIn("not online", sent["error"]["message"])
 
     def test_session_reads_actor_reply_once_without_client_cursor(self) -> None:
         actor_identity = self._actor_identity()
