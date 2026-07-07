@@ -30,6 +30,29 @@ function assertExcludes(source, forbidden) {
   assert.equal(source.includes(forbidden), false, `Expected asset content to exclude: ${forbidden}`);
 }
 
+function collectCssDeclarations(selector) {
+  const bodies = Array.from(stylesCss.matchAll(/([^{}]+)\{([^{}]*)\}/g))
+    .filter((match) => match[1].split(',').map((part) => part.trim()).includes(selector))
+    .map((match) => match[2])
+    .join('\n');
+  assert.ok(bodies, `Expected stylesheet to include a rule for: ${selector}`);
+  return bodies;
+}
+
+function assertCssDeclarations(selector, declarations) {
+  const body = collectCssDeclarations(selector);
+  declarations.forEach((declaration) => {
+    assertIncludes(body, declaration);
+  });
+}
+
+function assertCssDeclarationsExclude(selector, declarations) {
+  const body = collectCssDeclarations(selector);
+  declarations.forEach((declaration) => {
+    assertExcludes(body, declaration);
+  });
+}
+
 test('production html keeps all real control ids used by the web UI', () => {
   [
     'server-status',
@@ -171,6 +194,33 @@ test('production stylesheet supports pending and loading feedback states', () =>
     '.message.failed',
   ].forEach((marker) => {
     assertIncludes(stylesCss, marker);
+  });
+});
+
+test('production stylesheet keeps long direct-thread message content inside bubbles', () => {
+  assertCssDeclarations('.room-thread', [
+    'min-width: 0;',
+    'overflow: auto;',
+  ]);
+  assertCssDeclarationsExclude('.room-thread', [
+    'overflow-x: hidden;',
+  ]);
+  assertCssDeclarations('.im-conversation', [
+    'min-width: 0;',
+  ]);
+  assertCssDeclarations('.message', [
+    'min-width: 0;',
+    'max-width: 76%;',
+  ]);
+  ['.message .meta', '.message p'].forEach((selector) => {
+    assertCssDeclarations(selector, [
+      'min-width: 0;',
+      'max-width: 100%;',
+      'overflow-wrap: anywhere;',
+    ]);
+    assertCssDeclarationsExclude(selector, [
+      'word-break: break-all;',
+    ]);
   });
 });
 

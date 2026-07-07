@@ -400,11 +400,13 @@ button.track-row {
   display: grid;
   align-content: start;
   gap: 12px;
+  min-width: 0;
 }
 
 .message {
   display: grid;
   gap: 5px;
+  min-width: 0;
   max-width: 76%;
   padding: 10px 12px;
   border: 1px solid var(--line);
@@ -431,6 +433,13 @@ button.track-row {
 .im-meta {
   color: var(--muted);
   font-size: 12px;
+}
+
+.message .meta,
+.message p {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .message p {
