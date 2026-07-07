@@ -24,7 +24,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 from env.repos import runtime_files  # noqa: E402
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_DISPLAY_NAME = "BuddySwitch iMessage"
 DEFAULT_NO_ACTOR_PROMPT = "Send /actors to choose an actor."
 DEFAULT_REPLY_WAIT_MS = 30000
@@ -71,6 +71,8 @@ class ImessageChannelStateStore:
             raise ChannelError(f"invalid iMessage channel state: {exc}") from exc
         if not isinstance(payload, dict):
             raise ChannelError("invalid iMessage channel state: root must be an object")
+        if payload.get("schema_version") != SCHEMA_VERSION:
+            raise ChannelError("iMessage channel state schema is retired; reset the channel state file")
         contacts_payload = payload.get("contacts")
         contacts: dict[str, dict[str, Any]] = {}
         if isinstance(contacts_payload, dict):
@@ -429,8 +431,9 @@ class ImessageChannelController:
         with self._state_lock:
             state = self.state_store.load()
             contact = self._contact(state, sender)
-            external_session_key = self._external_session_key(contact)
             route = _route_from_row(row, sender=sender)
+            _set_contact_route(contact, route)
+            external_session_key, _external_identity_id = self._external_session_binding(contact)
 
             if content == "/actors":
                 return self._handle_actors(state, contact, external_session_key, route)
@@ -452,7 +455,7 @@ class ImessageChannelController:
             poll_targets = [
                 (sender_key, _contact_external_session_key(contact))
                 for sender_key, contact in _contacts(state).items()
-                if _contact_external_session_key(contact)
+                if _contact_external_session_key(contact) and _contact_external_identity_id(contact) and _contact_route(contact)
             ]
         sent_count = 0
         for sender_key, external_session_key in poll_targets:
@@ -463,6 +466,9 @@ class ImessageChannelController:
                 state = self.state_store.load()
                 contact = _contacts(state).get(sender_key)
                 if not isinstance(contact, dict):
+                    continue
+                route = _contact_route(contact)
+                if route is None:
                     continue
                 sent_ids = set(_string_list(contact.get("sent_outbound_event_ids")))
                 contact_sent_count = 0
@@ -480,12 +486,9 @@ class ImessageChannelController:
                     if fetched.get("ok") is not True or not isinstance(fetched.get("message"), dict):
                         continue
                     message = fetched["message"]
-                    reply_to = str(message.get("reply_to") or event.get("reply_to") or "")
-                    route = _contact_routes(contact).get(reply_to)
                     content = str(message.get("content") or "").strip()
                     actor_id = _actor_id_for_reply(event, message)
-                    if not route or not content or not actor_id:
-                        self._ack_outbound_event(external_session_key=external_session_key, event_id=event_id)
+                    if not content or not actor_id:
                         continue
                     self.imsg.send(route=route, text=f"[Message From {actor_id}]\n\n{content}")
                     sent_ids.add(event_id)
@@ -539,8 +542,10 @@ class ImessageChannelController:
         selected = choices.get(str(int(content)))
         if not selected:
             if not _active_identity_id(contact):
+                self.state_store.save(state)
                 self.imsg.send(route=route, text=DEFAULT_NO_ACTOR_PROMPT)
                 return {"ok": True, "status": "needs_actor"}
+            self.state_store.save(state)
             return {"ok": True, "status": "ignored_invalid_choice"}
         contact["active_identity_id"] = selected
         self.state_store.save(state)
@@ -566,6 +571,7 @@ class ImessageChannelController:
         inbound_key = _inbound_key(row)
         seen = set(_string_list(contact.get("seen_inbound_keys")))
         if inbound_key in seen:
+            self.state_store.save(state)
             return {"ok": True, "status": "duplicate"}
         response = self.api.send_message(
             external_session_key=external_session_key,
@@ -581,7 +587,6 @@ class ImessageChannelController:
             raise ChannelError("BuddySwitch send response did not include message.id")
         seen.add(inbound_key)
         contact["seen_inbound_keys"] = sorted(seen)
-        _contact_routes(contact)[message_id] = route
         self.state_store.save(state)
         return {"ok": True, "status": "delivered", "message_id": message_id, "sender": _sender_key(sender)}
 
@@ -592,18 +597,25 @@ class ImessageChannelController:
             contacts[key] = _default_contact()
         return contacts[key]
 
-    def _external_session_key(self, contact: dict[str, Any]) -> str:
-        existing = _contact_external_session_key(contact)
-        if existing:
-            return existing
+    def _external_session_binding(self, contact: dict[str, Any]) -> tuple[str, str]:
+        existing_key = _contact_external_session_key(contact)
+        existing_identity = _contact_external_identity_id(contact)
+        if existing_key and existing_identity:
+            return existing_key, existing_identity
         created = self.api.create_external_session(display_name=self.config.display_name)
         if created.get("ok") is not True:
             raise ChannelError(str((created.get("error") or {}).get("message") or "external session creation failed"))
-        external_session_key = created.get("external_session_key")
-        if not isinstance(external_session_key, str) or not external_session_key.strip():
+        external_session_key = str(created.get("external_session_key") or "").strip()
+        identity = created.get("identity")
+        external_identity_id = str(identity.get("id") or "").strip() if isinstance(identity, dict) else ""
+        identity_type = str(identity.get("type") or "").strip() if isinstance(identity, dict) else ""
+        if not external_session_key:
             raise ChannelError("external session creation did not return external_session_key")
-        contact["external_session_key"] = external_session_key.strip()
-        return external_session_key.strip()
+        if not external_identity_id or identity_type != "external":
+            raise ChannelError("external session creation did not return external identity")
+        contact["external_session_key"] = external_session_key
+        contact["external_identity_id"] = external_identity_id
+        return external_session_key, external_identity_id
 
 
 class ImessageChannelWorker:
@@ -662,7 +674,6 @@ def _default_contact() -> dict[str, Any]:
         "pending_actor_choices": {},
         "seen_inbound_keys": [],
         "sent_outbound_event_ids": [],
-        "routes": {},
     }
 
 
@@ -671,19 +682,18 @@ def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
     external_session_key = payload.get("external_session_key")
     if isinstance(external_session_key, str) and external_session_key.strip():
         contact["external_session_key"] = external_session_key.strip()
+    external_identity_id = payload.get("external_identity_id")
+    if isinstance(external_identity_id, str) and external_identity_id.strip():
+        contact["external_identity_id"] = external_identity_id.strip()
+    route = payload.get("route")
+    if isinstance(route, dict) and _valid_route(route):
+        contact["route"] = dict(route)
     active_identity_id = payload.get("active_identity_id")
     if isinstance(active_identity_id, str) and active_identity_id.strip():
         contact["active_identity_id"] = active_identity_id.strip()
     contact["pending_actor_choices"] = _string_dict(payload.get("pending_actor_choices"))
     contact["seen_inbound_keys"] = _string_list(payload.get("seen_inbound_keys"))
     contact["sent_outbound_event_ids"] = _string_list(payload.get("sent_outbound_event_ids"))
-    routes = payload.get("routes")
-    if isinstance(routes, dict):
-        contact["routes"] = {
-            str(key): dict(value)
-            for key, value in routes.items()
-            if isinstance(key, str) and isinstance(value, dict)
-        }
     return contact
 
 
@@ -745,6 +755,21 @@ def _route_from_row(row: dict[str, Any], *, sender: str) -> dict[str, Any]:
     return route
 
 
+def _valid_route(route: dict[str, Any]) -> bool:
+    return any(route.get(field) for field in ("chat_id", "chat_identifier", "chat_guid", "sender"))
+
+
+def _contact_route(contact: dict[str, Any]) -> dict[str, Any] | None:
+    value = contact.get("route")
+    return dict(value) if isinstance(value, dict) and _valid_route(value) else None
+
+
+def _set_contact_route(contact: dict[str, Any], route: dict[str, Any]) -> None:
+    if not _valid_route(route):
+        raise ChannelError("iMessage contact route is missing chat or sender")
+    contact["route"] = dict(route)
+
+
 def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -777,18 +802,9 @@ def _contact_external_session_key(contact: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
-def _contact_routes(contact: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    routes = contact.get("routes")
-    if not isinstance(routes, dict):
-        routes = {}
-        contact["routes"] = routes
-    normalized: dict[str, dict[str, Any]] = {}
-    for key, value in routes.items():
-        if isinstance(key, str) and isinstance(value, dict):
-            normalized[key] = value
-    if normalized is not routes:
-        contact["routes"] = normalized
-    return normalized
+def _contact_external_identity_id(contact: dict[str, Any]) -> str:
+    value = contact.get("external_identity_id")
+    return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
 def _inbound_key(row: dict[str, Any]) -> str:
