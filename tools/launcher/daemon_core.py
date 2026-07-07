@@ -25,7 +25,6 @@ import app_server  # noqa: E402
 import daemon_mailbox  # noqa: E402
 import daemon_triggers  # noqa: E402
 import runtime_event_log  # noqa: E402
-import side_thread_lifecycle  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
 from task_sys_runtime import cleanup_task_sys_side_lease as task_sys_cleanup_task_sys_side_lease  # noqa: E402
 from task_sys_runtime import execute_instruction as task_sys_execute_instruction  # noqa: E402
@@ -1134,46 +1133,6 @@ class DaemonRuntime:
         if interrupted_turn_id is not None:
             result["interrupted_turn_id"] = interrupted_turn_id
         return result
-
-    def submit_side_triage_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, Any]:
-        result = side_thread_lifecycle.find_or_start_side_thread(
-            socket_path=self.context.socket_path,
-            instance_json=self.context.instance_json,
-            actor_id=self.context.actor_id,
-            parent_thread_id=self.context.main_thread_id,
-            text=text,
-            purpose="daemon.side_triage",
-            workspace_dir=self.context.workspace_dir,
-            shared_project_workspace_dir=self.context.project_workspace_dir,
-            permissions=self.context.permissions,
-        )
-        action = result.get("action")
-        side_thread_id = _string_field(result, "side_thread_id", "sideThreadId")
-        if action == "send" and side_thread_id:
-            self._record_runtime_call(
-                handler_name=handler_name,
-                origin_id=origin_id,
-                runtime_method="side_send",
-                side_thread_id=side_thread_id,
-                turn_id=_string_field(result, "turn_id", "turnId"),
-                status="succeeded",
-            )
-            payload = dict(result)
-            payload["action"] = "send"
-            return payload
-        if side_thread_id:
-            self._record_runtime_call(
-                handler_name=handler_name,
-                origin_id=origin_id,
-                runtime_method="side_start",
-                side_thread_id=side_thread_id,
-                turn_id=_string_field(result, "turn_id", "turnId"),
-                status="succeeded",
-            )
-            payload = dict(result)
-            payload["action"] = "start"
-            return payload
-        raise app_server.AppServerProtocolError("side lifecycle did not return a side_thread_id")
 
 
 def load_daemon_context(instance_json: Path) -> DaemonContext:

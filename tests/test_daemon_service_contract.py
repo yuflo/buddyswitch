@@ -977,40 +977,6 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertIn("submit failed after interrupt", records[1]["error"])
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
 
-    def test_submit_side_triage_prompt_starts_or_reuses_side_and_records_runtime_facts(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
-            state = self._state(instance["instance_root"])
-            runtime = self.core.DaemonRuntime(context=context, state=state)
-            calls: list[dict[str, object]] = []
-            original_find_or_start = self.core.side_thread_lifecycle.find_or_start_side_thread
-
-            def fake_find_or_start_side_thread(**kwargs: object) -> dict[str, object]:
-                calls.append({"helper": "find_or_start_side_thread", **kwargs})
-                if len(calls) == 1:
-                    return {"action": "start", "side_thread_id": "thr-side-1", "turn_id": "turn-side-1", "thread_action": "start"}
-                return {"action": "send", "side_thread_id": "thr-side-1", "turn_id": "turn-side-2", "thread_action": "steer"}
-
-            self.addCleanup(setattr, self.core.side_thread_lifecycle, "find_or_start_side_thread", original_find_or_start)
-            self.core.side_thread_lifecycle.find_or_start_side_thread = fake_find_or_start_side_thread
-
-            started = runtime.submit_side_triage_prompt("triage prompt", handler_name="im_message_created", origin_id="msg-1")
-            reused = runtime.submit_side_triage_prompt("follow up", handler_name="im_message_created", origin_id="msg-2")
-
-            self.assertEqual(started["side_thread_id"], "thr-side-1")
-            self.assertEqual(reused["side_thread_id"], "thr-side-1")
-            self.assertEqual(reused["action"], "send")
-            self.assertEqual([call["helper"] for call in calls], ["find_or_start_side_thread", "find_or_start_side_thread"])
-            self.assertEqual(calls[0]["workspace_dir"], context.workspace_dir)
-            self.assertEqual(calls[0]["shared_project_workspace_dir"], context.project_workspace_dir)
-            self.assertEqual(calls[0]["permissions"], "buddyswitch-runtime")
-            self.assertNotIn("model", calls[0])
-            self.assertNotIn("model_reasoning_effort", calls[0])
-            records = self._runtime_records(instance["instance_root"])
-            self.assertEqual([record["runtime_method"] for record in records], ["side_start", "side_send"])
-            self.assertEqual([record["side_thread_id"] for record in records], ["thr-side-1", "thr-side-1"])
-
     def test_daemon_runtime_handler_facing_surface_is_exactly_clean_runtime_methods(self) -> None:
         public_methods = {
             name
@@ -1022,7 +988,6 @@ class DaemonServiceContractTests(unittest.TestCase):
             {
                 "parent_activity",
                 "submit_parent_prompt",
-                "submit_side_triage_prompt",
                 "execute_task_sys_instruction",
                 "cleanup_task_sys_side_lease",
             },
@@ -1073,11 +1038,12 @@ class DaemonServiceContractTests(unittest.TestCase):
             "submit_turn",
             "interrupt_parent",
             "interrupt_and_submit_parent_prompt",
-            "start_side_triage",
-            "send_side_triage",
-            "start_or_reuse_side_triage",
+            "start_" + "side_triage",
+            "send_" + "side_triage",
+            "start_" + "or_reuse_side_triage",
             "require_side_thread",
-            "close_side_triage",
+            "close_" + "side_triage",
+            "submit_" + "side_triage_prompt",
         ):
             self.assertFalse(hasattr(self.core.DaemonRuntime, old_name), old_name)
 

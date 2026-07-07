@@ -141,12 +141,6 @@ def update_side_thread(
     return updated_row
 
 
-def _is_task_bound_lease(row: dict[str, Any]) -> bool:
-    task_id = row.get("task_id")
-    purpose = row.get("purpose")
-    return (isinstance(task_id, str) and bool(task_id.strip())) or purpose == "task_sys.side_frame"
-
-
 def require_side_thread(
     instance_json: Path,
     *,
@@ -161,29 +155,6 @@ def require_side_thread(
         if row.get("thread_id") == side and row.get("parent_thread_id") == parent and row.get("status") == "open":
             return row
     raise SideThreadRegistryError(f"Side thread is not registered for this instance: {side}")
-
-
-def find_open_side_thread(
-    instance_json: Path,
-    *,
-    actor_id: str,
-    parent_thread_id: str,
-) -> dict[str, Any] | None:
-    actor = _require_id(actor_id, "Actor id")
-    parent = _require_id(parent_thread_id, "Parent thread id")
-    payload = _load_payload(Path(instance_json), actor)
-    for row in _side_rows(payload):
-        thread_id = row.get("thread_id")
-        if (
-            isinstance(thread_id, str)
-            and thread_id
-            and thread_id != parent
-            and row.get("parent_thread_id") == parent
-            and row.get("status") == "open"
-            and not _is_task_bound_lease(row)
-        ):
-            return row
-    return None
 
 
 def find_task_side_thread(
@@ -255,9 +226,6 @@ def build_parser() -> argparse.ArgumentParser:
     require = subparsers.add_parser("require")
     _add_common(require, side=True)
     require.set_defaults(func=_command_require)
-    find = subparsers.add_parser("find-open")
-    _add_common(find, side=False)
-    find.set_defaults(func=_command_find_open)
     unregister = subparsers.add_parser("unregister")
     _add_common(unregister, side=True)
     unregister.set_defaults(func=_command_unregister)
@@ -289,16 +257,6 @@ def _command_require(args: argparse.Namespace) -> int:
             side_thread_id=args.side_thread_id,
         )
     )
-    return 0
-
-
-def _command_find_open(args: argparse.Namespace) -> int:
-    row = find_open_side_thread(
-        Path(args.instance_json),
-        actor_id=args.actor_id,
-        parent_thread_id=args.parent_thread_id,
-    )
-    _print_json(row or {})
     return 0
 
 

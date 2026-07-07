@@ -204,50 +204,6 @@ class SideThreadRegistryTests(unittest.TestCase):
                     side_thread_id="thr-main",
                 )
 
-    def test_find_open_side_thread_returns_first_open_row_for_parent(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_json = self._instance_json(temp_root)
-            payload = self._payload(instance_json)
-            payload["side_threads"] = [
-                {"thread_id": "thr-closed", "parent_thread_id": "thr-main", "status": "closed"},
-                {"thread_id": "thr-other", "parent_thread_id": "thr-other-parent", "status": "open"},
-                {"thread_id": "thr-side-1", "parent_thread_id": "thr-main", "status": "open"},
-                {"thread_id": "thr-side-2", "parent_thread_id": "thr-main", "status": "open"},
-            ]
-            instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
-
-            row = self.registry.find_open_side_thread(
-                instance_json,
-                actor_id="act-dev-side",
-                parent_thread_id="thr-main",
-            )
-
-            self.assertEqual(row["thread_id"], "thr-side-1")
-
-    def test_find_open_side_thread_skips_task_bound_task_sys_leases(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_json = self._instance_json(temp_root)
-            payload = self._payload(instance_json)
-            payload["side_threads"] = [
-                {
-                    "thread_id": "thr-task-sys",
-                    "parent_thread_id": "thr-main",
-                    "status": "open",
-                    "task_id": "task-user-input-abcdef123456",
-                    "purpose": "task_sys.side_frame",
-                },
-                {"thread_id": "thr-manual", "parent_thread_id": "thr-main", "status": "open"},
-            ]
-            instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
-
-            row = self.registry.find_open_side_thread(
-                instance_json,
-                actor_id="act-dev-side",
-                parent_thread_id="thr-main",
-            )
-
-            self.assertEqual(row["thread_id"], "thr-manual")
-
     def test_unregister_removes_only_matching_side_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(temp_root)

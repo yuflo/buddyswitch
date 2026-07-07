@@ -80,17 +80,6 @@ class FakeDaemonRuntime:
         )
         raise AssertionError("Track comment handler must not submit parent prompts")
 
-    def submit_side_triage_prompt(self, text: str, *, handler_name: str, origin_id: str | None) -> dict[str, object]:
-        self.calls.append(
-            {
-                "method": "submit_side_triage_prompt",
-                "text": text,
-                "handler_name": handler_name,
-                "origin_id": origin_id,
-            }
-        )
-        raise AssertionError("Track comment handler must not submit side prompts")
-
     def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, object]:
         self.calls.append({"method": "execute_task_sys_instruction", "instruction": instruction})
         return {"action": instruction["type"], "task_id": instruction["task_id"]}

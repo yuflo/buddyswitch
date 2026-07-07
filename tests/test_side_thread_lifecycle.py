@@ -214,7 +214,7 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
         *,
         side_thread_id: str = "thr-side-1",
         turn_id: str = "turn-side-active",
-        purpose: str = "daemon.side_triage",
+        purpose: str = "host_control.side",
         task_id: str | None = None,
     ) -> None:
         payload = self._payload(instance_json)
@@ -322,30 +322,6 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertEqual(result["model_config_durability"], "thread_fork_only")
             self.assertNotIn("model", result)
             self.assertNotIn("model_reasoning_effort", result)
-
-    def test_find_or_start_rejects_model_or_effort_when_existing_side_thread_would_be_reused(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_json = self._instance_json(temp_root)
-            self._seed_side_thread(instance_json)
-
-            with self.assertRaisesRegex(
-                self.lifecycle.SideThreadLifecycleError,
-                "only applies when starting a new side thread",
-            ):
-                self.lifecycle.find_or_start_side_thread(
-                    socket_path=self.socket_path,
-                    instance_json=instance_json,
-                    actor_id="act-dev-side",
-                    parent_thread_id="thr-main",
-                    text="Follow up",
-                    purpose="daemon.side_triage",
-                    workspace_dir=self.workspace_dir,
-                    shared_project_workspace_dir=self.project_workspace_dir,
-                    permissions="buddyswitch-runtime",
-                    model="gpt-5.4",
-                )
-
-            self.assertEqual(self.app_server.calls, [])
 
     def test_send_to_active_side_thread_steers_stored_turn_without_turn_list(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

@@ -278,55 +278,6 @@ def cleanup_task_side_lease(
     )
 
 
-def find_or_start_side_thread(
-    *,
-    socket_path: Path,
-    instance_json: Path,
-    actor_id: str,
-    parent_thread_id: str,
-    text: str,
-    purpose: str,
-    workspace_dir: Path,
-    shared_project_workspace_dir: Path,
-    permissions: str,
-    model: str | None = None,
-    model_reasoning_effort: str | None = None,
-) -> dict[str, Any]:
-    normalized_model = _optional_text(model, "model")
-    normalized_effort = _optional_text(model_reasoning_effort, "model_reasoning_effort")
-    row = side_thread_registry.find_open_side_thread(
-        instance_json,
-        actor_id=actor_id,
-        parent_thread_id=parent_thread_id,
-    )
-    side_thread_id = row.get("thread_id") if isinstance(row, Mapping) else None
-    if isinstance(side_thread_id, str) and side_thread_id.strip():
-        if normalized_model is not None or normalized_effort is not None:
-            raise SideThreadLifecycleError("model and effort only applies when starting a new side thread")
-        return send_to_side_thread(
-            socket_path=socket_path,
-            instance_json=instance_json,
-            actor_id=actor_id,
-            parent_thread_id=parent_thread_id,
-            side_thread_id=side_thread_id,
-            text=text,
-            permissions=permissions,
-        )
-    return start_side_thread(
-        socket_path=socket_path,
-        instance_json=instance_json,
-        actor_id=actor_id,
-        parent_thread_id=parent_thread_id,
-        text=text,
-        purpose=purpose,
-        workspace_dir=workspace_dir,
-        shared_project_workspace_dir=shared_project_workspace_dir,
-        permissions=permissions,
-        model=normalized_model,
-        model_reasoning_effort=normalized_effort,
-    )
-
-
 def _print_json(payload: Any) -> None:
     print(json.dumps(payload, ensure_ascii=True))
 

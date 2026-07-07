@@ -48,10 +48,6 @@ class _Runtime:
         self.calls.append({"method": "submit_parent_prompt", "prompt": prompt, **kwargs})
         raise AssertionError("IM wake handler must not submit parent prompts")
 
-    def submit_side_triage_prompt(self, prompt: str, **kwargs: Any) -> None:
-        self.calls.append({"method": "submit_side_triage_prompt", "prompt": prompt, **kwargs})
-        raise AssertionError("IM wake handler must not submit side prompts")
-
     def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
         self.calls.append({"method": "execute_task_sys_instruction", "instruction": instruction})
         return {"action": instruction["type"], "task_id": instruction["task_id"]}
