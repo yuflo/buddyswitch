@@ -61,9 +61,12 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "artifact.create",
             "evidence.approve",
             "track.add_proof",
+            "message.contacts",
+            "message.send",
             "message.conversation",
             "message.get",
             "message.mark",
+            "message.list",
         ):
             with self.subTest(permission=permission):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)

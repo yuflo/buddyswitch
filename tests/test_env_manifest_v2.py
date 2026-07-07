@@ -72,15 +72,26 @@ class EnvManifestV2Tests(unittest.TestCase):
         ]
         self.assertEqual(rows, [])
 
-    def test_all_roles_have_message_and_track_tools(self) -> None:
-        """Every role has direct messages and Track collaboration tools."""
-        required_tools = {"message-tool", "track-tool"}
+    def test_manifest_has_no_message_tool_skill_row(self) -> None:
+        retired_id = "message" + "-tool"
+        rows = [
+            row
+            for row in self.manifest.get("skills", [])
+            if isinstance(row, dict) and row.get("id") == retired_id
+        ]
+        self.assertEqual(rows, [])
+
+    def test_all_roles_have_track_tool_skill(self) -> None:
+        """Every role keeps Track collaboration as a shared skill."""
+        required_tools = {"track-tool"}
+        retired_message_tool = "message" + "-tool"
         for role in self.manifest.get("roles", []):
             assert isinstance(role, dict)
             role_id = str(role.get("id"))
             skills = {row for row in role.get("skills", []) if isinstance(row, str)}
             with self.subTest(role=role_id):
                 self.assertTrue(required_tools.issubset(skills), msg=f"{role_id} missing tools: {required_tools - skills}")
+                self.assertNotIn(retired_message_tool, skills)
 
     def test_show_role_authority_excludes_retired_acl_fields(self) -> None:
         profile = env_manifest.role_authority_profile(self.manifest, "pm")

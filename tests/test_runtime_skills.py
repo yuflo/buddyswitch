@@ -39,7 +39,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "task_sys": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
         "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
         "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
-        "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
     }
     DEV_PRODUCT_SKILLS = (
         "enter-dev-workspace",
@@ -106,8 +105,9 @@ class RuntimeSkillsTests(unittest.TestCase):
         "track-tool",
         "artifact-tool",
         "task-management",
-        "message-tool",
     }
+    RETIRED_MESSAGE_TOOL_ID = "message" + "-tool"
+    RETIRED_MESSAGE_TOOL_DIR = ROOT / "buddyswitch" / "skills" / "shared" / RETIRED_MESSAGE_TOOL_ID
     ROLE_AGENT_FILES = (
         ROOT / "tools/launcher/assets/roles/pm/AGENTS.md",
         ROOT / "tools/launcher/assets/roles/dev/AGENTS.md",
@@ -178,13 +178,36 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_role_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-management", "message-tool"}
+        required = {"track-tool", "artifact-tool", "task-management"}
         for role in self.manifest.get("roles", []):
             assert isinstance(role, dict)
             skills = set(role.get("skills", []))
             with self.subTest(role=role.get("id")):
                 self.assertTrue(required.issubset(skills))
                 self.assertNotIn("handoff-tool", skills)
+
+    def test_message_tool_skill_is_retired_from_manifest_and_runtime_install(self) -> None:
+        all_skill_ids = {row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)}
+        self.assertNotIn(self.RETIRED_MESSAGE_TOOL_ID, all_skill_ids)
+        self.assertFalse((self.RETIRED_MESSAGE_TOOL_DIR / "SKILL.md").exists())
+
+        for role in ("pm", "design", "dev", "market", "test"):
+            role_row = next(
+                row
+                for row in self.manifest.get("roles", [])
+                if isinstance(row, dict) and row.get("id") == role
+            )
+            self.assertNotIn(self.RETIRED_MESSAGE_TOOL_ID, set(role_row.get("skills", [])), msg=role)
+            with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+                workspace = Path(temp_dir) / f"{role}-workspace"
+                workspace.mkdir()
+                installed = runtime_skills.install_runtime_skills(
+                    manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+                    role_id=role,
+                    workspace=workspace,
+                )
+                self.assertNotIn(self.RETIRED_MESSAGE_TOOL_ID, set(installed), msg=role)
+                self.assertFalse((workspace / ".agents" / "skills" / self.RETIRED_MESSAGE_TOOL_ID).exists(), msg=role)
 
     def test_manifest_and_runtime_skill_materialization_exclude_actor_private_tool(self) -> None:
         all_skill_ids = {row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)}
@@ -455,10 +478,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                     self.assertNotIn(forbidden.lower(), lowered)
 
     def test_shared_tool_skills_do_not_embed_payload_or_return_schema_blocks(self) -> None:
-        skill_paths = [
-            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
-        ]
+        skill_paths = list(self.SHARED_TOOL_SKILLS.values())
         for path in skill_paths:
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
@@ -466,63 +486,16 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("**returns:**", text)
                 self.assertNotIn("## payload examples", text)
 
-    def test_shared_message_skill_prevents_observed_invalid_calls(self) -> None:
-        message_skill = self.SHARED_TOOL_SKILLS["message"].read_text(encoding="utf-8").lower()
-        forbidden_identity_residue = (
-            "active role cannot",
-            "same role id",
-            "same role cannot",
-            "same-role cannot",
-            "same buddy",
-            "buddybox",
-            "role messages",
-            "direct_role_channel",
-            "active-role inbox",
-            "not the active role",
-        )
-
-        self.assertIn("message__contacts", message_skill)
-        self.assertIn("target_identity_id", message_skill)
-        self.assertIn("contact.identity_id", message_skill)
-        self.assertIn("message__get", message_skill)
-        self.assertIn("message__send", message_skill)
-        self.assertIn("message__mark", message_skill)
-        self.assertIn("message__conversation", message_skill)
-        self.assertIn("message__list", message_skill)
-        self.assertNotIn("request__list", message_skill)
-        self.assertIn("context.get.tool_catalog['message']", message_skill)
-        self.assertNotIn("message contacts --payload", message_skill)
-        self.assertNotIn("message send --payload", message_skill)
-        self.assertNotIn("message conversation --payload", message_skill)
-        self.assertNotIn("message list --payload", message_skill)
-        self.assertNotIn("to_role", message_skill)
-        self.assertNotIn("from_role", message_skill)
-        self.assertNotIn('"actor_address":', message_skill)
-        self.assertNotIn('"message":', message_skill)
-        self.assertNotIn('message list --payload \'{"box":"inbox"}\'', message_skill)
-        self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
-        self.assertNotIn("selected target role", message_skill)
-        self.assertNotIn("role selector", message_skill)
-        for token in forbidden_identity_residue:
-            with self.subTest(source_token=token):
-                self.assertNotIn(token, message_skill)
-
-    def test_message_track_shared_tool_skills_stay_atomic(self) -> None:
-        """MCT-SURF-006: Message/Track skills don't teach non-goal features."""
-        msg_skill = (ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md").read_text(encoding="utf-8").lower()
+    def test_track_shared_tool_skill_stays_atomic(self) -> None:
+        """MCT-SURF-006: Track skill does not teach non-goal features."""
         track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8").lower()
         non_goals = ["broadcast", "read receipt", "read_receipt", "handoff", "edit", "delete", "reopen", "task comment", "whiteboard"]
-        for skill_text, label in [(msg_skill, "message-tool"), (track_skill, "track-tool")]:
-            with self.subTest(skill=label):
-                self.assertIn("env.tool", skill_text)
-                self.assertIn("context.get.tool_catalog", skill_text)
-                # Non-goals should only appear in "Do not" context
-                for term in non_goals:
-                    if term in skill_text:
-                        # Allow "do not" context
-                        do_not_idx = skill_text.find("do not")
-                        term_idx = skill_text.find(term)
-                        self.assertTrue(do_not_idx >= 0, msg=f"{label}: '{term}' found without 'do not' section")
+        self.assertIn("env.tool", track_skill)
+        self.assertIn("context.get.tool_catalog", track_skill)
+        for term in non_goals:
+            if term in track_skill:
+                do_not_idx = track_skill.find("do not")
+                self.assertTrue(do_not_idx >= 0, msg=f"track-tool: '{term}' found without 'do not' section")
 
     def test_role_skills_remove_optional_handoff_guidance(self) -> None:
         role_skill_files = [
@@ -775,12 +748,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("python3 scripts/env/client.py", combined)
 
     def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
-        skill_paths = {
-            "task_sys": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
-            "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
-            "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
-            "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-        }
+        skill_paths = self.SHARED_TOOL_SKILLS
         for tool, path in skill_paths.items():
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(tool=tool):
