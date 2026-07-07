@@ -147,29 +147,64 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertEqual(rows[0]["shared_root"], str(paths.shared_root))
             self.assertEqual(rows[0]["pid_file"], str(paths.pid_file))
 
-    def test_ping_rejects_daemon_without_actor_address_protocol(self) -> None:
+    def test_ping_uses_identity_reachability_protocol(self) -> None:
         cli = load_module(CENTRAL_CLI_PATH)
         original_request = cli.daemon_client.request_central_daemon
+        original_check = cli.daemon_client.check_reachability
         calls: list[dict[str, Any]] = []
 
         def fake_request(method: str, params: dict[str, Any], *, socket_path: Path) -> dict[str, Any]:
-            calls.append({"method": method, "params": params, "socket_path": socket_path})
+            calls.append({"kind": "request", "method": method, "params": params, "socket_path": socket_path})
             if method == "daemon.ping":
                 return {"ok": True, "pid": 1111, "socket_path": str(socket_path)}
-            if method == "actor.check_reachability":
-                return {"reachability_status": "invalid_identity_id", "target_identity_id": None}
             raise AssertionError(f"unexpected central daemon method: {method}")
 
+        def fake_check_reachability(*, target_identity_id: str, socket_path: Path) -> dict[str, Any]:
+            calls.append(
+                {
+                    "kind": "reachability",
+                    "target_identity_id": target_identity_id,
+                    "socket_path": socket_path,
+                }
+            )
+            return {
+                "reachability_status": "never_registered",
+                "target_identity_id": "act-central-daemon-probe",
+                "record": None,
+            }
+
         self.addCleanup(setattr, cli.daemon_client, "request_central_daemon", original_request)
+        self.addCleanup(setattr, cli.daemon_client, "check_reachability", original_check)
         cli.daemon_client.request_central_daemon = fake_request
+        cli.daemon_client.check_reachability = fake_check_reachability
 
-        with self.assertRaises(RuntimeError) as raised:
-            cli.ping_central_daemon(socket_path=Path("/tmp/central.sock"))
+        payload = cli.ping_central_daemon(socket_path=Path("/tmp/central.sock"))
 
-        self.assertIn("actor-address protocol", str(raised.exception))
-        self.assertEqual([row["method"] for row in calls], ["daemon.ping", "actor.check_reachability"])
+        self.assertTrue(payload["identity_reachability_protocol"])
+        self.assertEqual(
+            calls,
+            [
+                {"kind": "request", "method": "daemon.ping", "params": {}, "socket_path": Path("/tmp/central.sock")},
+                {
+                    "kind": "reachability",
+                    "target_identity_id": "act-central-daemon-probe",
+                    "socket_path": Path("/tmp/central.sock"),
+                },
+            ],
+        )
+        self.assertNotIn("target_" + "actor_address", repr(calls))
 
-    def test_start_daemon_restarts_live_process_without_actor_address_protocol(self) -> None:
+    def test_central_daemon_readiness_has_no_actor_address_contract(self) -> None:
+        text = CENTRAL_CLI_PATH.read_text(encoding="utf-8")
+        for forbidden in (
+            "PROBE_" + "ACTOR_ADDRESS",
+            "target_" + "actor_address",
+            "actor_" + "address_protocol",
+            "actor-address " + "protocol",
+        ):
+            self.assertNotIn(forbidden, text)
+
+    def test_start_daemon_restarts_live_process_without_identity_reachability_protocol(self) -> None:
         cli = load_module(CENTRAL_CLI_PATH)
         with tempfile.TemporaryDirectory() as temp_root:
             paths = self._paths(temp_root)
@@ -197,8 +232,13 @@ class CentralDaemonServiceTests(unittest.TestCase):
             def fake_ping(*, socket_path: Path) -> dict[str, Any]:
                 self.assertEqual(socket_path, paths.socket_path)
                 if not commands:
-                    raise RuntimeError("central daemon does not support actor-address protocol")
-                return {"ok": True, "pid": 2222, "socket_path": str(socket_path)}
+                    raise RuntimeError("central daemon does not support identity reachability protocol")
+                return {
+                    "ok": True,
+                    "pid": 2222,
+                    "socket_path": str(socket_path),
+                    "identity_reachability_protocol": True,
+                }
 
             def fake_terminate(pid: int) -> bool:
                 terminated.append(pid)
@@ -219,6 +259,7 @@ class CentralDaemonServiceTests(unittest.TestCase):
 
             self.assertTrue(payload["started"])
             self.assertEqual(payload["pid"], 2222)
+            self.assertEqual(payload["ping"]["identity_reachability_protocol"], True)
             self.assertEqual(terminated, [1111])
             self.assertEqual(len(commands), 1)
 

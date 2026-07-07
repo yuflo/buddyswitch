@@ -26,7 +26,8 @@ from env.tool_runtime import daemon_client  # noqa: E402
 
 STOP_GRACE_SECONDS = 2.0
 POLL_SECONDS = 0.05
-PROBE_ACTOR_ADDRESS = {"actor_id": "act-central-daemon-probe", "role_id": "dev"}
+PROBE_IDENTITY_ID = "act-central-daemon-probe"
+READY_REACHABILITY_STATUSES = {"online", "registered_offline", "never_registered"}
 
 
 def read_pid(pid_file: Path) -> int | None:
@@ -95,15 +96,16 @@ def register_test_process(paths: central_daemon_core.CentralDaemonPaths, *, pid:
 
 def ping_central_daemon(*, socket_path: Path) -> dict[str, Any]:
     ping = daemon_client.request_central_daemon("daemon.ping", {}, socket_path=socket_path)
-    reachability = daemon_client.request_central_daemon(
-        "actor.check_reachability",
-        {"target_actor_address": PROBE_ACTOR_ADDRESS},
+    reachability = daemon_client.check_reachability(
+        target_identity_id=PROBE_IDENTITY_ID,
         socket_path=socket_path,
     )
-    target = reachability.get("target_actor_address")
-    if target != PROBE_ACTOR_ADDRESS:
-        raise RuntimeError("central daemon does not support actor-address protocol")
-    ping["actor_address_protocol"] = True
+    if (
+        reachability.get("target_identity_id") != PROBE_IDENTITY_ID
+        or reachability.get("reachability_status") not in READY_REACHABILITY_STATUSES
+    ):
+        raise RuntimeError("central daemon does not support identity reachability protocol")
+    ping["identity_reachability_protocol"] = True
     return ping
 
 
