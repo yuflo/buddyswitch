@@ -208,14 +208,9 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("not online", response.get("error", {}).get("message", ""))
         self.assertEqual(after, before)
 
-    def test_im_repository_rejects_retired_row_fields_without_writing_files(self) -> None:
+    def test_im_repository_rejects_unknown_row_fields_without_writing_files(self) -> None:
         sender = {"id": "act-pm-repo", "type": "actor"}
         target = {"id": "act-dev-repo", "type": "actor"}
-        retired_participants = "partici" + "pants"
-        retired_participant = "partici" + "pant"
-        retired_from_identity = "from_" + "identity_id"
-        retired_to_identity = "to_" + "identity_id"
-        retired_visible_identity = "visible_to_" + "identity"
 
         def snapshot() -> list[str]:
             im_root = self.runtime_state_root / "im"
@@ -228,62 +223,30 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "conversation",
                 lambda: message_repo.save_im_conversation(
                     {
-                        "id": "conv-retired",
+                        "id": "conv-unknown",
                         "type": "direct",
                         "identity_ids": [sender["id"], target["id"]],
-                        retired_participants: [sender, target],
+                        "created_at": "2026-07-07T00:00:00Z",
+                        "updated_at": "2026-07-07T00:00:00Z",
+                        "last_message_id": "msg-unknown",
+                        "last_sequence": 1,
+                        "debug_payload": {"unexpected": True},
                     }
                 ),
             ),
             (
-                "message_from",
+                "message",
                 lambda: message_repo.save_im_message(
                     {
-                        "id": "msg-retired-from",
-                        "conversation_id": "conv-retired",
+                        "id": "msg-unknown",
+                        "conversation_id": "conv-unknown",
                         "sender_identity": sender,
                         "target_identity": target,
-                        "from": sender,
-                        "content": "bad",
-                    }
-                ),
-            ),
-            (
-                "message_to",
-                lambda: message_repo.save_im_message(
-                    {
-                        "id": "msg-retired-to",
-                        "conversation_id": "conv-retired",
-                        "sender_identity": sender,
-                        "target_identity": target,
-                        "to": target,
-                        "content": "bad",
-                    }
-                ),
-            ),
-            (
-                "message_from_identity",
-                lambda: message_repo.save_im_message(
-                    {
-                        "id": "msg-retired-from-identity",
-                        "conversation_id": "conv-retired",
-                        "sender_identity": sender,
-                        "target_identity": target,
-                        retired_from_identity: sender["id"],
-                        "content": "bad",
-                    }
-                ),
-            ),
-            (
-                "message_to_identity",
-                lambda: message_repo.save_im_message(
-                    {
-                        "id": "msg-retired-to-identity",
-                        "conversation_id": "conv-retired",
-                        "sender_identity": sender,
-                        "target_identity": target,
-                        retired_to_identity: target["id"],
-                        "content": "bad",
+                        "content": "unknown",
+                        "reply_to": None,
+                        "created_at": "2026-07-07T00:00:00Z",
+                        "sequence": 1,
+                        "debug_payload": {"unexpected": True},
                     }
                 ),
             ),
@@ -291,54 +254,31 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "state",
                 lambda: message_repo.save_im_message_state(
                     {
-                        "message_id": "msg-retired-state",
+                        "message_id": "msg-unknown-state",
                         "owner_identity_id": target["id"],
-                        retired_participant: target,
                         "disposition": "unseen",
+                        "reason": None,
+                        "processed_by": None,
+                        "updated_at": "2026-07-07T00:00:00Z",
+                        "debug_payload": {"unexpected": True},
                     }
                 ),
             ),
             (
-                "event_visible_alias",
+                "event",
                 lambda: message_repo.save_im_event(
                     {
-                        "event_id": "imev-retired-visible",
+                        "event_id": "imev-unknown",
                         "type": "message.created",
-                        "message_id": "msg-retired-event",
-                        "conversation_id": "conv-retired",
-                        "sender_identity": sender,
-                        "target_identity": target,
-                        retired_visible_identity: target,
-                    }
-                ),
-            ),
-            (
-                "event_from_identity",
-                lambda: message_repo.save_im_event(
-                    {
-                        "event_id": "imev-retired-from",
-                        "type": "message.created",
-                        "message_id": "msg-retired-event",
-                        "conversation_id": "conv-retired",
+                        "message_id": "msg-unknown",
+                        "conversation_id": "conv-unknown",
                         "sender_identity": sender,
                         "target_identity": target,
                         "visible_to_identity_id": target["id"],
-                        retired_from_identity: sender["id"],
-                    }
-                ),
-            ),
-            (
-                "event_to_identity",
-                lambda: message_repo.save_im_event(
-                    {
-                        "event_id": "imev-retired-to",
-                        "type": "message.created",
-                        "message_id": "msg-retired-event",
-                        "conversation_id": "conv-retired",
-                        "sender_identity": sender,
-                        "target_identity": target,
-                        "visible_to_identity_id": target["id"],
-                        retired_to_identity: target["id"],
+                        "reply_to": None,
+                        "created_at": "2026-07-07T00:00:00Z",
+                        "sequence": 1,
+                        "debug_payload": {"unexpected": True},
                     }
                 ),
             ),
@@ -347,7 +287,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for name, call in cases:
             with self.subTest(name=name):
                 before = snapshot()
-                with self.assertRaisesRegex(ValueError, "retired IM field"):
+                with self.assertRaisesRegex(ValueError, "unknown IM field"):
                     call()
                 self.assertEqual(snapshot(), before)
 
@@ -460,6 +400,51 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         state = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(state["disposition"], "replied")
+
+    def test_send_im_reply_rejects_non_processable_source_message_without_write(self) -> None:
+        _created, _external_session, external = self._external_session()
+        actor = self._actor_identity(role="dev", label="act-dev-reply-processed")
+        root = message_service.send_im_message(
+            sender_identity=external,
+            target_identity=actor["identity"],
+            content="ping",
+        )
+
+        before_messages = sorted(path.name for path in (self.runtime_state_root / "im" / "messages").glob("*.json"))
+        before_events = sorted(path.name for path in (self.runtime_state_root / "im" / "events").glob("*.json"))
+
+        for disposition in ("absorbed", "replied"):
+            with self.subTest(disposition=disposition):
+                mark = message_service.update_im_disposition(
+                    identity=actor["identity"],
+                    message_id=root["message"]["id"],
+                    disposition=disposition,
+                    reason=f"already {disposition}",
+                )
+                self.assertTrue(mark.get("ok"), msg=mark)
+
+                reply = message_service.send_im_reply(
+                    sender_identity=actor["identity"],
+                    reply_to=root["message"]["id"],
+                    content="pong",
+                    actor_reachability_checker=lambda *, target_identity_id: {
+                        "reachability_status": "online",
+                        "target_identity_id": target_identity_id,
+                        "record": {"identity_id": target_identity_id},
+                    },
+                )
+
+                self.assertFalse(reply.get("ok"), msg=reply)
+                self.assertEqual(reply["error"]["code"], "E_IM_REPLY_TARGET")
+                self.assertIn("processable inbound message", reply["error"]["message"])
+                self.assertEqual(
+                    sorted(path.name for path in (self.runtime_state_root / "im" / "messages").glob("*.json")),
+                    before_messages,
+                )
+                self.assertEqual(
+                    sorted(path.name for path in (self.runtime_state_root / "im" / "events").glob("*.json")),
+                    before_events,
+                )
 
     def test_send_im_reply_rejects_message_not_addressed_to_sender(self) -> None:
         sender = self._actor_identity(role="pm", label="act-pm-reply-guard")
@@ -653,21 +638,26 @@ class ImProductCoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         _created, external_session, sender = self._external_session()
         sender_ref = sender
         actor = self._actor_identity()
-        root = message_service.send_external_session_message(
+        first_root = message_service.send_external_session_message(
             external_session=external_session,
             target_identity=actor["identity"],
             content="ping",
+        )
+        second_root = message_service.send_external_session_message(
+            external_session=external_session,
+            target_identity=actor["identity"],
+            content="ping again",
         )
         before = external_session["last_event_id"]
         first_reply = message_service.send_im_reply(
             sender_identity=actor["identity"],
             content="pong one",
-            reply_to=root["message"]["id"],
+            reply_to=first_root["message"]["id"],
         )
         second_reply = message_service.send_im_reply(
             sender_identity=actor["identity"],
             content="pong two",
-            reply_to=root["message"]["id"],
+            reply_to=second_root["message"]["id"],
         )
 
         read = message_service.read_external_session_events(external_session=external_session, wait_ms=0)

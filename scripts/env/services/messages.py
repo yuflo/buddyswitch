@@ -228,6 +228,23 @@ def _im_reply_target_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_REPLY_TARGET", "message": message}}
 
 
+def _reply_source_state(
+    *,
+    message_repo: Any,
+    sender: dict[str, str],
+    message_id: str,
+) -> dict[str, Any]:
+    state = message_repo.get_im_message_state(message_id, sender["id"])
+    if not isinstance(state, dict):
+        return _im_reply_target_error("reply_to message is not processable for the sender identity")
+    disposition = state.get("disposition")
+    if disposition not in {"unseen", "needs_parent"}:
+        return _im_reply_target_error(
+            f"reply_to message must be a processable inbound message; current disposition is {disposition}"
+        )
+    return {"ok": True, "state": state}
+
+
 def _resolve_reply_target_identity_id(
     *,
     message_repo: Any,
@@ -247,6 +264,13 @@ def _resolve_reply_target_identity_id(
     original_id = original_message.get("id")
     if not isinstance(original_id, str) or not original_id.strip():
         return _im_reply_target_error("reply_to message id is invalid")
+    source_state = _reply_source_state(
+        message_repo=message_repo,
+        sender=sender,
+        message_id=original_id.strip(),
+    )
+    if source_state.get("ok") is not True:
+        return source_state
     return {
         "ok": True,
         "target_identity_id": original_sender["id"],

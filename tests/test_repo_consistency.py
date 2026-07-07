@@ -582,6 +582,14 @@ print(json.dumps({{
             "tests/test_artifact_env_tool.py",
             "tests/test_artifact_selection.py",
         ]
+        expanded_live_targets = [
+            "tools/launcher/assets/roles",
+            "buddyswitch/skills",
+            "framework/contracts",
+            "scripts/env/tools",
+            "scripts/env/tool_runtime",
+            "tools/launcher/assets/web-management/app.js",
+        ]
 
         scans = [
             (
@@ -594,6 +602,13 @@ print(json.dumps({{
             (r"\bfrom_identity_id\b|\bto_identity_id\b|\bvisible_to_identity\b", flattened_im_targets),
             (r"['\"]participants['\"]|['\"]participant['\"]", participant_field_targets),
             (r"\bfrom_actor\b", track_artifact_targets),
+            (
+                r"ActorAddress|actor_address|from_actor_address|to_actor_address|processed_by_actor_address"
+                r"|source_actor_address|target_actor_address|identity_from_im_participant"
+                r"|participant\.actor_address|participant\.external_id|\bactor_profile\b",
+                expanded_live_targets,
+            ),
+            (r"\bfrom_identity_id\b|\bto_identity_id\b|\bvisible_to_identity\b", expanded_live_targets),
         ]
 
         def is_allowed_hit(line: str) -> bool:

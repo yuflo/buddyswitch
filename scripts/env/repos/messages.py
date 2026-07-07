@@ -14,15 +14,52 @@ from . import runtime_files
 
 _VALID_DISPOSITIONS = {"unseen", "absorbed", "replied", "needs_parent"}
 INITIAL_IM_EVENT_CURSOR = "imev-000000000000"
-_RETIRED_CONVERSATION_FIELDS = ("partici" + "pants",)
-_RETIRED_MESSAGE_FIELDS = ("fr" + "om", "to", "from_" + "identity_id", "to_" + "identity_id")
-_RETIRED_STATE_FIELDS = ("partici" + "pant",)
-_RETIRED_EVENT_FIELDS = (
-    "fr" + "om",
-    "to",
-    "from_" + "identity_id",
-    "to_" + "identity_id",
-    "visible_to_" + "identity",
+_CONVERSATION_FIELDS = frozenset(
+    {
+        "id",
+        "type",
+        "identity_ids",
+        "created_at",
+        "updated_at",
+        "last_message_id",
+        "last_sequence",
+    }
+)
+_MESSAGE_FIELDS = frozenset(
+    {
+        "id",
+        "conversation_id",
+        "sender_identity",
+        "target_identity",
+        "content",
+        "reply_to",
+        "created_at",
+        "sequence",
+    }
+)
+_MESSAGE_STATE_FIELDS = frozenset(
+    {
+        "message_id",
+        "owner_identity_id",
+        "disposition",
+        "reason",
+        "processed_by",
+        "updated_at",
+    }
+)
+_EVENT_FIELDS = frozenset(
+    {
+        "event_id",
+        "type",
+        "message_id",
+        "conversation_id",
+        "sender_identity",
+        "target_identity",
+        "visible_to_identity_id",
+        "reply_to",
+        "created_at",
+        "sequence",
+    }
 )
 
 
@@ -70,10 +107,16 @@ def _identity_ref(value: Any, field: str) -> dict[str, str]:
     raise ValueError(f"{field} must be an identity payload or identity id")
 
 
-def _reject_retired_fields(row: dict[str, Any], fields: tuple[str, ...], context: str) -> None:
-    present = [field for field in fields if field in row]
-    if present:
-        raise ValueError(f"{context} contains retired IM field(s): {', '.join(present)}")
+def _reject_unknown_fields(row: dict[str, Any], fields: frozenset[str], context: str) -> None:
+    unknown = sorted(set(row) - fields)
+    if unknown:
+        raise ValueError(f"{context} contains unknown IM field(s): {', '.join(unknown)}")
+
+
+def _require_non_negative_int(value: Any, field: str) -> int:
+    if not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
+    return value
 
 
 def save_external_session(external_session: dict[str, Any]) -> dict[str, Any]:
@@ -124,7 +167,7 @@ def next_im_sequence() -> int:
 
 
 def save_im_conversation(conversation: dict[str, Any]) -> dict[str, Any]:
-    _reject_retired_fields(conversation, _RETIRED_CONVERSATION_FIELDS, "conversation")
+    _reject_unknown_fields(conversation, _CONVERSATION_FIELDS, "conversation")
     conversation_id = runtime_files.require_id(str(conversation.get("id") or ""), "conversation.id")
     identity_ids_raw = conversation.get("identity_ids")
     if isinstance(identity_ids_raw, list):
@@ -133,10 +176,18 @@ def save_im_conversation(conversation: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("conversation.identity_ids must be a list")
     if len(identity_ids) < 2:
         raise ValueError("conversation.identity_ids must contain at least two identities")
-    normalized = dict(conversation)
-    normalized["id"] = conversation_id
-    normalized["identity_ids"] = identity_ids
-    normalized["type"] = _require_non_empty_text(conversation.get("type"), "conversation.type")
+    normalized = {
+        "id": conversation_id,
+        "type": _require_non_empty_text(conversation.get("type"), "conversation.type"),
+        "identity_ids": identity_ids,
+        "created_at": _require_non_empty_text(conversation.get("created_at"), "conversation.created_at"),
+        "updated_at": _require_non_empty_text(conversation.get("updated_at"), "conversation.updated_at"),
+        "last_message_id": runtime_files.require_id(
+            str(conversation.get("last_message_id") or ""),
+            "conversation.last_message_id",
+        ),
+        "last_sequence": _require_non_negative_int(conversation.get("last_sequence"), "conversation.last_sequence"),
+    }
     _require_im_write_root()
     runtime_files.write_json_object(_im_dir("conversations") / f"{conversation_id}.json", normalized)
     return normalized
@@ -171,21 +222,24 @@ def find_im_direct_conversation(identities: list[dict[str, Any] | str]) -> dict[
 
 
 def save_im_message(message: dict[str, Any]) -> dict[str, Any]:
-    _reject_retired_fields(message, _RETIRED_MESSAGE_FIELDS, "message")
+    _reject_unknown_fields(message, _MESSAGE_FIELDS, "message")
     message_id = runtime_files.require_id(str(message.get("id") or ""), "message.id")
     conversation_id = runtime_files.require_id(str(message.get("conversation_id") or ""), "message.conversation_id")
     sender_identity = _identity_ref(message.get("sender_identity"), "message.sender_identity")
     target_identity = _identity_ref(message.get("target_identity"), "message.target_identity")
     reply_to = message.get("reply_to")
     if reply_to is not None:
-        runtime_files.require_id(str(reply_to), "message.reply_to")
-    normalized = dict(message)
-    normalized["id"] = message_id
-    normalized["conversation_id"] = conversation_id
-    normalized["sender_identity"] = sender_identity
-    normalized["target_identity"] = target_identity
-    normalized["content"] = _require_non_empty_text(message.get("content"), "message.content")
-    normalized["reply_to"] = reply_to
+        reply_to = runtime_files.require_id(str(reply_to), "message.reply_to")
+    normalized = {
+        "id": message_id,
+        "conversation_id": conversation_id,
+        "sender_identity": sender_identity,
+        "target_identity": target_identity,
+        "content": _require_non_empty_text(message.get("content"), "message.content"),
+        "reply_to": reply_to,
+        "created_at": _require_non_empty_text(message.get("created_at"), "message.created_at"),
+        "sequence": _require_non_negative_int(message.get("sequence"), "message.sequence"),
+    }
     _require_im_write_root()
     runtime_files.write_json_object(_im_dir("messages") / f"{message_id}.json", normalized)
     return normalized
@@ -210,14 +264,22 @@ def list_im_messages() -> list[dict[str, Any]]:
 
 
 def save_im_message_state(state: dict[str, Any]) -> dict[str, Any]:
-    _reject_retired_fields(state, _RETIRED_STATE_FIELDS, "state")
+    _reject_unknown_fields(state, _MESSAGE_STATE_FIELDS, "state")
     message_id = runtime_files.require_id(str(state.get("message_id") or ""), "state.message_id")
     disposition = state.get("disposition")
     if disposition not in _VALID_DISPOSITIONS:
         raise ValueError("state.disposition must be one of absorbed, needs_parent, replied, unseen")
-    normalized = dict(state)
-    normalized["message_id"] = message_id
-    normalized["owner_identity_id"] = runtime_files.require_id(str(state.get("owner_identity_id") or ""), "state.owner_identity_id")
+    normalized = {
+        "message_id": message_id,
+        "owner_identity_id": runtime_files.require_id(
+            str(state.get("owner_identity_id") or ""),
+            "state.owner_identity_id",
+        ),
+        "disposition": disposition,
+        "reason": state.get("reason"),
+        "processed_by": state.get("processed_by"),
+        "updated_at": _require_non_empty_text(state.get("updated_at"), "state.updated_at"),
+    }
     _require_im_write_root()
     runtime_files.write_json_object(
         _im_dir("message_states") / f"{message_id}--{_identity_filename_key(normalized['owner_identity_id'])}.json",
@@ -236,23 +298,31 @@ def get_im_message_state(message_id: str, identity: dict[str, Any] | str) -> dic
 
 
 def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
-    _reject_retired_fields(event, _RETIRED_EVENT_FIELDS, "event")
+    _reject_unknown_fields(event, _EVENT_FIELDS, "event")
     event_id = runtime_files.require_id(str(event.get("event_id") or ""), "event.event_id")
     message_id = runtime_files.require_id(str(event.get("message_id") or ""), "event.message_id")
     conversation_id = runtime_files.require_id(str(event.get("conversation_id") or ""), "event.conversation_id")
     sender_identity = _identity_ref(event.get("sender_identity"), "event.sender_identity")
     target_identity = _identity_ref(event.get("target_identity"), "event.target_identity")
     visible_to_identity_id = event.get("visible_to_identity_id")
-    normalized = dict(event)
-    normalized["event_id"] = event_id
-    normalized["message_id"] = message_id
-    normalized["conversation_id"] = conversation_id
-    normalized["sender_identity"] = sender_identity
-    normalized["target_identity"] = target_identity
-    normalized["visible_to_identity_id"] = runtime_files.require_id(
-        str(visible_to_identity_id or ""),
-        "event.visible_to_identity_id",
-    )
+    reply_to = event.get("reply_to")
+    if reply_to is not None:
+        reply_to = runtime_files.require_id(str(reply_to), "event.reply_to")
+    normalized = {
+        "event_id": event_id,
+        "type": _require_non_empty_text(event.get("type"), "event.type"),
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+        "sender_identity": sender_identity,
+        "target_identity": target_identity,
+        "visible_to_identity_id": runtime_files.require_id(
+            str(visible_to_identity_id or ""),
+            "event.visible_to_identity_id",
+        ),
+        "reply_to": reply_to,
+        "created_at": _require_non_empty_text(event.get("created_at"), "event.created_at"),
+        "sequence": _require_non_negative_int(event.get("sequence"), "event.sequence"),
+    }
     _require_im_write_root()
     runtime_files.write_json_object(
         _im_dir("events") / f"{event_id}--{_identity_filename_key(normalized['visible_to_identity_id'])}.json",
