@@ -585,7 +585,6 @@ print(json.dumps({{
             ROOT / "scripts/env/tools/message/tool.py",
             ROOT / "scripts/env/tools/track/tool.py",
             ROOT / "scripts/env/tools/task_sys/tool.py",
-            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
             ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             ROOT / "buddyswitch/skills/pm/define-scope/SKILL.md",
             ROOT / "README.md",
@@ -633,6 +632,28 @@ print(json.dumps({{
 
         self.assertEqual(hits, [], msg="\n".join(hits))
 
+    def test_retired_message_skill_has_no_live_surface_residue(self) -> None:
+        retired_skill_id = "message" + "-tool"
+        retired_skill_path = "/".join(("buddyswitch", "skills", "shared", retired_skill_id))
+        self.assertFalse((ROOT / retired_skill_path / "SKILL.md").exists())
+
+        live_targets = [
+            ROOT / "buddyswitch/manifest.toml",
+            ROOT / "tests/test_runtime_skills.py",
+            ROOT / "tests/test_env_manifest_v2.py",
+            ROOT / "tests/test_repo_consistency.py",
+        ]
+        hits: list[str] = []
+        for path in live_targets:
+            text = path.read_text(encoding="utf-8")
+            relative = path.relative_to(ROOT)
+            if retired_skill_id in text:
+                hits.append(f"{relative}: retired skill id")
+            if retired_skill_path in text:
+                hits.append(f"{relative}: retired skill path")
+
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
     def test_communication_identity_live_surfaces_have_no_retired_shapes(self) -> None:
         high_signal_targets = [
             "scripts/env/repos/messages.py",
@@ -650,7 +671,6 @@ print(json.dumps({{
             "tools/launcher/web_im_identity.py",
             "tools/launcher/task_sys_" + "runtime.py",
             "tools/launcher/assets/roles",
-            "buddyswitch/skills/shared/message-tool",
             "buddyswitch/skills/shared/track-tool",
             "tests/test_communication_identity_cutover.py",
             "tests/test_im_product_core.py",
