@@ -19,8 +19,9 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import app_server  # noqa: E402
+import actor_side_thread  # noqa: E402
+import parent_thread_submit  # noqa: E402
 import side_thread_lifecycle  # noqa: E402
-import submit_turn as launcher_submit_turn  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 
 
@@ -399,7 +400,7 @@ def _start_side_attempt(
     attempt_number: int,
 ) -> dict[str, Any]:
     try:
-        started = side_thread_lifecycle.start_side_thread(
+        started = actor_side_thread.start_actor_side_thread(
             socket_path=_socket_path(context),
             instance_json=_instance_json(context),
             actor_id=_context_actor_id(context),
@@ -534,8 +535,9 @@ def _execute_submit_parent(context: Any, instruction: Mapping[str, Any], *, inte
                 interrupted_turn_id = value.strip()
             else:
                 raise ValueError("interrupt submit parent instruction did not return an interrupted turn id")
-    result = launcher_submit_turn.submit_turn(
+    result = parent_thread_submit.submit_parent_turn(
         socket_path=_socket_path(context),
+        instance_json=_instance_json(context),
         thread_id=_main_thread_id(context),
         text=frame_text,
         permissions=_permissions(context),

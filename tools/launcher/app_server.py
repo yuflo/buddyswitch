@@ -427,6 +427,53 @@ class AppServerClient:
                 raise AppServerProtocolError(f"invalid JSON-RPC result shape for {method}")
             return result
 
+    def request_with_notification(
+        self,
+        method: str,
+        params: dict[str, object] | None,
+        *,
+        notification_method: str,
+        notification_thread_id: str | None = None,
+    ) -> dict[str, object]:
+        request_id = self._next_request_id
+        self._next_request_id += 1
+        payload: dict[str, object] = {"id": request_id, "method": method}
+        if params is not None:
+            payload["params"] = params
+        self._send_json(payload)
+
+        response_seen = False
+        notification_payload: dict[str, object] | None = None
+        while True:
+            message = self._read_json_message(method=method)
+            if "method" in message and "id" not in message:
+                if message.get("method") == notification_method:
+                    notification_params = message.get("params")
+                    if not isinstance(notification_params, dict):
+                        raise AppServerProtocolError(f"invalid notification params shape for {notification_method}")
+                    if notification_thread_id is None or notification_params.get("threadId") == notification_thread_id:
+                        notification_payload = dict(notification_params)
+                        if response_seen:
+                            return notification_payload
+                continue
+            if message.get("id") != request_id:
+                continue
+            if "error" in message:
+                error = message["error"]
+                if not isinstance(error, dict):
+                    raise AppServerProtocolError(f"invalid JSON-RPC error shape for {method}")
+                code = error.get("code")
+                message_text = error.get("message")
+                if not isinstance(message_text, str):
+                    message_text = json.dumps(error, ensure_ascii=True)
+                raise AppServerRequestError(method, code if isinstance(code, int) else None, message_text)
+            result = message.get("result")
+            if not isinstance(result, dict):
+                raise AppServerProtocolError(f"invalid JSON-RPC result shape for {method}")
+            response_seen = True
+            if notification_payload is not None:
+                return notification_payload
+
     def read_notification(self) -> dict[str, object]:
         while True:
             message = self._read_json_message(method="notification")
@@ -761,6 +808,43 @@ def thread_fork(
         params["config"] = {"model_reasoning_effort": normalized_effort}
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
         return client.request("thread/fork", params)
+
+
+def build_thread_settings_update_params(
+    thread_id: str,
+    *,
+    model: str | None = None,
+    effort: str | None = None,
+) -> dict[str, object]:
+    if not isinstance(thread_id, str) or not thread_id.strip():
+        raise AppServerProtocolError("thread settings update requires a thread id")
+    normalized_model = _optional_non_empty_text(model, "model")
+    normalized_effort = _optional_non_empty_text(effort, "effort")
+    if normalized_model is None and normalized_effort is None:
+        raise AppServerProtocolError("thread settings update requires model or effort")
+    params: dict[str, object] = {"threadId": thread_id.strip()}
+    if normalized_model is not None:
+        params["model"] = normalized_model
+    if normalized_effort is not None:
+        params["effort"] = normalized_effort
+    return params
+
+
+def thread_settings_update(
+    socket_path: Path,
+    thread_id: str,
+    *,
+    model: str | None = None,
+    effort: str | None = None,
+) -> dict[str, Any]:
+    params = build_thread_settings_update_params(thread_id, model=model, effort=effort)
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        return client.request_with_notification(
+            "thread/settings/update",
+            params,
+            notification_method="thread/settings/updated",
+            notification_thread_id=thread_id.strip(),
+        )
 
 
 def thread_inject_items(

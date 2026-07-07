@@ -558,7 +558,7 @@ temp_path.replace(instance_json)
 PY
 }
 
-buddyswitch_side_thread_lifecycle_start() {
+buddyswitch_actor_side_thread_start() {
   local actor_id="$1"
   local parent_thread_id="$2"
   local text="$3"
@@ -568,7 +568,7 @@ buddyswitch_side_thread_lifecycle_start() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
   args=(
-    "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py"
+    "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/actor_side_thread.py"
     start
     --socket "$(buddyswitch_app_server_socket)"
     --instance-json "${instance_json}"

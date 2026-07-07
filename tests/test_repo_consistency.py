@@ -436,8 +436,29 @@ print(json.dumps({{
             hits.extend(self._scan_targets(token, targets))
         self.assertEqual(hits, [], msg="\n".join(hits))
 
-    def test_side_thread_model_override_has_no_persistent_config_write_path(self) -> None:
-        targets = ["tools/launcher", "scripts/env", "buddyswitch-codex", "tests"]
+    def test_parent_thread_settings_update_is_limited_to_parent_boundary(self) -> None:
+        targets = ["tools/launcher", "tests"]
+        hits = self._scan_targets("thread/" + "settings/update", targets)
+
+        allowed_paths = {
+            "tools/launcher/app_server.py",
+            "tests/test_app_server_client.py",
+            "tests/test_repo_consistency.py",
+        }
+        disallowed: list[str] = []
+        for line in hits:
+            path = line.split(":", 1)[0]
+            if path not in allowed_paths:
+                disallowed.append(line)
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_side_thread_model_selection_has_no_persistent_config_write_path(self) -> None:
+        side_targets = [
+            "tools/launcher/actor_side_thread.py",
+            "tools/launcher/side_thread_lifecycle.py",
+            "buddyswitch-codex",
+            "tools/launcher/web_management.py",
+        ]
         forbidden = (
             "thread/" + "settings/update",
             "config/" + "batchWrite",
@@ -446,8 +467,38 @@ print(json.dumps({{
         )
         hits: list[str] = []
         for token in forbidden:
-            hits.extend(self._scan_targets(token, targets))
+            hits.extend(self._scan_targets(token, side_targets))
         self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_model_config_is_read_only_at_actor_aware_boundaries(self) -> None:
+        wrong_layers = [
+            "tools/launcher/app_server.py",
+            "tools/launcher/submit_turn.py",
+            "tools/launcher/side_thread_lifecycle.py",
+            "tools/launcher/daemon_core.py",
+            "tools/launcher/task_sys_" + "runtime.py",
+        ]
+        hits = self._scan_targets("model-config\\.json", wrong_layers)
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_model_config_retires_direct_start_and_submit_paths(self) -> None:
+        direct_side_hits = self._scan_targets(
+            "side_thread_lifecycle\\.start_side_thread",
+            ["tools/launcher/task_sys_" + "runtime.py", "buddyswitch-codex", "tools/launcher/env.sh"],
+        )
+        self.assertEqual(direct_side_hits, [], msg="\n".join(direct_side_hits))
+
+        side_cli_hits = self._scan_targets(
+            "subparsers\\.add_parser\\(\"start\"",
+            ["tools/launcher/side_thread_lifecycle.py"],
+        )
+        self.assertEqual(side_cli_hits, [], msg="\n".join(side_cli_hits))
+
+        direct_parent_hits = self._scan_targets(
+            "launcher_submit_turn\\.submit_turn|import submit_turn as launcher_submit_turn",
+            ["tools/launcher/task_sys_" + "runtime.py", "tools/launcher/daemon_core.py"],
+        )
+        self.assertEqual(direct_parent_hits, [], msg="\n".join(direct_parent_hits))
 
     def test_env_store_module_is_runtime_root_compat_only(self) -> None:
         retired_api = (

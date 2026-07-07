@@ -1035,6 +1035,30 @@ exec "$real_git" "$@"
             for path in sorted(tasks_dir.glob("*.json"))
         ]
 
+    def test_instance_start_seeds_model_config_default_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_root = Path(str(ctx["instance_root"]))
+            model_config = instance_root / "model-config.json"
+
+            self.assertTrue(model_config.exists())
+            self.assertEqual(
+                json.loads(model_config.read_text(encoding="utf-8")),
+                {
+                    "schema_version": 1,
+                    "parent": {},
+                    "side": {},
+                },
+            )
+
+            instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
+            for key in ("model", "effort", "parent", "side", "model_config"):
+                self.assertNotIn(key, instance_payload)
+
     def _write_task_sys_record(
         self,
         shared_root: Path,
@@ -3550,6 +3574,70 @@ exec "$real_git" "$@"
             self.assertNotIn("model", side_thread)
             self.assertNotIn("model_reasoning_effort", side_thread)
 
+    def test_side_start_uses_model_config_side_defaults_as_thread_fork_only_actor_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"next_side_thread_id": "thread-side-1"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            (Path(str(ctx["instance_root"])) / "model-config.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "parent": {},
+                        "side": {"model": "gpt-5.4-mini", "effort": "medium"},
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["actor_id"],
+                    "--text",
+                    "Use configured side defaults",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
+            payload = json.loads(side_result.stdout)
+            self.assertEqual(payload["action"], "start")
+            self.assertEqual(payload["model"], "gpt-5.4-mini")
+            self.assertEqual(payload["model_reasoning_effort"], "medium")
+            self.assertEqual(payload["model_source"], "actor_config")
+            self.assertEqual(payload["model_reasoning_effort_source"], "actor_config")
+            self.assertEqual(payload["model_config_durability"], "thread_fork_only")
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
+            self.assertEqual(fork["params"]["model"], "gpt-5.4-mini")
+            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "medium"})
+            methods = [row["rpc_method"] for row in rpc_rows]
+            self.assertNotIn("thread/" + "settings/update", methods)
+            self.assertNotIn("config/" + "batchWrite", methods)
+
+            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            side_thread = instance_payload["side_threads"][0]
+            self.assertNotIn("model", side_thread)
+            self.assertNotIn("model_reasoning_effort", side_thread)
+
     def test_side_create_human_output_prints_side_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
@@ -3583,7 +3671,7 @@ exec "$real_git" "$@"
             self.assertIn("thread-side-1", side_result.stdout)
             self.assertNotIn("{", side_result.stdout)
 
-    def test_side_send_existing_active_child_steers_side_not_parent(self) -> None:
+    def test_side_send_existing_active_child_ignores_model_config_and_steers_side_not_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -3591,6 +3679,19 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            (Path(str(ctx["instance_root"])) / "model-config.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "parent": {},
+                        "side": {"model": "gpt-5.4-mini", "effort": "medium"},
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             self._set_instance_side_threads(
                 ctx["instance_root"],
                 [
@@ -3648,10 +3749,14 @@ exec "$real_git" "$@"
             self.assertEqual(payload["parent_thread_id"], main_thread_id)
             self.assertEqual(payload["thread_action"], "steer")
             self.assertEqual(payload["expected_turn_id"], "turn-side-1")
+            self.assertNotIn("model", payload)
+            self.assertNotIn("model_reasoning_effort", payload)
+            self.assertNotIn("model_source", payload)
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             methods = [row["rpc_method"] for row in rpc_rows]
             self.assertNotIn("thread/fork", methods)
+            self.assertNotIn("thread/" + "settings/update", methods)
             self.assertIn("turn/steer", methods)
             steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
             self.assertEqual(steer["params"]["threadId"], "thread-side-1")

@@ -8,6 +8,8 @@ WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
 SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"
+MODEL_CONFIG_HELPER="${REPO_ROOT}/tools/launcher/actor_model_config.py"
+ACTOR_SIDE_THREAD_HELPER="${REPO_ROOT}/tools/launcher/actor_side_thread.py"
 TASK_SYS_INGRESS_HELPER="${REPO_ROOT}/tools/launcher/task_sys_ingress.py"
 DAEMON_CLIENT_HELPER="${REPO_ROOT}/scripts/env/tool_runtime/daemon_client.py"
 DAEMON_HELPER="${REPO_ROOT}/tools/launcher/daemon.sh"
@@ -16,7 +18,7 @@ CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${DAEMON_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${MODEL_CONFIG_HELPER}" || ! -f "${ACTOR_SIDE_THREAD_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${DAEMON_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -280,6 +282,7 @@ start_locked_bootstrap() {
   buddyswitch_workspace_repair_runtime_projects_app_projection
   buddyswitch_instance_ensure_private_writable_surface
   buddyswitch_instance_activate "${requested_actor_id}" "${requested_role}" "inactive" >/dev/null
+  python3 "${MODEL_CONFIG_HELPER}" seed --instance-json "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null
   buddyswitch_runtime_broker_ensure
   buddyswitch_patch_codex_config
   if ! buddyswitch_env_mcp_ensure; then
@@ -634,7 +637,7 @@ instance_side() {
     return $?
   fi
 
-  output="$(buddyswitch_side_thread_lifecycle_start "${actor_id}" "${parent_thread_id}" "${text}" "${model}" "${effort}" 2>&1)" || {
+  output="$(buddyswitch_actor_side_thread_start "${actor_id}" "${parent_thread_id}" "${text}" "${model}" "${effort}" 2>&1)" || {
     [[ -n "${output}" ]] && echo "${output}" >&2
     return 1
   }

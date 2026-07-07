@@ -493,6 +493,141 @@ class AppServerClientTests(unittest.TestCase):
 
             self.assertEqual(errors, [])
 
+    def test_build_thread_settings_update_params_omits_absent_fields_and_rejects_noop(self) -> None:
+        self.assertEqual(
+            APP_SERVER.build_thread_settings_update_params("thread-main", model="gpt-5.4", effort="high"),
+            {
+                "threadId": "thread-main",
+                "model": "gpt-5.4",
+                "effort": "high",
+            },
+        )
+        self.assertEqual(
+            APP_SERVER.build_thread_settings_update_params("thread-main", effort="medium"),
+            {
+                "threadId": "thread-main",
+                "effort": "medium",
+            },
+        )
+        with self.assertRaises(APP_SERVER.AppServerProtocolError):
+            APP_SERVER.build_thread_settings_update_params("thread-main")
+
+    def test_thread_settings_update_returns_notification_when_it_arrives_before_response(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_update() -> None:
+                try:
+                    results.append(
+                        APP_SERVER.thread_settings_update(
+                            socket_path,
+                            "thread-main",
+                            model="gpt-5.4",
+                            effort="high",
+                        )
+                    )
+                except BaseException as exc:
+                    errors.append(exc)
+
+            update_thread = threading.Thread(target=run_update, daemon=True)
+            update_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/settings/update")
+            params = request["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(
+                params,
+                {
+                    "threadId": "thread-main",
+                    "model": "gpt-5.4",
+                    "effort": "high",
+                },
+            )
+            server.send_notification("thread/settings/updated", {"threadId": "thread-other", "model": "ignored"})
+            server.send_notification(
+                "thread/settings/updated",
+                {
+                    "threadId": "thread-main",
+                    "model": "gpt-5.4",
+                    "effort": "high",
+                },
+            )
+            server.send_response(request["id"], {"ok": True})
+            update_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(
+                results,
+                [
+                    {
+                        "threadId": "thread-main",
+                        "model": "gpt-5.4",
+                        "effort": "high",
+                    }
+                ],
+            )
+
+    def test_thread_settings_update_returns_notification_when_it_arrives_after_response(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_update() -> None:
+                try:
+                    results.append(
+                        APP_SERVER.thread_settings_update(
+                            socket_path,
+                            "thread-main",
+                            effort="medium",
+                        )
+                    )
+                except BaseException as exc:
+                    errors.append(exc)
+
+            update_thread = threading.Thread(target=run_update, daemon=True)
+            update_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/settings/update")
+            params = request["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(params, {"threadId": "thread-main", "effort": "medium"})
+            self.assertNotIn("model", params)
+
+            server.send_response(request["id"], {"ok": True})
+            server.send_notification("unrelated/event", {"threadId": "thread-main"})
+            server.send_notification(
+                "thread/settings/updated",
+                {
+                    "threadId": "thread-main",
+                    "effort": "medium",
+                },
+            )
+            update_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [{"threadId": "thread-main", "effort": "medium"}])
+
     def test_thread_bootstrap_rollout_injects_minimal_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))

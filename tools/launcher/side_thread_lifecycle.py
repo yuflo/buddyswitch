@@ -282,25 +282,6 @@ def _print_json(payload: Any) -> None:
     print(json.dumps(payload, ensure_ascii=True))
 
 
-def _command_start(args: argparse.Namespace) -> int:
-    _print_json(
-        start_side_thread(
-            socket_path=Path(args.socket),
-            instance_json=Path(args.instance_json),
-            actor_id=args.actor_id,
-            parent_thread_id=args.parent_thread_id,
-            text=args.text,
-            purpose=args.purpose,
-            workspace_dir=Path(args.workspace_dir),
-            shared_project_workspace_dir=Path(args.shared_project_workspace_dir),
-            permissions=args.permissions,
-            model=args.model,
-            model_reasoning_effort=args.effort,
-        )
-    )
-    return 0
-
-
 def _command_send(args: argparse.Namespace) -> int:
     _print_json(
         send_to_side_thread(
@@ -332,20 +313,6 @@ def _command_cleanup(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    start = subparsers.add_parser("start")
-    start.add_argument("--socket", required=True)
-    start.add_argument("--instance-json", required=True)
-    start.add_argument("--actor-id", required=True)
-    start.add_argument("--parent-thread-id", required=True)
-    start.add_argument("--text", required=True)
-    start.add_argument("--purpose", required=True)
-    start.add_argument("--workspace-dir", required=True)
-    start.add_argument("--shared-project-workspace-dir", required=True)
-    start.add_argument("--permissions", required=True)
-    start.add_argument("--model")
-    start.add_argument("--effort")
-    start.set_defaults(func=_command_start)
 
     send = subparsers.add_parser("send")
     send.add_argument("--socket", required=True)

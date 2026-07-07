@@ -24,8 +24,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import app_server  # noqa: E402
 import daemon_mailbox  # noqa: E402
 import daemon_triggers  # noqa: E402
+import parent_thread_submit  # noqa: E402
 import runtime_event_log  # noqa: E402
-import submit_turn as launcher_submit_turn  # noqa: E402
 from task_sys_runtime import cleanup_task_sys_side_lease as task_sys_cleanup_task_sys_side_lease  # noqa: E402
 from task_sys_runtime import execute_instruction as task_sys_execute_instruction  # noqa: E402
 from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
@@ -987,15 +987,16 @@ class DaemonRuntime:
 
     def _submit_parent_once(self, text: str, *, handler_name: str, origin_id: str | None) -> str:
         try:
-            result = launcher_submit_turn.submit_turn(
+            result = parent_thread_submit.submit_parent_turn(
                 socket_path=self.context.socket_path,
+                instance_json=self.context.instance_json,
                 thread_id=self.context.main_thread_id,
                 text=text,
                 permissions=self.context.permissions,
             )
             turn_id = _turn_id_from_submit_result(result)
             if not turn_id:
-                raise launcher_submit_turn.SubmitTurnError("submit_turn did not return a turn id")
+                raise parent_thread_submit.SubmitTurnError("submit_turn did not return a turn id")
         except Exception as exc:
             self._record_runtime_call(
                 handler_name=handler_name,

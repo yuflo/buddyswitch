@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Actor Model Config Boundary Architecture</title>
+  <style>
+    :root {
+      --bg: #f7f8f5;
+      --panel: #ffffff;
+      --panel-soft: #f0f4f1;
+      --ink: #17201b;
+      --muted: #65716b;
+      --line: #d8ded8;
+      --green: #26745f;
+      --blue: #2f67a6;
+      --amber: #a8651a;
+      --red: #a5433d;
+      --violet: #6f5798;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.55;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 28px 20px 48px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
+      gap: 18px;
+      align-items: stretch;
+      margin-bottom: 18px;
+    }
+
+    .hero,
+    .decision {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .decision {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    .decision strong {
+      color: var(--ink);
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .badge {
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      color: #34413a;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    section {
+      margin-top: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    code,
+    .mono {
+      font-family: var(--mono);
+      font-size: 0.93em;
+    }
+
+    .diagram {
+      overflow-x: auto;
+      padding: 4px 0 0;
+    }
+
+    svg {
+      display: block;
+      min-width: 900px;
+      width: 100%;
+      height: auto;
+    }
+
+    .node {
+      fill: #fff;
+      stroke: #cfd7cf;
+      stroke-width: 1.2;
+    }
+
+    .node.green {
+      fill: #edf8f3;
+      stroke: #9bc9b9;
+    }
+
+    .node.blue {
+      fill: #edf4fc;
+      stroke: #9fbfdf;
+    }
+
+    .node.amber {
+      fill: #fff5e7;
+      stroke: #d7b37e;
+    }
+
+    .node.violet {
+      fill: #f4f0fa;
+      stroke: #c1b2da;
+    }
+
+    .node.red {
+      fill: #fff0ef;
+      stroke: #d8aaa7;
+    }
+
+    .arrow {
+      stroke: #84908a;
+      stroke-width: 1.4;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .arrow.blue {
+      stroke: var(--blue);
+    }
+
+    .arrow.green {
+      stroke: var(--green);
+    }
+
+    .arrow.amber {
+      stroke: var(--amber);
+    }
+
+    .svg-title {
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 700;
+      fill: var(--ink);
+    }
+
+    .svg-label {
+      font-family: var(--sans);
+      font-size: 12px;
+      fill: #28332e;
+    }
+
+    .svg-small {
+      font-family: var(--mono);
+      font-size: 10px;
+      fill: #5b665f;
+    }
+
+    .flow-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfa;
+    }
+
+    .step-index {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--panel-soft);
+      color: var(--green);
+      font-weight: 800;
+      font-size: 13px;
+      border: 1px solid #c9d7cf;
+    }
+
+    .step p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #334039;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: #f4f7f4;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      flex: 0 0 auto;
+    }
+
+    .dot.blue {
+      background: var(--blue);
+    }
+
+    .dot.amber {
+      background: var(--amber);
+    }
+
+    .dot.red {
+      background: var(--red);
+    }
+
+    .callout {
+      border-left: 4px solid var(--green);
+      background: #f1f7f3;
+      padding: 12px 14px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      color: #2c3b33;
+      font-size: 14px;
+    }
+
+    .callout.warn {
+      border-left-color: var(--amber);
+      background: #fff6e8;
+    }
+
+    .code-block {
+      margin: 10px 0 0;
+      background: #17201b;
+      color: #eef5ef;
+      border-radius: var(--radius);
+      padding: 12px;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: pre;
+    }
+
+    .owner-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .owner {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: #fbfcfa;
+    }
+
+    .owner ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .owner li + li {
+      margin-top: 4px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 10px 0 0;
+    }
+
+    button {
+      border: 1px solid #cbd6cf;
+      background: #fff;
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    button.active {
+      border-color: var(--green);
+      background: #eaf6f0;
+      color: #1d604d;
+      font-weight: 700;
+    }
+
+    .evidence {
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .evidence div {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 9px;
+      background: #fbfcfa;
+    }
+
+    .highlight-parent [data-kind="parent"],
+    .highlight-side [data-kind="side"],
+    .highlight-config [data-kind="config"],
+    .highlight-daemon [data-kind="daemon"] {
+      outline: 3px solid rgba(38, 116, 95, 0.28);
+      outline-offset: 2px;
+    }
+
+    @media (max-width: 900px) {
+      header,
+      .grid.two,
+      .grid.three,
+      .owner-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .shell {
+        padding: 18px 12px 36px;
+      }
+
+      .hero,
+      .decision,
+      .panel {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell" id="page">
+    <header>
+      <div class="hero">
+        <p class="eyebrow">Architecture memo · 2026-07-07</p>
+        <h1>Actor Model Config Boundary Architecture</h1>
+        <p class="lead">This HTML helps the user inspect where BuddySwitch should apply actor-local parent and side model settings by separating configuration ownership from Codex RPC primitives and runtime orchestration.</p>
+        <div class="badge-row">
+          <span class="badge">Single config source</span>
+          <span class="badge">Parent actor boundary</span>
+          <span class="badge">Side actor boundary</span>
+          <span class="badge">No dual-track</span>
+          <span class="badge">Daemon is not owner</span>
+          <span class="badge">Attach TUI out of scope for v1</span>
+        </div>
+      </div>
+      <aside class="decision">
+        <h2>Locked Decision</h2>
+        <p><strong>Do not embed model hot-loading in daemon handlers, raw Codex RPC, or low-level submit/lifecycle helpers.</strong></p>
+        <p class="note">Put policy in one actor-aware parent wrapper and one actor-aware side wrapper. The lower layers execute already-resolved intent.</p>
+        <div class="callout">
+          V1 covers BuddySwitch-controlled inputs only. Attach TUI direct input bypasses BuddySwitch boundaries and is intentionally excluded.
+        </div>
+      </aside>
+    </header>
+
+    <section class="panel">
+      <h2>System Boundary Map</h2>
+      <p class="note">Use the buttons to highlight ownership. The diagram intentionally keeps <span class="mono">app_server.py</span>, <span class="mono">submit_turn.py</span>, and <span class="mono">side_thread_lifecycle.py</span> out of actor config policy.</p>
+      <div class="toolbar" aria-label="Diagram focus controls">
+        <button type="button" class="active" data-focus="all">All</button>
+        <button type="button" data-focus="config">Config owner</button>
+        <button type="button" data-focus="parent">Parent path</button>
+        <button type="button" data-focus="side">Side path</button>
+        <button type="button" data-focus="daemon">Daemon role</button>
+      </div>
+      <div class="diagram" id="diagram-shell">
+        <svg viewBox="0 0 1180 640" role="img" aria-labelledby="diagram-title diagram-desc">
+          <title id="diagram-title">BuddySwitch actor model config architecture</title>
+          <desc id="diagram-desc">Input surfaces flow through BuddySwitch control paths to actor-aware parent and side boundaries, then through low-level helpers and app_server JSON-RPC primitives.</desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#84908a"></path>
+            </marker>
+          </defs>
+
+          <rect class="node green" data-kind="config" x="430" y="28" width="320" height="64" rx="8"></rect>
+          <text class="svg-title" x="590" y="55" text-anchor="middle">actor_model_config.py</text>
+          <text class="svg-small" x="590" y="76" text-anchor="middle">instances/&lt;actor-id&gt;/model-config.json</text>
+
+          <rect class="node" x="40" y="135" width="190" height="54" rx="8"></rect>
+          <text class="svg-title" x="135" y="158" text-anchor="middle">CLI / WebUI input</text>
+          <text class="svg-small" x="135" y="177" text-anchor="middle">instance input, Web route</text>
+
+          <rect class="node amber" data-kind="daemon" x="40" y="214" width="190" height="54" rx="8"></rect>
+          <text class="svg-title" x="135" y="237" text-anchor="middle">IM / Track trigger</text>
+          <text class="svg-small" x="135" y="256" text-anchor="middle">daemon observes events</text>
+
+          <rect class="node red" x="40" y="293" width="190" height="54" rx="8"></rect>
+          <text class="svg-title" x="135" y="316" text-anchor="middle">Attach TUI</text>
+          <text class="svg-small" x="135" y="335" text-anchor="middle">out of scope for v1</text>
+
+          <rect class="node" x="270" y="174" width="180" height="86" rx="8"></rect>
+          <text class="svg-title" x="360" y="202" text-anchor="middle">Task Sys</text>
+          <text class="svg-label" x="360" y="224" text-anchor="middle">task frame + instruction</text>
+          <text class="svg-small" x="360" y="244" text-anchor="middle">start_side / submit_parent</text>
+
+          <rect class="node blue" data-kind="parent" x="505" y="128" width="210" height="88" rx="8"></rect>
+          <text class="svg-title" x="610" y="156" text-anchor="middle">parent_thread_submit.py</text>
+          <text class="svg-label" x="610" y="178" text-anchor="middle">actor-aware parent boundary</text>
+          <text class="svg-small" x="610" y="198" text-anchor="middle">resolve + settings update</text>
+
+          <rect class="node green" data-kind="side" x="505" y="286" width="210" height="88" rx="8"></rect>
+          <text class="svg-title" x="610" y="314" text-anchor="middle">actor_side_thread.py</text>
+          <text class="svg-label" x="610" y="336" text-anchor="middle">actor-aware side boundary</text>
+          <text class="svg-small" x="610" y="356" text-anchor="middle">resolve + explicit overrides</text>
+
+          <rect class="node blue" data-kind="parent" x="770" y="132" width="180" height="80" rx="8"></rect>
+          <text class="svg-title" x="860" y="161" text-anchor="middle">submit_turn.py</text>
+          <text class="svg-small" x="860" y="184" text-anchor="middle">start/steer helper</text>
+
+          <rect class="node green" data-kind="side" x="770" y="286" width="180" height="88" rx="8"></rect>
+          <text class="svg-title" x="860" y="315" text-anchor="middle">side_thread_lifecycle.py</text>
+          <text class="svg-label" x="860" y="337" text-anchor="middle">fork/inject/start</text>
+          <text class="svg-small" x="860" y="357" text-anchor="middle">registry lease execution</text>
+
+          <rect class="node" x="1000" y="190" width="150" height="132" rx="8"></rect>
+          <text class="svg-title" x="1075" y="221" text-anchor="middle">app_server.py</text>
+          <text class="svg-label" x="1075" y="245" text-anchor="middle">pure RPC adapter</text>
+          <text class="svg-small" x="1075" y="267" text-anchor="middle">settings/update</text>
+          <text class="svg-small" x="1075" y="287" text-anchor="middle">thread/fork</text>
+          <text class="svg-small" x="1075" y="307" text-anchor="middle">turn start/steer</text>
+
+          <rect class="node red" x="1000" y="410" width="150" height="70" rx="8"></rect>
+          <text class="svg-title" x="1075" y="438" text-anchor="middle">Codex app-server</text>
+          <text class="svg-small" x="1075" y="460" text-anchor="middle">thread + model state</text>
+
+          <path class="arrow" d="M230 162 C248 162 252 190 270 200"></path>
+          <path class="arrow amber" data-kind="daemon" d="M230 241 C248 241 252 232 270 226"></path>
+          <path class="arrow" d="M450 204 C475 194 485 180 505 172"></path>
+          <path class="arrow green" d="M450 237 C480 260 485 306 505 326"></path>
+          <path class="arrow blue" data-kind="parent" d="M720 92 C674 107 630 105 614 128"></path>
+          <path class="arrow green" data-kind="side" d="M590 92 C604 152 606 226 608 286"></path>
+          <path class="arrow blue" data-kind="parent" d="M715 172 L770 172"></path>
+          <path class="arrow green" data-kind="side" d="M715 330 L770 330"></path>
+          <path class="arrow blue" data-kind="parent" d="M950 172 C980 182 988 202 1000 226"></path>
+          <path class="arrow green" data-kind="side" d="M950 330 C980 322 988 298 1000 282"></path>
+          <path class="arrow" d="M1075 322 L1075 410"></path>
+          <path class="arrow violet" d="M230 320 C505 500 808 535 1000 450"></path>
+
+          <text class="svg-small" x="304" y="432">Attach TUI bypasses BuddySwitch actor-aware wrappers.</text>
+          <text class="svg-small" x="304" y="450">No model-config hot-load guarantee in v1.</text>
+          <text class="svg-small" x="732" y="112">Only actor-aware wrappers read actor config.</text>
+          <text class="svg-small" x="748" y="397">Lifecycle keeps registry lease work, but does not read model-config.json.</text>
+        </svg>
+      </div>
+    </section>
+
+    <section class="grid two">
+      <div class="panel" data-kind="parent">
+        <h2>Parent Hot Reload</h2>
+        <div class="flow-list">
+          <div class="step">
+            <div class="step-index">1</div>
+            <div>
+              <h3>Reach actor parent boundary</h3>
+              <p>Before any BuddySwitch-controlled parent turn is submitted, route through <span class="mono">parent_thread_submit.py</span>.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-index">2</div>
+            <div>
+              <h3>Apply thread setting</h3>
+              <p>Call <span class="mono">thread/settings/update</span> with <span class="mono">model</span> and <span class="mono">effort</span>, then wait for <span class="mono">thread/settings/updated</span>.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-index">3</div>
+            <div>
+              <h3>Submit the turn</h3>
+              <p>Delegate to <span class="mono">submit_turn.py</span> after settings are reconciled. Already running model calls are not changed.</p>
+            </div>
+          </div>
+        </div>
+        <div class="code-block">parent_thread_submit.py:
+  config = actor_model_config.parent(instance_json)
+  app_server.thread_settings_update(thread_id, config)
+  submit_turn.submit_turn(thread_id, text)</div>
+      </div>
+
+      <div class="panel" data-kind="side">
+        <h2>Side Creation Reload</h2>
+        <div class="flow-list">
+          <div class="step">
+            <div class="step-index">1</div>
+            <div>
+              <h3>Reach actor side boundary</h3>
+              <p>Any automatic or manual side creation flows through <span class="mono">actor_side_thread.py</span> before lifecycle execution.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-index">2</div>
+            <div>
+              <h3>Resolve side config</h3>
+              <p>Explicit request values win. Otherwise read <span class="mono">model-config.json</span> side defaults.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-index">3</div>
+            <div>
+              <h3>Fork with creation params</h3>
+              <p>Pass resolved <span class="mono">model</span> and <span class="mono">model_reasoning_effort</span> into <span class="mono">side_thread_lifecycle.start_side_thread(...)</span>. Existing side threads are not mutated.</p>
+            </div>
+          </div>
+        </div>
+        <div class="code-block">actor_side_thread.py:
+  config = actor_model_config.side(instance_json)
+  options = merge_explicit_overrides(config, request)
+  side_thread_lifecycle.start_side_thread(..., model=options.model, model_reasoning_effort=options.effort)</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Input Surface Coverage</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Surface</th>
+            <th>Primary path</th>
+            <th>Model config touchpoint</th>
+            <th>Daemon role</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mono">buddyswitch-codex instance input</span></td>
+            <td>CLI -> Task Sys ingress -> runtime instruction</td>
+            <td><span class="status"><span class="dot"></span>Actor side boundary</span>, then actor parent boundary only if side asks parent</td>
+            <td>Executes Task Sys instruction, not policy owner</td>
+          </tr>
+          <tr>
+            <td>WebUI input</td>
+            <td>Web route -> launcher action -> same controlled path</td>
+            <td><span class="status"><span class="dot"></span>Same as CLI input</span></td>
+            <td>Same as CLI input</td>
+          </tr>
+          <tr>
+            <td>IM message</td>
+            <td>IM event -> daemon trigger -> Task Sys ingress</td>
+            <td><span class="status"><span class="dot"></span>Actor side boundary</span></td>
+            <td>Trigger observer and executor only</td>
+          </tr>
+          <tr>
+            <td>Track comment</td>
+            <td>Track event -> daemon trigger -> Task Sys ingress</td>
+            <td><span class="status"><span class="dot"></span>Actor side boundary</span></td>
+            <td>Trigger observer and executor only</td>
+          </tr>
+          <tr>
+            <td><span class="mono">instance side</span></td>
+            <td>CLI -> actor side boundary -> side lifecycle</td>
+            <td><span class="status"><span class="dot"></span>Actor side boundary</span>; explicit CLI values override file</td>
+            <td>Not required</td>
+          </tr>
+          <tr>
+            <td><span class="mono">instance attach</span> TUI input</td>
+            <td>Codex TUI -> app-server direct</td>
+            <td><span class="status"><span class="dot red"></span>Out of scope for v1</span></td>
+            <td>No daemon model-config behavior in v1</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid two">
+      <div class="panel" data-kind="config">
+        <h2>Config Contract</h2>
+        <p class="note">Instance-local config is the runtime authority. Role defaults may seed this file at instance creation, but do not overwrite it later.</p>
+        <div class="code-block">instances/&lt;actor-id&gt;/model-config.json
+{
+  "schema_version": 1,
+  "parent": {
+    "model": "gpt-5.4",
+    "effort": "high"
+  },
+  "side": {
+    "model": "gpt-5.4-mini",
+    "effort": "medium"
+  }
+}</div>
+        <div class="callout warn" style="margin-top: 12px;">
+          Do not write this into <span class="mono">instance.json</span>. That file is active runtime state and side lease storage.
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Priority Rules</h2>
+        <div class="flow-list">
+          <div class="step">
+            <div class="step-index">1</div>
+            <div>
+              <h3>Explicit request override</h3>
+              <p>Manual side creation with <span class="mono">--model</span> or <span class="mono">--effort</span> wins for that new side thread only.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-index">2</div>
+            <div>
+              <h3>Actor instance config</h3>
+              <p>Use <span class="mono">model-config.json</span> for parent and side defaults.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-index">3</div>
+            <div>
+              <h3>Codex default behavior</h3>
+              <p>If a field is missing, omit it from the Codex request and let Codex inherit or use its current default.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Ownership Rules</h2>
+      <div class="owner-grid">
+        <div class="owner" data-kind="config">
+          <h3><span class="mono">actor_model_config.py</span></h3>
+          <ul>
+            <li>Owns schema, validation, read, and seed defaults.</li>
+            <li>Knows actor instance paths.</li>
+            <li>Does not call Codex RPC.</li>
+          </ul>
+        </div>
+        <div class="owner">
+          <h3><span class="mono">app_server.py</span></h3>
+          <ul>
+            <li>Owns JSON-RPC framing and primitive methods.</li>
+            <li>Does not read actor files.</li>
+            <li>Does not decide parent versus side policy.</li>
+          </ul>
+        </div>
+        <div class="owner" data-kind="parent">
+          <h3><span class="mono">parent_thread_submit.py</span></h3>
+          <ul>
+            <li>Owns actor-aware parent reconcile before controlled parent turns.</li>
+            <li>Uses <span class="mono">thread/settings/update</span>.</li>
+            <li>Delegates actual start/steer to <span class="mono">submit_turn.py</span>.</li>
+          </ul>
+        </div>
+        <div class="owner" data-kind="side">
+          <h3><span class="mono">actor_side_thread.py</span></h3>
+          <ul>
+            <li>Owns actor-aware side config resolve.</li>
+            <li>Merges explicit side creation overrides with instance defaults.</li>
+            <li>Delegates lifecycle execution to <span class="mono">side_thread_lifecycle.py</span>.</li>
+          </ul>
+        </div>
+        <div class="owner" data-kind="parent">
+          <h3><span class="mono">submit_turn.py</span></h3>
+          <ul>
+            <li>Owns parent thread idle/active start-or-steer mechanics.</li>
+            <li>Does not read actor config.</li>
+            <li>Does not call <span class="mono">thread/settings/update</span>.</li>
+          </ul>
+        </div>
+        <div class="owner" data-kind="side">
+          <h3><span class="mono">side_thread_lifecycle.py</span></h3>
+          <ul>
+            <li>Owns side-thread fork, inject, start, send, cleanup, and registry lease execution.</li>
+            <li>Does not read <span class="mono">model-config.json</span>.</li>
+            <li>Uses <span class="mono">thread/fork</span> model/config params.</li>
+          </ul>
+        </div>
+        <div class="owner" data-kind="daemon">
+          <h3>Daemon service</h3>
+          <ul>
+            <li>Observes triggers and executes runtime instructions.</li>
+            <li>Calls actor-aware parent and side boundaries indirectly through controlled runtime paths.</li>
+            <li>Does not own model policy or handler-specific branches.</li>
+          </ul>
+        </div>
+        <div class="owner">
+          <h3>Task Sys</h3>
+          <ul>
+            <li>Owns task frames and instruction generation.</li>
+            <li>Does not encode model selection policy.</li>
+            <li>Benefits from actor-aware parent and side boundaries automatically.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Rebuild Path</h2>
+      <p class="note">This is the single forward path. Do not keep legacy direct lifecycle policy reads beside the new wrappers.</p>
+      <div class="grid three">
+        <div class="owner">
+          <h3>Short Term</h3>
+          <ul>
+            <li>Add <span class="mono">actor_model_config.py</span>, <span class="mono">parent_thread_submit.py</span>, and <span class="mono">actor_side_thread.py</span>.</li>
+            <li>Move controlled parent submits to <span class="mono">parent_thread_submit.py</span>.</li>
+            <li>Move controlled side starts to <span class="mono">actor_side_thread.py</span>.</li>
+          </ul>
+        </div>
+        <div class="owner">
+          <h3>Keep Narrow</h3>
+          <ul>
+            <li>Keep <span class="mono">submit_turn.py</span> and <span class="mono">side_thread_lifecycle.py</span> as execution helpers.</li>
+            <li>No daemon-by-scenario model branches.</li>
+            <li>No alternate side config read path in lifecycle.</li>
+          </ul>
+        </div>
+        <div class="owner">
+          <h3>Later Cleanup</h3>
+          <ul>
+            <li>Rename or narrow <span class="mono">instance_json</span> lifecycle usage toward registry storage semantics.</li>
+            <li>Split registry persistence from lifecycle only when it becomes a real bottleneck.</li>
+            <li>Attach TUI support remains a separate future design, not a hidden v1 side path.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Failure Modes And Guardrails</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Risk</th>
+            <th>Handling</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Invalid <span class="mono">model-config.json</span></td>
+            <td>Fail explicit config commands; runtime reconcile reports structured warning and falls back to omitted fields only if policy chooses soft mode.</td>
+            <td>Bad config should be visible, not silently mutated into wrong model state.</td>
+          </tr>
+          <tr>
+            <td>Parent turn already running</td>
+            <td>Apply settings for subsequent turns only. Do not claim current request changed.</td>
+            <td>Codex settings update is thread-local future-turn behavior.</td>
+          </tr>
+          <tr>
+            <td>Attach TUI bypasses BuddySwitch submit</td>
+            <td>Declare unsupported for v1. Users who need actor model-config behavior should use BuddySwitch-controlled CLI/Web/IM/Track paths.</td>
+            <td>Supporting TUI direct input requires a separate background reconcile mechanism and would add a third trigger model.</td>
+          </tr>
+          <tr>
+            <td>Side config changes while side is active</td>
+            <td>Do not mutate existing side. <span class="mono">actor_side_thread.py</span> applies the latest config only when a new side is created.</td>
+            <td>Side model policy is creation-time fork policy.</td>
+          </tr>
+          <tr>
+            <td>Policy leaking into execution helpers</td>
+            <td>Keep <span class="mono">app_server.py</span>, <span class="mono">submit_turn.py</span>, and <span class="mono">side_thread_lifecycle.py</span> free of model-config file reads.</td>
+            <td>Preserves one clear policy boundary and prevents hidden file I/O inside primitive execution paths.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Evidence And Source Anchors</h2>
+      <div class="evidence">
+        <div><span class="mono">tools/launcher/app_server.py</span> is the BuddySwitch JSON-RPC adapter and already initializes with <span class="mono">experimentalApi: true</span>.</div>
+        <div><span class="mono">tools/launcher/side_thread_lifecycle.py</span> already accepts creation-time <span class="mono">model</span> and <span class="mono">model_reasoning_effort</span>.</div>
+        <div><span class="mono">tools/launcher/task_sys_runtime.py</span> currently delegates side creation to lifecycle; implementation should replace that direct call with <span class="mono">actor_side_thread.py</span>, not add a second path.</div>
+        <div><span class="mono">tools/launcher/submit_turn.py</span> is a low-level start/steer helper; implementation should wrap it with <span class="mono">parent_thread_submit.py</span> instead of adding actor config parameters to it.</div>
+        <div><span class="mono">/Users/chen/Dev/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs</span> defines <span class="mono">ThreadSettingsUpdateParams.model</span> and <span class="mono">effort</span> for subsequent turns.</div>
+        <div><span class="mono">/Users/chen/Dev/codex/codex-rs/app-server/tests/suite/v2/thread_settings_update.rs</span> proves settings-only update affects future turns and emits <span class="mono">thread/settings/updated</span>.</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const page = document.getElementById("page");
+    const buttons = Array.from(document.querySelectorAll("[data-focus]"));
+
+    function setFocus(kind) {
+      page.classList.remove("highlight-parent", "highlight-side", "highlight-config", "highlight-daemon");
+      if (kind !== "all") {
+        page.classList.add("highlight-" + kind);
+      }
+      buttons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.focus === kind);
+      });
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => setFocus(button.dataset.focus || "all"));
+    });
+  </script>
+</body>
+</html>
