@@ -36,10 +36,16 @@ PORT_START = 9222
 PORT_END = 9321
 DEFAULT_READY_ATTEMPTS = 50
 DEFAULT_READY_DELAY_SECONDS = 0.1
+_DETACHED_BROWSER_PROCESSES: list[subprocess.Popen[str]] = []
 
 
 class BrowserRuntimeManagerError(RuntimeError):
     pass
+
+
+def _remember_detached_browser_process(proc: subprocess.Popen[str]) -> None:
+    _DETACHED_BROWSER_PROCESSES[:] = [item for item in _DETACHED_BROWSER_PROCESSES if item.poll() is None]
+    _DETACHED_BROWSER_PROCESSES.append(proc)
 
 
 class ProcessInfo:
@@ -691,6 +697,8 @@ def acquire(
                 except Exception:
                     break
                 _set_browser_port(root, actor_id, port)
+                if proc is not None:
+                    _remember_detached_browser_process(proc)
                 return _success(
                     browser_url=browser_url,
                     browser_port=port,

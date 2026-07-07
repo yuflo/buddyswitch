@@ -28,6 +28,9 @@ BROWSER_PAGE_EXPIRED_TRIGGER = "browser.page.expired"
 BROWSER_COCKPIT_RELEASE_DELAY_SECONDS = 10
 BROWSER_COCKPIT_RELEASE_TRIGGER = "browser.cockpit.release"
 BROWSER_COCKPIT_RELEASE_SCHEDULE_KEY = "browser.cockpit.release"
+BROWSER_FAILED_OPEN_PAGE_CLEANUP_TRIGGER = "browser.failed_open_page.cleanup"
+BROWSER_FAILED_OPEN_PAGE_CLEANUP_DELAY_SECONDS = 5
+BROWSER_FAILED_OPEN_PAGE_CLEANUP_MAX_ATTEMPTS = 3
 
 
 class BrowserLifecycleError(RuntimeError):
@@ -158,6 +161,14 @@ def _normalize_page_id(page_id: object) -> str | None:
     if isinstance(page_id, str) and page_id.strip():
         return page_id.strip()
     raise BrowserLifecycleError("page_id must be a string or integer when provided")
+
+
+def _normalize_target_id(target_id: object) -> str:
+    if isinstance(target_id, bool) or target_id is None:
+        raise BrowserLifecycleError("target_id must be a non-empty string")
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise BrowserLifecycleError("target_id must be a non-empty string")
+    return target_id.strip()
 
 
 def _apply_page_metadata(
@@ -353,6 +364,39 @@ def schedule_browser_cockpit_release(
     )
 
 
+def schedule_failed_open_page_cleanup(
+    *,
+    instance_root: Path,
+    target_id: object,
+    url: str | None = None,
+    attempts: int = 1,
+    first_seen_at: str | None = None,
+    delay_seconds: int = BROWSER_FAILED_OPEN_PAGE_CLEANUP_DELAY_SECONDS,
+) -> dict[str, Any]:
+    normalized_target_id = _normalize_target_id(target_id)
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+        raise BrowserLifecycleError("attempts must be a positive integer")
+    if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, int) or delay_seconds < 0:
+        raise BrowserLifecycleError("cleanup delay_seconds must be a non-negative integer")
+    seen_at = first_seen_at.strip() if isinstance(first_seen_at, str) and first_seen_at.strip() else _format_utc(_utc_now())
+    payload: dict[str, Any] = {
+        "target_id": normalized_target_id,
+        "attempts": attempts,
+        "first_seen_at": seen_at,
+        "reason": "failed_open_page",
+    }
+    if isinstance(url, str) and url.strip():
+        payload["url"] = url.strip()
+    return daemon_client.schedule_trigger(
+        instance_root=Path(instance_root),
+        delay_seconds=delay_seconds,
+        trigger_type=BROWSER_FAILED_OPEN_PAGE_CLEANUP_TRIGGER,
+        payload=payload,
+        source_context={"owner": "browser"},
+        schedule_key=f"browser.failed_open_page.cleanup:{normalized_target_id}",
+    )
+
+
 def forget_page_idle_page(*, instance_root: Path, page_id: object) -> dict[str, Any]:
     normalized_page_id = _normalize_page_id(page_id)
     if normalized_page_id is None:
@@ -371,4 +415,3 @@ def forget_page_idle_page(*, instance_root: Path, page_id: object) -> dict[str, 
             state.pop("selected_page_id", None)
         _write_page_idle_state(Path(instance_root), state)
         return dict(state)
-

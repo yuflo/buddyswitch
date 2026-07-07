@@ -98,6 +98,14 @@ def _browser_version(browser_url: str, timeout_seconds: float) -> dict[str, Any]
     return payload
 
 
+def _browser_websocket_url(browser_url: str, timeout_seconds: float) -> str:
+    version = _browser_version(browser_url, timeout_seconds)
+    websocket_url = version.get("webSocketDebuggerUrl")
+    if not isinstance(websocket_url, str) or not websocket_url.strip():
+        raise CdpTargetError("Chrome DevTools /json/version is missing webSocketDebuggerUrl")
+    return websocket_url.strip()
+
+
 def _connect_websocket(websocket_url: str, timeout_seconds: float) -> tuple[socket.socket, bytearray]:
     parsed = urlparse(websocket_url)
     if parsed.scheme != "ws":
@@ -145,27 +153,21 @@ def _connect_websocket(websocket_url: str, timeout_seconds: float) -> tuple[sock
     return sock, bytearray(remainder)
 
 
-def create_background_target(browser_url: str, target_url: str, timeout_seconds: float) -> dict[str, Any]:
-    version = _browser_version(browser_url, timeout_seconds)
-    websocket_url = version.get("webSocketDebuggerUrl")
-    if not isinstance(websocket_url, str) or not websocket_url.strip():
-        raise CdpTargetError("Chrome DevTools /json/version is missing webSocketDebuggerUrl")
-
-    sock, buffer = _connect_websocket(websocket_url.strip(), timeout_seconds)
+def _send_browser_command(
+    browser_url: str,
+    request: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    response_name: str,
+) -> dict[str, Any]:
+    websocket_url = _browser_websocket_url(browser_url, timeout_seconds)
+    sock, buffer = _connect_websocket(websocket_url, timeout_seconds)
     try:
-        request = {
-            "id": 1,
-            "method": "Target.createTarget",
-            "params": {
-                "url": target_url,
-                "background": True,
-            },
-        }
         _send_client_frame(sock, json.dumps(request, ensure_ascii=True, separators=(",", ":")).encode("utf-8"))
         while True:
             opcode, payload = _read_server_frame(sock, timeout_seconds, buffer)
             if opcode == 0x8:
-                raise CdpTargetError("browser websocket closed before Target.createTarget response")
+                raise CdpTargetError(f"browser websocket closed before {response_name} response")
             if opcode == 0x9:
                 _send_client_frame(sock, payload)
                 continue
@@ -175,7 +177,7 @@ def create_background_target(browser_url: str, target_url: str, timeout_seconds:
                 message = json.loads(payload.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise CdpTargetError("browser websocket returned invalid JSON") from exc
-            if not isinstance(message, dict) or message.get("id") != 1:
+            if not isinstance(message, dict) or message.get("id") != request.get("id"):
                 continue
             if "error" in message:
                 error = message.get("error")
@@ -183,8 +185,8 @@ def create_background_target(browser_url: str, target_url: str, timeout_seconds:
                     raise CdpTargetError(error["message"])
                 raise CdpTargetError(json.dumps(error, ensure_ascii=True))
             result = message.get("result")
-            if not isinstance(result, dict) or not isinstance(result.get("targetId"), str):
-                raise CdpTargetError("Target.createTarget response missing result.targetId")
+            if not isinstance(result, dict):
+                raise CdpTargetError(f"{response_name} response missing result")
             return result
     except OSError as exc:
         raise CdpTargetError(f"browser websocket communication failed: {exc}") from exc
@@ -193,6 +195,45 @@ def create_background_target(browser_url: str, target_url: str, timeout_seconds:
             sock.close()
         except OSError:
             pass
+
+
+def create_background_target(browser_url: str, target_url: str, timeout_seconds: float) -> dict[str, Any]:
+    result = _send_browser_command(
+        browser_url,
+        {
+            "id": 1,
+            "method": "Target.createTarget",
+            "params": {
+                "url": target_url,
+                "background": True,
+            },
+        },
+        timeout_seconds=timeout_seconds,
+        response_name="Target.createTarget",
+    )
+    if not isinstance(result.get("targetId"), str):
+        raise CdpTargetError("Target.createTarget response missing result.targetId")
+    return result
+
+
+def close_target(browser_url: str, target_id: str, timeout_seconds: float = 3.0) -> dict[str, Any]:
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise CdpTargetError("target_id must be a non-empty string")
+    result = _send_browser_command(
+        browser_url,
+        {
+            "id": 1,
+            "method": "Target.closeTarget",
+            "params": {
+                "targetId": target_id.strip(),
+            },
+        },
+        timeout_seconds=timeout_seconds,
+        response_name="Target.closeTarget",
+    )
+    if result.get("success") is not True:
+        raise CdpTargetError("Target.closeTarget response missing success=true")
+    return result
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

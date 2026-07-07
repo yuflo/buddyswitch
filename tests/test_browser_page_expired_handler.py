@@ -81,12 +81,20 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         self.triggers = load_module(TRIGGERS_PATH)
         self.release_calls: list[dict[str, object]] = []
         self.close_calls: list[dict[str, object]] = []
+        self.failed_open_close_calls: list[dict[str, object]] = []
+        self.failed_open_cleanup_schedules: list[dict[str, object]] = []
+        self.failed_open_targets: list[dict[str, object]] = []
+        self.failed_open_close_error: Exception | None = None
         self.list_pages_payload: list[dict[str, object]] = []
         self.mcp_list_batches: list[list[dict[str, object]]] | None = None
         self.mcp_sessions: list[Any] = []
         lifecycle = self.handler_module.browser_lifecycle
         self._original_schedule_browser_cockpit_release = lifecycle.schedule_browser_cockpit_release
         self._original_refresh_page_idle = lifecycle.refresh_page_idle
+        self._original_read_page_targets = lifecycle.read_page_targets
+        self._original_schedule_failed_open_page_cleanup = getattr(lifecycle, "schedule_failed_open_page_cleanup", None)
+        self._had_cdp_background_page = hasattr(self.handler_module, "cdp_background_page")
+        self._original_cdp_background_page = getattr(self.handler_module, "cdp_background_page", None)
         self.addCleanup(
             setattr,
             lifecycle,
@@ -94,12 +102,48 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             self._original_schedule_browser_cockpit_release,
         )
         self.addCleanup(setattr, lifecycle, "refresh_page_idle", self._original_refresh_page_idle)
+        self.addCleanup(setattr, lifecycle, "read_page_targets", self._original_read_page_targets)
+        if self._original_schedule_failed_open_page_cleanup is None:
+            self.addCleanup(delattr, lifecycle, "schedule_failed_open_page_cleanup")
+        else:
+            self.addCleanup(
+                setattr,
+                lifecycle,
+                "schedule_failed_open_page_cleanup",
+                self._original_schedule_failed_open_page_cleanup,
+            )
+        if self._had_cdp_background_page:
+            self.addCleanup(setattr, self.handler_module, "cdp_background_page", self._original_cdp_background_page)
+        else:
+            self.addCleanup(delattr, self.handler_module, "cdp_background_page")
 
         def fake_schedule_browser_cockpit_release(**kwargs: object) -> dict[str, object]:
             self.release_calls.append(kwargs)
             return {"schedule": {"schedule_id": "schedule-release"}}
 
+        def fake_schedule_failed_open_page_cleanup(**kwargs: object) -> dict[str, object]:
+            self.failed_open_cleanup_schedules.append(kwargs)
+            return {"schedule": {"schedule_id": "schedule-failed-open"}}
+
+        def fake_read_page_targets(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+            return [dict(target) for target in self.failed_open_targets]
+
         test_case = self
+
+        class FakeCdpBackgroundPage:
+            @staticmethod
+            def close_target(browser_url: str, target_id: str, timeout_seconds: float = 3.0) -> dict[str, object]:
+                test_case.failed_open_close_calls.append(
+                    {"browser_url": browser_url, "target_id": target_id, "timeout_seconds": timeout_seconds}
+                )
+                if test_case.failed_open_close_error is not None:
+                    raise test_case.failed_open_close_error
+                test_case.failed_open_targets = [
+                    target
+                    for target in test_case.failed_open_targets
+                    if target.get("id") != target_id and target.get("targetId") != target_id
+                ]
+                return {"success": True}
 
         class FakeMcpSession:
             def __init__(self, browser_endpoint: str) -> None:
@@ -140,6 +184,9 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             return FakeMcpSession(browser_endpoint)
 
         lifecycle.schedule_browser_cockpit_release = fake_schedule_browser_cockpit_release
+        lifecycle.schedule_failed_open_page_cleanup = fake_schedule_failed_open_page_cleanup
+        lifecycle.read_page_targets = fake_read_page_targets
+        self.handler_module.cdp_background_page = FakeCdpBackgroundPage
         self.handler_module.open_mcp_session = fake_open_mcp_session
 
     def _trigger(
@@ -161,6 +208,31 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
             correlation_id=None,
             payload={"page_id": page_id},
             source_context=source_context,
+        )
+
+    def _failed_open_trigger(
+        self,
+        *,
+        target_id: object = "target-failed-open",
+        url: str = "https://example.com/failed-open",
+        attempts: int = 1,
+        target_identity_route: dict[str, str] | None = None,
+    ) -> Any:
+        return self.triggers.DaemonTrigger(
+            source="scheduled_trigger",
+            type="browser.failed_open_page.cleanup",
+            target_identity_id=(target_identity_route or {"actor_id": "act-dev-browser"})["actor_id"],
+            target_role_id=(target_identity_route or {"role_id": "dev"})["role_id"],
+            origin_id="schedule-failed-open",
+            correlation_id=None,
+            payload={
+                "target_id": target_id,
+                "url": url,
+                "attempts": attempts,
+                "first_seen_at": "2026-07-07T00:00:00Z",
+                "reason": "failed_open_page",
+            },
+            source_context={"schedule_id": "schedule-failed-open", "owner": "browser"},
         )
 
     def _write_page_state(
@@ -200,6 +272,97 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         context.instance_json = instance_json
         context.instance_payload = {"browser_port": None}
         return context
+
+    def _failed_open_cleanup_handler(self) -> Any:
+        self.assertTrue(
+            hasattr(self.handler_module, "BrowserFailedOpenPageCleanupHandler"),
+            "BrowserFailedOpenPageCleanupHandler is required",
+        )
+        return self.handler_module.BrowserFailedOpenPageCleanupHandler()
+
+    def test_failed_open_cleanup_target_absent_is_handled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            context = self._context(instance_root)
+            self.failed_open_targets = []
+            handler = self._failed_open_cleanup_handler()
+
+            result = handler.handle(
+                context,
+                state=object(),
+                runtime=FakeRuntime(),
+                trigger=self._failed_open_trigger(target_id="target-already-gone"),
+            )
+
+        self.assertEqual(result.status, "handled", msg=getattr(result, "message", None))
+        self.assertEqual(self.failed_open_close_calls, [])
+        self.assertEqual(self.failed_open_cleanup_schedules, [])
+        self.assertEqual(self.close_calls, [])
+
+    def test_failed_open_cleanup_closes_exact_cdp_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            context = self._context(instance_root)
+            self.failed_open_targets = [
+                {"id": "target-keep", "type": "page", "url": "https://example.com/keep"},
+                {"id": "target-failed-open", "type": "page", "url": "https://example.com/failed-open"},
+            ]
+            handler = self._failed_open_cleanup_handler()
+
+            result = handler.handle(
+                context,
+                state=object(),
+                runtime=FakeRuntime(),
+                trigger=self._failed_open_trigger(target_id="target-failed-open"),
+            )
+
+        self.assertEqual(result.status, "handled", msg=getattr(result, "message", None))
+        self.assertEqual(
+            self.failed_open_close_calls,
+            [
+                {
+                    "browser_url": "http://127.0.0.1:9444",
+                    "target_id": "target-failed-open",
+                    "timeout_seconds": 3.0,
+                }
+            ],
+        )
+        self.assertEqual(self.failed_open_cleanup_schedules, [])
+        self.assertEqual(self.close_calls, [])
+        self.assertEqual(self.failed_open_targets, [{"id": "target-keep", "type": "page", "url": "https://example.com/keep"}])
+
+    def test_failed_open_cleanup_reschedules_same_target_after_close_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            context = self._context(instance_root)
+            self.failed_open_targets = [
+                {"id": "target-failed-open", "type": "page", "url": "https://example.com/failed-open"},
+            ]
+            self.failed_open_close_error = self.handler_module.browser_lifecycle.BrowserLifecycleError("close denied")
+            handler = self._failed_open_cleanup_handler()
+
+            result = handler.handle(
+                context,
+                state=object(),
+                runtime=FakeRuntime(),
+                trigger=self._failed_open_trigger(target_id="target-failed-open", attempts=1),
+            )
+
+        self.assertEqual(result.status, "handled", msg=getattr(result, "message", None))
+        self.assertEqual(len(self.failed_open_close_calls), 1)
+        self.assertEqual(
+            self.failed_open_cleanup_schedules,
+            [
+                {
+                    "instance_root": instance_root,
+                    "target_id": "target-failed-open",
+                    "url": "https://example.com/failed-open",
+                    "attempts": 2,
+                    "first_seen_at": "2026-07-07T00:00:00Z",
+                }
+            ],
+        )
+        self.assertEqual(self.close_calls, [])
 
     def test_expiry_payload_requires_page_id(self) -> None:
         inbound = load_module(BROWSER_INBOUND_PATH)
@@ -411,7 +574,9 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
         by_type = {registration.event_type: registration for registration in registrations}
         self.assertIn("browser.page.expired", by_type)
         self.assertIn("browser.cockpit.release", by_type)
+        self.assertIn("browser.failed_open_page.cleanup", by_type)
         self.assertEqual(by_type["browser.cockpit.release"].payload_contract["required_fields"], ("reason",))
+        self.assertEqual(by_type["browser.failed_open_page.cleanup"].payload_contract["required_fields"], ("target_id",))
 
     def test_handler_rejects_wrong_target_actor(self) -> None:
         handler = self.handler_module.BrowserPageExpiredHandler()

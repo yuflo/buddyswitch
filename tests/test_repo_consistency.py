@@ -309,7 +309,6 @@ print(json.dumps({{
             "target_id_for_" + "page_id",
             "create_background_page_" + "target",
             "close_page_" + "target",
-            "Target." + "closeTarget",
             "target_idle_expiry_after_" + "due_at",
             "forget_page_idle_" + "target",
         )
@@ -320,6 +319,63 @@ print(json.dumps({{
                 if token in text:
                     hits.append(f"{relative}: {token}")
         self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_browser_failed_open_cleanup_live_surfaces_keep_cdp_close_scoped(self) -> None:
+        required_tokens = {
+            "scripts/env/cdp_background_page.py": ("Target." + "closeTarget",),
+            "scripts/env/cdp_browser_lifecycle.py": (
+                "browser.failed_open_page.cleanup",
+                "schedule_failed_open_page_cleanup",
+            ),
+            "tools/launcher/chrome_devtools_cockpit_proxy.py": (
+                "failed_open_page",
+                "close_target",
+            ),
+            "tools/launcher/browser_page_expired_handler.py": (
+                "browser.failed_open_page.cleanup",
+                "close_target",
+            ),
+            "tools/launcher/browser_inbound.py": ("browser.failed_open_page.cleanup",),
+        }
+        for relative, tokens in required_tokens.items():
+            source = (ROOT / relative).read_text(encoding="utf-8")
+            for token in tokens:
+                with self.subTest(relative=relative, token=token):
+                    self.assertIn(token, source)
+
+        close_scan_targets = [
+            "tools/launcher",
+            "scripts/env",
+            "tests/test_browser_cockpit_proxy.py",
+            "tests/test_browser_page_expired_handler.py",
+            "tests/test_cdp_browser_session.py",
+            "tests/test_repo_consistency.py",
+        ]
+        allowed_close_files = {
+            "scripts/env/cdp_background_page.py",
+            "tools/launcher/chrome_devtools_cockpit_proxy.py",
+            "tools/launcher/browser_page_expired_handler.py",
+            "tests/test_browser_cockpit_proxy.py",
+            "tests/test_browser_page_expired_handler.py",
+            "tests/test_cdp_browser_session.py",
+            "tests/test_repo_consistency.py",
+        }
+        close_hits = self._scan_targets(r"Target\.closeTarget|\bclose_target\b", close_scan_targets)
+        disallowed_close_hits = [
+            line
+            for line in close_hits
+            if line.split(":", 1)[0] not in allowed_close_files
+        ]
+        self.assertEqual(disallowed_close_hits, [], msg="\n".join(disallowed_close_hits))
+
+        lifecycle_source = (ROOT / "scripts/env/cdp_browser_lifecycle.py").read_text(encoding="utf-8")
+        self.assertNotIn("current_" + "target_id", lifecycle_source)
+        self.assertNotIn("page_id_to_" + "target_id", lifecycle_source)
+        self.assertNotIn("close_target(", lifecycle_source)
+
+        release_source = (ROOT / "tools/launcher/browser_release_handler.py").read_text(encoding="utf-8")
+        self.assertNotIn("failed_open_page", release_source)
+        self.assertNotIn("close_target", release_source)
 
     def test_side_thread_lifecycle_boundary_has_no_direct_call_residue(self) -> None:
         targets = ["tools/launcher", "scripts/env", "buddyswitch-codex", "tests"]

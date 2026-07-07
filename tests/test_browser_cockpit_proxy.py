@@ -145,7 +145,10 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
                 raw_message = _read_client_text_frame(self.rfile)
                 message = json.loads(raw_message)
                 state.setdefault("rpc_requests", []).append(message)
-                response = {"id": message.get("id"), "result": {"success": True}}
+                if message.get("method") == "Target.closeTarget" and state.get("close_error"):
+                    response = {"id": message.get("id"), "error": {"message": str(state["close_error"])}}
+                else:
+                    response = {"id": message.get("id"), "result": {"success": True}}
                 _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
                 return
             self.send_response(404)
@@ -290,6 +293,24 @@ for raw_line in sys.stdin:
                         {
                             "type": "text",
                             "text": "failed " + str(params.get("name")),
+                        }
+                    ],
+                    "isError": True,
+                },
+            }
+            print(json.dumps(response, ensure_ascii=True), flush=True)
+            if os.environ.get("BUDDYSWITCH_TEST_PROXY_EXIT_AFTER_RESPONSE") == "1":
+                raise SystemExit(0)
+            continue
+        if params.get("name") == "new_page" and os.environ.get("BUDDYSWITCH_TEST_PROXY_NEW_PAGE_ERROR_TEXT"):
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": os.environ["BUDDYSWITCH_TEST_PROXY_NEW_PAGE_ERROR_TEXT"],
                         }
                     ],
                     "isError": True,
@@ -579,6 +600,16 @@ for raw_line in sys.stdin:
                 "arguments": arguments,
             },
         }
+
+    def _assert_only_cleanup_snapshot_reads(self, cdp_state: dict[str, object]) -> None:
+        self.assertEqual(cdp_state.get("rpc_requests", []), [])
+        requests = cdp_state.get("requests", [])
+        self.assertIsInstance(requests, list, msg=requests)
+        assert isinstance(requests, list)
+        for request in requests:
+            self.assertIsInstance(request, dict, msg=request)
+            assert isinstance(request, dict)
+            self.assertEqual(request.get("path"), "/json/list", msg=requests)
 
     def test_initialize_and_tools_list_do_not_start_upstream_without_browser_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -939,6 +970,75 @@ for raw_line in sys.stdin:
             self.assertEqual(cdp_state.get("rpc_requests", []), [])
             self.assertFalse(thread.is_alive())
 
+    def test_failed_new_page_closes_new_cdp_page_target_and_reports_cleanup(self) -> None:
+        existing_targets = _page_targets(1)
+        new_target = {"id": "target-new", "type": "page", "url": "https://example.com/failed-open"}
+        cdp_state: dict[str, object] = {
+            "requests": [],
+            "list_payloads": [existing_targets, [*existing_targets, new_target]],
+        }
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/failed-open", "forceError": True})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+
+            self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+            self.assertTrue(responses[0]["result"].get("isError"), msg=responses[0])
+            response_text = json.dumps(responses[0], ensure_ascii=True)
+            self.assertIn("failed new_page", response_text)
+            self.assertIn("Browser cleanup", response_text)
+            self.assertIn("closed it before returning", response_text)
+            self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
+
+        list_requests = [request for request in cdp_state.get("requests", []) if request.get("path") == "/json/list"]
+        self.assertEqual(len(list_requests), 2, msg=cdp_state.get("requests"))
+        self.assertEqual(
+            cdp_state.get("rpc_requests"),
+            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-new"}}],
+        )
+
+    def test_failed_search_page_closes_new_cdp_page_target_and_reports_cleanup(self) -> None:
+        existing_targets = _page_targets(1)
+        search_url = "https://www.google.com/search?q=BuddySwitch+failed+open"
+        new_target = {"id": "target-search-new", "type": "page", "url": search_url}
+        cdp_state: dict[str, object] = {
+            "requests": [],
+            "list_payloads": [existing_targets, [*existing_targets, new_target]],
+        }
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("search_page", {"query": "BuddySwitch failed open", "engine": "google"})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+                extra_env={
+                    "BUDDYSWITCH_TEST_PROXY_NEW_PAGE_ERROR_TEXT": "Navigation timeout of 10000 ms exceeded",
+                },
+            )
+
+            self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+            self.assertEqual(forwarded[0]["params"]["arguments"], {"url": search_url, "background": True})
+            self.assertTrue(responses[0]["result"].get("isError"), msg=responses[0])
+            response_text = json.dumps(responses[0], ensure_ascii=True)
+            self.assertIn("Navigation timeout", response_text)
+            self.assertIn("Browser cleanup", response_text)
+            self.assertIn("closed it before returning", response_text)
+            self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
+
+        list_requests = [request for request in cdp_state.get("requests", []) if request.get("path") == "/json/list"]
+        self.assertEqual(len(list_requests), 2, msg=cdp_state.get("requests"))
+        self.assertEqual(
+            cdp_state.get("rpc_requests"),
+            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-search-new"}}],
+        )
+
     def test_opened_page_then_list_pages_does_not_schedule_empty_release(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
         search_url = "https://www.google.com/search?q=BuddySwitch+open+current+projection"
@@ -984,8 +1084,14 @@ for raw_line in sys.stdin:
             self.assertEqual(release_schedules, [])
             self.assertFalse(thread.is_alive())
 
-    def test_new_page_without_selected_page_id_reports_lifecycle_warning_without_state(self) -> None:
-        browser_url = self._start_cdp_list_server({"requests": [], "targets": _page_targets(1)})
+    def test_new_page_without_selected_page_id_closes_new_target_and_reports_not_deliverable(self) -> None:
+        existing_targets = _page_targets(1)
+        new_target = {"id": "target-undeliverable", "type": "page", "url": "https://example.com/new"}
+        cdp_state: dict[str, object] = {
+            "requests": [],
+            "list_payloads": [existing_targets, [*existing_targets, new_target]],
+        }
+        browser_url = self._start_cdp_list_server(cdp_state)
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
@@ -1004,7 +1110,10 @@ for raw_line in sys.stdin:
 
             self.assertEqual(forwarded[0]["params"]["name"], "new_page")
             response_text = json.dumps(responses[0], ensure_ascii=True)
-            self.assertIn("Browser lifecycle warning", response_text)
+            self.assertIn("page id was not readable", response_text)
+            self.assertIn("not deliverable", response_text)
+            self.assertIn("Browser cleanup", response_text)
+            self.assertIn("closed it before returning", response_text)
             self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
             if daemon_core.daemon_state_file(instance_root).exists():
                 saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
@@ -1015,6 +1124,62 @@ for raw_line in sys.stdin:
                 ]
                 self.assertEqual(page_expiry_schedules, [])
             self.assertFalse(thread.is_alive())
+
+        list_requests = [request for request in cdp_state.get("requests", []) if request.get("path") == "/json/list"]
+        self.assertEqual(len(list_requests), 2, msg=cdp_state.get("requests"))
+        self.assertEqual(
+            cdp_state.get("rpc_requests"),
+            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-undeliverable"}}],
+        )
+
+    def test_failed_new_page_close_failure_schedules_precise_cleanup(self) -> None:
+        existing_targets = _page_targets(1)
+        new_target = {"id": "target-close-fails", "type": "page", "url": "https://example.com/failed-open"}
+        cdp_state: dict[str, object] = {
+            "requests": [],
+            "list_payloads": [existing_targets, [*existing_targets, new_target]],
+            "close_error": "close denied",
+        }
+        browser_url = self._start_cdp_list_server(cdp_state)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            daemon_core, server, thread = self._start_mailbox(instance_root)
+
+            responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
+                [self._single_call("new_page", {"url": "https://example.com/failed-open", "forceError": True})],
+                browser_url=browser_url,
+                instance_root=instance_root,
+            )
+            server.close()
+            thread.join(timeout=2)
+
+            self.assertEqual(forwarded[0]["params"]["name"], "new_page")
+            self.assertTrue(responses[0]["result"].get("isError"), msg=responses[0])
+            response_text = json.dumps(responses[0], ensure_ascii=True)
+            self.assertIn("failed new_page", response_text)
+            self.assertIn("Browser cleanup warning", response_text)
+            self.assertIn("scheduled short cleanup", response_text)
+            self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
+            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            cleanup_schedules = [
+                item
+                for item in saved["scheduled_triggers"].values()
+                if item["type"] == "browser.failed_open_page.cleanup"
+            ]
+            self.assertEqual(len(cleanup_schedules), 1, msg=saved["scheduled_triggers"])
+            self.assertEqual(cleanup_schedules[0]["schedule_key"], "browser.failed_open_page.cleanup:target-close-fails")
+            self.assertEqual(cleanup_schedules[0]["payload"]["target_id"], "target-close-fails")
+            self.assertEqual(cleanup_schedules[0]["payload"]["url"], "https://example.com/failed-open")
+            self.assertEqual(cleanup_schedules[0]["payload"]["attempts"], 1)
+            self.assertEqual(cleanup_schedules[0]["payload"]["reason"], "failed_open_page")
+            self.assertIsInstance(cleanup_schedules[0]["payload"].get("first_seen_at"), str)
+            self.assertFalse(thread.is_alive())
+
+        self.assertEqual(
+            cdp_state.get("rpc_requests"),
+            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-close-fails"}}],
+        )
 
     def test_new_page_does_not_call_target_create_target(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
@@ -1160,7 +1325,7 @@ for raw_line in sys.stdin:
         self.assertEqual(forwarded[0]["params"]["arguments"], {"url": "   ", "background": True})
         response = responses[0]
         self.assertFalse(response["result"].get("isError", False), msg=response)
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_list_pages_projects_page_id_resource_state(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
@@ -1308,7 +1473,7 @@ for raw_line in sys.stdin:
         self.assertEqual(len(forwarded), 1)
         self.assertEqual(forwarded[0]["params"]["name"], "new_page")
         self.assertNotIn("Browser pages:", json.dumps(responses, ensure_ascii=True))
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_new_page_forwards_with_explicit_instance_root_without_env(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
@@ -1326,7 +1491,7 @@ for raw_line in sys.stdin:
         self.assertEqual(len(forwarded), 1)
         self.assertEqual(forwarded[0]["params"]["arguments"], {"url": "https://example.com/new", "background": True})
         self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_new_page_without_instance_root_forwards_upstream(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": []}
@@ -1343,7 +1508,7 @@ for raw_line in sys.stdin:
         self.assertEqual(forwarded[0]["params"]["arguments"], {"url": "https://example.com/new", "background": True})
         response = responses[0]
         self.assertFalse(response["result"].get("isError", False), msg=response)
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_new_page_does_not_read_cdp_page_count_before_forwarding(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "list_fail": True}
@@ -1359,7 +1524,7 @@ for raw_line in sys.stdin:
         self.assertEqual(len(forwarded), 1)
         self.assertEqual(forwarded[0]["params"]["name"], "new_page")
         self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_select_page_marks_mcp_page_id_current(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
@@ -1549,7 +1714,7 @@ for raw_line in sys.stdin:
         self.assertEqual(len(forwarded), 1)
         self.assertEqual(forwarded[0]["params"]["name"], "new_page")
         self.assertNotIn(SOFT_PAGE_HINT_5, json.dumps(responses, ensure_ascii=True))
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_new_page_no_longer_blocks_from_local_cdp_hard_page_limit(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(10)}
@@ -1567,7 +1732,7 @@ for raw_line in sys.stdin:
         response = responses[0]
         self.assertFalse(response["result"].get("isError", False), msg=response)
         self.assertNotIn(HARD_PAGE_BLOCK, response["result"]["content"][0]["text"])
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_new_page_does_not_reuse_exact_url_through_local_cdp_gate(self) -> None:
         target_url = "https://example.com/new"
@@ -1589,7 +1754,7 @@ for raw_line in sys.stdin:
         self.assertFalse(response["result"].get("isError", False), msg=response)
         text = response["result"]["content"][0]["text"]
         self.assertNotIn("state: reused", text)
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_new_page_forwards_when_local_cdp_page_count_is_unavailable(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "list_fail": True}
@@ -1607,7 +1772,7 @@ for raw_line in sys.stdin:
         response = responses[0]
         self.assertFalse(response["result"].get("isError", False), msg=response)
         self.assertNotIn("page-count", response["result"]["content"][0]["text"].lower())
-        self.assertEqual(cdp_state.get("requests"), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
 
     def test_select_page_forces_no_bring_to_front(self) -> None:
         _responses, forwarded, _upstream_argv, _stderr = self._run_proxy(

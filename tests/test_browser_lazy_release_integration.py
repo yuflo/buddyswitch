@@ -235,6 +235,17 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 write_state(state)
                 response = {"id": message.get("id"), "result": {"targetId": target_id}}
+            elif method == "Target.closeTarget":
+                params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                target_id = params.get("targetId")
+                before_count = len(targets)
+                state["targets"] = [
+                    target
+                    for target in targets
+                    if not (isinstance(target, dict) and target.get("id") == target_id)
+                ]
+                write_state(state)
+                response = {"id": message.get("id"), "result": {"success": len(state["targets"]) < before_count}}
             else:
                 response = {"id": message.get("id"), "result": {"success": True}}
             write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
@@ -317,6 +328,25 @@ def list_pages_text(payload: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def append_fake_chrome_target(url: str) -> str:
+    chrome_state_path = Path(os.environ["BUDDYSWITCH_TEST_FAKE_CHROME_STATE"])
+    try:
+        chrome_state = json.loads(chrome_state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        chrome_state = {"targets": []}
+    if not isinstance(chrome_state, dict):
+        chrome_state = {"targets": []}
+    targets = chrome_state.setdefault("targets", [])
+    if not isinstance(targets, list):
+        targets = []
+        chrome_state["targets"] = targets
+    target_id = f"target-{len(targets) + 1}"
+    targets.append({"id": target_id, "type": "page", "url": url})
+    chrome_state_path.parent.mkdir(parents=True, exist_ok=True)
+    chrome_state_path.write_text(json.dumps(chrome_state, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    return target_id
+
+
 write_state(read_state())
 
 for raw_line in sys.stdin:
@@ -350,8 +380,26 @@ for raw_line in sys.stdin:
             pages = []
             state["pages"] = pages
         if tool_name == "new_page":
-            page_id = len(pages) + 1
             url = arguments.get("url") if isinstance(arguments.get("url"), str) else "about:blank"
+            if os.environ.get("BUDDYSWITCH_TEST_UPSTREAM_FAIL_NEW_PAGE_AFTER_TARGET") == "1":
+                append_fake_chrome_target(url)
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Navigation timeout of 10000 ms exceeded",
+                            }
+                        ],
+                        "isError": True,
+                    },
+                }
+                sys.stdout.write(json.dumps(response, ensure_ascii=True) + "\n")
+                sys.stdout.flush()
+                continue
+            page_id = len(pages) + 1
             page = {
                 "pageId": page_id,
                 "title": "Lazy Release Smoke",
@@ -819,6 +867,110 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 os.kill(pid, signal.SIGKILL)
             except OSError:
                 pass
+
+    def test_failed_new_page_cleanup_allows_browser_release(self) -> None:
+        actor_id = "act-dev-browser"
+        role = "dev"
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            runtime_state_root = temp_root_path / "runtime-state"
+            runtime_state_root.mkdir(parents=True, exist_ok=True)
+            runtime_files.set_runtime_root_override(runtime_state_root)
+            self.addCleanup(runtime_files.reset_runtime_root_override)
+            source_home = temp_root_path / "home"
+            shared_root = source_home / ".codex-buddyswitch"
+            instance_root = shared_root / "instances" / actor_id
+            instance_json = self._instance_record(instance_root, actor_id, role)
+            self._seed_active_task(actor_id=actor_id, role=role)
+
+            fake_chrome = temp_root_path / "fake_chrome_server.py"
+            fake_upstream = temp_root_path / "fake_upstream.py"
+            ensure_script = temp_root_path / "fake_browser_ensure.py"
+            fake_chrome_state = temp_root_path / "fake_chrome_state.json"
+            ensure_calls = temp_root_path / "ensure_calls.jsonl"
+            broker_calls = temp_root_path / "broker_calls.jsonl"
+            broker_socket = temp_root_path / "runtime-broker.sock"
+            upstream_argv = temp_root_path / "upstream_argv.jsonl"
+            upstream_calls = temp_root_path / "upstream_calls.jsonl"
+            upstream_state = temp_root_path / "upstream_state.json"
+            fake_chrome_pids: list[int] = []
+            fake_port = free_port()
+
+            self._write_fake_chrome_server(fake_chrome)
+            self._write_fake_upstream(fake_upstream)
+            self._write_ensure_script(ensure_script)
+            self.addCleanup(self._cleanup_fake_chrome_pids, fake_chrome_pids)
+
+            base_env = os.environ.copy()
+            base_env.update(
+                {
+                    "HOME": str(source_home),
+                    "CODEX_HOME": str(source_home / ".codex"),
+                    "BUDDYSWITCH_SOURCE_HOME": str(source_home),
+                    "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
+                    "BUDDYSWITCH_REPO_ROOT": str(ROOT),
+                    "BUDDYSWITCH_TEST_INSTANCE_ROOT": str(instance_root),
+                    "BUDDYSWITCH_TEST_INSTANCE_JSON": str(instance_json),
+                    "BUDDYSWITCH_TEST_FAKE_CHROME_PORT": str(fake_port),
+                    "BUDDYSWITCH_TEST_FAKE_CHROME_STATE": str(fake_chrome_state),
+                    "BUDDYSWITCH_TEST_FAKE_CHROME_SERVER": str(fake_chrome),
+                    "BUDDYSWITCH_TEST_BROWSER_ENSURE_CALLS": str(ensure_calls),
+                    "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(broker_socket),
+                    "BUDDYSWITCH_TEST_UPSTREAM_ARGV": str(upstream_argv),
+                    "BUDDYSWITCH_TEST_UPSTREAM_CALLS": str(upstream_calls),
+                    "BUDDYSWITCH_TEST_UPSTREAM_STATE": str(upstream_state),
+                    "BUDDYSWITCH_TEST_UPSTREAM_FAIL_NEW_PAGE_AFTER_TARGET": "1",
+                    "BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND": " ".join(
+                        shlex.quote(part) for part in (sys.executable, str(fake_upstream))
+                    ),
+                    "NO_PROXY": "127.0.0.1,localhost",
+                    "no_proxy": "127.0.0.1,localhost",
+                }
+            )
+
+            with patch.dict(os.environ, base_env, clear=False):
+                broker_stop = self._start_fake_runtime_broker(
+                    socket_path=broker_socket,
+                    ensure_script=ensure_script,
+                    instance_root=instance_root,
+                    instance_json=instance_json,
+                    calls_path=broker_calls,
+                )
+                self.addCleanup(broker_stop)
+                proxy = self._start_proxy(instance_root=instance_root, upstream=fake_upstream, env=base_env)
+
+                failed_response = self._send_proxy_tool_call(
+                    proxy,
+                    request_id=1,
+                    tool_name="new_page",
+                    arguments={"url": "https://example.com/failed-open"},
+                )
+                for event in read_jsonl(ensure_calls):
+                    pid = event.get("pid")
+                    if isinstance(pid, int):
+                        fake_chrome_pids.append(pid)
+
+                self.assertTrue(failed_response.get("result", {}).get("isError"), msg=failed_response)
+                failed_text = json.dumps(failed_response, ensure_ascii=True)
+                self.assertIn("Navigation timeout of 10000 ms exceeded", failed_text)
+                self.assertIn("Browser cleanup", failed_text)
+                self.assertIn("closed it before returning", failed_text)
+                self.assertEqual(json.loads(fake_chrome_state.read_text(encoding="utf-8"))["targets"], [])
+                self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
+
+                release_handler = load_module(RELEASE_HANDLER)
+                triggers = load_module(TRIGGERS)
+                context = self._handler_context(instance_root=instance_root, instance_json=instance_json, actor_id=actor_id, role=role)
+                release_result = release_handler.BrowserReleaseHandler().handle(
+                    context,
+                    state=object(),
+                    runtime=FakeRuntime(),
+                    trigger=self._release_trigger(triggers, actor_id=actor_id, role=role),
+                )
+
+                self.assertEqual(release_result.status, "handled", msg=getattr(release_result, "message", None))
+                self.assertIsNone(json.loads(instance_json.read_text(encoding="utf-8")).get("browser_port"))
+                self.assertTrue(wait_until(lambda: not port_accepts(fake_port)), "release must stop fake Chrome endpoint")
 
     def test_lazy_runtime_releases_after_idle_and_restarts_on_next_browser_call(self) -> None:
         """Proves cockpit new_page -> list_pages -> select_page -> take_snapshot -> idle close -> release -> restart."""

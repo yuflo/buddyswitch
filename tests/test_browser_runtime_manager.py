@@ -161,8 +161,27 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             except ProcessLookupError:
                 return
 
+    def _cleanup_process(self, proc: subprocess.Popen[str], log_handle: Any | None = None) -> None:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait(timeout=2.0)
+        if log_handle is not None:
+            try:
+                if not log_handle.closed:
+                    log_handle.close()
+            except OSError:
+                pass
+
     def _start_fake_chrome(self, chrome_bin: Path, *, port: int, profile_dir: Path, log_file: Path) -> subprocess.Popen[str]:
         log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_handle = log_file.open("a", encoding="utf-8")
         proc = subprocess.Popen(
             [
                 str(chrome_bin),
@@ -172,12 +191,12 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
                 "--no-default-browser-check",
                 "about:blank",
             ],
-            stdout=log_file.open("a", encoding="utf-8"),
+            stdout=log_handle,
             stderr=subprocess.STDOUT,
             text=True,
             start_new_session=True,
         )
-        self.addCleanup(self._terminate_process, proc.pid)
+        self.addCleanup(self._cleanup_process, proc, log_handle)
         self.assertTrue(wait_until(lambda: port_accepts(port)), "fake Chrome endpoint did not become ready")
         return proc
 
@@ -247,7 +266,7 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
     def test_release_cleans_owned_runtime_state(self) -> None:
         upstream_proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
         upstream_pgid = os.getpgid(upstream_proc.pid)
-        self.addCleanup(self._terminate_process, upstream_proc.pid)
+        self.addCleanup(self._cleanup_process, upstream_proc)
 
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)

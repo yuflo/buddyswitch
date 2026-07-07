@@ -21,6 +21,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from env import cdp_background_page  # noqa: E402
 from env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 
@@ -311,6 +312,40 @@ def _new_page_message(message: dict[str, Any], arguments: dict[str, Any]) -> dic
     return rewritten
 
 
+def _target_id(target: dict[str, Any]) -> str | None:
+    for key in ("id", "targetId"):
+        value = target.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _target_url(target: dict[str, Any]) -> str | None:
+    value = target.get("url")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _target_map(targets: object) -> dict[str, dict[str, Any]]:
+    if not isinstance(targets, list):
+        return {}
+    mapped: dict[str, dict[str, Any]] = {}
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        target_id = _target_id(target)
+        if target_id is not None:
+            mapped[target_id] = dict(target)
+    return mapped
+
+
+def _open_cleanup_metadata(browser_url: str) -> dict[str, Any]:
+    try:
+        targets = browser_lifecycle.read_page_targets(browser_url)
+    except Exception as exc:
+        return {"pre_open_page_targets_error": str(exc)}
+    return {"pre_open_page_targets": targets}
+
+
 def _format_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -446,7 +481,13 @@ def mutate_tool_call(
                 "url": target_url,
                 "background": True,
             },
-        ), None, {"kind": "new_page", "source_tool": "search_page", "query": query, "engine": engine}
+        ), None, {
+            "kind": "new_page",
+            "source_tool": "search_page",
+            "query": query,
+            "engine": engine,
+            **_open_cleanup_metadata(browser_url),
+        }
 
     if name == "new_page":
         if "isolatedContext" in arguments:
@@ -456,7 +497,7 @@ def mutate_tool_call(
                 "does not apply background creation to isolated browser contexts. This keeps the "
                 "chrome-devtools-cockpit path non-activating.",
             ), None
-        return _new_page_message(message, arguments), None, {"kind": "new_page"}
+        return _new_page_message(message, arguments), None, {"kind": "new_page", **_open_cleanup_metadata(browser_url)}
 
     if name == "list_pages":
         return message, None, {"kind": "list_pages"}
@@ -602,6 +643,85 @@ def _tool_response_succeeded(message: dict[str, Any]) -> bool:
     return isinstance(result, dict) and result.get("isError") is not True
 
 
+def _new_failed_open_targets(metadata: dict[str, Any], *, browser_url: str) -> list[dict[str, Any]]:
+    pre_targets = metadata.get("pre_open_page_targets")
+    if not isinstance(pre_targets, list):
+        return []
+    pre_by_id = _target_map(pre_targets)
+    post_targets = browser_lifecycle.read_page_targets(browser_url)
+    post_by_id = _target_map(post_targets)
+    return [post_by_id[target_id] for target_id in sorted(post_by_id) if target_id not in pre_by_id]
+
+
+def _cleanup_failed_open_targets(
+    message: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    browser_url: str,
+    root: Path | None,
+    not_deliverable_reason: str,
+) -> dict[str, Any]:
+    patched = message
+    if metadata.get("pre_open_page_targets_error"):
+        return patch_tool_response_hint(
+            patched,
+            f"Browser cleanup warning: {not_deliverable_reason}; cleanup snapshot was unavailable before opening: {metadata['pre_open_page_targets_error']}",
+        )
+    try:
+        targets = _new_failed_open_targets(metadata, browser_url=browser_url)
+    except Exception as exc:
+        return patch_tool_response_hint(
+            patched,
+            f"Browser cleanup warning: {not_deliverable_reason}; cleanup snapshot was unavailable after opening: {exc}",
+        )
+    if not targets:
+        return patch_tool_response_hint(
+            patched,
+            f"Browser cleanup: {not_deliverable_reason}; BuddySwitch found no new unmanaged page target for this call.",
+        )
+
+    for target in targets:
+        target_id = _target_id(target)
+        if target_id is None:
+            patched = patch_tool_response_hint(
+                patched,
+                f"Browser cleanup warning: {not_deliverable_reason}; a new page target had no readable target id.",
+            )
+            continue
+        try:
+            cdp_background_page.close_target(browser_url, target_id)
+        except Exception as exc:
+            if root is None:
+                patched = patch_tool_response_hint(
+                    patched,
+                    f"Browser cleanup warning: {not_deliverable_reason}; immediate close failed for unmanaged page target {target_id}, and instance root was unavailable for scheduling: {exc}",
+                )
+                continue
+            try:
+                browser_lifecycle.schedule_failed_open_page_cleanup(
+                    instance_root=root,
+                    target_id=target_id,
+                    url=_target_url(target),
+                    attempts=1,
+                )
+            except Exception as schedule_exc:
+                patched = patch_tool_response_hint(
+                    patched,
+                    f"Browser cleanup warning: {not_deliverable_reason}; immediate close failed for unmanaged page target {target_id}, and exact cleanup scheduling failed: {schedule_exc}",
+                )
+                continue
+            patched = patch_tool_response_hint(
+                patched,
+                f"Browser cleanup warning: {not_deliverable_reason}; the failed open created an unmanaged page target, immediate close failed ({exc}), and BuddySwitch scheduled short cleanup for it.",
+            )
+            continue
+        patched = patch_tool_response_hint(
+            patched,
+            f"Browser cleanup: {not_deliverable_reason}; the failed open created 1 unmanaged page target, and BuddySwitch closed it before returning this response.",
+        )
+    return patched
+
+
 def patch_tool_response_page_use_metadata(
     message: dict[str, Any],
     metadata: dict[str, Any],
@@ -614,18 +734,31 @@ def patch_tool_response_page_use_metadata(
     if isinstance(page_hint, str) and page_hint:
         patched = patch_tool_response_hint(patched, page_hint)
     kind = metadata.get("kind")
-    if not _tool_response_succeeded(message):
-        return patched
     root = _instance_root_path(instance_root)
-    if root is None:
-        return patched
     if kind == "new_page":
         selected_page = selected_page_from_new_page_response(message)
-        if selected_page is None:
-            return patch_tool_response_hint(
+        if not _tool_response_succeeded(message):
+            return _cleanup_failed_open_targets(
                 patched,
-                f"{LIFECYCLE_WARNING_PREFIX} opened page id was not readable from upstream new_page response; browser idle was not refreshed.",
+                metadata,
+                browser_url=browser_url,
+                root=root,
+                not_deliverable_reason="upstream new_page failed",
             )
+        if selected_page is None:
+            patched = patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened page id was not readable from upstream new_page response; this result is not deliverable and browser idle was not refreshed.",
+            )
+            return _cleanup_failed_open_targets(
+                patched,
+                metadata,
+                browser_url=browser_url,
+                root=root,
+                not_deliverable_reason="opened page id was not readable from upstream new_page response and the result is not deliverable",
+            )
+        if root is None:
+            return patched
         try:
             hint = _refresh_current_idle_hint(
                 root=root,
@@ -638,9 +771,11 @@ def patch_tool_response_page_use_metadata(
                 f"{LIFECYCLE_WARNING_PREFIX} opened page idle was not refreshed: {exc}",
             )
         return patch_tool_response_hint(patched, hint)
+    if not _tool_response_succeeded(message):
+        return patched
+    if root is None:
+        return patched
     if kind == "list_pages":
-        if not _tool_response_succeeded(message):
-            return patched
         patched = patch_tool_response_hint(patched, _browser_session_state_text(browser_url=browser_url, instance_root=instance_root))
         warning = _schedule_release_if_no_tracked_pages(root)
         if warning:

@@ -25,10 +25,12 @@ for candidate in (HELPER_DIR, SCRIPTS, SCRIPTS_ENV):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
+import cdp_background_page  # noqa: E402
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 
 
 BROWSER_PAGE_EXPIRED_EVENT_TYPE = "browser.page.expired"
+BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE = "browser.failed_open_page.cleanup"
 DEFAULT_UPSTREAM_COMMAND = "npx chrome-devtools-mcp@1.1.1"
 MCP_TOOL_TIMEOUT_SECONDS = 20.0
 
@@ -55,6 +57,28 @@ def _payload(trigger: Any) -> dict[str, Any]:
         raise ValueError("page_id must be a string or integer")
     return {
         "page_id": page_id,
+    }
+
+
+def _failed_open_cleanup_payload(trigger: Any) -> dict[str, Any]:
+    payload = getattr(trigger, "payload", None)
+    if not isinstance(payload, dict):
+        raise ValueError("browser failed-open cleanup trigger payload must be an object")
+    target_id = payload.get("target_id")
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise ValueError("target_id is required")
+    attempts = payload.get("attempts")
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+        attempts = 1
+    first_seen_at = payload.get("first_seen_at")
+    first_seen_at = first_seen_at.strip() if isinstance(first_seen_at, str) and first_seen_at.strip() else None
+    url = payload.get("url")
+    url = url.strip() if isinstance(url, str) and url.strip() else None
+    return {
+        "target_id": target_id.strip(),
+        "url": url,
+        "attempts": attempts,
+        "first_seen_at": first_seen_at,
     }
 
 
@@ -193,17 +217,24 @@ def _stop_mcp_process(proc: subprocess.Popen[str]) -> None:
             proc.stdin.close()
     except OSError:
         pass
-    if proc.poll() is not None:
-        return
-    proc.terminate()
     try:
-        proc.wait(timeout=2.0)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            proc.kill()
-        proc.wait(timeout=2.0)
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except OSError:
+                    proc.kill()
+                proc.wait(timeout=2.0)
+    finally:
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                if stream is not None and not stream.closed:
+                    stream.close()
+            except OSError:
+                pass
 
 
 class McpToolSession:
@@ -426,6 +457,21 @@ def _recorded_page_visible(recorded: dict[str, Any], pages: list[dict[str, Any]]
     return bool(_recorded_identity_candidates(recorded, pages))
 
 
+def _target_id(target: dict[str, Any]) -> str | None:
+    for key in ("id", "targetId"):
+        value = target.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _find_page_target(targets: list[dict[str, Any]], target_id: str) -> dict[str, Any] | None:
+    for target in targets:
+        if _target_id(target) == target_id:
+            return target
+    return None
+
+
 class BrowserPageExpiredHandler:
     name = "browser_page_expired"
 
@@ -524,6 +570,95 @@ class BrowserPageExpiredHandler:
             state = _forget_tracked_page(root, page_id)
             if state is not None:
                 _schedule_release_if_empty(root, state)
+        return daemon_core.HandlerResult.handled()
+
+
+class BrowserFailedOpenPageCleanupHandler:
+    name = "browser_failed_open_page_cleanup"
+
+    def handles(self, trigger: Any) -> bool:
+        return getattr(trigger, "type", None) == BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE
+
+    def handle(
+        self,
+        context: Any,
+        state: Any,
+        runtime: Any,
+        trigger: Any,
+    ) -> daemon_core.HandlerResult:
+        del state, runtime
+        if getattr(trigger, "type", None) != BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE:
+            return daemon_core.HandlerResult.ignored()
+        try:
+            local_route = _context_identity_route(context)
+            target_route = {
+                "identity_id": str(getattr(trigger, "target_identity_id", "")).strip(),
+                "role_id": str(getattr(trigger, "target_role_id", "")).strip(),
+            }
+            if target_route != local_route:
+                raise PermissionError("wrong target identity for browser failed-open cleanup trigger")
+            payload = _failed_open_cleanup_payload(trigger)
+            return self._handle_failed_open_cleanup(context, payload)
+        except Exception as exc:
+            return daemon_core.HandlerResult.failed(str(exc))
+
+    def _handle_failed_open_cleanup(self, context: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
+        browser_endpoint = _browser_endpoint(context)
+        if browser_endpoint is None:
+            return daemon_core.HandlerResult.handled()
+        root = _instance_root(context)
+        target_id = payload["target_id"]
+        try:
+            target = _find_page_target(browser_lifecycle.read_page_targets(browser_endpoint), target_id)
+        except browser_lifecycle.BrowserLifecycleError as exc:
+            return self._reschedule_or_escalate(context, payload, reason=str(exc))
+        if target is None:
+            return daemon_core.HandlerResult.handled()
+        try:
+            cdp_background_page.close_target(browser_endpoint, target_id)
+        except Exception as exc:
+            return self._reschedule_or_escalate(context, payload, reason=str(exc))
+        if root is not None:
+            try:
+                state_payload = browser_lifecycle._read_page_idle_state(root)
+                pages = state_payload.get("pages")
+                if isinstance(pages, dict) and not pages:
+                    browser_lifecycle.schedule_browser_cockpit_release(
+                        instance_root=root,
+                        reason="failed_open_page_cleanup_complete",
+                    )
+            except Exception:
+                pass
+        return daemon_core.HandlerResult.handled()
+
+    def _reschedule_or_escalate(
+        self,
+        context: Any,
+        payload: dict[str, Any],
+        *,
+        reason: str,
+    ) -> daemon_core.HandlerResult:
+        root = _instance_root(context)
+        if root is None:
+            return daemon_core.HandlerResult.failed(f"instance_root is required for browser failed-open cleanup: {reason}")
+        attempts = payload["attempts"]
+        if attempts < browser_lifecycle.BROWSER_FAILED_OPEN_PAGE_CLEANUP_MAX_ATTEMPTS:
+            browser_lifecycle.schedule_failed_open_page_cleanup(
+                instance_root=root,
+                target_id=payload["target_id"],
+                url=payload.get("url"),
+                attempts=attempts + 1,
+                first_seen_at=payload.get("first_seen_at"),
+            )
+            return daemon_core.HandlerResult.handled()
+        print(
+            f"Browser failed-open cleanup exhausted for target {payload['target_id']}: {reason}",
+            file=sys.stderr,
+        )
+        browser_lifecycle.schedule_browser_cockpit_release(
+            instance_root=root,
+            reason="failed_open_page_cleanup_exhausted",
+        )
         return daemon_core.HandlerResult.handled()
 
 
