@@ -296,6 +296,11 @@ button.track-row {
   background: #f2fafb;
 }
 
+.person-row.is-pending {
+  border-style: dashed;
+  background: #fffaf0;
+}
+
 .track-row.is-selected {
   border-color: #bdb5cf;
   background: #fbfaff;
@@ -713,6 +718,56 @@ button.track-row {
 .inline-loading {
   color: var(--muted);
   font-style: italic;
+}
+
+.skeleton-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-line {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e7e3d8, #f5f3ec, #e7e3d8);
+  background-size: 180% 100%;
+}
+
+.skeleton-line.short {
+  width: 36%;
+}
+
+.skeleton-line.medium {
+  width: 62%;
+}
+
+.skeleton-line.long {
+  width: 84%;
+}
+
+.skeleton-card .skeleton-line + .skeleton-line {
+  margin-top: 8px;
+}
+
+.conversation-skeleton {
+  display: grid;
+  gap: 12px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-line {
+    animation: skeleton-shimmer 1.15s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -80% 0;
+  }
 }
 
 .is-loading {

@@ -43,8 +43,52 @@ function imMessage({ id, sender, target, content, replyTo = null }) {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function okResponse(payload) {
+  return {
+    ok: true,
+    json: async function () {
+      return Object.assign({ ok: true }, payload || {});
+    },
+  };
+}
+
+function imNotFoundResponse() {
+  return {
+    ok: false,
+    json: async function () {
+      return {
+        ok: false,
+        error: { code: 'E_IM_NOT_FOUND', message: 'direct conversation not found' },
+      };
+    },
+  };
+}
+
+async function waitFor(predicate, description, timeoutMs = 800) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for ' + description);
+}
+
 function createRenderElements() {
-  const node = () => ({
+  const node = () => {
+    const attributes = {};
+    return {
     textContent: '',
     value: '',
     hidden: false,
@@ -52,7 +96,13 @@ function createRenderElements() {
     innerHTML: '',
     classList: { toggle() {} },
     querySelectorAll() { return []; },
-  });
+      setAttribute(name, value) { attributes[name] = String(value); },
+      getAttribute(name) {
+        return Object.prototype.hasOwnProperty.call(attributes, name) ? attributes[name] : null;
+      },
+      removeAttribute(name) { delete attributes[name]; },
+    };
+  };
   return {
     serverStatus: node(),
     refreshButton: node(),
@@ -154,6 +204,52 @@ test('teammate roster renders prototype person rows from supported actor facts',
   assert.match(html, /active/);
   assert.match(html, /healthy/);
   assert.doesNotMatch(html, /Dev Actor|PM Actor|72%|capacity|current focus|last proof/i);
+});
+
+test('role select repopulates role options after initial empty-shell render', () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = {
+    createElement(tagName) {
+      return {
+        tagName,
+        value: '',
+        textContent: '',
+      };
+    },
+  };
+
+  try {
+    const state = app.createState();
+    const appended = [];
+    const elements = createRenderElements();
+    elements.roleSelect = {
+      options: [{ value: '', textContent: 'Select role' }],
+      value: '',
+      appendChild(option) {
+        appended.push(option);
+        this.options.push(option);
+      },
+    };
+    state.roles = [
+      { id: 'market', label: 'Market' },
+      { id: 'dev', label: 'Dev' },
+    ];
+    state.selectedRole = 'market';
+
+    app.renderRoleSelect(state, elements);
+
+    assert.deepEqual(
+      elements.roleSelect.options.map((option) => [option.value, option.textContent]),
+      [
+        ['', 'Select role'],
+        ['market', 'Market (market)'],
+        ['dev', 'Dev (dev)'],
+      ]
+    );
+    assert.equal(elements.roleSelect.value, 'market');
+  } finally {
+    globalThis.document = originalDocument;
+  }
 });
 
 test('track payload sync chooses first track and keeps comments inside detail state', () => {
@@ -305,13 +401,677 @@ test('actor selection clears stale feedback before fetch completes', async () =>
     assert.equal(state.message, '');
     assert.equal(elements.messageBanner.textContent, '');
     assert.deepEqual(state.imConversation, []);
-    assert.match(elements.actorRuntimeDetail.innerHTML, /Loading/);
+    assert.match(elements.actorRuntimeDetail.innerHTML, /skeleton-card/);
 
     await selection;
     if (state.actorRefreshTimer) {
       clearTimeout(state.actorRefreshTimer);
       state.actorRefreshTimer = null;
     }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('create teammate keeps pending actor visible until roster reconciliation', async () => {
+  const originalFetch = globalThis.fetch;
+  let actorRosterCalls = 0;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({ actor_id: 'act-market-new' });
+    }
+    if (requestUrl === '/api/actors') {
+      actorRosterCalls += 1;
+      return okResponse({
+        actors: actorRosterCalls === 1
+          ? [
+              { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+            ]
+          : [
+              { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+              { actor_id: 'act-market-new', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+            ],
+      });
+    }
+    if (requestUrl === '/api/actors/act-market-new/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-market-new', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-new', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-market-new', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-market-new&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.selectedRole = 'market';
+    state.actors = [
+      { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-market-old';
+    state.rosterReconcileDelaysMs = [0, 1];
+
+    await app.createInstance(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-market-new');
+    assert.equal(state.rosterPendingActorId, 'act-market-new');
+    assert.match(elements.actorsList.innerHTML, /act-market-new/);
+    assert.match(elements.actorsList.innerHTML, /pending|confirming/i);
+
+    await waitFor(() => state.rosterPendingActorId === '', 'roster confirmation');
+
+    assert.equal(state.selectedActorId, 'act-market-new');
+    assert.equal(state.rosterPendingActorId, '');
+    assert.match(elements.actorsList.innerHTML, /act-market-new/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /pending|confirming/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('failed create preserves previous selection and leaves no pending actor', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      return {
+        ok: false,
+        json: async function () {
+          return { ok: false, error: { message: 'launcher refused start' } };
+        },
+      };
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.selectedRole = 'market';
+    state.actors = [
+      { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-market-old';
+
+    await app.createInstance(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-market-old');
+    assert.equal(state.rosterPendingActorId, '');
+    assert.doesNotMatch(elements.actorsList.innerHTML, /act-market-new/);
+    assert.match(elements.messageBanner.textContent, /launcher refused start/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('create reconciliation timeout keeps selected pending row and manual refresh can confirm it', async () => {
+  const originalFetch = globalThis.fetch;
+  let actorRosterCalls = 0;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({ actor_id: 'act-market-late' });
+    }
+    if (requestUrl === '/api/actors') {
+      actorRosterCalls += 1;
+      return okResponse({
+        actors: actorRosterCalls < 2
+          ? [
+              { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+            ]
+          : [
+              { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+              { actor_id: 'act-market-late', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+            ],
+      });
+    }
+    if (requestUrl === '/api/actors/act-market-late/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-market-late', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-late', thread_status: 'idle' },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-market-late', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-market-late&limit=50') {
+      return imNotFoundResponse();
+    }
+    if (requestUrl === '/api/health') {
+      return okResponse({});
+    }
+    if (requestUrl === '/api/roles') {
+      return okResponse({ roles: [{ id: 'market', label: 'Market' }] });
+    }
+    if (requestUrl === '/api/tracks') {
+      return okResponse({ tracks: [] });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.selectedRole = 'market';
+    state.actors = [
+      { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-market-old';
+    state.rosterReconcileDelaysMs = [0];
+
+    await app.createInstance(state, elements);
+    await waitFor(
+      () => /has not confirmed/.test(elements.messageBanner.textContent),
+      'roster timeout message',
+      300
+    );
+
+    assert.equal(state.selectedActorId, 'act-market-late');
+    assert.equal(state.rosterPendingActorId, 'act-market-late');
+    assert.match(elements.actorsList.innerHTML, /act-market-late/);
+    assert.match(elements.actorsList.innerHTML, /confirming/);
+
+    await app.refreshVisibleRegionsWithFeedback(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-market-late');
+    assert.equal(state.rosterPendingActorId, '');
+    assert.match(elements.actorsList.innerHTML, /act-market-late/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /confirming/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('actor card renders as soon as console resolves before conversation', async () => {
+  const originalFetch = globalThis.fetch;
+  const conversation = deferred();
+  const conversationStarted = deferred();
+  let selection;
+  let assertionError = null;
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-new/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-new', role: 'market' },
+          runtime: {
+            status: 'active',
+            app_server_health: 'healthy',
+            thread_id: 'thread-new',
+            browser_port: 8765,
+            thread_status: 'idle',
+          },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-new', role_id: 'market' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-new&limit=50') {
+      conversationStarted.resolve();
+      return conversation.promise;
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-new', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-old';
+
+    selection = app.selectActor(state, elements, 'act-new');
+    selection.catch(function () {});
+    await conversationStarted.promise;
+    await waitFor(
+      () => /Status/.test(elements.actorRuntimeDetail.innerHTML),
+      'actor card render before conversation resolves',
+      200
+    );
+
+    try {
+      assert.equal(state.selectedActorId, 'act-new');
+      assert.match(elements.actorRuntimeDetail.innerHTML, /Status/);
+      assert.match(elements.actorRuntimeDetail.innerHTML, /Health/);
+      assert.match(elements.actorRuntimeDetail.innerHTML, /Task Sys/);
+      assert.match(elements.actorRuntimeDetail.innerHTML, /Tracks/);
+      assert.doesNotMatch(elements.actorRuntimeDetail.innerHTML, /Loading/);
+      assert.match(elements.imConversation.innerHTML, /thread|conversation|skeleton|loading/i);
+    } catch (error) {
+      assertionError = error;
+    }
+
+    conversation.resolve(imNotFoundResponse());
+    await selection;
+    if (assertionError) {
+      throw assertionError;
+    }
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('slow conversation does not disable runtime actions after console loads', async () => {
+  const originalFetch = globalThis.fetch;
+  const conversation = deferred();
+  const conversationStarted = deferred();
+  let selection;
+  let assertionError = null;
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-controls/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-controls', role: 'market' },
+          runtime: {
+            status: 'active',
+            app_server_health: 'healthy',
+            thread_id: 'thread-controls',
+            thread_status: 'idle',
+          },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-controls', role_id: 'market' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-controls&limit=50') {
+      conversationStarted.resolve();
+      return conversation.promise;
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-controls', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+
+    selection = app.selectActor(state, elements, 'act-controls');
+    selection.catch(function () {});
+    await conversationStarted.promise;
+    await waitFor(
+      () => elements.stopButton.disabled === false
+        && elements.clearButton.disabled === false
+        && elements.openTuiButton.disabled === false,
+      'runtime controls after console before conversation resolves',
+      200
+    );
+
+    try {
+      assert.equal(elements.stopButton.disabled, false);
+      assert.equal(elements.clearButton.disabled, false);
+      assert.equal(elements.openTuiButton.disabled, false);
+      assert.equal(elements.actionAvailabilityStatus.textContent, '');
+    } catch (error) {
+      assertionError = error;
+    }
+
+    conversation.resolve(imNotFoundResponse());
+    await selection;
+    if (assertionError) {
+      throw assertionError;
+    }
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh renders roster before selected conversation completes', async () => {
+  const originalFetch = globalThis.fetch;
+  const conversation = deferred();
+  const conversationStarted = deferred();
+  let refresh;
+  let assertionError = null;
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') {
+      return Promise.resolve(okResponse({}));
+    }
+    if (requestUrl === '/api/roles') {
+      return Promise.resolve(okResponse({ roles: [{ id: 'market', label: 'Market' }] }));
+    }
+    if (requestUrl === '/api/actors') {
+      return Promise.resolve(okResponse({
+        actors: [
+          { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+          { actor_id: 'act-roster-new', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+        ],
+      }));
+    }
+    if (requestUrl === '/api/tracks') {
+      return Promise.resolve(okResponse({ tracks: [] }));
+    }
+    if (requestUrl === '/api/actors/act-old/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-old', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-old', thread_status: 'idle' },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-old', role_id: 'market' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-old&limit=50') {
+      conversationStarted.resolve();
+      return conversation.promise;
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.selectedActorId = 'act-old';
+    state.actors = [
+      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+
+    refresh = app.refreshVisibleRegionsWithFeedback(state, elements);
+    refresh.catch(function () {});
+    await conversationStarted.promise;
+    await waitFor(
+      () => /act-roster-new/.test(elements.actorsList.innerHTML) && /Status/.test(elements.actorRuntimeDetail.innerHTML),
+      'progressive roster and card render before conversation resolves',
+      200
+    );
+
+    try {
+      assert.match(elements.actorsList.innerHTML, /act-roster-new/);
+      assert.match(elements.actorRuntimeDetail.innerHTML, /Status/);
+      assert.match(elements.imConversation.innerHTML, /thread|conversation|skeleton|loading/i);
+    } catch (error) {
+      assertionError = error;
+    }
+
+    conversation.resolve(imNotFoundResponse());
+    await refresh;
+    if (assertionError) {
+      throw assertionError;
+    }
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh preserves visible conversation while revalidating it', async () => {
+  const originalFetch = globalThis.fetch;
+  const conversation = deferred();
+  const conversationStarted = deferred();
+  let refresh;
+  let assertionError = null;
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') {
+      return Promise.resolve(okResponse({}));
+    }
+    if (requestUrl === '/api/roles') {
+      return Promise.resolve(okResponse({ roles: [{ id: 'market', label: 'Market' }] }));
+    }
+    if (requestUrl === '/api/actors') {
+      return Promise.resolve(okResponse({
+        actors: [
+          { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      }));
+    }
+    if (requestUrl === '/api/tracks') {
+      return Promise.resolve(okResponse({ tracks: [] }));
+    }
+    if (requestUrl === '/api/actors/act-old/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-old', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-old', thread_status: 'idle' },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-old', role_id: 'market' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-old&limit=50') {
+      conversationStarted.resolve();
+      return conversation.promise;
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.selectedActorId = 'act-old';
+    state.actors = [
+      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.imConversationIdentityId = 'act-old';
+    state.imConversation = [
+      { id: 'msg-old', direction: 'reply', sender: 'market/act-old', deliveryStatus: '', wakeStatus: '', replyTo: '', content: 'still visible' },
+    ];
+    state.imSeenMessageIds = { 'msg-old': true };
+    app.renderImConversation(state, elements);
+
+    refresh = app.refreshVisibleRegionsWithFeedback(state, elements);
+    refresh.catch(function () {});
+    await conversationStarted.promise;
+
+    try {
+      assert.match(elements.imConversation.innerHTML, /still visible/);
+      assert.doesNotMatch(elements.imConversation.innerHTML, /conversation-skeleton/);
+      assert.equal(elements.imConversation.getAttribute('aria-busy'), 'true');
+    } catch (error) {
+      assertionError = error;
+    }
+
+    conversation.resolve(okResponse({
+      messages: [
+        imMessage({
+          id: 'msg-new',
+          sender: 'act-old',
+          target: 'ext-web',
+          content: 'fresh reply',
+        }),
+      ],
+    }));
+    await refresh;
+    if (assertionError) {
+      throw assertionError;
+    }
+    assert.match(elements.imConversation.innerHTML, /fresh reply/);
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh renders tracks list before selected conversation completes', async () => {
+  const originalFetch = globalThis.fetch;
+  const conversation = deferred();
+  const conversationStarted = deferred();
+  let refresh;
+  let assertionError = null;
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') {
+      return Promise.resolve(okResponse({}));
+    }
+    if (requestUrl === '/api/roles') {
+      return Promise.resolve(okResponse({ roles: [{ id: 'market', label: 'Market' }] }));
+    }
+    if (requestUrl === '/api/actors') {
+      return Promise.resolve(okResponse({
+        actors: [
+          { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      }));
+    }
+    if (requestUrl === '/api/tracks') {
+      return Promise.resolve(okResponse({
+        tracks: [
+          { id: 'track-new', title: 'Progressive refresh', state: 'active', comment_summary: { open_thread_count: 2 } },
+        ],
+      }));
+    }
+    if (requestUrl === '/api/actors/act-old/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-old', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-old', thread_status: 'idle' },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-old', role_id: 'market' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-old&limit=50') {
+      conversationStarted.resolve();
+      return conversation.promise;
+    }
+    if (requestUrl === '/api/tracks/track-new') {
+      return Promise.resolve(okResponse({
+        track: { id: 'track-new', title: 'Progressive refresh', state: 'active' },
+      }));
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.selectedActorId = 'act-old';
+    state.actors = [
+      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+
+    refresh = app.refreshVisibleRegionsWithFeedback(state, elements);
+    refresh.catch(function () {});
+    await conversationStarted.promise;
+    await waitFor(
+      () => /track-new/.test(elements.tracksList.innerHTML),
+      'tracks list before conversation resolves',
+      200
+    );
+
+    try {
+      assert.match(elements.tracksList.innerHTML, /track-new/);
+      assert.match(elements.tracksList.innerHTML, /Progressive refresh/);
+      assert.match(elements.imConversation.innerHTML, /thread|conversation|skeleton|loading/i);
+    } catch (error) {
+      assertionError = error;
+    }
+
+    conversation.resolve(imNotFoundResponse());
+    await refresh;
+    if (assertionError) {
+      throw assertionError;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('console failure does not clear the visible direct thread', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') {
+      return Promise.resolve(okResponse({}));
+    }
+    if (requestUrl === '/api/roles') {
+      return Promise.resolve(okResponse({ roles: [{ id: 'market', label: 'Market' }] }));
+    }
+    if (requestUrl === '/api/actors') {
+      return Promise.resolve(okResponse({
+        actors: [
+          { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      }));
+    }
+    if (requestUrl === '/api/tracks') {
+      return Promise.resolve(okResponse({ tracks: [] }));
+    }
+    if (requestUrl === '/api/actors/act-old/console') {
+      return Promise.resolve({
+        ok: false,
+        json: async function () {
+          return { ok: false, error: { message: 'console unavailable' } };
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-old&limit=50') {
+      return Promise.resolve(okResponse({
+        messages: [
+          imMessage({
+            id: 'msg-still-here',
+            sender: 'act-old',
+            target: 'ext-web',
+            content: 'thread survives',
+          }),
+        ],
+      }));
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.selectedActorId = 'act-old';
+    state.actors = [
+      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.imConversationIdentityId = 'act-old';
+    state.imConversation = [
+      { id: 'msg-old', direction: 'reply', sender: 'market/act-old', deliveryStatus: '', wakeStatus: '', replyTo: '', content: 'thread survives' },
+    ];
+    state.imSeenMessageIds = { 'msg-old': true };
+
+    await app.refreshVisibleRegionsWithFeedback(state, elements);
+
+    assert.match(elements.actorRuntimeDetail.innerHTML, /console unavailable/);
+    assert.match(elements.imConversation.innerHTML, /thread survives/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -391,6 +1151,102 @@ test('rapid actor switching keeps the latest selected teammate visible', async (
 
     assert.equal(state.selectedActorId, 'act-second');
     assert.equal(state.actorConsole.actor.actor_id, 'act-second');
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rapid actor switching keeps stale conversation from overwriting latest selection', async () => {
+  const originalFetch = globalThis.fetch;
+  let resolveFirstConversation;
+  let resolveSecondConversation;
+  const firstConversation = new Promise((resolve) => { resolveFirstConversation = resolve; });
+  const secondConversation = new Promise((resolve) => { resolveSecondConversation = resolve; });
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-first/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-first', role: 'dev' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-first', thread_status: 'idle' },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-first', role_id: 'dev' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/actors/act-second/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-second', role: 'pm' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-second', thread_status: 'idle' },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-second', role_id: 'pm' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-first&limit=50') {
+      return firstConversation;
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-second&limit=50') {
+      return secondConversation;
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-first', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-second', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-old';
+
+    const firstSelection = app.selectActor(state, elements, 'act-first');
+    firstSelection.catch(function () {});
+    const secondSelection = app.selectActor(state, elements, 'act-second');
+    secondSelection.catch(function () {});
+
+    resolveSecondConversation(okResponse({
+      messages: [
+        imMessage({
+          id: 'msg-second',
+          sender: 'act-second',
+          target: 'ext-web',
+          content: 'second wins',
+        }),
+      ],
+    }));
+    await waitFor(
+      () => /second wins/.test(elements.imConversation.innerHTML),
+      'latest conversation render',
+      300
+    );
+
+    resolveFirstConversation(okResponse({
+      messages: [
+        imMessage({
+          id: 'msg-first',
+          sender: 'act-first',
+          target: 'ext-web',
+          content: 'first stale',
+        }),
+      ],
+    }));
+
+    await Promise.allSettled([firstSelection, secondSelection]);
+
+    assert.equal(state.selectedActorId, 'act-second');
+    assert.equal(state.imConversationIdentityId, 'act-second');
+    assert.match(elements.imConversation.innerHTML, /second wins/);
+    assert.doesNotMatch(elements.imConversation.innerHTML, /first stale/);
     if (state.actorRefreshTimer) {
       clearTimeout(state.actorRefreshTimer);
       state.actorRefreshTimer = null;

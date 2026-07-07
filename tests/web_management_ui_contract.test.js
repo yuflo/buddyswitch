@@ -261,6 +261,33 @@ test('production javascript keeps draft input off the full page render path', ()
   assertExcludes(appJs, 'render(state, ' + 'elements);');
 });
 
+test('production javascript removes monolithic refresh functions', () => {
+  assertExcludes(appJs, 'async function refreshAll(');
+  assertExcludes(appJs, 'async function refreshAllWithFeedback(');
+  assertExcludes(appJs, 'await refreshAll(state, elements)');
+  assertExcludes(appJs, 'refreshAllWithFeedback(state, elements)');
+});
+
+test('production assets expose scoped skeleton and aria busy states', () => {
+  [
+    '.skeleton-line',
+    '.skeleton-card',
+    '.conversation-skeleton',
+    '.person-row.is-pending',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+  [
+    'setRegionBusy',
+    "aria-busy",
+    'actorCardLoading',
+    'conversationLoading',
+    'rosterPendingActorId',
+  ].forEach((marker) => {
+    assertIncludes(appJs, marker);
+  });
+});
+
 test('production assets present Team room and Tracks as the only primary tabs', () => {
   assertIncludes(indexHtml, '>Team room<');
   assertIncludes(indexHtml, '>Tracks<');
