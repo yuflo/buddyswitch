@@ -43,6 +43,8 @@ Usage:
   buddyswitch-codex instance side <actor-id> --text <text> [--json]
   buddyswitch-codex instance side <actor-id> --side-thread-id <side-thread-id> --text <text> [--json]
   buddyswitch-codex instance side close <actor-id> --side-thread-id <side-thread-id> [--json]
+  buddyswitch-codex instance model-config <actor-id> get [--json]
+  buddyswitch-codex instance model-config <actor-id> set --payload-json <json> [--json]
   buddyswitch-codex instance goal <actor-id> get|set|clear [--json]
   buddyswitch-codex instance compact <actor-id> [--json]
   buddyswitch-codex instance clear <actor-id> [--json]

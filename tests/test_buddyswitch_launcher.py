@@ -1035,6 +1035,50 @@ exec "$real_git" "$@"
             for path in sorted(tasks_dir.glob("*.json"))
         ]
 
+    def _write_model_config_cli_instance(
+        self,
+        shared_root: Path,
+        *,
+        actor_id: str = "act-pm-demo",
+        role: str = "pm",
+    ) -> Path:
+        instance_root = shared_root / "instances" / actor_id
+        instance_root.mkdir(parents=True, exist_ok=True)
+        instance_json = instance_root / "instance.json"
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "actor_id": actor_id,
+                    "role": role,
+                    "status": "inactive",
+                    "instance_root": str(instance_root),
+                    "workspace_dir": str(instance_root / "workspace"),
+                    "browser_port": None,
+                    "updated_at": "2026-07-08T00:00:00Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (instance_root / "model-config.json").write_text(
+            json.dumps({"schema_version": 1, "parent": {}, "side": {}}, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return instance_json
+
+    def _model_config_cli_env(self, temp_root: Path, shared_root: Path) -> dict[str, str]:
+        source_home = temp_root / "source-home"
+        source_home.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env["HOME"] = str(source_home)
+        env["BUDDYSWITCH_SOURCE_HOME"] = str(source_home)
+        env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+        env.pop("BUDDYSWITCH_STATE_ROOT", None)
+        env.pop("CODEX_HOME", None)
+        return env
+
     def test_instance_start_seeds_model_config_default_schema(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
@@ -1058,6 +1102,144 @@ exec "$real_git" "$@"
             instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
             for key in ("model", "effort", "parent", "side", "model_config"):
                 self.assertNotIn(key, instance_payload)
+
+    def test_instance_model_config_get_json_returns_default_null_dto(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            shared_root = temp_root_path / "shared"
+            self._write_model_config_cli_instance(shared_root)
+            env = self._model_config_cli_env(temp_root_path, shared_root)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["actor_id"], "act-pm-demo")
+            self.assertEqual(payload["model_config"]["parent"], {"model": None, "effort": None})
+            self.assertEqual(payload["model_config"]["side"], {"model": None, "effort": None})
+
+    def test_instance_model_config_set_json_writes_disk_and_get_returns_same_dto(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            shared_root = temp_root_path / "shared"
+            instance_json = self._write_model_config_cli_instance(shared_root)
+            env = self._model_config_cli_env(temp_root_path, shared_root)
+            request_payload = {
+                "parent": {"model": "gpt-5.4", "effort": "high"},
+                "side": {"model": "gpt-5.4-mini", "effort": None},
+            }
+
+            set_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "model-config",
+                    "act-pm-demo",
+                    "set",
+                    "--payload-json",
+                    json.dumps(request_payload),
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            get_result = subprocess.run(
+                [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(set_result.returncode, 0, msg=set_result.stderr)
+            self.assertEqual(get_result.returncode, 0, msg=get_result.stderr)
+            set_payload = json.loads(set_result.stdout)
+            get_payload = json.loads(get_result.stdout)
+            self.assertEqual(set_payload["actor_id"], "act-pm-demo")
+            self.assertEqual(set_payload["model_config"], get_payload["model_config"])
+            self.assertEqual(
+                json.loads((instance_json.parent / "model-config.json").read_text(encoding="utf-8")),
+                {
+                    "schema_version": 1,
+                    "parent": {"model": "gpt-5.4", "effort": "high"},
+                    "side": {"model": "gpt-5.4-mini"},
+                },
+            )
+
+    def test_instance_model_config_invalid_payload_exits_nonzero_and_preserves_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            shared_root = temp_root_path / "shared"
+            instance_json = self._write_model_config_cli_instance(shared_root)
+            path = instance_json.parent / "model-config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "parent": {"model": "gpt-5.4", "effort": "high"},
+                        "side": {},
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            before = path.read_text(encoding="utf-8")
+            env = self._model_config_cli_env(temp_root_path, shared_root)
+
+            completed = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "model-config",
+                    "act-pm-demo",
+                    "set",
+                    "--payload-json",
+                    '{"parent":{"model":null,"effort":"max"},"side":{"model":null,"effort":null}}',
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("effort", completed.stderr)
+            self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_instance_model_config_unknown_option_exits_two(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            shared_root = temp_root_path / "shared"
+            self._write_model_config_cli_instance(shared_root)
+            env = self._model_config_cli_env(temp_root_path, shared_root)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--bogus"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("Unknown instance model-config get option: --bogus", completed.stderr)
 
     def _write_task_sys_record(
         self,

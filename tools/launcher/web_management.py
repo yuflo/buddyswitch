@@ -27,6 +27,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import web_im_identity
 import im_http_router
 import imessage_channel
+import actor_model_config
 from env.domain import task_sys, track_read
 from env.repos import runtime_files
 from env.tool_runtime import daemon_client
@@ -174,6 +175,9 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
         def do_PATCH(self) -> None:  # noqa: N802
             self._dispatch()
 
+        def do_PUT(self) -> None:  # noqa: N802
+            self._dispatch()
+
         def do_DELETE(self) -> None:  # noqa: N802
             self._dispatch()
 
@@ -319,6 +323,13 @@ class WebManagementService:
             return 200, self._create_instance(body)
         if method == "GET" and route == "/api/actors":
             return 200, {"ok": True, "actors": self._list_actor_rows()}
+        actor_model_config_id = self._parse_actor_model_config_path(route)
+        if actor_model_config_id is not None:
+            if method == "GET":
+                return 200, self._read_actor_model_config(actor_model_config_id)
+            if method == "PUT":
+                return 200, self._replace_actor_model_config(actor_model_config_id, body)
+            raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
         actor_console_id = self._parse_actor_console_path(route)
         if method == "GET" and actor_console_id is not None:
             try:
@@ -392,6 +403,15 @@ class WebManagementService:
             if "/" in actor_id:
                 return None
             return actor_id, "delete"
+        return None
+
+    def _parse_actor_model_config_path(self, path: str) -> str | None:
+        prefix = "/api/actors/"
+        suffix = "/model-config"
+        if path.startswith(prefix) and path.endswith(suffix):
+            actor_id = path[len(prefix) : -len(suffix)]
+            if "/" not in actor_id:
+                return actor_id
         return None
 
     def _parse_actor_console_path(self, path: str) -> str | None:
@@ -909,7 +929,53 @@ class WebManagementService:
                     "role_id": role,
                 }
             },
+            "model_config": self._read_actor_model_config(actor_id)["model_config"],
         }
+
+    def _shared_root(self) -> Path:
+        raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+        if isinstance(raw_shared_root, str) and raw_shared_root.strip():
+            return Path(raw_shared_root.strip()).expanduser().resolve(strict=False)
+        source_home = os.environ.get("BUDDYSWITCH_SOURCE_HOME") or os.environ.get("HOME")
+        if isinstance(source_home, str) and source_home.strip():
+            return (Path(source_home.strip()).expanduser() / ".codex-buddyswitch").resolve(strict=False)
+        return (Path.home() / ".codex-buddyswitch").resolve(strict=False)
+
+    def _instance_json_for_actor(self, actor_id: str) -> Path:
+        try:
+            validate_actor_id(actor_id)
+        except ValueError as exc:
+            raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
+        shared_root = self._shared_root()
+        instances_root = (shared_root / "instances").resolve(strict=False)
+        instance_json = (instances_root / actor_id / "instance.json").resolve(strict=False)
+        try:
+            instance_json.relative_to(instances_root)
+        except ValueError as exc:
+            raise HttpError(status=400, code="INVALID_REQUEST", message="Invalid actor instance path.") from exc
+        if not instance_json.is_file():
+            raise HttpError(status=404, code="NOT_FOUND", message=f"actor instance not found: {actor_id}")
+        return instance_json
+
+    def _read_actor_model_config(self, actor_id: str) -> dict[str, Any]:
+        instance_json = self._instance_json_for_actor(actor_id)
+        try:
+            model_config = actor_model_config.read_management_payload(instance_json)
+        except actor_model_config.ActorModelConfigError as exc:
+            raise HttpError(status=409, code="MODEL_CONFIG_INVALID", message=str(exc)) from exc
+        return {"ok": True, "actor_id": actor_id, "model_config": model_config}
+
+    def _replace_actor_model_config(self, actor_id: str, body: bytes) -> dict[str, Any]:
+        instance_json = self._instance_json_for_actor(actor_id)
+        payload = self._parse_json_body(body)
+        try:
+            model_config = actor_model_config.replace_management_payload(instance_json, payload)
+        except actor_model_config.ActorModelConfigError as exc:
+            message = str(exc)
+            if "failed to write model config" in message:
+                raise HttpError(status=502, code="MODEL_CONFIG_WRITE_FAILED", message=message) from exc
+            raise HttpError(status=400, code="INVALID_REQUEST", message=message) from exc
+        return {"ok": True, "actor_id": actor_id, "model_config": model_config}
 
     def _wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return daemon_client.wake_im_actor(payload)
