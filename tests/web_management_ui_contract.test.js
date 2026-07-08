@@ -168,10 +168,43 @@ test('production stylesheet supports Team Room and Track Studio states', () => {
   });
 });
 
+test('production stylesheet keeps the workspace compact on desktop viewports', () => {
+  [
+    'height: calc(100dvh - 78px);',
+    'min-height: 640px;',
+    'grid-template-columns: 240px minmax(360px, 1fr) 300px;',
+    'grid-template-columns: 232px minmax(360px, 1fr) 300px;',
+    '@media (max-width: 1040px)',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+
+  assertExcludes(stylesCss, '@media (max-width: 1180px)');
+  assertCssDeclarations('.composer-box', [
+    'min-height: 72px;',
+    'padding: 9px;',
+  ]);
+  assertCssDeclarations('.textarea-field textarea', [
+    'resize: none;',
+  ]);
+  assertCssDeclarations('.command-fallback', [
+    'grid-template-columns: minmax(0, 1fr) auto;',
+    'align-items: center;',
+  ]);
+  assertCssDeclarations('.person-row', [
+    'grid-template-columns: 34px minmax(0, 1fr);',
+    'align-items: start;',
+  ]);
+  assertCssDeclarations('.row-status', [
+    'grid-column: 2;',
+    'justify-content: flex-start;',
+  ]);
+});
+
 test('production stylesheet restores prototype room and studio proportions', () => {
   [
-    'grid-template-columns: 260px minmax(0, 1fr) 320px;',
-    'grid-template-columns: 250px minmax(0, 1fr) 320px;',
+    'grid-template-columns: 240px minmax(360px, 1fr) 300px;',
+    'grid-template-columns: 232px minmax(360px, 1fr) 300px;',
     'background: #f7f6f1;',
     'background: #ebe8dc;',
     'background: #fbfbf8;',
