@@ -481,6 +481,42 @@ print(json.dumps({{
         hits = self._scan_targets("model-config\\.json", wrong_layers)
         self.assertEqual(hits, [], msg="\n".join(hits))
 
+    def test_actor_model_config_runtime_layers_do_not_use_management_api(self) -> None:
+        wrong_layers = [
+            "tools/launcher/app_server.py",
+            "tools/launcher/submit_turn.py",
+            "tools/launcher/side_thread_lifecycle.py",
+            "tools/launcher/daemon_core.py",
+            "tools/launcher/task_sys_" + "runtime.py",
+        ]
+        hits = self._scan_targets("read_management_payload|replace_management_payload", wrong_layers)
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_model_config_webui_assets_do_not_read_config_files(self) -> None:
+        hits = self._scan_targets("model-config\\.json", ["tools/launcher/assets/web-management"])
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_model_config_webui_controls_are_deferred_from_interface_slice(self) -> None:
+        hits = self._scan_targets(
+            "model-config|parent-model|side-model|parent-effort|side-effort",
+            ["tools/launcher/assets/web-management"],
+        )
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_model_config_management_routes_are_actor_scoped_only(self) -> None:
+        hits = self._scan_targets(
+            "/api/instances/.*/model-config|/api/instances/.*model-config",
+            ["tools/launcher/web_management.py"],
+        )
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_model_config_management_adapters_do_not_duplicate_schema_constants(self) -> None:
+        hits = self._scan_targets(
+            "allowed_efforts|VALID_EFFORTS|schema_version",
+            ["tools/launcher/web_management.py", "tools/launcher/instance.sh", "buddyswitch-codex"],
+        )
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
     def test_actor_model_config_retires_direct_start_and_submit_paths(self) -> None:
         direct_side_hits = self._scan_targets(
             "side_thread_lifecycle\\.start_side_thread",

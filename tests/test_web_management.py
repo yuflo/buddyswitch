@@ -36,6 +36,7 @@ NO_PROXY_OPENER = build_opener(ProxyHandler({}))
 
 from env.services import messages as message_service  # noqa: E402
 from env.repos import identities as identity_repo  # noqa: E402
+import actor_model_config  # noqa: E402
 
 
 def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:
@@ -112,6 +113,42 @@ def active_status(actor_id: str, thread_id: str, thread_status: str) -> dict[str
     }
 
 
+def write_web_model_config_instance(
+    shared_root: Path,
+    *,
+    actor_id: str = "act-pm-demo",
+    role: str = "pm",
+    model_config: dict[str, object] | None = None,
+) -> Path:
+    instance_root = shared_root / "instances" / actor_id
+    instance_root.mkdir(parents=True, exist_ok=True)
+    instance_json = instance_root / "instance.json"
+    instance_json.write_text(
+        json.dumps(
+            {
+                "actor_id": actor_id,
+                "role": role,
+                "status": "active",
+                "instance_root": str(instance_root),
+                "workspace_dir": str(instance_root / "workspace"),
+                "thread_id": "thread-main",
+                "browser_port": 9222,
+                "updated_at": "2026-07-08T00:00:00Z",
+            },
+            ensure_ascii=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    payload = model_config or {"schema_version": 1, "parent": {}, "side": {}}
+    (instance_root / "model-config.json").write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return instance_json
+
+
 OPEN_TUI_HEADERS = {
     "Content-Type": "application/json",
     "X-BuddySwitch-Web": "1",
@@ -172,8 +209,9 @@ class WebManagementServerTestCase(unittest.TestCase):
         server = WEB_MANAGEMENT.create_server("127.0.0.1", 0, service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
         self.addCleanup(thread.join, 5)
+        self.addCleanup(server.shutdown)
         return fake_runner, f"http://127.0.0.1:{server.server_port}"
 
     @staticmethod
@@ -1438,6 +1476,24 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
 
 class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _use_model_config_shared_root(self) -> Path:
+        shared_root = self.runtime_root / "shared-root"
+        original_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+        os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+        self.addCleanup(_restore_env_value, "BUDDYSWITCH_SHARED_ROOT", original_shared_root)
+        return shared_root
+
+    def _launcher_env_for_model_config_shared_root(self, shared_root: Path) -> dict[str, str]:
+        source_home = self.runtime_root / "source-home"
+        source_home.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env["HOME"] = str(source_home)
+        env["BUDDYSWITCH_SOURCE_HOME"] = str(source_home)
+        env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+        env.pop("BUDDYSWITCH_STATE_ROOT", None)
+        env.pop("CODEX_HOME", None)
+        return env
+
     def _service(self, runner: FakeRunner | OrderedRunner | None = None) -> WEB_MANAGEMENT.WebManagementService:
         command_runner = runner.run if runner is not None else FakeRunner().run
         return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=command_runner)
@@ -1622,6 +1678,185 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(payload["actors"][1]["runtime"]["status"], "inactive")
         self.assertEqual(runner.calls, [["instance", "list", "--json"]])
 
+    def test_actor_model_config_get_api_returns_default_null_dto(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        write_web_model_config_instance(shared_root)
+        service = self._service()
+
+        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["actor_id"], "act-pm-demo")
+        self.assertEqual(payload["model_config"]["parent"], {"model": None, "effort": None})
+        self.assertEqual(payload["model_config"]["side"], {"model": None, "effort": None})
+
+    def test_actor_model_config_put_api_replaces_config_and_runtime_resolve_uses_same_core(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        instance_json = write_web_model_config_instance(shared_root)
+        service = self._service()
+        body = json.dumps(
+            {
+                "parent": {"model": "gpt-5.4", "effort": "high"},
+                "side": {"model": "gpt-5.4-mini", "effort": "medium"},
+            },
+            ensure_ascii=True,
+        ).encode("utf-8")
+
+        put_status, put_payload = service.handle_api("PUT", "/api/actors/act-pm-demo/model-config", body)
+        get_status, get_payload = service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
+        parent = actor_model_config.resolve_parent_options(instance_json)
+        side = actor_model_config.resolve_side_options(instance_json)
+
+        self.assertEqual(put_status, 200)
+        self.assertEqual(get_status, 200)
+        self.assertEqual(put_payload["model_config"], get_payload["model_config"])
+        self.assertEqual(parent.model, "gpt-5.4")
+        self.assertEqual(parent.effort, "high")
+        self.assertEqual(side.model, "gpt-5.4-mini")
+        self.assertEqual(side.effort, "medium")
+
+    def test_actor_model_config_cli_set_is_readable_from_web_api_and_core_resolve(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        instance_json = write_web_model_config_instance(shared_root)
+        env = self._launcher_env_for_model_config_shared_root(shared_root)
+        request_payload = {
+            "parent": {"model": "gpt-5.4", "effort": "high"},
+            "side": {"model": "gpt-5.4-mini", "effort": "medium"},
+        }
+
+        completed = subprocess.run(
+            [
+                str(LAUNCHER),
+                "instance",
+                "model-config",
+                "act-pm-demo",
+                "set",
+                "--payload-json",
+                json.dumps(request_payload, ensure_ascii=True),
+                "--json",
+            ],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        service = self._service()
+        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
+        parent = actor_model_config.resolve_parent_options(instance_json)
+        side = actor_model_config.resolve_side_options(instance_json)
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.4", "effort": "high"})
+        self.assertEqual(payload["model_config"]["side"], {"model": "gpt-5.4-mini", "effort": "medium"})
+        self.assertEqual(parent.model, "gpt-5.4")
+        self.assertEqual(parent.effort, "high")
+        self.assertEqual(side.model, "gpt-5.4-mini")
+        self.assertEqual(side.effort, "medium")
+
+    def test_actor_model_config_web_put_is_readable_from_cli_get(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        write_web_model_config_instance(shared_root)
+        env = self._launcher_env_for_model_config_shared_root(shared_root)
+        service = self._service()
+
+        status, payload = service.handle_api(
+            "PUT",
+            "/api/actors/act-pm-demo/model-config",
+            b'{"parent":{"model":"gpt-5.4","effort":"high"},"side":{"model":null,"effort":"medium"}}',
+        )
+        completed = subprocess.run(
+            [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--json"],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        cli_payload = json.loads(completed.stdout)
+        self.assertEqual(cli_payload["actor_id"], "act-pm-demo")
+        self.assertEqual(cli_payload["model_config"], payload["model_config"])
+        self.assertEqual(cli_payload["model_config"]["side"], {"model": None, "effort": "medium"})
+
+    def test_actor_model_config_api_rejects_invalid_actor_ids_and_missing_instances(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        shared_root.mkdir(parents=True, exist_ok=True)
+        service = self._service()
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as invalid_actor:
+            service.handle_api("GET", "/api/actors/not-an-actor/model-config", b"")
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as missing_actor:
+            service.handle_api("GET", "/api/actors/act-pm-missing/model-config", b"")
+
+        self.assertEqual(invalid_actor.exception.status, 400)
+        self.assertEqual(invalid_actor.exception.code, "INVALID_REQUEST")
+        self.assertEqual(missing_actor.exception.status, 404)
+        self.assertEqual(missing_actor.exception.code, "NOT_FOUND")
+
+    def test_actor_model_config_put_invalid_payload_is_400_and_preserves_file(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        instance_json = write_web_model_config_instance(
+            shared_root,
+            model_config={
+                "schema_version": 1,
+                "parent": {"model": "gpt-5.4", "effort": "high"},
+                "side": {},
+            },
+        )
+        path = instance_json.parent / "model-config.json"
+        before = path.read_text(encoding="utf-8")
+        service = self._service()
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api(
+                "PUT",
+                "/api/actors/act-pm-demo/model-config",
+                b'{"parent":{"model":null,"effort":"max"},"side":{"model":null,"effort":null}}',
+            )
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_actor_model_config_get_invalid_existing_config_is_409(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        instance_json = write_web_model_config_instance(shared_root)
+        (instance_json.parent / "model-config.json").write_text("{bad json\n", encoding="utf-8")
+        service = self._service()
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.code, "MODEL_CONFIG_INVALID")
+
+    def test_actor_model_config_put_write_failure_is_502(self) -> None:
+        shared_root = self._use_model_config_shared_root()
+        instance_json = write_web_model_config_instance(shared_root)
+        service = self._service()
+
+        with mock.patch.object(
+            WEB_MANAGEMENT.actor_model_config,
+            "replace_management_payload",
+            side_effect=actor_model_config.ActorModelConfigError(
+                f"{instance_json.parent / 'model-config.json'}: failed to write model config: denied"
+            ),
+        ):
+            with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                service.handle_api(
+                    "PUT",
+                    "/api/actors/act-pm-demo/model-config",
+                    b'{"parent":{"model":null,"effort":null},"side":{"model":null,"effort":null}}',
+                )
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.code, "MODEL_CONFIG_WRITE_FAILED")
+
     def test_web_im_send_resolves_actor_route_from_instance_list_not_identity_id_text(self) -> None:
         target_identity_id = "act-web-identity-route"
         save_test_actor_identity_profile(actor_id=target_identity_id, role_id="market")
@@ -1677,6 +1912,15 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
     def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
         from env.domain import task_sys
 
+        shared_root = self._use_model_config_shared_root()
+        write_web_model_config_instance(
+            shared_root,
+            model_config={
+                "schema_version": 1,
+                "parent": {"model": "gpt-5.4"},
+                "side": {"effort": "medium"},
+            },
+        )
         self._seed_track_pages()
         runner = FakeRunner()
         runner.add(["instance", "status", "act-pm-demo", "--json"], command_json(self._instance_status_payload()))
@@ -1724,6 +1968,8 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(console["im"]["target"]["role_id"], "pm")
         self.assertNotIn("actor_address", console["im"]["target"])
         self.assertEqual([row["id"] for row in console["tracks"]["items"]], ["track-alpha"])
+        self.assertEqual(console["model_config"]["parent"], {"model": "gpt-5.4", "effort": None})
+        self.assertEqual(console["model_config"]["side"], {"model": None, "effort": "medium"})
 
     def test_actor_console_api_rejects_invalid_actor_ids(self) -> None:
         service = self._service()
@@ -1783,6 +2029,30 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
 
 class WebManagementHTTPActionTests(WebManagementServerTestCase):
+    def test_model_config_put_route_accepts_http_put_method(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / "shared-root"
+            write_web_model_config_instance(shared_root)
+            original_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+            os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            self.addCleanup(_restore_env_value, "BUDDYSWITCH_SHARED_ROOT", original_shared_root)
+            _runner, base_url = self._start_server()
+
+            status, payload = self._request_json(
+                base_url,
+                method="PUT",
+                path="/api/actors/act-pm-demo/model-config",
+                payload={
+                    "parent": {"model": "gpt-5.4", "effort": "high"},
+                    "side": {"model": None, "effort": None},
+                },
+            )
+
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["actor_id"], "act-pm-demo")
+            self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.4", "effort": "high"})
+
     def test_side_create_route_delegates_and_reports_side_thread_id(self) -> None:
         runner = OrderedRunner(
             [
