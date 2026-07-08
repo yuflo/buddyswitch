@@ -53,8 +53,12 @@
                 <button id="refresh-button" class="mini-button" type="button">Refresh</button>
               </div>
             </header>
-            <div class="room-thread">
+            <div id="room-thread" class="room-thread">
               <div id="im-conversation" class="im-conversation" aria-live="polite"></div>
+              <button id="new-reply-chip" class="new-reply-chip" type="button" hidden>
+                <span class="reply-mark" aria-hidden="true"></span>
+                New reply
+              </button>
             </div>
             <div class="composer">
               <div class="composer-box">

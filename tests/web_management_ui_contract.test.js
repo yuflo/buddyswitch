@@ -81,6 +81,7 @@ test('production html keeps all real control ids used by the web UI', () => {
     'open-tui-command',
     'message-banner',
     'im-conversation',
+    'new-reply-chip',
   ].forEach((id) => {
     assertIncludes(indexHtml, `id="${id}"`);
   });
@@ -201,6 +202,44 @@ test('production stylesheet keeps the workspace compact on desktop viewports', (
   ]);
 });
 
+test('production stylesheet bounds workspace panes vertically instead of clipping controls', () => {
+  assertCssDeclarations('.proto-shell', [
+    'grid-template-rows: minmax(0, 1fr);',
+  ]);
+  assertCssDeclarations('.room-main', [
+    'grid-template-rows: auto minmax(0, 1fr) auto;',
+    'min-height: 0;',
+    'overflow: hidden;',
+  ]);
+  assertCssDeclarations('.room-thread', [
+    'min-height: 0;',
+    'overflow: auto;',
+  ]);
+  [
+    '.room-sidebar',
+    '.person-panel',
+    '.studio-side',
+    '.studio-doc',
+    '.studio-rail',
+  ].forEach((selector) => {
+    assertCssDeclarations(selector, [
+      'min-height: 0;',
+    ]);
+  });
+  [
+    '.room-main',
+    '.room-thread',
+    '.person-panel',
+    '.studio-doc',
+    '.studio-rail',
+  ].forEach((selector) => {
+    assertCssDeclarationsExclude(selector, [
+      'max-height:',
+      'height: calc(100dvh',
+    ]);
+  });
+});
+
 test('production stylesheet restores prototype room and studio proportions', () => {
   [
     'grid-template-columns: 240px minmax(360px, 1fr) 300px;',
@@ -230,6 +269,17 @@ test('production stylesheet supports pending and loading feedback states', () =>
   });
 });
 
+test('production stylesheet keeps hidden operational fallback frames collapsed', () => {
+  assertIncludes(stylesCss, '.command-fallback[hidden]');
+  assertCssDeclarations('.command-fallback[hidden]', [
+    'display: none;',
+  ]);
+  assertIncludes(stylesCss, '.new-reply-chip[hidden]');
+  assertCssDeclarations('.new-reply-chip[hidden]', [
+    'display: none;',
+  ]);
+});
+
 test('production stylesheet keeps long direct-thread message content inside bubbles', () => {
   assertCssDeclarations('.room-thread', [
     'min-width: 0;',
@@ -255,6 +305,42 @@ test('production stylesheet keeps long direct-thread message content inside bubb
       'word-break: break-all;',
     ]);
   });
+});
+
+test('production assets support markdown replies and new reply motion without layout drift', () => {
+  [
+    '.markdown-body',
+    '.markdown-table-wrap',
+    '.new-reply-chip',
+    '.new-reply-chip.is-chip-pop',
+    '.message.is-new',
+    '@keyframes reply-pop',
+    '@keyframes chip-pop',
+    'prefers-reduced-motion',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+  assertCssDeclarations('.message.is-new', [
+    'animation: reply-pop 190ms cubic-bezier(0.2, 0.8, 0.2, 1) both;',
+  ]);
+  assertCssDeclarations('.markdown-body', [
+    'min-width: 0;',
+    'max-width: 100%;',
+    'overflow-wrap: anywhere;',
+  ]);
+  assertCssDeclarations('.markdown-table-wrap', [
+    'max-width: 100%;',
+    'overflow-x: auto;',
+  ]);
+  assertCssDeclarations('.markdown-body pre', [
+    'max-width: 100%;',
+    'overflow-x: auto;',
+  ]);
+  assertIncludes(indexHtml, 'id="room-thread"');
+  assertIncludes(indexHtml, 'id="new-reply-chip"');
+  assertIncludes(appJs, 'renderMarkdownMessageHtml');
+  assertIncludes(appJs, 'imFreshMessageIds');
+  assertIncludes(appJs, 'isConversationNearBottom');
 });
 
 test('production javascript keeps the real api surface', () => {

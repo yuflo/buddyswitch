@@ -122,6 +122,8 @@ function createRenderElements() {
     trackDetail: node(),
     trackStudioRail: node(),
     imConversation: node(),
+    roomThread: Object.assign(node(), { scrollTop: 0, scrollHeight: 0, clientHeight: 0, scrollTo(options) { this.lastScrollTo = options; } }),
+    newReplyChip: Object.assign(node(), { classList: { add() {}, remove() {}, toggle() {} } }),
     sendButton: node(),
     interruptButton: node(),
     stopButton: node(),
@@ -315,6 +317,114 @@ test('direct thread renders final prototype message bubbles', () => {
   assert.match(elements.imConversation.innerHTML, /class="message you/);
   assert.match(elements.imConversation.innerHTML, /reply · dev\/act-dev-demo/);
   assert.match(elements.imConversation.innerHTML, /sent · you · delivered \/ submitted/);
+});
+
+test('direct thread renders markdown replies inside stable bubble boundaries', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.imConversation = [
+    {
+      id: 'msg-markdown',
+      direction: 'reply',
+      sender: 'market/act-market-demo',
+      deliveryStatus: '',
+      wakeStatus: '',
+      replyTo: '',
+      content: [
+        '**Short answer:** launch is viable.',
+        '',
+        '- Keep actor health visible',
+        '- Keep proof details in Track view',
+        '',
+        '> Decision: ship once send and reply are inspectable.',
+        '',
+        '```bash',
+        'node tests/web_management_ui_state.test.js',
+        '```',
+        '',
+        '| Area | Status |',
+        '| --- | --- |',
+        '| Message body | Markdown safe |',
+        '',
+        'Links stay low-key: [review](#proof) and `code`.',
+      ].join('\n'),
+    },
+  ];
+
+  app.renderImConversation(state, elements);
+
+  assert.match(elements.imConversation.innerHTML, /class="markdown-body"/);
+  assert.match(elements.imConversation.innerHTML, /<strong>Short answer:<\/strong>/);
+  assert.match(elements.imConversation.innerHTML, /<ul><li>Keep actor health visible<\/li><li>Keep proof details in Track view<\/li><\/ul>/);
+  assert.match(elements.imConversation.innerHTML, /<blockquote><p>Decision: ship once send and reply are inspectable\.<\/p><\/blockquote>/);
+  assert.match(elements.imConversation.innerHTML, /<pre><code>node tests\/web_management_ui_state\.test\.js<\/code><\/pre>/);
+  assert.match(elements.imConversation.innerHTML, /class="markdown-table-wrap"/);
+  assert.match(elements.imConversation.innerHTML, /<th>Area<\/th>/);
+  assert.match(elements.imConversation.innerHTML, /<td>Markdown safe<\/td>/);
+  assert.match(elements.imConversation.innerHTML, /<a href="#proof">review<\/a>/);
+  assert.match(elements.imConversation.innerHTML, /<code>code<\/code>/);
+});
+
+test('new projected replies pop once and then settle into history', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.selectedActorId = 'act-market-demo';
+  state.imConversationIdentityId = 'act-market-demo';
+
+  const recorded = app.recordSelectedActorEventMessage(state, imMessage({
+    id: 'msg-new-reply',
+    sender: 'act-market-demo',
+    target: 'ext-web',
+    content: 'Fresh reply.',
+  }), 'act-market-demo');
+
+  assert.equal(recorded, true);
+
+  app.renderImConversation(state, elements);
+
+  assert.match(elements.imConversation.innerHTML, /message reply is-new/);
+  assert.equal(state.imFreshMessageIds['msg-new-reply'], undefined);
+
+  app.renderImConversation(state, elements);
+
+  assert.doesNotMatch(elements.imConversation.innerHTML, /message reply is-new/);
+  assert.match(elements.imConversation.innerHTML, /Fresh reply/);
+});
+
+test('new reply auto-scroll uses the pre-render bottom position', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.selectedActorId = 'act-market-demo';
+  state.imConversationIdentityId = 'act-market-demo';
+  elements.roomThread.scrollTop = 300;
+  elements.roomThread.clientHeight = 200;
+  elements.roomThread.scrollHeight = 500;
+  elements.roomThread.scrollTo = function (options) {
+    this.lastScrollTo = options;
+    this.scrollTop = options.top;
+  };
+  Object.defineProperty(elements.imConversation, 'innerHTML', {
+    get() {
+      return this.renderedHtml || '';
+    },
+    set(value) {
+      this.renderedHtml = value;
+      elements.roomThread.scrollHeight = 650;
+    },
+  });
+
+  app.recordSelectedActorEventMessage(state, imMessage({
+    id: 'msg-bottom-reply',
+    sender: 'act-market-demo',
+    target: 'ext-web',
+    content: 'Fresh reply while already at bottom.',
+  }), 'act-market-demo');
+
+  app.renderImConversation(state, elements);
+
+  assert.match(elements.imConversation.innerHTML, /message reply is-new/);
+  assert.equal(elements.newReplyChip.hidden, true);
+  assert.deepEqual(elements.roomThread.lastScrollTo, { top: 650, behavior: 'smooth' });
 });
 
 test('Track Studio rail renders read-only comment context without write controls', () => {
