@@ -2471,6 +2471,28 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         html_status, html = self._request_text(base_url, method="GET", path="/")
         js_status, js = self._request_text(base_url, method="GET", path="/static/app.js")
         css_status, css = self._request_text(base_url, method="GET", path="/static/styles.css")
+        renderer_status, renderer = self._request_text(base_url, method="GET", path="/static/markdown-renderer.js")
+        markdown_it_status, markdown_it = self._request_text(
+            base_url,
+            method="GET",
+            path="/static/vendor/markdown-it/markdown-it.min.js",
+        )
+        purify_status, purify = self._request_text(
+            base_url,
+            method="GET",
+            path="/static/vendor/dompurify/purify.min.js",
+        )
+        hljs_status, hljs = self._request_text(
+            base_url,
+            method="GET",
+            path="/static/vendor/highlightjs/highlight.min.js",
+        )
+        hljs_css_status, hljs_css = self._request_text(
+            base_url,
+            method="GET",
+            path="/static/vendor/highlightjs/github.min.css",
+        )
+        blocked_status, blocked = self._request_text(base_url, method="GET", path="/static/../web_management.py")
         self.assertEqual(html_status, 200)
         self.assertIn("BuddySwitch Web Management", html)
         self.assertIn("webui-root", html)
@@ -2491,6 +2513,18 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertNotIn(".app-shell", css)
         self.assertNotIn(".actor-console-grid", css)
         self.assertNotIn(".team-room-grid", css)
+        self.assertEqual(renderer_status, 200)
+        self.assertIn("BuddySwitchMarkdownRenderer", renderer)
+        self.assertEqual(markdown_it_status, 200)
+        self.assertIn("markdownit", markdown_it.lower())
+        self.assertEqual(purify_status, 200)
+        self.assertIn("DOMPurify", purify)
+        self.assertEqual(hljs_status, 200)
+        self.assertIn("hljs", hljs)
+        self.assertEqual(hljs_css_status, 200)
+        self.assertIn(".hljs", hljs_css)
+        self.assertEqual(blocked_status, 404)
+        self.assertNotIn("WebManagementService", blocked)
 
 
 if __name__ == "__main__":

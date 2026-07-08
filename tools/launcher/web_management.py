@@ -36,6 +36,14 @@ import external_im_session
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATIC_ROOT = HELPER_DIR / "assets" / "web-management"
+STATIC_CONTENT_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+}
 VALID_INSTANCE_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
 
@@ -190,11 +198,8 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
                 if parsed.path == "/":
                     self._serve_static(STATIC_ROOT / "index.html", "text/html; charset=utf-8")
                     return
-                if parsed.path == "/static/styles.css":
-                    self._serve_static(STATIC_ROOT / "styles.css", "text/css; charset=utf-8")
-                    return
-                if parsed.path == "/static/app.js":
-                    self._serve_static(STATIC_ROOT / "app.js", "application/javascript; charset=utf-8")
+                if parsed.path.startswith("/static/"):
+                    self._serve_static_request(parsed.path)
                     return
                 if parsed.path.startswith("/api/"):
                     api_path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
@@ -223,9 +228,26 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
             payload = path.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+
+        def _serve_static_request(self, request_path: str) -> None:
+            relative_path = request_path[len("/static/") :]
+            if not relative_path or "\x00" in relative_path:
+                self._serve_html_404()
+                return
+            static_root = STATIC_ROOT.resolve()
+            candidate = (STATIC_ROOT / relative_path).resolve()
+            if candidate != static_root and static_root not in candidate.parents:
+                self._serve_html_404()
+                return
+            content_type = STATIC_CONTENT_TYPES.get(candidate.suffix)
+            if content_type is None:
+                self._serve_html_404()
+                return
+            self._serve_static(candidate, content_type)
 
         def _serve_json(self, status: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload, ensure_ascii=True).encode("utf-8")

@@ -9,8 +9,10 @@ const root = path.join(__dirname, '..');
 const assetDir = path.join(root, 'tools', 'launcher', 'assets', 'web-management');
 const indexHtml = fs.readFileSync(path.join(assetDir, 'index.html'), 'utf8');
 const appJs = fs.readFileSync(path.join(assetDir, 'app.js'), 'utf8');
+const markdownRendererPath = path.join(assetDir, 'markdown-renderer.js');
+const markdownRendererJs = fs.existsSync(markdownRendererPath) ? fs.readFileSync(markdownRendererPath, 'utf8') : '';
 const stylesCss = fs.readFileSync(path.join(assetDir, 'styles.css'), 'utf8');
-const combinedAssets = [indexHtml, appJs, stylesCss].join('\n');
+const combinedAssets = [indexHtml, appJs, markdownRendererJs, stylesCss].join('\n');
 
 function test(name, fn) {
   try {
@@ -338,9 +340,57 @@ test('production assets support markdown replies and new reply motion without la
   ]);
   assertIncludes(indexHtml, 'id="room-thread"');
   assertIncludes(indexHtml, 'id="new-reply-chip"');
-  assertIncludes(appJs, 'renderMarkdownMessageHtml');
+  assertIncludes(markdownRendererJs, 'renderMarkdownMessageHtml');
+  assertIncludes(appJs, 'BuddySwitchMarkdownRenderer');
   assertIncludes(appJs, 'imFreshMessageIds');
   assertIncludes(appJs, 'isConversationNearBottom');
+});
+
+test('production webui has one markdown renderer boundary and no handwritten parser residue', () => {
+  [
+    'sanitizeMarkdownHref',
+    'renderInlineMarkdownHtml',
+    'isFenceLine',
+    'isUnorderedListLine',
+    'isOrderedListLine',
+    'isBlockquoteLine',
+    'splitMarkdownTableCells',
+    'isTableDividerLine',
+    'isTableStart',
+    'isMarkdownBlockStart',
+    'renderMarkdownTableHtml',
+  ].forEach((forbidden) => {
+    assertExcludes(appJs, forbidden);
+  });
+  assertIncludes(appJs, 'renderMessageContentHtml');
+  assertIncludes(markdownRendererJs, 'createMarkdownRenderer');
+  assertIncludes(markdownRendererJs, 'renderMarkdownMessageHtml');
+});
+
+test('production webui vendors local markdown dependencies without cdn or build chain', () => {
+  [
+    'vendor/markdown-it/markdown-it.min.js',
+    'vendor/dompurify/purify.min.js',
+    'vendor/highlightjs/highlight.min.js',
+    'vendor/highlightjs/github.min.css',
+    'vendor/PROVENANCE.md',
+  ].forEach((relativePath) => {
+    assert.ok(fs.existsSync(path.join(assetDir, relativePath)), `Expected vendor asset: ${relativePath}`);
+  });
+  [
+    '/static/vendor/markdown-it/markdown-it.min.js',
+    '/static/vendor/dompurify/purify.min.js',
+    '/static/vendor/highlightjs/highlight.min.js',
+    '/static/markdown-renderer.js',
+    '/static/app.js',
+  ].forEach((src) => {
+    assertIncludes(indexHtml, `src="${src}"`);
+  });
+  assert.ok(indexHtml.indexOf('/static/markdown-renderer.js') < indexHtml.indexOf('/static/app.js'));
+  assertIncludes(indexHtml, 'href="/static/vendor/highlightjs/github.min.css"');
+  assertExcludes(indexHtml, 'https://cdn');
+  assertExcludes(indexHtml, 'https://unpkg');
+  assertExcludes(indexHtml, 'https://cdn.jsdelivr');
 });
 
 test('production javascript keeps the real api surface', () => {

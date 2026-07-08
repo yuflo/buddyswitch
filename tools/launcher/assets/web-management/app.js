@@ -1,10 +1,10 @@
 (function (root, factory) {
-  const exportsObject = factory();
+  const exportsObject = factory(root);
   if (typeof module === 'object' && module.exports) {
     module.exports = exportsObject;
   }
   root.BuddySwitchWebManagement = exportsObject;
-}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
 
   const ACTOR_CONSOLE_REFRESH_INTERVAL_MS = 3000;
@@ -234,164 +234,21 @@
       .replace(/'/g, '&#039;');
   }
 
-  function sanitizeMarkdownHref(value) {
-    const href = String(value || '').trim();
-    if (/^(https?:\/\/|\/|#)/.test(href)) {
-      return href;
+  function createAppMarkdownRenderer() {
+    const rendererFactory = root.BuddySwitchMarkdownRenderer
+      && typeof root.BuddySwitchMarkdownRenderer.createMarkdownRenderer === 'function'
+      ? root.BuddySwitchMarkdownRenderer.createMarkdownRenderer
+      : null;
+    return rendererFactory ? rendererFactory() : null;
+  }
+
+  const markdownRenderer = createAppMarkdownRenderer();
+
+  function renderMessageContentHtml(content) {
+    if (!markdownRenderer || typeof markdownRenderer.renderMarkdownMessageHtml !== 'function') {
+      throw new Error('BuddySwitch markdown renderer is not loaded.');
     }
-    return '#';
-  }
-
-  function renderInlineMarkdownHtml(value) {
-    const codeTokens = [];
-    let html = escapeHtml(value);
-    html = html.replace(/`([^`\n]+)`/g, function (_match, content) {
-      const token = '\u0000code' + codeTokens.length + '\u0000';
-      codeTokens.push('<code>' + content + '</code>');
-      return token;
-    });
-    html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, function (_match, label, href) {
-      return '<a href="' + escapeHtml(sanitizeMarkdownHref(href.replace(/&amp;/g, '&'))) + '">' + label + '</a>';
-    });
-    codeTokens.forEach(function (rendered, index) {
-      html = html.replace('\u0000code' + index + '\u0000', rendered);
-    });
-    return html;
-  }
-
-  function isFenceLine(line) {
-    return /^```/.test(line || '');
-  }
-
-  function isUnorderedListLine(line) {
-    return /^\s*[-*]\s+/.test(line || '');
-  }
-
-  function isOrderedListLine(line) {
-    return /^\s*\d+\.\s+/.test(line || '');
-  }
-
-  function isBlockquoteLine(line) {
-    return /^\s*>\s?/.test(line || '');
-  }
-
-  function splitMarkdownTableCells(line) {
-    return String(line || '')
-      .trim()
-      .replace(/^\|/, '')
-      .replace(/\|$/, '')
-      .split('|')
-      .map(function (cell) {
-        return cell.trim();
-      });
-  }
-
-  function isTableDividerLine(line) {
-    const cells = splitMarkdownTableCells(line);
-    return cells.length > 1 && cells.every(function (cell) {
-      return /^:?-{3,}:?$/.test(cell);
-    });
-  }
-
-  function isTableStart(lines, index) {
-    return Boolean(
-      lines[index]
-      && lines[index].indexOf('|') !== -1
-      && lines[index + 1]
-      && isTableDividerLine(lines[index + 1])
-    );
-  }
-
-  function isMarkdownBlockStart(lines, index) {
-    const line = lines[index] || '';
-    return isFenceLine(line)
-      || isUnorderedListLine(line)
-      || isOrderedListLine(line)
-      || isBlockquoteLine(line)
-      || isTableStart(lines, index);
-  }
-
-  function renderMarkdownTableHtml(lines, index) {
-    const headers = splitMarkdownTableCells(lines[index]);
-    const bodyRows = [];
-    let cursor = index + 2;
-    while (cursor < lines.length && lines[cursor].trim() && lines[cursor].indexOf('|') !== -1) {
-      bodyRows.push(splitMarkdownTableCells(lines[cursor]));
-      cursor += 1;
-    }
-    const head = headers.map(function (cell) {
-      return '<th>' + renderInlineMarkdownHtml(cell) + '</th>';
-    }).join('');
-    const body = bodyRows.map(function (row) {
-      return '<tr>' + row.map(function (cell) {
-        return '<td>' + renderInlineMarkdownHtml(cell) + '</td>';
-      }).join('') + '</tr>';
-    }).join('');
-    return {
-      html: '<div class="markdown-table-wrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>',
-      nextIndex: cursor,
-    };
-  }
-
-  function renderMarkdownMessageHtml(content) {
-    const lines = String(content || '').replace(/\r\n?/g, '\n').split('\n');
-    const blocks = [];
-    let index = 0;
-    while (index < lines.length) {
-      const line = lines[index];
-      if (!line.trim()) {
-        index += 1;
-        continue;
-      }
-      if (isFenceLine(line)) {
-        const codeLines = [];
-        index += 1;
-        while (index < lines.length && !isFenceLine(lines[index])) {
-          codeLines.push(lines[index]);
-          index += 1;
-        }
-        if (index < lines.length) {
-          index += 1;
-        }
-        blocks.push('<pre><code>' + escapeHtml(codeLines.join('\n')) + '</code></pre>');
-        continue;
-      }
-      if (isTableStart(lines, index)) {
-        const table = renderMarkdownTableHtml(lines, index);
-        blocks.push(table.html);
-        index = table.nextIndex;
-        continue;
-      }
-      if (isUnorderedListLine(line) || isOrderedListLine(line)) {
-        const ordered = isOrderedListLine(line);
-        const items = [];
-        while (index < lines.length && (ordered ? isOrderedListLine(lines[index]) : isUnorderedListLine(lines[index]))) {
-          items.push(lines[index].replace(ordered ? /^\s*\d+\.\s+/ : /^\s*[-*]\s+/, ''));
-          index += 1;
-        }
-        blocks.push('<' + (ordered ? 'ol' : 'ul') + '>' + items.map(function (item) {
-          return '<li>' + renderInlineMarkdownHtml(item) + '</li>';
-        }).join('') + '</' + (ordered ? 'ol' : 'ul') + '>');
-        continue;
-      }
-      if (isBlockquoteLine(line)) {
-        const quoteLines = [];
-        while (index < lines.length && isBlockquoteLine(lines[index])) {
-          quoteLines.push(lines[index].replace(/^\s*>\s?/, ''));
-          index += 1;
-        }
-        blocks.push('<blockquote><p>' + renderInlineMarkdownHtml(quoteLines.join(' ')) + '</p></blockquote>');
-        continue;
-      }
-      const paragraphLines = [];
-      while (index < lines.length && lines[index].trim() && !isMarkdownBlockStart(lines, index)) {
-        paragraphLines.push(lines[index].trim());
-        index += 1;
-      }
-      blocks.push('<p>' + renderInlineMarkdownHtml(paragraphLines.join(' ')) + '</p>');
-    }
-    return blocks.length ? blocks.join('') : '<p></p>';
+    return markdownRenderer.renderMarkdownMessageHtml(content);
   }
 
   function buildActorConsoleUrl(actorId) {
@@ -1171,7 +1028,7 @@
       return [
         '<div class="' + classes.join(' ') + '">',
         renderMessageMetaHtml(meta, entry),
-        '<div class="markdown-body">' + renderMarkdownMessageHtml(entry.content) + '</div>',
+        '<div class="markdown-body">' + renderMessageContentHtml(entry.content) + '</div>',
         '</div>',
       ].join('');
     }).join('');
@@ -2441,7 +2298,6 @@
     pollImEventsOnce,
     renderActorRowsHtml,
     renderImConversation,
-    renderMarkdownMessageHtml,
     renderRoleSelect,
     renderTrackDetailHtml,
     renderTrackStudioRailHtml,

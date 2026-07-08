@@ -4,6 +4,41 @@
 const assert = require('assert');
 const path = require('path');
 
+const rendererModule = require(path.join(
+  __dirname,
+  '..',
+  'tools',
+  'launcher',
+  'assets',
+  'web-management',
+  'markdown-renderer.js'
+));
+const MarkdownIt = require(path.join(
+  __dirname,
+  '..',
+  'tools',
+  'launcher',
+  'assets',
+  'web-management',
+  'vendor',
+  'markdown-it',
+  'markdown-it.min.js'
+));
+
+globalThis.BuddySwitchMarkdownRenderer = {
+  createMarkdownRenderer() {
+    return rendererModule.createMarkdownRenderer({
+      markdownIt: MarkdownIt,
+      DOMPurify: {
+        sanitize(html) {
+          return html;
+        },
+      },
+      hljs: null,
+    });
+  },
+};
+
 const app = require(path.join(__dirname, '..', 'tools', 'launcher', 'assets', 'web-management', 'app.js'));
 
 let testChain = Promise.resolve();
@@ -355,13 +390,14 @@ test('direct thread renders markdown replies inside stable bubble boundaries', (
 
   assert.match(elements.imConversation.innerHTML, /class="markdown-body"/);
   assert.match(elements.imConversation.innerHTML, /<strong>Short answer:<\/strong>/);
-  assert.match(elements.imConversation.innerHTML, /<ul><li>Keep actor health visible<\/li><li>Keep proof details in Track view<\/li><\/ul>/);
-  assert.match(elements.imConversation.innerHTML, /<blockquote><p>Decision: ship once send and reply are inspectable\.<\/p><\/blockquote>/);
-  assert.match(elements.imConversation.innerHTML, /<pre><code>node tests\/web_management_ui_state\.test\.js<\/code><\/pre>/);
+  assert.match(elements.imConversation.innerHTML, /<li>Keep actor health visible<\/li>/);
+  assert.match(elements.imConversation.innerHTML, /<li>Keep proof details in Track view<\/li>/);
+  assert.match(elements.imConversation.innerHTML, /<blockquote>\s*<p>Decision: ship once send and reply are inspectable\.<\/p>\s*<\/blockquote>/);
+  assert.match(elements.imConversation.innerHTML, /<pre><code class="[^"]*language-bash[^"]*">node tests\/web_management_ui_state\.test\.js\s*<\/code><\/pre>/);
   assert.match(elements.imConversation.innerHTML, /class="markdown-table-wrap"/);
   assert.match(elements.imConversation.innerHTML, /<th>Area<\/th>/);
   assert.match(elements.imConversation.innerHTML, /<td>Markdown safe<\/td>/);
-  assert.match(elements.imConversation.innerHTML, /<a href="#proof">review<\/a>/);
+  assert.match(elements.imConversation.innerHTML, /<a href="#proof">review<\/a>|<a href="#proof"[^>]*>review<\/a>/);
   assert.match(elements.imConversation.innerHTML, /<code>code<\/code>/);
 });
 
