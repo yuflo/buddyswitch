@@ -32,6 +32,10 @@ function assertExcludes(source, forbidden) {
   assert.equal(source.includes(forbidden), false, `Expected asset content to exclude: ${forbidden}`);
 }
 
+function assertNotMatches(source, forbiddenPattern) {
+  assert.equal(forbiddenPattern.test(source), false, `Expected asset content to exclude pattern: ${forbiddenPattern}`);
+}
+
 function collectCssDeclarations(selector) {
   const bodies = Array.from(stylesCss.matchAll(/([^{}]+)\{([^{}]*)\}/g))
     .filter((match) => match[1].split(',').map((part) => part.trim()).includes(selector))
@@ -280,6 +284,45 @@ test('production stylesheet keeps hidden operational fallback frames collapsed',
   assertCssDeclarations('.new-reply-chip[hidden]', [
     'display: none;',
   ]);
+});
+
+test('actor model config UI uses payload editor without schema or dropdown residue', () => {
+  [
+    'id="actor-model-config-card"',
+    'id="actor-model-config-toggle"',
+    'id="actor-model-config-status"',
+    'id="actor-model-config-parent-summary"',
+    'id="actor-model-config-side-summary"',
+    'id="actor-model-config-panel"',
+    'id="actor-model-config-payload"',
+    'id="actor-model-config-save"',
+    'id="actor-model-config-revert"',
+  ].forEach((marker) => {
+    assertIncludes(indexHtml, marker);
+  });
+
+  [
+    'parent-model',
+    'side-model',
+    'parent-effort',
+    'side-effort',
+    'schema-strip',
+    '<summary>Schema</summary>',
+    'allowed_efforts',
+    'VALID_EFFORTS',
+    'model-config.json',
+    'effort must be',
+    'Payload must include parent and side',
+  ].forEach((forbidden) => {
+    assertExcludes(combinedAssets, forbidden);
+  });
+  assertNotMatches(combinedAssets, /minimal\s*[,\n]\s*low\s*[,\n]\s*medium\s*[,\n]\s*high\s*[,\n]\s*ultra/i);
+
+  assertIncludes(appJs, 'buildActorModelConfigUrl(actorId)');
+  assertIncludes(appJs, 'parseJsonObjectPayload(text)');
+  assertIncludes(appJs, 'summarizeActorModelPayload(payload)');
+  assertIncludes(stylesCss, '.actor-model-config-card');
+  assertIncludes(stylesCss, '.model-config-payload-editor');
 });
 
 test('production stylesheet keeps long direct-thread message content inside bubbles', () => {

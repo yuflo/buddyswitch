@@ -1063,7 +1063,16 @@ exec "$real_git" "$@"
             encoding="utf-8",
         )
         (instance_root / "model-config.json").write_text(
-            json.dumps({"schema_version": 1, "parent": {}, "side": {}}, ensure_ascii=True, indent=2) + "\n",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "parent": {"model": "gpt-5.5", "effort": "medium"},
+                    "side": {"model": "gpt-5.5", "effort": "medium"},
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
         return instance_json
@@ -1094,8 +1103,8 @@ exec "$real_git" "$@"
                 json.loads(model_config.read_text(encoding="utf-8")),
                 {
                     "schema_version": 1,
-                    "parent": {},
-                    "side": {},
+                    "parent": {"model": "gpt-5.5", "effort": "medium"},
+                    "side": {"model": "gpt-5.5", "effort": "medium"},
                 },
             )
 
@@ -1103,7 +1112,7 @@ exec "$real_git" "$@"
             for key in ("model", "effort", "parent", "side", "model_config"):
                 self.assertNotIn(key, instance_payload)
 
-    def test_instance_model_config_get_json_returns_default_null_dto(self) -> None:
+    def test_instance_model_config_get_json_returns_creation_default_dto(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
             shared_root = temp_root_path / "shared"
@@ -1123,8 +1132,8 @@ exec "$real_git" "$@"
             payload = json.loads(completed.stdout)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["actor_id"], "act-pm-demo")
-            self.assertEqual(payload["model_config"]["parent"], {"model": None, "effort": None})
-            self.assertEqual(payload["model_config"]["side"], {"model": None, "effort": None})
+            self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.5", "effort": "medium"})
+            self.assertEqual(payload["model_config"]["side"], {"model": "gpt-5.5", "effort": "medium"})
 
     def test_instance_model_config_set_json_writes_disk_and_get_returns_same_dto(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

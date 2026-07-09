@@ -60,8 +60,8 @@ class ActorModelConfigTests(unittest.TestCase):
                 json.loads(path.read_text(encoding="utf-8")),
                 {
                     "schema_version": 1,
-                    "parent": {},
-                    "side": {},
+                    "parent": {"model": "gpt-5.5", "effort": "medium"},
+                    "side": {"model": "gpt-5.5", "effort": "medium"},
                 },
             )
 
@@ -88,7 +88,7 @@ class ActorModelConfigTests(unittest.TestCase):
                 },
             )
 
-    def test_missing_file_resolves_empty_defaults_without_writing(self) -> None:
+    def test_missing_file_resolves_creation_defaults_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
             path = actor_model_config.model_config_path(instance_json)
@@ -99,16 +99,18 @@ class ActorModelConfigTests(unittest.TestCase):
 
             self.assertFalse(path.exists())
             self.assertEqual(loaded.schema_version, 1)
-            self.assertEqual(loaded.parent, {})
-            self.assertEqual(loaded.side, {})
-            self.assertFalse(parent.has_values)
-            self.assertIsNone(parent.model)
-            self.assertIsNone(parent.effort)
-            self.assertEqual(parent.model_source, "codex_default")
-            self.assertEqual(parent.effort_source, "codex_default")
-            self.assertFalse(side.has_values)
-            self.assertEqual(side.model_source, "codex_default")
-            self.assertEqual(side.effort_source, "codex_default")
+            self.assertEqual(loaded.parent, {"model": "gpt-5.5", "effort": "medium"})
+            self.assertEqual(loaded.side, {"model": "gpt-5.5", "effort": "medium"})
+            self.assertTrue(parent.has_values)
+            self.assertEqual(parent.model, "gpt-5.5")
+            self.assertEqual(parent.effort, "medium")
+            self.assertEqual(parent.model_source, "actor_config")
+            self.assertEqual(parent.effort_source, "actor_config")
+            self.assertTrue(side.has_values)
+            self.assertEqual(side.model, "gpt-5.5")
+            self.assertEqual(side.effort, "medium")
+            self.assertEqual(side.model_source, "actor_config")
+            self.assertEqual(side.effort_source, "actor_config")
 
     def test_validation_rejects_invalid_shapes_and_values(self) -> None:
         invalid_cases: list[tuple[str, dict[str, object], str]] = [
@@ -220,9 +222,17 @@ class ActorModelConfigTests(unittest.TestCase):
             self.assertEqual(payload["model_reasoning_effort_source"], "override")
             self.assertEqual(payload["model_config_durability"], "thread_fork_only")
 
-    def test_side_source_metadata_reports_codex_defaults_when_omitted(self) -> None:
+    def test_empty_side_config_reports_codex_defaults_when_reset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
+            self._write_config(
+                instance_json,
+                {
+                    "schema_version": 1,
+                    "parent": {},
+                    "side": {},
+                },
+            )
             options = actor_model_config.resolve_side_options(instance_json)
 
             payload = actor_model_config.apply_side_source_metadata({"action": "start"}, options)
@@ -261,7 +271,7 @@ class ActorModelConfigTests(unittest.TestCase):
                 },
             )
 
-    def test_management_read_missing_file_returns_default_null_dto_without_writing(self) -> None:
+    def test_management_read_missing_file_returns_creation_defaults_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
             path = actor_model_config.model_config_path(instance_json)
@@ -269,9 +279,41 @@ class ActorModelConfigTests(unittest.TestCase):
             payload = actor_model_config.read_management_payload(instance_json)
 
             self.assertFalse(path.exists())
+            self.assertEqual(payload["parent"], {"model": "gpt-5.5", "effort": "medium"})
+            self.assertEqual(payload["side"], {"model": "gpt-5.5", "effort": "medium"})
+            self.assertEqual(payload["allowed_efforts"], ["high", "low", "medium", "minimal", "ultra"])
+
+    def test_management_replace_all_null_resets_to_codex_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(Path(temp_root))
+
+            payload = actor_model_config.replace_management_payload(
+                instance_json,
+                {
+                    "parent": {"model": None, "effort": None},
+                    "side": {"model": None, "effort": None},
+                },
+            )
+
+            self.assertEqual(
+                json.loads(actor_model_config.model_config_path(instance_json).read_text(encoding="utf-8")),
+                {
+                    "schema_version": 1,
+                    "parent": {},
+                    "side": {},
+                },
+            )
             self.assertEqual(payload["parent"], {"model": None, "effort": None})
             self.assertEqual(payload["side"], {"model": None, "effort": None})
-            self.assertEqual(payload["allowed_efforts"], ["high", "low", "medium", "minimal", "ultra"])
+
+            parent = actor_model_config.resolve_parent_options(instance_json)
+            side = actor_model_config.resolve_side_options(instance_json)
+            self.assertFalse(parent.has_values)
+            self.assertFalse(side.has_values)
+            self.assertEqual(parent.model_source, "codex_default")
+            self.assertEqual(parent.effort_source, "codex_default")
+            self.assertEqual(side.model_source, "codex_default")
+            self.assertEqual(side.effort_source, "codex_default")
 
     def test_management_replace_trims_writes_non_null_disk_schema_and_updates_runtime_resolve(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

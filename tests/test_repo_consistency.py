@@ -496,9 +496,16 @@ print(json.dumps({{
         hits = self._scan_targets("model-config\\.json", ["tools/launcher/assets/web-management"])
         self.assertEqual(hits, [], msg="\n".join(hits))
 
-    def test_actor_model_config_webui_controls_are_deferred_from_interface_slice(self) -> None:
+    def test_actor_model_config_webui_assets_do_not_duplicate_schema(self) -> None:
         hits = self._scan_targets(
-            "model-config|parent-model|side-model|parent-effort|side-effort",
+            "allowed_efforts|VALID_EFFORTS|schema_version|minimal.*low.*medium.*high.*ultra|effort must be|must include parent and side",
+            ["tools/launcher/assets/web-management"],
+        )
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_model_config_webui_assets_do_not_keep_retired_form_controls(self) -> None:
+        hits = self._scan_targets(
+            "parent-model|side-model|parent-effort|side-effort|model-config\\.json|schema-strip",
             ["tools/launcher/assets/web-management"],
         )
         self.assertEqual(hits, [], msg="\n".join(hits))

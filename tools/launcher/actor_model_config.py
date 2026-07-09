@@ -18,10 +18,14 @@ SCHEMA_VERSION = 1
 VALID_EFFORTS = {"minimal", "low", "medium", "high", "ultra"}
 _TOP_LEVEL_KEYS = {"schema_version", "parent", "side"}
 _SECTION_KEYS = {"model", "effort"}
+_DEFAULT_MODEL = "gpt-5.5"
+_DEFAULT_EFFORT = "medium"
+_DEFAULT_PARENT = {"model": _DEFAULT_MODEL, "effort": _DEFAULT_EFFORT}
+_DEFAULT_SIDE = {"model": _DEFAULT_MODEL, "effort": _DEFAULT_EFFORT}
 _DEFAULT_PAYLOAD = {
     "schema_version": SCHEMA_VERSION,
-    "parent": {},
-    "side": {},
+    "parent": dict(_DEFAULT_PARENT),
+    "side": dict(_DEFAULT_SIDE),
 }
 _MANAGEMENT_TOP_LEVEL_KEYS = {"parent", "side"}
 _MANAGEMENT_EFFECTS = {
@@ -70,7 +74,7 @@ def load_model_config(instance_json: Path) -> ActorModelConfig:
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return ActorModelConfig(schema_version=SCHEMA_VERSION, parent={}, side={})
+        return _default_config()
     except OSError as exc:
         raise ActorModelConfigError(f"{path}: failed to read model config: {exc}") from exc
 
@@ -150,6 +154,14 @@ def _management_payload(config: ActorModelConfig) -> dict[str, Any]:
         "allowed_efforts": sorted(VALID_EFFORTS),
         "effects": dict(_MANAGEMENT_EFFECTS),
     }
+
+
+def _default_config() -> ActorModelConfig:
+    return ActorModelConfig(
+        schema_version=SCHEMA_VERSION,
+        parent=dict(_DEFAULT_PARENT),
+        side=dict(_DEFAULT_SIDE),
+    )
 
 
 def _management_section_payload(section: Mapping[str, str]) -> dict[str, str | None]:

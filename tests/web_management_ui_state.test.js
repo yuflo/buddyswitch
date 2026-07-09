@@ -123,13 +123,27 @@ async function waitFor(predicate, description, timeoutMs = 800) {
 function createRenderElements() {
   const node = () => {
     const attributes = {};
+    const classes = new Set();
     return {
     textContent: '',
     value: '',
     hidden: false,
     disabled: false,
     innerHTML: '',
-    classList: { toggle() {} },
+    className: '',
+    classList: {
+      toggle(name, force) {
+        const shouldHave = force === undefined ? !classes.has(name) : Boolean(force);
+        if (shouldHave) {
+          classes.add(name);
+        } else {
+          classes.delete(name);
+        }
+      },
+      contains(name) {
+        return classes.has(name);
+      },
+    },
     querySelectorAll() { return []; },
       setAttribute(name, value) { attributes[name] = String(value); },
       getAttribute(name) {
@@ -153,6 +167,16 @@ function createRenderElements() {
     actorRuntimeDetail: node(),
     actorTaskSummary: node(),
     actorTrackSummary: node(),
+    actorModelConfigCard: node(),
+    actorModelConfigStatus: node(),
+    actorModelConfigToggle: node(),
+    actorModelConfigParentSummary: node(),
+    actorModelConfigSideSummary: node(),
+    actorModelConfigPanel: node(),
+    actorModelConfigPayload: node(),
+    actorModelConfigSave: node(),
+    actorModelConfigRevert: node(),
+    actorModelConfigMessage: node(),
     tracksList: node(),
     trackDetail: node(),
     trackStudioRail: node(),
@@ -287,6 +311,209 @@ test('role select repopulates role options after initial empty-shell render', ()
   } finally {
     globalThis.document = originalDocument;
   }
+});
+
+test('actor model config payload parser accepts generic JSON objects only', () => {
+  assert.deepEqual(app.parseJsonObjectPayload('{"future": {"effort": "warp"}}'), {
+    ok: true,
+    value: { future: { effort: 'warp' } },
+  });
+
+  assert.equal(app.parseJsonObjectPayload('[1,2,3]').ok, false);
+  assert.match(app.parseJsonObjectPayload('[1,2,3]').error, /JSON object/);
+  assert.equal(app.parseJsonObjectPayload('{bad json').ok, false);
+  assert.match(app.parseJsonObjectPayload('{bad json').error, /Invalid JSON/);
+});
+
+test('actor model config summary is derived from payload without schema validation', () => {
+  assert.deepEqual(app.summarizeActorModelPayload({
+    parent: { model: 'gpt-5.4', effort: 'high' },
+    side: { model: 'gpt-5.4-mini', effort: 'medium' },
+  }), {
+    parent: 'gpt-5.4 · high',
+    side: 'gpt-5.4-mini · medium',
+  });
+
+  assert.deepEqual(app.summarizeActorModelPayload({
+    model_overrides: {
+      parent: { model: 'gpt-future', effort: 'warp' },
+    },
+  }), {
+    parent: 'Custom payload',
+    side: 'Custom payload',
+  });
+});
+
+test('actor model config URL is actor scoped', () => {
+  assert.equal(
+    app.buildActorModelConfigUrl('act-pm-demo'),
+    '/api/actors/act-pm-demo/model-config'
+  );
+  assert.equal(
+    app.buildActorModelConfigUrl('act demo/one'),
+    '/api/actors/act%20demo%2Fone/model-config'
+  );
+});
+
+test('actor model config render initializes from actor console model_config', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.selectedActorId = 'act-pm-demo';
+  state.actorConsole = {
+    actor: { actor_id: 'act-pm-demo', role: 'pm' },
+    runtime: { actor_id: 'act-pm-demo', role: 'pm', status: 'active' },
+    model_config: {
+      parent: { model: 'gpt-5.4', effort: 'high' },
+      side: { model: 'gpt-5.4-mini', effort: 'medium' },
+    },
+  };
+
+  app.renderActorModelConfig(state, elements);
+
+  assert.equal(elements.actorModelConfigParentSummary.textContent, 'gpt-5.4 · high');
+  assert.equal(elements.actorModelConfigSideSummary.textContent, 'gpt-5.4-mini · medium');
+  assert.equal(elements.actorModelConfigStatus.textContent, 'Saved');
+  assert.equal(elements.actorModelConfigPanel.hidden, true);
+  assert.match(elements.actorModelConfigPayload.value, /"parent"/);
+});
+
+test('actor model config render edits request payload without response metadata', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.selectedActorId = 'act-pm-demo';
+  state.actorConsole = {
+    actor: { actor_id: 'act-pm-demo', role: 'pm' },
+    model_config: {
+      schema_version: 1,
+      parent: { model: null, effort: null },
+      side: { model: null, effort: null },
+      allowed_efforts: ['minimal', 'low', 'medium', 'high', 'ultra'],
+      effects: { parent: 'next submit', side: 'new side threads' },
+    },
+  };
+
+  app.renderActorModelConfig(state, elements);
+
+  assert.match(elements.actorModelConfigPayload.value, /"parent"/);
+  assert.doesNotMatch(elements.actorModelConfigPayload.value, /schema_version|allowed_efforts|effects/);
+});
+
+test('actor model config render uses custom summary for future payload shape', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.selectedActorId = 'act-pm-demo';
+  state.actorModelConfigSavedText = JSON.stringify({ model_overrides: { parent: { effort: 'warp' } } }, null, 2);
+  state.actorModelConfigDraftText = state.actorModelConfigSavedText;
+
+  app.renderActorModelConfig(state, elements);
+
+  assert.equal(elements.actorModelConfigParentSummary.textContent, 'Custom payload');
+  assert.equal(elements.actorModelConfigSideSummary.textContent, 'Custom payload');
+});
+
+test('actor model config console refresh preserves open dirty draft', () => {
+  const state = app.createState();
+  state.actorModelConfigPanelOpen = true;
+  state.actorModelConfigSavedText = JSON.stringify({ parent: {}, side: {} }, null, 2);
+  state.actorModelConfigDraftText = JSON.stringify({ future: { effort: 'warp' } }, null, 2);
+  state.actorConsole = {
+    model_config: {
+      parent: { model: 'server-model', effort: 'low' },
+      side: {},
+    },
+  };
+
+  app.syncActorModelConfigFromConsole(state);
+
+  assert.match(state.actorModelConfigDraftText, /"future"/);
+  assert.doesNotMatch(state.actorModelConfigDraftText, /server-model/);
+});
+
+test('actor model config console refresh preserves an open clean panel', () => {
+  const state = app.createState();
+  state.actorModelConfigPanelOpen = true;
+  state.actorModelConfigSavedText = JSON.stringify({ parent: {}, side: {} }, null, 2);
+  state.actorModelConfigDraftText = state.actorModelConfigSavedText;
+  state.actorConsole = {
+    model_config: {
+      parent: { model: null, effort: null },
+      side: { model: null, effort: null },
+    },
+  };
+
+  app.syncActorModelConfigFromConsole(state);
+
+  assert.equal(state.actorModelConfigPanelOpen, true);
+});
+
+test('actor model config edit state accepts future payload and rejects non-object JSON', () => {
+  const state = app.createState();
+  state.actorModelConfigSavedText = JSON.stringify({ parent: { model: null, effort: null }, side: {} }, null, 2);
+  state.actorModelConfigDraftText = state.actorModelConfigSavedText;
+
+  app.recordActorModelConfigDraft(state, '{"future": {"effort": "warp"}}');
+  assert.equal(state.actorModelConfigError, '');
+  assert.match(state.actorModelConfigStatus, /Unsaved/);
+
+  app.recordActorModelConfigDraft(state, '[1,2,3]');
+  assert.equal(state.actorModelConfigError, 'Payload must be a JSON object.');
+});
+
+test('actor model config render enables save for valid unsaved future payload', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.actorModelConfigPanelOpen = true;
+  state.actorModelConfigSavedText = JSON.stringify({ parent: {}, side: {} }, null, 2);
+  app.recordActorModelConfigDraft(state, '{"future":{"effort":"warp"}}');
+
+  app.renderActorModelConfig(state, elements);
+
+  assert.equal(elements.actorModelConfigStatus.textContent, 'Unsaved');
+  assert.equal(elements.actorModelConfigSave.disabled, false);
+  assert.equal(elements.actorModelConfigMessage.textContent, 'Unsaved payload.');
+});
+
+test('actor model config revert returns to saved payload', () => {
+  const state = app.createState();
+  state.actorModelConfigSavedText = JSON.stringify({ parent: { model: 'gpt-5.4', effort: 'high' }, side: {} }, null, 2);
+  state.actorModelConfigDraftText = '{"future": true}';
+
+  app.revertActorModelConfigDraft(state);
+
+  assert.equal(state.actorModelConfigDraftText, state.actorModelConfigSavedText);
+  assert.equal(state.actorModelConfigError, '');
+});
+
+test('actor model config save PUTs actor-scoped API and accepts server canonical payload', async () => {
+  const state = app.createState();
+  state.selectedActorId = 'act-pm-demo';
+  state.actorConsole = { model_config: { parent: {}, side: {} } };
+  state.actorModelConfigSavedText = JSON.stringify({ parent: {}, side: {} }, null, 2);
+  state.actorModelConfigDraftText = JSON.stringify({ future: { effort: 'warp' } }, null, 2);
+
+  const calls = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    calls.push({ url, options });
+    return okResponse({
+      actor_id: 'act-pm-demo',
+      model_config: { future: { effort: 'warp' } },
+    });
+  };
+
+  try {
+    await app.saveActorModelConfig(state);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/actors/act-pm-demo/model-config');
+  assert.equal(calls[0].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { future: { effort: 'warp' } });
+  assert.equal(state.actorModelConfigPanelOpen, false);
+  assert.equal(state.actorModelConfigError, '');
+  assert.deepEqual(state.actorConsole.model_config, { future: { effort: 'warp' } });
 });
 
 test('track payload sync chooses first track and keeps comments inside detail state', () => {

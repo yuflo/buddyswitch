@@ -116,9 +116,45 @@ class ActorSideThreadTests(unittest.TestCase):
             self.assertEqual(result["model_source"], "override")
             self.assertEqual(result["model_reasoning_effort_source"], "actor_config")
 
-    def test_missing_side_config_uses_codex_default_metadata(self) -> None:
+    def test_missing_side_config_uses_creation_default_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
+            calls: list[dict[str, Any]] = []
+            original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
+
+            def fake_start(**kwargs: Any) -> dict[str, Any]:
+                calls.append(kwargs)
+                return {
+                    "action": "start",
+                    "side_thread_id": "thread-side-1",
+                    "turn_id": "turn-side-1",
+                    "model_source": "parent_thread",
+                    "model_reasoning_effort_source": "parent_thread",
+                }
+
+            self.addCleanup(setattr, actor_side_thread.side_thread_lifecycle, "start_side_thread", original_start)
+            actor_side_thread.side_thread_lifecycle.start_side_thread = fake_start
+
+            result = actor_side_thread.start_actor_side_thread(**self._start_kwargs(instance_json))
+
+            self.assertEqual(calls[0]["model"], "gpt-5.5")
+            self.assertEqual(calls[0]["model_reasoning_effort"], "medium")
+            self.assertEqual(result["model"], "gpt-5.5")
+            self.assertEqual(result["model_reasoning_effort"], "medium")
+            self.assertEqual(result["model_source"], "actor_config")
+            self.assertEqual(result["model_reasoning_effort_source"], "actor_config")
+
+    def test_empty_side_config_uses_codex_default_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(Path(temp_root))
+            self._write_model_config(
+                instance_json,
+                {
+                    "schema_version": 1,
+                    "parent": {},
+                    "side": {},
+                },
+            )
             calls: list[dict[str, Any]] = []
             original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
 

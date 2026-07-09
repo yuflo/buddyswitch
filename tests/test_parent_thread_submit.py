@@ -87,18 +87,21 @@ class ParentThreadSubmitTests(unittest.TestCase):
             self.assertEqual(calls[1]["thread_id"], "thread-main")
             self.assertEqual(calls[1]["text"], "hello")
 
-    def test_missing_parent_config_skips_settings_update_and_still_submits(self) -> None:
+    def test_missing_parent_config_applies_creation_defaults_before_submit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
             original_update = parent_thread_submit.app_server.thread_settings_update
             original_submit = parent_thread_submit.submit_turn.submit_turn
+            calls: list[dict[str, Any]] = []
 
-            def fake_update(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-                raise AssertionError("missing config must not update settings")
+            def fake_update(socket_path: Path, thread_id: str, *, model: str | None, effort: str | None) -> dict[str, Any]:
+                calls.append({"helper": "thread_settings_update", "model": model, "effort": effort})
+                return {"threadId": thread_id}
 
             def fake_submit(**kwargs: Any) -> dict[str, Any]:
+                calls.append({"helper": "submit_turn", **kwargs})
                 self.assertEqual(kwargs["thread_id"], "thread-main")
-                return {"action": "start", "turn_id": "turn-parent-default"}
+                return {"action": "start", "turn_id": "turn-parent-created-default"}
 
             self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
             self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
@@ -113,7 +116,46 @@ class ParentThreadSubmitTests(unittest.TestCase):
                 permissions="buddyswitch-runtime",
             )
 
-            self.assertEqual(result["turn_id"], "turn-parent-default")
+            self.assertEqual(result["turn_id"], "turn-parent-created-default")
+            self.assertEqual([call["helper"] for call in calls], ["thread_settings_update", "submit_turn"])
+            self.assertEqual(calls[0]["model"], "gpt-5.5")
+            self.assertEqual(calls[0]["effort"], "medium")
+
+    def test_empty_parent_config_skips_settings_update_and_still_submits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(Path(temp_root))
+            self._write_model_config(
+                instance_json,
+                {
+                    "schema_version": 1,
+                    "parent": {},
+                    "side": {},
+                },
+            )
+            original_update = parent_thread_submit.app_server.thread_settings_update
+            original_submit = parent_thread_submit.submit_turn.submit_turn
+
+            def fake_update(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+                raise AssertionError("empty config must not update settings")
+
+            def fake_submit(**kwargs: Any) -> dict[str, Any]:
+                self.assertEqual(kwargs["thread_id"], "thread-main")
+                return {"action": "start", "turn_id": "turn-parent-codex-default"}
+
+            self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
+            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
+            parent_thread_submit.app_server.thread_settings_update = fake_update
+            parent_thread_submit.submit_turn.submit_turn = fake_submit
+
+            result = parent_thread_submit.submit_parent_turn(
+                socket_path=Path("/tmp/app-server.sock"),
+                instance_json=instance_json,
+                thread_id="thread-main",
+                text="hello",
+                permissions="buddyswitch-runtime",
+            )
+
+            self.assertEqual(result["turn_id"], "turn-parent-codex-default")
 
     def test_invalid_parent_config_fails_before_submit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

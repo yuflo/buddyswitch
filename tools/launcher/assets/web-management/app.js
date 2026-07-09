@@ -138,6 +138,12 @@
       selectedRole: '',
       selectedActorId: '',
       actorConsole: null,
+      actorModelConfigPanelOpen: false,
+      actorModelConfigSavedText: '',
+      actorModelConfigDraftText: '',
+      actorModelConfigError: '',
+      actorModelConfigSaving: false,
+      actorModelConfigStatus: '',
       selectedTrackId: '',
       selectedTrackDetail: null,
       draftText: '',
@@ -255,6 +261,57 @@
     return '/api/actors/' + encodeURIComponent(actorId) + '/console';
   }
 
+  function buildActorModelConfigUrl(actorId) {
+    return '/api/actors/' + encodeURIComponent(actorId) + '/model-config';
+  }
+
+  function parseJsonObjectPayload(text) {
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      return { ok: false, error: 'Invalid JSON: ' + error.message };
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { ok: false, error: 'Payload must be a JSON object.' };
+    }
+    return { ok: true, value: payload };
+  }
+
+  function stablePayloadText(payload) {
+    return JSON.stringify(payload || {}, null, 2);
+  }
+
+  function summarizeActorModelSection(section) {
+    if (!section || typeof section !== 'object' || Array.isArray(section)) {
+      return 'Custom payload';
+    }
+    if (!Object.prototype.hasOwnProperty.call(section, 'model')
+        && !Object.prototype.hasOwnProperty.call(section, 'effort')) {
+      return 'Custom payload';
+    }
+    const model = typeof section.model === 'string' && section.model.trim()
+      ? section.model.trim()
+      : 'Codex default';
+    const effort = typeof section.effort === 'string' && section.effort.trim()
+      ? section.effort.trim()
+      : 'default effort';
+    return model + ' · ' + effort;
+  }
+
+  function summarizeActorModelPayload(payload) {
+    return {
+      parent: summarizeActorModelSection(payload && payload.parent),
+      side: summarizeActorModelSection(payload && payload.side),
+    };
+  }
+
+  function sameJsonObjectText(leftText, rightText) {
+    const left = parseJsonObjectPayload(leftText);
+    const right = parseJsonObjectPayload(rightText);
+    return Boolean(left.ok && right.ok && JSON.stringify(left.value) === JSON.stringify(right.value));
+  }
+
   function buildTrackDetailUrl(trackId) {
     return '/api/tracks/' + encodeURIComponent(trackId);
   }
@@ -350,6 +407,7 @@
     if (!stillPresent) {
       state.selectedActorId = state.actors.length ? state.actors[0].actor_id : '';
       state.actorConsole = null;
+      syncActorModelConfigFromConsole(state, { force: true });
     }
     if (state.selectedActorId !== previousActorId) {
       clearOpenTuiFeedback(state);
@@ -364,6 +422,132 @@
     state.actorConsole = consolePayload;
     if (consolePayload && consolePayload.actor && typeof consolePayload.actor.actor_id === 'string') {
       state.selectedActorId = consolePayload.actor.actor_id;
+    }
+    syncActorModelConfigFromConsole(state);
+  }
+
+  function cloneJsonObject(value) {
+    return JSON.parse(JSON.stringify(value && typeof value === 'object' ? value : {}));
+  }
+
+  function editableActorModelConfigPayload(payload) {
+    const source = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload
+      : {};
+    const hasParent = Object.prototype.hasOwnProperty.call(source, 'parent');
+    const hasSide = Object.prototype.hasOwnProperty.call(source, 'side');
+    if (!hasParent && !hasSide) {
+      return cloneJsonObject(source);
+    }
+    const parent = source.parent && typeof source.parent === 'object' && !Array.isArray(source.parent)
+      ? source.parent
+      : {};
+    const side = source.side && typeof source.side === 'object' && !Array.isArray(source.side)
+      ? source.side
+      : {};
+    return {
+      parent: cloneJsonObject(parent),
+      side: cloneJsonObject(side),
+    };
+  }
+
+  function actorConsoleModelConfigPayload(actorConsole) {
+    const modelConfig = actorConsole && actorConsole.model_config && typeof actorConsole.model_config === 'object'
+      ? actorConsole.model_config
+      : {};
+    return editableActorModelConfigPayload(modelConfig);
+  }
+
+  function actorModelConfigHasLocalChanges(state) {
+    if (state.actorModelConfigError) {
+      return true;
+    }
+    if (!state.actorModelConfigDraftText && !state.actorModelConfigSavedText) {
+      return false;
+    }
+    return !sameJsonObjectText(state.actorModelConfigDraftText || '{}', state.actorModelConfigSavedText || '{}');
+  }
+
+  function syncActorModelConfigFromConsole(state, options) {
+    const force = Boolean(options && options.force);
+    if (!force && state.actorModelConfigPanelOpen && actorModelConfigHasLocalChanges(state)) {
+      return;
+    }
+    const panelOpen = state.actorModelConfigPanelOpen;
+    const payload = actorConsoleModelConfigPayload(state.actorConsole);
+    const text = stablePayloadText(payload);
+    state.actorModelConfigSavedText = text;
+    state.actorModelConfigDraftText = text;
+    state.actorModelConfigError = '';
+    state.actorModelConfigStatus = '';
+    state.actorModelConfigSaving = false;
+    state.actorModelConfigPanelOpen = force ? false : panelOpen;
+  }
+
+  function recordActorModelConfigDraft(state, text) {
+    state.actorModelConfigDraftText = text;
+    const result = parseJsonObjectPayload(text);
+    if (!result.ok) {
+      state.actorModelConfigError = result.error;
+      state.actorModelConfigStatus = result.error;
+      return false;
+    }
+    state.actorModelConfigError = '';
+    state.actorModelConfigStatus = sameJsonObjectText(text, state.actorModelConfigSavedText || '{}')
+      ? ''
+      : 'Unsaved payload.';
+    return true;
+  }
+
+  function revertActorModelConfigDraft(state) {
+    state.actorModelConfigDraftText = state.actorModelConfigSavedText || '{}';
+    state.actorModelConfigError = '';
+    state.actorModelConfigStatus = 'Reverted to saved payload.';
+  }
+
+  async function saveActorModelConfig(state) {
+    if (!state.selectedActorId || state.actorModelConfigSaving) {
+      return null;
+    }
+
+    const result = parseJsonObjectPayload(state.actorModelConfigDraftText || '{}');
+    if (!result.ok) {
+      state.actorModelConfigError = result.error;
+      state.actorModelConfigStatus = result.error;
+      return null;
+    }
+
+    if (sameJsonObjectText(state.actorModelConfigDraftText || '{}', state.actorModelConfigSavedText || '{}')) {
+      return null;
+    }
+
+    state.actorModelConfigSaving = true;
+    state.actorModelConfigStatus = 'Saving payload...';
+    try {
+      const response = await fetchJson(buildActorModelConfigUrl(state.selectedActorId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result.value),
+      });
+      const canonicalPayload = response && response.model_config && typeof response.model_config === 'object'
+        ? response.model_config
+        : result.value;
+      const editablePayload = editableActorModelConfigPayload(canonicalPayload);
+      state.actorModelConfigSavedText = stablePayloadText(editablePayload);
+      state.actorModelConfigDraftText = state.actorModelConfigSavedText;
+      state.actorModelConfigError = '';
+      state.actorModelConfigStatus = '';
+      state.actorModelConfigPanelOpen = false;
+      if (state.actorConsole) {
+        state.actorConsole.model_config = JSON.parse(JSON.stringify(canonicalPayload));
+      }
+      return response;
+    } catch (error) {
+      state.actorModelConfigError = error && error.message ? error.message : 'Request failed.';
+      state.actorModelConfigStatus = state.actorModelConfigError;
+      return null;
+    } finally {
+      state.actorModelConfigSaving = false;
     }
   }
 
@@ -1141,6 +1325,43 @@
     elements.actorsList.innerHTML = renderActorRowsHtml(state);
   }
 
+  function renderActorModelConfig(state, elements) {
+    if (!elements.actorModelConfigCard) {
+      return;
+    }
+    if (!state.actorModelConfigSavedText && !state.actorModelConfigDraftText) {
+      syncActorModelConfigFromConsole(state, { force: true });
+    }
+
+    const draftText = state.actorModelConfigDraftText || '{}';
+    const savedText = state.actorModelConfigSavedText || '{}';
+    const parseResult = parseJsonObjectPayload(draftText);
+    const savedResult = parseJsonObjectPayload(savedText);
+    const errorMessage = state.actorModelConfigError || (!parseResult.ok ? parseResult.error : '');
+    const message = errorMessage || state.actorModelConfigStatus;
+    const payload = parseResult.ok
+      ? parseResult.value
+      : (savedResult.ok ? savedResult.value : {});
+    const summary = summarizeActorModelPayload(payload);
+    const dirty = !errorMessage && !sameJsonObjectText(draftText, savedText);
+
+    elements.actorModelConfigParentSummary.textContent = summary.parent;
+    elements.actorModelConfigSideSummary.textContent = summary.side;
+    elements.actorModelConfigPanel.hidden = !state.actorModelConfigPanelOpen;
+    elements.actorModelConfigPayload.value = draftText;
+    elements.actorModelConfigPayload.classList.toggle('is-invalid', Boolean(errorMessage));
+    elements.actorModelConfigSave.disabled = !dirty || state.actorModelConfigSaving || Boolean(errorMessage);
+    elements.actorModelConfigRevert.disabled = (!dirty && !errorMessage) || state.actorModelConfigSaving;
+    elements.actorModelConfigSave.textContent = state.actorModelConfigSaving ? 'Saving...' : 'Save';
+    elements.actorModelConfigStatus.textContent = errorMessage ? 'Invalid' : (dirty ? 'Unsaved' : 'Saved');
+    elements.actorModelConfigStatus.className = 'status-badge ' + (errorMessage ? 'danger' : (dirty ? 'busy' : 'healthy'));
+    elements.actorModelConfigToggle.textContent = state.actorModelConfigPanelOpen ? 'Close' : (dirty || Boolean(errorMessage) ? 'Review' : 'Configure');
+    elements.actorModelConfigToggle.setAttribute('aria-expanded', state.actorModelConfigPanelOpen ? 'true' : 'false');
+    elements.actorModelConfigToggle.classList.toggle('primary', !state.actorModelConfigPanelOpen && (dirty || Boolean(errorMessage)));
+    elements.actorModelConfigMessage.textContent = message || '';
+    elements.actorModelConfigMessage.hidden = !state.actorModelConfigPanelOpen || !message;
+  }
+
   function renderActorDetail(state, elements) {
     setRegionBusy(elements.actorRuntimeDetail, state.actorCardLoading);
     setRegionBusy(elements.actorRuntimeSummary, state.actorCardLoading);
@@ -1162,6 +1383,7 @@
     }
     elements.actorTaskSummary.innerHTML = renderTaskSummaryHtml(state);
     elements.actorTrackSummary.innerHTML = renderActorTrackSummaryHtml(state);
+    renderActorModelConfig(state, elements);
   }
 
   function renderTrackList(state, elements) {
@@ -1304,6 +1526,7 @@
   async function refreshActorCard(state, elements, actorId, requestId, options) {
     if (!actorId) {
       state.actorConsole = null;
+      syncActorModelConfigFromConsole(state, { force: true });
       state.actorCardLoading = false;
       state.actorCardError = '';
       renderActorDetail(state, elements);
@@ -1402,6 +1625,7 @@
   async function refreshSelectedActorConsole(state) {
     if (!state.selectedActorId) {
       state.actorConsole = null;
+      syncActorModelConfigFromConsole(state, { force: true });
       clearImConversation(state, '');
       return;
     }
@@ -1542,6 +1766,7 @@
     state.actorSelectionRequestId = requestId;
     state.selectedActorId = actorId;
     state.actorConsole = null;
+    syncActorModelConfigFromConsole(state, { force: true });
     state.actorSelectionPendingId = actorId;
     state.actorCardLoading = true;
     state.actorCardError = '';
@@ -2066,6 +2291,16 @@
       actorRuntimeSummary: document.getElementById('actor-runtime-summary'),
       actorTaskSummary: document.getElementById('actor-task-summary'),
       actorTrackSummary: document.getElementById('actor-track-summary'),
+      actorModelConfigCard: document.getElementById('actor-model-config-card'),
+      actorModelConfigStatus: document.getElementById('actor-model-config-status'),
+      actorModelConfigToggle: document.getElementById('actor-model-config-toggle'),
+      actorModelConfigParentSummary: document.getElementById('actor-model-config-parent-summary'),
+      actorModelConfigSideSummary: document.getElementById('actor-model-config-side-summary'),
+      actorModelConfigPanel: document.getElementById('actor-model-config-panel'),
+      actorModelConfigPayload: document.getElementById('actor-model-config-payload'),
+      actorModelConfigSave: document.getElementById('actor-model-config-save'),
+      actorModelConfigRevert: document.getElementById('actor-model-config-revert'),
+      actorModelConfigMessage: document.getElementById('actor-model-config-message'),
       tracksList: document.getElementById('tracks-list'),
       trackDetail: document.getElementById('track-detail'),
       trackStudioRail: document.getElementById('track-studio-rail'),
@@ -2112,6 +2347,35 @@
         renderShell(state, elements);
       });
     });
+    if (elements.actorModelConfigToggle) {
+      elements.actorModelConfigToggle.addEventListener('click', function () {
+        state.actorModelConfigPanelOpen = !state.actorModelConfigPanelOpen;
+        if (state.actorModelConfigPanelOpen && state.actorModelConfigError) {
+          state.actorModelConfigStatus = state.actorModelConfigError;
+        }
+        renderActorDetail(state, elements);
+      });
+    }
+    if (elements.actorModelConfigPayload) {
+      elements.actorModelConfigPayload.addEventListener('input', function () {
+        recordActorModelConfigDraft(state, elements.actorModelConfigPayload.value);
+        renderActorDetail(state, elements);
+      });
+    }
+    if (elements.actorModelConfigRevert) {
+      elements.actorModelConfigRevert.addEventListener('click', function () {
+        revertActorModelConfigDraft(state);
+        renderActorDetail(state, elements);
+      });
+    }
+    if (elements.actorModelConfigSave) {
+      elements.actorModelConfigSave.addEventListener('click', function () {
+        saveActorModelConfig(state).then(function () {
+          renderActorDetail(state, elements);
+        });
+        renderActorDetail(state, elements);
+      });
+    }
     elements.tracksList.addEventListener('click', function (event) {
       const row = event.target && event.target.closest
         ? event.target.closest('[data-track-id]')
@@ -2270,11 +2534,13 @@
   return {
     applyActorConsolePayload,
     applyActorsPayload,
+    actorConsoleModelConfigPayload,
     actorInitials,
     applyImConversationPayload,
     applyTrackDetailPayload,
     applyTracksPayload,
     buildActorConsoleUrl,
+    buildActorModelConfigUrl,
     buildImAckPayload,
     buildImEventsUrl,
     buildImConversationUrl,
@@ -2290,23 +2556,32 @@
     recordImProjectedMessage,
     recordImPendingSend,
     recordImSent,
+    recordActorModelConfigDraft,
     recordSelectedActorEventMessage,
     removeImEntry,
     replaceImPendingSend,
     refreshSelectedActorConversation,
     refreshVisibleRegionsWithFeedback,
     pollImEventsOnce,
+    parseJsonObjectPayload,
     renderActorRowsHtml,
+    renderActorModelConfig,
     renderImConversation,
     renderRoleSelect,
     renderTrackDetailHtml,
     renderTrackStudioRailHtml,
+    revertActorModelConfigDraft,
     renderComposer,
+    saveActorModelConfig,
     sectionCopy,
     selectActor,
     selectedActorRuntime,
     selectSection,
+    sameJsonObjectText,
     isConversationNearBottom,
+    stablePayloadText,
     shouldRefreshSelectedActorConsole,
+    syncActorModelConfigFromConsole,
+    summarizeActorModelPayload,
   };
 }));

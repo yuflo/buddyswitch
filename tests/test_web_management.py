@@ -141,7 +141,12 @@ def write_web_model_config_instance(
         + "\n",
         encoding="utf-8",
     )
-    payload = model_config or {"schema_version": 1, "parent": {}, "side": {}}
+    default_model_config = {
+        "schema_version": 1,
+        "parent": {"model": "gpt-5.5", "effort": "medium"},
+        "side": {"model": "gpt-5.5", "effort": "medium"},
+    }
+    payload = model_config if model_config is not None else default_model_config
     (instance_root / "model-config.json").write_text(
         json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
         encoding="utf-8",
@@ -1678,7 +1683,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(payload["actors"][1]["runtime"]["status"], "inactive")
         self.assertEqual(runner.calls, [["instance", "list", "--json"]])
 
-    def test_actor_model_config_get_api_returns_default_null_dto(self) -> None:
+    def test_actor_model_config_get_api_returns_creation_default_dto(self) -> None:
         shared_root = self._use_model_config_shared_root()
         write_web_model_config_instance(shared_root)
         service = self._service()
@@ -1688,8 +1693,8 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["actor_id"], "act-pm-demo")
-        self.assertEqual(payload["model_config"]["parent"], {"model": None, "effort": None})
-        self.assertEqual(payload["model_config"]["side"], {"model": None, "effort": None})
+        self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.5", "effort": "medium"})
+        self.assertEqual(payload["model_config"]["side"], {"model": "gpt-5.5", "effort": "medium"})
 
     def test_actor_model_config_put_api_replaces_config_and_runtime_resolve_uses_same_core(self) -> None:
         shared_root = self._use_model_config_shared_root()
