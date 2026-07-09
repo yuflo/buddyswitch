@@ -89,7 +89,7 @@ def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context
         retryable=True,
         retry_guidance="Retry with only documented task_sys payload fields.",
         allowed_next_actions=[
-            "Use task_sys.list, task_sys.get, task_sys.close, or task_sys.need_parent with documented payload fields.",
+            "Use task_sys.list, task_sys.get, task_sys.update_task_analysis, task_sys.close, or task_sys.need_parent with documented payload fields.",
         ],
         correctable_fields=unknown,
     )
@@ -104,22 +104,19 @@ def _task_events(task: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
     task_id = task.get("id")
+    execution = task.get("execution")
     row = {
         "task_id": task_id,
         "id": task_id,
         "source_type": task.get("source_type"),
         "source_ref": task.get("source_ref"),
         "status": task.get("status"),
-        "active_processor": task.get("active_processor"),
+        "task_desc": task.get("task_desc"),
+        "task_relation": dict(task.get("task_relation")) if isinstance(task.get("task_relation"), Mapping) else None,
+        "execution": dict(execution) if isinstance(execution, Mapping) else {},
         "updated_at": task.get("updated_at"),
         "event_types": [str(event.get("type")) for event in _task_events(task) if event.get("type")],
     }
-    parent_handoff = task.get("parent_handoff_params")
-    if isinstance(parent_handoff, Mapping):
-        row["parent_handoff_params"] = dict(parent_handoff)
-    failure_result = task.get("failure_result")
-    if isinstance(failure_result, Mapping):
-        row["failure_result"] = dict(failure_result)
     return row
 
 
@@ -135,6 +132,7 @@ def _read_success(action: str, context: Any, *, effect_summary: str, extra: dict
         read_scope="actor-owned task sys task records",
         allowed_next_actions=[
             "Use task_sys.get for full task detail.",
+            "Use task_sys.update_task_analysis to record task_desc and task_relation before a side final action.",
             "Use task_sys.close when the active frame completed the required task work.",
             "Use task_sys.need_parent when side processing requires parent work.",
         ],
@@ -151,34 +149,37 @@ def _success(
     parent_runtime: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task = result.get("task") if isinstance(result.get("task"), dict) else {}
+    execution = task.get("execution") if isinstance(task, dict) else None
+    execution_row = dict(execution) if isinstance(execution, dict) else {}
+    execution_result = execution_row.get("result")
+    execution_handoff = execution_row.get("handoff")
     extra: dict[str, Any] = {
         "task_id": result.get("task_id"),
         "outcome": result.get("outcome"),
         "task_status": task.get("status"),
+        "task_desc": task.get("task_desc"),
+        "task_relation": dict(task.get("task_relation")) if isinstance(task.get("task_relation"), dict) else None,
+        "execution": execution_row,
     }
-    parent_handoff = task.get("parent_handoff_params")
-    if isinstance(parent_handoff, dict):
-        extra["parent_handoff_params"] = parent_handoff
-    close_result = task.get("close_result")
-    if isinstance(close_result, dict):
-        extra["close_result"] = close_result
-        processor = close_result.get("processor")
-        if isinstance(processor, str) and processor.strip():
-            extra["processor"] = processor.strip()
-        side_thread_id = close_result.get("side_thread_id")
+    if isinstance(execution_handoff, dict):
+        extra["execution_handoff"] = execution_handoff
+        if action == "need_parent":
+            extra["processor"] = "side"
+        side_thread_id = execution_handoff.get("side_thread_id")
         if isinstance(side_thread_id, str) and side_thread_id.strip():
             extra["side_thread_id"] = side_thread_id.strip()
-        cleanup = close_result.get("cleanup")
+        cleanup = execution_handoff.get("cleanup")
         if isinstance(cleanup, dict):
             extra["side_cleanup"] = cleanup
-    side_result = task.get("side_result")
-    if isinstance(side_result, dict):
-        extra["side_result"] = side_result
-        extra["processor"] = "side"
-        side_thread_id = side_result.get("side_thread_id")
+    if isinstance(execution_result, dict):
+        extra["execution_result"] = execution_result
+        processor = execution_result.get("processor")
+        if isinstance(processor, str) and processor.strip():
+            extra["processor"] = processor.strip()
+        side_thread_id = execution_result.get("side_thread_id")
         if isinstance(side_thread_id, str) and side_thread_id.strip():
             extra["side_thread_id"] = side_thread_id.strip()
-        cleanup = side_result.get("cleanup")
+        cleanup = execution_result.get("cleanup")
         if isinstance(cleanup, dict):
             extra["side_cleanup"] = cleanup
     if isinstance(parent_instruction, dict):
@@ -189,6 +190,8 @@ def _success(
         effect_summary = "Closed Task Sys task."
     elif action == "need_parent":
         effect_summary = "Recorded Task Sys parent handoff."
+    elif action == "update_task_analysis":
+        effect_summary = "Updated Task Sys task analysis."
     else:
         effect_summary = f"Recorded Task Sys action: {result.get('outcome')}."
     return tool_results.success(
@@ -208,7 +211,7 @@ def _success(
                 "outcome": result.get("outcome"),
             }
         ],
-        allowed_next_actions=["Use the returned task_status, processor, and cleanup fields to decide the next frame action."],
+        allowed_next_actions=["Use returned task_status, task_desc, task_relation, execution, processor, and cleanup fields to decide the next frame action."],
         extra=extra,
     )
 
@@ -322,6 +325,24 @@ def get(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
 
+def update_task_analysis(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    task_sys = _task_sys_domain(context)
+    actor_target = _actor_target(context)
+    task_id = str(args.get("task_id") or "")
+    task = task_sys.get_task(task_id)
+    owner = task.get("actor_target")
+    if not isinstance(owner, Mapping) or owner.get("actor_id") != actor_target["actor_id"] or owner.get("role_id") != actor_target["role_id"]:
+        raise PermissionError("task does not belong to the active actor")
+    result = task_sys.record_task_analysis_update(
+        task_id,
+        {
+            "task_desc": args.get("task_desc"),
+            "task_relation": args.get("task_relation"),
+        },
+    )
+    return _success("update_task_analysis", result, context)
+
+
 def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
     result = task_sys.record_task_close(
@@ -329,8 +350,9 @@ def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
         {"summary": args.get("summary")},
     )
     task = result.get("task") if isinstance(result.get("task"), dict) else {}
-    close_result = task.get("close_result") if isinstance(task, dict) else None
-    if isinstance(close_result, dict) and close_result.get("processor") == "side" and "cleanup" not in close_result:
+    execution = task.get("execution") if isinstance(task, dict) else None
+    execution_result = execution.get("result") if isinstance(execution, dict) else None
+    if isinstance(execution_result, dict) and execution_result.get("processor") == "side" and "cleanup" not in execution_result:
         result = dict(result, task=_record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))["task"])
     return _success("close", result, context)
 
@@ -365,6 +387,7 @@ def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 _ACTION_HANDLERS = {
     "list": list_tasks,
     "get": get,
+    "update_task_analysis": update_task_analysis,
     "close": close,
     "need_parent": need_parent,
 }

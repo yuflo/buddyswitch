@@ -21,6 +21,7 @@ COMMON_ROLE_PERMISSIONS = frozenset(
         "task_sys.get",
         "task_sys.close",
         "task_sys.need_parent",
+        "task_sys.update_task_analysis",
         "artifact.read",
         "artifact.create",
         "artifact.update",

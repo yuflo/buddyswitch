@@ -41,7 +41,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request"},
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
-    "task_sys": {"list", "get", "close", "need_parent"},
+    "task_sys": {"list", "get", "update_task_analysis", "close", "need_parent"},
 }
 _TASK_REQUIREMENT_FREE = "free"
 _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
@@ -63,6 +63,7 @@ _EXPECTED_FREE_ACTIONS = {
     "search.status",
     "task_sys.list",
     "task_sys.get",
+    "task_sys.update_task_analysis",
     "task_sys.close",
     "task_sys.need_parent",
     "track.list",
@@ -203,8 +204,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("message", "get", ("exact", "message_id", "disposition")),
             ("message", "mark", ("absorbed", "task_sys.need_parent", "disposition")),
             ("message", "list", ("event", "cursor", "track")),
-            ("task_sys", "list", ("active", "ongoing", "actor")),
+            ("task_sys", "list", ("summaries", "relations", "execution")),
             ("task_sys", "get", ("task_id", "detail", "events")),
+            ("task_sys", "update_task_analysis", ("task_desc", "task_relation", "relation")),
             ("task_sys", "close", ("side", "completed", "parent")),
             ("task_sys", "need_parent", ("parent", "handoff", "interrupt")),
             ("track", "resolve_comment_thread", ("owner", "thread", "resolved")),
@@ -514,7 +516,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertTrue(str(row["required_permission"]).startswith("task_sys."))
                 self.assertIn("task sys task record", row["reads"])
                 self.assertEqual(row["writes"], [])
-        for action in ("task_sys.close", "task_sys.need_parent"):
+        for action in ("task_sys.update_task_analysis", "task_sys.close", "task_sys.need_parent"):
             self.assertIn(action, op)
             row = op[action]
             with self.subTest(action=action):
@@ -532,6 +534,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("task_sys.get", op)
         close_returns = set(op["task_sys.close"]["returns"])
         need_parent_returns = set(op["task_sys.need_parent"]["returns"])
+        update_returns = set(op["task_sys.update_task_analysis"]["returns"])
         list_returns = set(op["task_sys.list"]["returns"])
         get_returns = set(op["task_sys.get"]["returns"])
 
@@ -544,6 +547,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         for field in ("task_id", "task_status", "state_changed", "processor", "side_thread_id", "side_cleanup"):
             with self.subTest(action="task_sys.close", field=field):
                 self.assertIn(field, close_returns)
+        self.assertIn("execution_result", close_returns)
+        self.assertNotIn("close_result", close_returns)
+        for field in ("task_id", "task_status", "task_desc", "task_relation", "execution", "state_changed"):
+            with self.subTest(action="task_sys.update_task_analysis", field=field):
+                self.assertIn(field, update_returns)
         for field in (
             "task_id",
             "task_status",
@@ -551,11 +559,12 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "processor",
             "side_thread_id",
             "side_cleanup",
-            "parent_handoff_params",
+            "execution_handoff",
             "parent_runtime",
         ):
             with self.subTest(action="task_sys.need_parent", field=field):
                 self.assertIn(field, need_parent_returns)
+        self.assertNotIn("parent_handoff_params", need_parent_returns)
 
     def test_high_risk_object_boundaries_are_explicit(self) -> None:
         desc = self._desc()
