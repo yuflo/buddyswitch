@@ -10,6 +10,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TaskSysRebuildResidueTests(unittest.TestCase):
+    def test_domain_task_records_do_not_carry_old_lifecycle_fields(self) -> None:
+        path = ROOT / "scripts" / "env" / "domain" / "task_sys.py"
+        forbidden = (
+            "active_processor",
+            "side_result",
+            "parent_handoff_params",
+            "failure_result",
+            "close_result",
+            "record_side_result",
+        )
+
+        text = path.read_text(encoding="utf-8")
+        violations = [token for token in forbidden if token in text]
+
+        self.assertEqual(violations, [])
+
     def test_live_task_sys_surfaces_do_not_teach_checkpoint_task_semantics(self) -> None:
         live_paths = [
             ROOT / "scripts" / "env" / "domain" / "task_sys.py",

@@ -62,14 +62,29 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(events, list)
         return [str(row.get("type")) for row in events if isinstance(row, dict)]
 
+    def _assert_no_legacy_execution_fields(self, record: dict[str, Any]) -> None:
+        for field in ("active_processor", "side_result", "parent_handoff_params", "failure_result", "close_result"):
+            with self.subTest(field=field):
+                self.assertNotIn(field, record)
+
     def _move_to_needs_parent(self, task_id: str) -> None:
         task_sys = _task_sys()
+        task_sys.record_task_analysis_update(
+            task_id,
+            {
+                "task_desc": "Draft brief",
+                "task_relation": {"kind": "independent", "target_task_id": None},
+            },
+        )
         task_sys.record_side_need_parent(
             task_id,
             {
                 "params": {
-                    "parent_frame_context": {"next": "Draft the brief in parent."},
-                    "relation": "User input requires main-thread work.",
+                    "parent_frame_context": {
+                        "next": "Draft the brief in parent.",
+                        "task_desc": "Draft brief",
+                        "task_relation": {"kind": "independent", "target_task_id": None},
+                    },
                     "interrupt": True,
                 },
             },
@@ -95,9 +110,18 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(persisted["source_ref"], {"id": "input-1", "surface": "cli"})
         self.assertEqual(persisted["actor_target"], envelope["actor_target"])
         self.assertEqual(persisted["inbound_context"], envelope["context"])
-        self.assertEqual(persisted["status"], "side_processing")
-        self.assertEqual(persisted["active_processor"], "side")
-        self.assertIsNone(persisted["parent_handoff_params"])
+        self.assertEqual(persisted["status"], "in_progress")
+        self.assertIsNone(persisted["task_desc"])
+        self.assertEqual(persisted["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertEqual(
+            persisted["execution"],
+            {
+                "processor": "side",
+                "handoff": None,
+                "result": None,
+            },
+        )
+        self._assert_no_legacy_execution_fields(persisted)
         self.assertNotIn("checkpoint_metadata", persisted)
         events = persisted.get("events")
         self.assertIsInstance(events, list, msg=persisted)
@@ -130,6 +154,105 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "initial_processor"):
                     task_sys.ingest({**self._envelope(), "initial_processor": value})
                 self.assertEqual(self._task_records(), [])
+
+    def test_record_task_analysis_update_writes_desc_and_independent_relation(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+
+        result = task_sys.record_task_analysis_update(
+            task_id,
+            {
+                "task_desc": "Draft brief",
+                "task_relation": {"kind": "independent", "target_task_id": None},
+            },
+        )
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(result["task_id"], task_id)
+        record = self._task_record(task_id)
+        self.assertEqual(record["task_desc"], "Draft brief")
+        self.assertEqual(record["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertIsInstance(record["updated_at"], str)
+        self.assertIn("task_analysis_updated", self._event_types(task_id))
+
+    def test_record_task_analysis_update_accepts_after_and_before_same_actor_target(self) -> None:
+        task_sys = _task_sys()
+        first_task_id = task_sys.ingest(self._envelope())["task_id"]
+        second_task_id = task_sys.ingest(self._envelope())["task_id"]
+
+        after_result = task_sys.record_task_analysis_update(
+            second_task_id,
+            {
+                "task_desc": "Continue brief",
+                "task_relation": {"kind": "after", "target_task_id": first_task_id},
+            },
+        )
+        before_result = task_sys.record_task_analysis_update(
+            first_task_id,
+            {
+                "task_desc": "Prepare input",
+                "task_relation": {"kind": "before", "target_task_id": second_task_id},
+            },
+        )
+
+        self.assertTrue(after_result["ok"], msg=after_result)
+        self.assertTrue(before_result["ok"], msg=before_result)
+        self.assertEqual(
+            self._task_record(second_task_id)["task_relation"],
+            {"kind": "after", "target_task_id": first_task_id},
+        )
+        self.assertEqual(
+            self._task_record(first_task_id)["task_relation"],
+            {"kind": "before", "target_task_id": second_task_id},
+        )
+
+    def test_record_task_analysis_update_rejects_invalid_desc_without_mutating(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        before = self._task_record(task_id)
+
+        for task_desc in ("", "   ", "x" * 50):
+            with self.subTest(task_desc=task_desc):
+                with self.assertRaisesRegex(ValueError, "task_desc"):
+                    task_sys.record_task_analysis_update(
+                        task_id,
+                        {
+                            "task_desc": task_desc,
+                            "task_relation": {"kind": "independent", "target_task_id": None},
+                        },
+                    )
+                self.assertEqual(self._task_record(task_id), before)
+
+    def test_record_task_analysis_update_rejects_invalid_relation_without_mutating(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+        other_actor_envelope = self._envelope()
+        other_actor_envelope["actor_target"] = {
+            "role_id": "dev",
+            "actor_id": self._runtime_actor_id(role="dev", label="act-dev-other-task-sys"),
+        }
+        cross_actor_task_id = task_sys.ingest(other_actor_envelope)["task_id"]
+        before = self._task_record(task_id)
+        cases = (
+            ({"kind": "related", "target_task_id": None}, "kind"),
+            ({"kind": "after", "target_task_id": None}, "target_task_id"),
+            ({"kind": "before"}, "target_task_id"),
+            ({"kind": "after", "target_task_id": "task-user-input-missing"}, "not found"),
+            ({"kind": "before", "target_task_id": cross_actor_task_id}, "same actor"),
+            ({"kind": "after", "target_task_id": task_id}, "self"),
+        )
+
+        for relation, expected in cases:
+            with self.subTest(relation=relation):
+                with self.assertRaisesRegex(ValueError, expected):
+                    task_sys.record_task_analysis_update(
+                        task_id,
+                        {
+                            "task_desc": "Draft brief",
+                            "task_relation": relation,
+                        },
+                    )
+                self.assertEqual(self._task_record(task_id), before)
 
     def test_parent_runtime_instruction_shapes_are_task_traceable(self) -> None:
         task_sys = _task_sys()
@@ -172,12 +295,22 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_parent_instruction_from_need_parent_task_stays_parent_ready_until_runtime_start(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_sys.record_task_analysis_update(
+            task_id,
+            {
+                "task_desc": "Draft brief",
+                "task_relation": {"kind": "independent", "target_task_id": None},
+            },
+        )
         task_sys.record_side_need_parent(
             task_id,
             {
                 "params": {
-                    "parent_frame_context": {"next": "Draft the brief in parent."},
-                    "relation": "User input requires main-thread work.",
+                    "parent_frame_context": {
+                        "next": "Draft the brief in parent.",
+                        "task_desc": "Draft brief",
+                        "task_relation": {"kind": "independent", "target_task_id": None},
+                    },
                     "interrupt": True,
                     "ordering": {"priority": "normal"},
                 },
@@ -196,19 +329,50 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(frame["task_id"], task_id)
         self.assertEqual(frame["source"], {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}})
         self.assertEqual(frame["inbound_context"], self._envelope()["context"])
-        self.assertEqual(frame["side_result"]["outcome"], "need_parent")
+        self.assertEqual(frame["task_desc"], "Draft brief")
+        self.assertEqual(frame["task_relation"], {"kind": "independent", "target_task_id": None})
         self.assertEqual(
-            frame["parent_handoff_params"],
+            frame["execution_handoff"],
             {
-                "parent_frame_context": {"next": "Draft the brief in parent."},
-                "relation": "User input requires main-thread work.",
+                "parent_frame_context": {
+                    "next": "Draft the brief in parent.",
+                    "task_desc": "Draft brief",
+                    "task_relation": {"kind": "independent", "target_task_id": None},
+                },
                 "interrupt": True,
                 "ordering": {"priority": "normal"},
+                "side_thread_id": None,
+                "cleanup": {},
             },
         )
         persisted = json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
-        self.assertEqual(persisted["status"], "needs_parent")
-        self.assertIsNone(persisted["active_processor"])
+        self.assertEqual(persisted["status"], "in_progress")
+        self.assertEqual(persisted["execution"]["processor"], None)
+        self.assertEqual(persisted["execution"]["handoff"], frame["execution_handoff"])
+        self.assertIsNone(persisted["execution"]["result"])
+        self._assert_no_legacy_execution_fields(persisted)
+
+    def test_side_need_parent_requires_recorded_relation_analysis(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+
+        with self.assertRaisesRegex(ValueError, "task analysis"):
+            task_sys.record_side_need_parent(
+                task_id,
+                {
+                    "params": {
+                        "parent_frame_context": {"next": "Draft the brief in parent."},
+                        "interrupt": True,
+                    },
+                },
+            )
+
+        persisted = self._task_record(task_id)
+        self.assertEqual(persisted["status"], "in_progress")
+        self.assertIsNone(persisted["task_desc"])
+        self.assertEqual(persisted["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertEqual(persisted["execution"]["processor"], "side")
+        self.assertIsNone(persisted["execution"]["handoff"])
 
     def test_record_parent_handoff_started_marks_parent_processing(self) -> None:
         task_sys = _task_sys()
@@ -220,10 +384,13 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(result["ok"], msg=result)
         self.assertEqual(result["task_id"], task_id)
         persisted = json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
-        self.assertEqual(persisted["status"], "parent_processing")
-        self.assertEqual(persisted["active_processor"], "parent")
+        self.assertEqual(persisted["status"], "in_progress")
+        self.assertEqual(persisted["execution"]["processor"], "parent")
+        self.assertIsInstance(persisted["execution"]["handoff"], dict)
+        self.assertIsNone(persisted["execution"]["result"])
+        self._assert_no_legacy_execution_fields(persisted)
 
-    def test_record_side_cleanup_updates_need_parent_side_result(self) -> None:
+    def test_record_side_cleanup_updates_need_parent_execution_handoff(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
         self._move_to_needs_parent(task_id)
@@ -241,11 +408,12 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertTrue(result["ok"], msg=result)
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "needs_parent")
-        self.assertEqual(record["side_result"]["outcome"], "need_parent")
-        self.assertEqual(record["side_result"]["side_thread_id"], "thr-side-parent")
-        self.assertEqual(record["side_result"]["cleanup"]["lease_unregistered"], True)
-        self.assertEqual(record["side_result"]["cleanup"]["turn_interrupt_ok"], True)
+        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["execution"]["processor"], None)
+        self.assertEqual(record["execution"]["handoff"]["side_thread_id"], "thr-side-parent")
+        self.assertEqual(record["execution"]["handoff"]["cleanup"]["lease_unregistered"], True)
+        self.assertEqual(record["execution"]["handoff"]["cleanup"]["turn_interrupt_ok"], True)
+        self._assert_no_legacy_execution_fields(record)
         self.assertIn("side_cleanup_recorded", self._event_types(task_id))
 
     def test_record_task_close_closes_side_processing_task(self) -> None:
@@ -258,16 +426,18 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(result["outcome"], "close")
         self.assertEqual(result["task_id"], task_id)
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "closed")
-        self.assertIsNone(record["active_processor"])
-        self.assertEqual(record["close_result"]["processor"], "side")
-        self.assertEqual(record["close_result"]["summary"], "Handled in side.")
-        self.assertIsInstance(record["close_result"]["updated_at"], str)
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["execution"]["processor"], None)
+        self.assertEqual(record["execution"]["result"]["type"], "completion")
+        self.assertEqual(record["execution"]["result"]["processor"], "side")
+        self.assertEqual(record["execution"]["result"]["summary"], "Handled in side.")
+        self.assertIsInstance(record["execution"]["result"]["updated_at"], str)
+        self._assert_no_legacy_execution_fields(record)
         event_types = self._event_types(task_id)
         self.assertEqual(event_types[0], "created")
         self.assertIn("closed", event_types)
 
-    def test_record_side_cleanup_updates_side_close_result(self) -> None:
+    def test_record_side_cleanup_updates_side_completion_result(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
         task_sys.record_task_close(task_id, {"summary": "Handled in side."})
@@ -286,11 +456,12 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertTrue(result["ok"], msg=result)
         record = self._task_record(task_id)
-        self.assertEqual(record["close_result"]["processor"], "side")
-        self.assertEqual(record["close_result"]["side_thread_id"], "thr-side-clean")
-        self.assertEqual(record["close_result"]["cleanup"]["lease_unregistered"], True)
-        self.assertEqual(record["close_result"]["cleanup"]["turn_interrupt_ok"], False)
-        self.assertEqual(record["close_result"]["cleanup"]["turn_interrupt_error"], "thread already gone")
+        self.assertEqual(record["execution"]["result"]["processor"], "side")
+        self.assertEqual(record["execution"]["result"]["side_thread_id"], "thr-side-clean")
+        self.assertEqual(record["execution"]["result"]["cleanup"]["lease_unregistered"], True)
+        self.assertEqual(record["execution"]["result"]["cleanup"]["turn_interrupt_ok"], False)
+        self.assertEqual(record["execution"]["result"]["cleanup"]["turn_interrupt_error"], "thread already gone")
+        self._assert_no_legacy_execution_fields(record)
         self.assertIn("side_cleanup_recorded", self._event_types(task_id))
 
     def test_record_task_close_closes_parent_processing_task(self) -> None:
@@ -304,14 +475,23 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(result["ok"], msg=result)
         self.assertEqual(result["outcome"], "close")
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "closed")
-        self.assertIsNone(record["active_processor"])
-        self.assertEqual(record["close_result"]["processor"], "parent")
-        self.assertEqual(record["close_result"]["summary"], "Parent completed the source task.")
-        self.assertIsInstance(record["close_result"]["updated_at"], str)
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["execution"]["processor"], None)
+        self.assertEqual(record["execution"]["result"]["type"], "completion")
+        self.assertEqual(record["execution"]["result"]["processor"], "parent")
+        self.assertEqual(record["execution"]["result"]["summary"], "Parent completed the source task.")
+        self.assertIsInstance(record["execution"]["result"]["updated_at"], str)
+        self._assert_no_legacy_execution_fields(record)
         self.assertEqual(
             self._event_types(task_id),
-            ["created", "side_frame_started", "side_parent_requested", "parent_handoff_started", "closed"],
+            [
+                "created",
+                "side_frame_started",
+                "task_analysis_updated",
+                "side_parent_requested",
+                "parent_handoff_started",
+                "closed",
+            ],
         )
 
     def test_record_task_close_rejects_needs_parent_task(self) -> None:
@@ -319,19 +499,24 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         task_id = task_sys.ingest(self._envelope())["task_id"]
         self._move_to_needs_parent(task_id)
 
-        with self.assertRaisesRegex(ValueError, "side_processing or parent_processing"):
+        with self.assertRaisesRegex(ValueError, "side or parent processor"):
             task_sys.record_task_close(task_id, {"summary": "Skipped parent."})
 
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "needs_parent")
-        self.assertIsNone(record["active_processor"])
-        self.assertNotIn("close_result", record)
+        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["execution"]["processor"], None)
+        self.assertIsInstance(record["execution"]["handoff"], dict)
+        self.assertIsNone(record["execution"]["result"])
+        self._assert_no_legacy_execution_fields(record)
 
-    def test_task_statuses_do_not_include_checkpoint_or_no_actor_action(self) -> None:
+    def test_task_statuses_are_lifecycle_only(self) -> None:
         task_sys = _task_sys()
 
+        self.assertEqual(task_sys.TASK_STATUSES, ("in_progress", "completed", "canceled"))
+        self.assertEqual(task_sys.ACTIVE_TASK_STATUSES, ("in_progress",))
+        self.assertEqual(task_sys.RECOVERABLE_TASK_REASONS, ("runtime_failed", "side_no_result", "side_timed_out"))
+        self.assertEqual(task_sys.TASK_RELATION_KINDS, ("independent", "after", "before"))
         self.assertNotIn("checkpoint", task_sys.TASK_STATUSES)
-        self.assertNotIn("checkpoint", task_sys.ACTIVE_TASK_STATUSES)
         self.assertNotIn("no_actor_action", task_sys.RUNTIME_INSTRUCTION_TYPES)
 
     def test_side_runtime_failure_is_recoverable_but_not_active(self) -> None:
@@ -342,7 +527,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         result = task_sys.record_side_runtime_failure(
             task_id,
             {
-                "status": "runtime_failed",
+                "reason": "runtime_failed",
                 "stage": "side_input",
                 "processor": "side",
                 "error": "thread not loaded",
@@ -361,29 +546,28 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(result["outcome"], "runtime_failed")
         self.assertEqual(result["task_id"], task_id)
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "runtime_failed")
-        self.assertIsNone(record["active_processor"])
-        self.assertEqual(record["failure_result"]["stage"], "side_input")
-        self.assertEqual(record["failure_result"]["processor"], "side")
-        self.assertEqual(record["failure_result"]["error"], "thread not loaded")
-        self.assertIs(record["failure_result"]["retryable"], True)
-        self.assertEqual(record["failure_result"]["attempts"], 2)
-        self.assertEqual(record["failure_result"]["last_side_thread_id"], "thr-side-stale")
-        self.assertEqual(record["failure_result"]["cleanup"]["lease_unregistered"], True)
-        self.assertIsInstance(record["failure_result"]["updated_at"], str)
+        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["execution"]["processor"], None)
+        self.assertEqual(record["execution"]["result"]["type"], "failure")
+        self.assertEqual(record["execution"]["result"]["reason"], "runtime_failed")
+        self.assertEqual(record["execution"]["result"]["stage"], "side_input")
+        self.assertEqual(record["execution"]["result"]["processor"], "side")
+        self.assertEqual(record["execution"]["result"]["error"], "thread not loaded")
+        self.assertIs(record["execution"]["result"]["retryable"], True)
+        self.assertEqual(record["execution"]["result"]["attempts"], 2)
+        self.assertEqual(record["execution"]["result"]["last_side_thread_id"], "thr-side-stale")
+        self.assertEqual(record["execution"]["result"]["cleanup"]["lease_unregistered"], True)
+        self.assertIsInstance(record["execution"]["result"]["updated_at"], str)
+        self._assert_no_legacy_execution_fields(record)
         for field in ("source_type", "source_ref", "actor_target", "inbound_context"):
             with self.subTest(field=field):
                 self.assertEqual(record[field], original[field])
         self.assertIn("side_runtime_failed", self._event_types(task_id))
 
-        self.assertIn("runtime_failed", task_sys.TASK_STATUSES)
-        self.assertIn("side_no_result", task_sys.TASK_STATUSES)
-        self.assertIn("side_timed_out", task_sys.TASK_STATUSES)
         self.assertEqual(
-            set(task_sys.RECOVERABLE_TASK_STATUSES),
+            set(task_sys.RECOVERABLE_TASK_REASONS),
             {"runtime_failed", "side_no_result", "side_timed_out"},
         )
-        self.assertTrue(set(task_sys.RECOVERABLE_TASK_STATUSES).isdisjoint(task_sys.ACTIVE_TASK_STATUSES))
         self.assertEqual(task_sys.active_tasks_for_actor(self._envelope()["actor_target"]), [])
         recoverable = task_sys.recoverable_tasks_for_actor(self._envelope()["actor_target"])
         self.assertEqual([row["id"] for row in recoverable], [task_id])
@@ -394,7 +578,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         task_sys.record_side_runtime_failure(
             task_id,
             {
-                "status": "side_no_result",
+                "reason": "side_no_result",
                 "stage": "side_turn",
                 "processor": "side",
                 "error": "side frame completed without task_sys.close or task_sys.need_parent",
@@ -403,13 +587,15 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
 
-        with self.assertRaisesRegex(ValueError, "side_processing or parent_processing"):
+        with self.assertRaisesRegex(ValueError, "side or parent processor"):
             task_sys.record_task_close(task_id, {"summary": "Pretend success."})
 
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "side_no_result")
-        self.assertIsNone(record["active_processor"])
-        self.assertNotIn("close_result", record)
+        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["execution"]["processor"], None)
+        self.assertEqual(record["execution"]["result"]["type"], "failure")
+        self.assertEqual(record["execution"]["result"]["reason"], "side_no_result")
+        self._assert_no_legacy_execution_fields(record)
 
     def test_record_task_close_is_retry_safe_for_closed_task(self) -> None:
         task_sys = _task_sys()
@@ -421,15 +607,16 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(second["ok"], msg=second)
         self.assertEqual(second["outcome"], "close")
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "closed")
-        self.assertIsNone(record["active_processor"])
-        self.assertEqual(record["close_result"], first["task"]["close_result"])
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["execution"]["processor"], None)
+        self.assertEqual(record["execution"]["result"], first["task"]["execution"]["result"])
+        self._assert_no_legacy_execution_fields(record)
 
     def test_parent_instruction_rejects_non_parent_ready_task(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
 
-        with self.assertRaisesRegex(ValueError, "needs_parent"):
+        with self.assertRaisesRegex(ValueError, "parent handoff"):
             task_sys.parent_handoff_instruction(task_id)
 
     def test_ingest_rejects_invalid_envelope_shapes(self) -> None:
