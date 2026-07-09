@@ -839,12 +839,7 @@ def thread_settings_update(
 ) -> dict[str, Any]:
     params = build_thread_settings_update_params(thread_id, model=model, effort=effort)
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
-        return client.request_with_notification(
-            "thread/settings/update",
-            params,
-            notification_method="thread/settings/updated",
-            notification_thread_id=thread_id.strip(),
-        )
+        return client.request("thread/settings/update", params)
 
 
 def thread_inject_items(

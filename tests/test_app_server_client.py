@@ -512,7 +512,7 @@ class AppServerClientTests(unittest.TestCase):
         with self.assertRaises(APP_SERVER.AppServerProtocolError):
             APP_SERVER.build_thread_settings_update_params("thread-main")
 
-    def test_thread_settings_update_returns_notification_when_it_arrives_before_response(self) -> None:
+    def test_thread_settings_update_returns_response_when_notification_arrives_before_response(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))
             server = FakeUnixWebSocketServer(socket_path)
@@ -567,18 +567,9 @@ class AppServerClientTests(unittest.TestCase):
             update_thread.join(timeout=2)
 
             self.assertEqual(errors, [])
-            self.assertEqual(
-                results,
-                [
-                    {
-                        "threadId": "thread-main",
-                        "model": "gpt-5.4",
-                        "effort": "high",
-                    }
-                ],
-            )
+            self.assertEqual(results, [{"ok": True}])
 
-    def test_thread_settings_update_returns_notification_when_it_arrives_after_response(self) -> None:
+    def test_thread_settings_update_returns_response_before_later_notification(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))
             server = FakeUnixWebSocketServer(socket_path)
@@ -626,7 +617,58 @@ class AppServerClientTests(unittest.TestCase):
             update_thread.join(timeout=2)
 
             self.assertEqual(errors, [])
-            self.assertEqual(results, [{"threadId": "thread-main", "effort": "medium"}])
+            self.assertEqual(results, [{"ok": True}])
+
+    def test_thread_settings_update_returns_response_without_notification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+            original_timeout = APP_SERVER.DEFAULT_RPC_TIMEOUT_SECONDS
+            APP_SERVER.DEFAULT_RPC_TIMEOUT_SECONDS = 0.2
+            self.addCleanup(setattr, APP_SERVER, "DEFAULT_RPC_TIMEOUT_SECONDS", original_timeout)
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_update() -> None:
+                try:
+                    results.append(
+                        APP_SERVER.thread_settings_update(
+                            socket_path,
+                            "thread-main",
+                            model="gpt-5.5",
+                            effort="medium",
+                        )
+                    )
+                except BaseException as exc:
+                    errors.append(exc)
+
+            update_thread = threading.Thread(target=run_update, daemon=True)
+            update_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/settings/update")
+            params = request["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(
+                params,
+                {
+                    "threadId": "thread-main",
+                    "model": "gpt-5.5",
+                    "effort": "medium",
+                },
+            )
+            server.send_response(request["id"], {"ok": True, "threadId": "thread-main"})
+            update_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [{"ok": True, "threadId": "thread-main"}])
 
     def test_thread_bootstrap_rollout_injects_minimal_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
