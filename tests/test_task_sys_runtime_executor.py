@@ -153,11 +153,18 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
                 "source": {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}},
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
                 "inbound_context": {"text": "Draft brief"},
-                "side_result": {"outcome": "need_parent", "params": {"interrupt": interrupt}},
-                "parent_handoff_params": {
-                    "parent_frame_context": {"next": "Draft the brief in parent."},
-                    "relation": "User input requires main-thread work.",
+                "task_desc": "Draft brief",
+                "task_relation": {"kind": "after", "target_task_id": "task-user-input-prior123"},
+                "execution_handoff": {
+                    "parent_frame_context": {
+                        "next": "Draft the brief in parent.",
+                        "task_desc": "Draft brief",
+                        "task_relation": {"kind": "after", "target_task_id": "task-user-input-prior123"},
+                    },
                     "interrupt": interrupt,
+                    "ordering": {"after": "task-user-input-prior123"},
+                    "side_thread_id": "thr-side-1",
+                    "cleanup": {},
                 },
             },
         }
@@ -196,6 +203,12 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
 
         self.assertIn("task_sys.side_frame", text)
         self.assertIn("task-user-input-abcdef123456", text)
+        self.assertIn("task_desc", text)
+        self.assertIn("task_relation", text)
+        self.assertIn("task_sys.update_task_analysis", text)
+        self.assertIn("task_sys.list(status=all)", text)
+        self.assertIn("task_sys.get(task_id=...)", text)
+        self.assertIn("task_relation.kind", text)
         self.assertIn("task_sys.close", text)
         self.assertIn("task_sys.need_parent", text)
         self.assertIn("Core policy: decide by required resources.", text)
@@ -213,6 +226,8 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertNotIn("checkpoint_update", text)
         self.assertNotIn("no_actor_action", text)
         self.assertIn("Allowed frame completion operations:", text)
+        self.assertIn("Allowed relation-analysis operation:", text)
+        self.assertNotIn("params={parent_frame_context, relation", text)
         stale_side_result = "Task Sys side " + "result"
         self.assertNotIn(stale_side_result, text)
         self.assertNotIn("[IM MESSAGE " + "TRIAGE]", text)
@@ -389,10 +404,16 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(len(result["attempts"]), 2)
         self.assertEqual(len(calls), 2)
         record = task_sys.get_task(task_id)
-        self.assertEqual(record["status"], "runtime_failed")
-        self.assertIsNone(record["active_processor"])
-        self.assertEqual(record["failure_result"]["stage"], "side_lifecycle")
-        self.assertEqual(record["failure_result"]["attempts"], 2)
+        self.assertEqual(record["status"], "in_progress")
+        self.assertNotIn("active_processor", record)
+        execution = record["execution"]
+        self.assertIsNone(execution["processor"])
+        self.assertEqual(execution["result"]["type"], "failure")
+        self.assertEqual(execution["result"]["reason"], "runtime_failed")
+        self.assertEqual(execution["result"]["stage"], "side_lifecycle")
+        self.assertEqual(execution["result"]["attempts"], 2)
+        self.assertEqual(result["execution_result"], execution["result"])
+        self.assertNotIn("failure_result", result)
 
     def test_cleanup_task_sys_side_lease_delegates_to_lifecycle_owner(self) -> None:
         context = self._context()
@@ -467,10 +488,27 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("task_sys.parent_frame", text)
         self.assertIn("task-user-input-abcdef123456", text)
         self.assertIn("Task Sys source:", text)
-        self.assertIn("Parent handoff params:", text)
+        self.assertIn("Task desc:", text)
+        self.assertIn("Task relation:", text)
+        self.assertIn("Execution handoff:", text)
         self.assertIn("Draft the brief in parent.", text)
+        self.assertIn("task-user-input-prior123", text)
+        self.assertNotIn("Side result:", text)
+        self.assertNotIn("Parent handoff params:", text)
         self.assertNotIn("[MESSAGE NEEDS " + "PARENT]", text)
         self.assertNotIn("[TRACK COMMENT", text)
+
+    def test_render_parent_frame_rejects_legacy_handoff_shape(self) -> None:
+        instruction = self._parent_instruction()
+        frame = instruction["frame"]
+        frame.pop("task_desc")
+        frame.pop("task_relation")
+        frame.pop("execution_handoff")
+        frame["side_result"] = {"outcome": "need_parent", "params": {"interrupt": False}}
+        frame["parent_handoff_params"] = {"parent_frame_context": {"next": "Draft the brief in parent."}}
+
+        with self.assertRaisesRegex(ValueError, "frame.task_desc"):
+            self.module.render_parent_frame(frame)
 
     def test_render_parent_frame_requires_task_sys_close(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
@@ -486,6 +524,8 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("For a user.input source:", text)
         self.assertIn("message.send(target_identity_id=..., content=...)", text)
         self.assertIn("After required parent work is complete, call task_sys.close.", text)
+        self.assertIn("execution_handoff", text)
+        self.assertNotIn("parent_handoff_params", text)
         self.assertNotIn("For an IM source message:", text)
         self.assertNotIn("Only after the source-" + "bound IM action " + "succeeds", text)
 
@@ -525,6 +565,7 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
 
         self.assertIn("Allowed frame completion operations:", text)
         self.assertIn("task_sys.close(task_id=..., summary=...) when the task is completed in side.", text)
+        self.assertIn("task_sys.update_task_analysis", text)
         stale_side_result = "Task Sys side " + "result"
         self.assertNotIn(stale_side_result, text)
         self.assertNotIn("side result:", text.lower())

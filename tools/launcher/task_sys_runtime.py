@@ -167,7 +167,8 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             (
                 "A side thread may handle the task only when completion requires this task_sys.side_frame, exact "
                 "source objects referenced by this frame, bounded read-only inspection, source-specific message "
-                "tools allowed by this frame, and one Task Sys frame operation."
+                "tools allowed by this frame, one Task Sys relation-analysis operation, and one Task Sys completion "
+                "operation."
             ),
             (
                 "If the task requires parent attention, workspace resources, browser/web/research resources, shared "
@@ -193,10 +194,18 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             "\n".join(
                 (
                     "2. Task Sys frame operation",
-                    "Finish this frame with exactly one legal Task Sys operation:",
+                    "First record relation analysis for this task:",
+                    "- derive task_desc from the source-visible request.",
+                    "- read relation context with task_sys.list(status=all) or task_sys.get(task_id=...).",
+                    (
+                        "- call task_sys.update_task_analysis(task_id=..., task_desc=..., task_relation=...) "
+                        "before deciding whether side may continue."
+                    ),
+                    "Side may continue only when task_relation.kind == independent and all required resources are allowed.",
+                    "Finish this frame with one legal completion operation:",
                     "- task_sys.close(task_id=..., summary=...) when the task is completed in side.",
                     (
-                        "- task_sys.need_parent(task_id=..., params={parent_frame_context, relation, interrupt, "
+                        "- task_sys.need_parent(task_id=..., params={parent_frame_context, interrupt, "
                         "ordering}) when parent work is required."
                     ),
                 )
@@ -219,16 +228,23 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             "\n".join(
                 (
                     "1. Identify the resources required to complete the user-visible task.",
-                    "2. If all required resources are allowed side resources, complete the task in side.",
-                    "3. If any required resource is forbidden or belongs to parent, call task_sys.need_parent.",
                     (
-                        "4. Do not call task_sys.need_parent for message work that this frame's source-specific "
+                        "2. Generate task_desc, read relation context with task_sys.list(status=all) or "
+                        "task_sys.get(task_id=...), and persist task_relation with task_sys.update_task_analysis."
+                    ),
+                    (
+                        "3. If task_relation.kind == independent and all required resources are allowed side "
+                        "resources, complete the task in side."
+                    ),
+                    "4. If any required resource is forbidden, non-independent, or belongs to parent, call task_sys.need_parent.",
+                    (
+                        "5. Do not call task_sys.need_parent for message work that this frame's source-specific "
                         "message guidance allows."
                     ),
                     (
-                        "5. Do call task_sys.need_parent for research, implementation, planning, verification, "
-                        "shared product-state writes, Track replies, artifact/evidence output, browser/web use, or "
-                        "parent-thread continuity."
+                        "6. Do call task_sys.need_parent for non-independent relation handling, research, "
+                        "implementation, planning, verification, shared product-state writes, Track replies, "
+                        "artifact/evidence output, browser/web use, or parent-thread continuity."
                     ),
                 )
             ),
@@ -254,6 +270,7 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     "- what the source asked for,",
                     "- what side inspected,",
                     "- why parent resources are required,",
+                    "- task_desc and task_relation,",
                     "- any exact source ids needed by parent,",
                     "- any failure details if side could not safely close.",
                     (
@@ -262,9 +279,11 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     ),
                 )
             ),
+            "Allowed relation-analysis operation:",
+            "- task_sys.update_task_analysis(task_id=..., task_desc=..., task_relation=...)",
             "Allowed frame completion operations:",
             "- task_sys.close(task_id=..., summary=...) when the task is completed in side.",
-            "- task_sys.need_parent(task_id=..., params={parent_frame_context, relation, interrupt, ordering})",
+            "- task_sys.need_parent(task_id=..., params={parent_frame_context, interrupt, ordering})",
             "Do not use any other Task Sys operation from side. Treat interrupt only as a task_sys.need_parent params field.",
         )
     )
@@ -280,7 +299,7 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             *_render_im_message_task_guidance(frame_kind="parent"),
             "\n".join(
                 (
-                    "- Use message tools only for work required by this parent frame and its parent_handoff_params.",
+                    "- Use message tools only for work required by this parent frame and its execution_handoff.",
                     "- Do not rely on parent turn completion to close this Task Sys task.",
                 )
             ),
@@ -303,7 +322,7 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             "For a user.input source:",
             "\n".join(
                 (
-                    "- Perform the parent work requested by parent_handoff_params.",
+                    "- Perform the parent work requested by execution_handoff.",
                     "- If parent work requires outbound communication, use message.send(target_identity_id=..., content=...).",
                     "- After required parent work is complete, call task_sys.close.",
                 )
@@ -311,7 +330,7 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             "Allowed parent frame operations:",
             "\n".join(
                 (
-                    "- message.send(target_identity_id=..., content=...) when parent_handoff_params requires outbound communication.",
+                    "- message.send(target_identity_id=..., content=...) when execution_handoff requires outbound communication.",
                     "- task_sys.close(task_id=..., summary=...)",
                 )
             ),
@@ -321,7 +340,7 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             "For this parent source:",
             "\n".join(
                 (
-                    "- Perform the parent work requested by parent_handoff_params.",
+                    "- Perform the parent work requested by execution_handoff.",
                     "- After required parent work is complete, call task_sys.close.",
                 )
             ),
@@ -336,10 +355,12 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             _json_block(source),
             "Inbound context:",
             _json_block(_require_mapping(payload.get("inbound_context"), "frame.inbound_context")),
-            "Side result:",
-            _json_block(_require_mapping(payload.get("side_result"), "frame.side_result")),
-            "Parent handoff params:",
-            _json_block(_require_mapping(payload.get("parent_handoff_params"), "frame.parent_handoff_params")),
+            "Task desc:",
+            _require_text(payload.get("task_desc"), "frame.task_desc"),
+            "Task relation:",
+            _json_block(_require_mapping(payload.get("task_relation"), "frame.task_relation")),
+            "Execution handoff:",
+            _json_block(_require_mapping(payload.get("execution_handoff"), "frame.execution_handoff")),
             "Required action:",
             "Process this Task Sys parent frame. Use source refs and task context; do not assume raw inbound outside this frame.",
             "When the source task is complete, call task_sys.close(task_id=..., summary=...).",
@@ -473,6 +494,7 @@ def _execute_start_side(context: Any, instruction: Mapping[str, Any]) -> dict[st
 
     last_attempt = attempts[-1] if attempts else {"stage": "side_fork", "error": "side dispatch failed"}
     failure = {
+        "reason": "runtime_failed",
         "status": "runtime_failed",
         "stage": last_attempt.get("stage") or "side_fork",
         "processor": "side",
@@ -488,13 +510,15 @@ def _execute_start_side(context: Any, instruction: Mapping[str, Any]) -> dict[st
         failure["cleanup"] = dict(cleanup)
     recorded = task_sys.record_side_runtime_failure(task_id, failure)
     task = recorded.get("task") if isinstance(recorded.get("task"), dict) else {}
+    execution = task.get("execution") if isinstance(task.get("execution"), Mapping) else {}
+    execution_result = execution.get("result") if isinstance(execution, Mapping) else None
     return {
         "action": "start_side",
         "task_id": task_id,
         "status": "runtime_failed",
         "stage": failure["stage"],
         "attempts": attempts,
-        "failure_result": task.get("failure_result"),
+        "execution_result": execution_result,
         "state_changed": recorded.get("state_changed"),
     }
 
