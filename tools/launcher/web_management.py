@@ -12,11 +12,13 @@ import subprocess
 import sys
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 HELPER_DIR = Path(__file__).resolve().parent
 SCRIPTS = HELPER_DIR.parents[1] / "scripts"
@@ -62,6 +64,52 @@ class HttpError(Exception):
     code: str
     message: str
     details: dict[str, Any] | None = None
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _lifecycle_action_label(action: str) -> str:
+    if action == "start":
+        return "Start"
+    if action == "stop":
+        return "Stop"
+    if action == "resume":
+        return "Resume"
+    if action == "clear":
+        return "Clear"
+    if action == "delete":
+        return "Delete"
+    return "Lifecycle action"
+
+
+@dataclass
+class WebLifecycleOperation:
+    id: str
+    action: str
+    status: str
+    label: str
+    detail: str
+    target: dict[str, str]
+    result: dict[str, Any] | None = None
+    error: dict[str, str] | None = None
+    started_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "action": self.action,
+            "status": self.status,
+            "label": self.label,
+            "detail": self.detail,
+            "target": dict(self.target),
+            "result": self.result,
+            "error": self.error,
+            "started_at": self.started_at,
+            "updated_at": self.updated_at,
+        }
 
 
 class TerminalOpenError(Exception):
@@ -310,6 +358,11 @@ class WebManagementService:
         self._terminal_opener = terminal_opener or open_macos_terminal_app
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
+        self._operation_lock = threading.Lock()
+        self._operations: dict[str, WebLifecycleOperation] = {}
+        self._operation_commands: dict[str, Callable[[], dict[str, Any]]] = {}
+        self._lifecycle_queue: list[str] = []
+        self._lifecycle_running_operation_id: str | None = None
         self._im_session = im_session or external_im_session.ExternalImSession(
             actor_lister=self._external_im_actor_rows,
             actor_reachability_checker=self._check_im_actor_reachability,
@@ -342,9 +395,12 @@ class WebManagementService:
         if method == "GET" and path == "/api/instances":
             return 200, {"ok": True, "instances": self._list_instances()}
         if method == "POST" and path == "/api/instances":
-            return 200, self._create_instance(body)
+            return 202, self._create_instance(body)
         if method == "GET" and route == "/api/actors":
             return 200, {"ok": True, "actors": self._list_actor_rows()}
+        operation_id = self._parse_operation_path(route)
+        if method == "GET" and operation_id is not None:
+            return 200, self._get_operation(operation_id)
         actor_model_config_id = self._parse_actor_model_config_path(route)
         if actor_model_config_id is not None:
             if method == "GET":
@@ -385,7 +441,7 @@ class WebManagementService:
         if method == "GET" and action == "status":
             return 200, {"ok": True, "instance": self._get_instance_status(actor_id)}
         if method == "POST" and action == "clear":
-            return 200, self._clear(actor_id)
+            return 202, self._clear(actor_id)
         if method == "POST" and action == "side":
             return 200, self._side(actor_id, body)
         if method == "POST" and action == "side-close":
@@ -393,14 +449,30 @@ class WebManagementService:
         if method == "POST" and action == "interrupt":
             return 200, self._interrupt(actor_id)
         if method == "POST" and action == "resume":
-            return 200, self._resume(actor_id)
+            return 202, self._resume(actor_id)
         if method == "POST" and action == "stop":
-            return 200, self._stop(actor_id)
+            return 202, self._stop(actor_id)
         if method == "POST" and action == "open-tui":
             return 200, self._open_tui(actor_id, body, headers)
         if method == "DELETE" and action == "delete":
-            return 200, self._delete(actor_id)
+            return 202, self._delete(actor_id)
         raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
+
+    def _parse_operation_path(self, path: str) -> str | None:
+        prefix = "/api/operations/"
+        if not path.startswith(prefix):
+            return None
+        operation_id = path[len(prefix):]
+        if not operation_id or "/" in operation_id:
+            return None
+        return operation_id
+
+    def _get_operation(self, operation_id: str) -> dict[str, Any]:
+        with self._operation_lock:
+            operation = self._operations.get(operation_id)
+            if operation is None:
+                raise HttpError(status=404, code="NOT_FOUND", message="Operation not found.")
+            return {"ok": True, "operation": operation.to_payload()}
 
     def _parse_instance_action_path(self, path: str) -> tuple[str, str] | None:
         status_prefix = "/api/instances/"
@@ -464,12 +536,18 @@ class WebManagementService:
         role = payload.get("role")
         if not isinstance(role, str) or not role.strip():
             raise HttpError(status=400, code="INVALID_REQUEST", message="role is required.")
-        valid_role_ids = {row["id"] for row in self._list_buddies()}
-        if role not in valid_role_ids:
+        buddies = self._list_buddies()
+        roles_by_id = {row["id"]: row for row in buddies}
+        if role not in roles_by_id:
             raise HttpError(status=400, code="INVALID_REQUEST", message=f"Unknown role: {role}")
-        return self._run_busy(
-            "start",
-            lambda: self._create_instance_under_lock(role),
+        role_label = str(roles_by_id[role].get("label") or role)
+        return self._start_lifecycle_operation(
+            key="start",
+            action="start",
+            label=f"Starting {role_label}",
+            detail="Launcher start command is queued.",
+            target={"actor_id": "", "role": role},
+            command=lambda: self._create_instance_under_lock(role),
         )
 
     def _create_instance_under_lock(self, role: str) -> dict[str, Any]:
@@ -484,9 +562,13 @@ class WebManagementService:
         return {"ok": True, "actor_id": actor_id, "instance": self._get_instance_status(actor_id)}
 
     def _clear(self, actor_id: str) -> dict[str, Any]:
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._clear_under_lock(actor_id),
+        return self._start_lifecycle_operation(
+            key=f"instance:{actor_id}",
+            action="clear",
+            label=f"Clearing thread for {actor_id}",
+            detail="Launcher clear command is queued.",
+            target={"actor_id": actor_id, "role": ""},
+            command=lambda: self._clear_under_lock(actor_id),
         )
 
     def _clear_under_lock(self, actor_id: str) -> dict[str, Any]:
@@ -654,9 +736,13 @@ class WebManagementService:
         return payload
 
     def _stop(self, actor_id: str) -> dict[str, Any]:
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._stop_under_lock(actor_id),
+        return self._start_lifecycle_operation(
+            key=f"instance:{actor_id}",
+            action="stop",
+            label=f"Stopping {actor_id}",
+            detail="Launcher stop command is queued.",
+            target={"actor_id": actor_id, "role": ""},
+            command=lambda: self._stop_under_lock(actor_id),
         )
 
     def _stop_under_lock(self, actor_id: str) -> dict[str, Any]:
@@ -668,9 +754,13 @@ class WebManagementService:
         return {"ok": True, "instance": self._get_instance_status(actor_id)}
 
     def _resume(self, actor_id: str) -> dict[str, Any]:
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._resume_under_lock(actor_id),
+        return self._start_lifecycle_operation(
+            key=f"instance:{actor_id}",
+            action="resume",
+            label=f"Resuming {actor_id}",
+            detail="Launcher resume command is queued.",
+            target={"actor_id": actor_id, "role": ""},
+            command=lambda: self._resume_under_lock(actor_id),
         )
 
     def _resume_under_lock(self, actor_id: str) -> dict[str, Any]:
@@ -682,9 +772,13 @@ class WebManagementService:
         return {"ok": True, "instance": self._get_instance_status(actor_id)}
 
     def _delete(self, actor_id: str) -> dict[str, Any]:
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._delete_under_lock(actor_id),
+        return self._start_lifecycle_operation(
+            key=f"instance:{actor_id}",
+            action="delete",
+            label=f"Deleting {actor_id}",
+            detail="Launcher delete command is queued.",
+            target={"actor_id": actor_id, "role": ""},
+            command=lambda: self._delete_under_lock(actor_id),
         )
 
     def _delete_under_lock(self, actor_id: str) -> dict[str, Any]:
@@ -1018,6 +1112,166 @@ class WebManagementService:
         if result.returncode != 0 or result.timed_out:
             raise map_command_failure(" ".join(args), result)
         return result
+
+    def _start_lifecycle_operation(
+        self,
+        *,
+        key: str,
+        action: str,
+        label: str,
+        detail: str,
+        target: dict[str, str],
+        command: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        operation = WebLifecycleOperation(
+            id=f"op-{uuid4().hex[:16]}",
+            action=action,
+            status="queued",
+            label=label,
+            detail=detail,
+            target=target,
+        )
+        next_thread: threading.Thread | None = None
+        with self._operation_lock:
+            conflict = self._active_lifecycle_conflict_locked(target)
+            if conflict is not None:
+                raise HttpError(
+                    status=409,
+                    code="BUSY",
+                    message=self._protective_lifecycle_message(action, conflict),
+                )
+            self._operations[operation.id] = operation
+            self._operation_commands[operation.id] = command
+            self._lifecycle_queue.append(operation.id)
+            next_thread = self._dispatch_next_lifecycle_operation_locked()
+        if next_thread is not None:
+            next_thread.start()
+        return {"ok": True, "operation": operation.to_payload()}
+
+    def _active_lifecycle_conflict_locked(self, target: dict[str, str]) -> WebLifecycleOperation | None:
+        actor_id = target.get("actor_id")
+        if not isinstance(actor_id, str) or not actor_id:
+            return None
+        for operation in self._operations.values():
+            operation_target = operation.target if isinstance(operation.target, dict) else {}
+            if (
+                operation.status in {"queued", "running"}
+                and operation_target.get("actor_id") == actor_id
+            ):
+                return operation
+        return None
+
+    def _protective_lifecycle_message(self, action: str, conflict: WebLifecycleOperation) -> str:
+        requested = _lifecycle_action_label(action)
+        active = _lifecycle_action_label(conflict.action)
+        actor_id = conflict.target.get("actor_id", "")
+        if action == conflict.action:
+            suffix = f" for {actor_id}" if actor_id else ""
+            return f"{requested} is already in progress{suffix}."
+        return f"{requested} available after {active} completes."
+
+    def _dispatch_next_lifecycle_operation_locked(self) -> threading.Thread | None:
+        if self._lifecycle_running_operation_id is not None:
+            return None
+        while self._lifecycle_queue:
+            operation_id = self._lifecycle_queue.pop(0)
+            operation = self._operations.get(operation_id)
+            command = self._operation_commands.get(operation_id)
+            if operation is None or command is None or operation.status != "queued":
+                continue
+            self._lifecycle_running_operation_id = operation_id
+            operation.status = "running"
+            operation.detail = "Launcher command is running."
+            operation.updated_at = utc_now_iso()
+            return threading.Thread(
+                target=self._run_lifecycle_operation_worker,
+                args=(operation_id, command),
+                daemon=True,
+            )
+        return None
+
+    def _run_lifecycle_operation_worker(
+        self,
+        operation_id: str,
+        command: Callable[[], dict[str, Any]],
+    ) -> None:
+        status = "succeeded"
+        detail = "Launcher command completed."
+        result: dict[str, Any] | None = None
+        error: dict[str, str] | None = None
+        target_patch: dict[str, str] = {}
+        try:
+            result = command()
+        except HttpError as exc:
+            status = "failed"
+            detail = exc.message
+            error = {"code": exc.code, "message": exc.message}
+        except Exception as exc:  # pragma: no cover - defensive thread boundary
+            status = "failed"
+            detail = str(exc)
+            error = {"code": "COMMAND_FAILED", "message": str(exc)}
+        else:
+            actor_id = result.get("actor_id")
+            if isinstance(actor_id, str):
+                target_patch["actor_id"] = actor_id
+        finally:
+            next_thread = self._complete_lifecycle_operation(
+                operation_id,
+                status=status,
+                detail=detail,
+                result=result,
+                error=error,
+                target_patch=target_patch,
+            )
+            if next_thread is not None:
+                next_thread.start()
+
+    def _complete_lifecycle_operation(
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        detail: str,
+        result: dict[str, Any] | None,
+        error: dict[str, str] | None,
+        target_patch: dict[str, str],
+    ) -> threading.Thread | None:
+        with self._operation_lock:
+            operation = self._operations.get(operation_id)
+            if operation is not None:
+                operation.status = status
+                operation.detail = detail
+                operation.result = result
+                operation.error = error
+                if target_patch:
+                    operation.target.update(target_patch)
+                operation.updated_at = utc_now_iso()
+            self._operation_commands.pop(operation_id, None)
+            if self._lifecycle_running_operation_id == operation_id:
+                self._lifecycle_running_operation_id = None
+            return self._dispatch_next_lifecycle_operation_locked()
+
+    def _update_operation(
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        detail: str,
+        result: dict[str, Any] | None = None,
+        error: dict[str, str] | None = None,
+        target_patch: dict[str, str] | None = None,
+    ) -> None:
+        with self._operation_lock:
+            operation = self._operations.get(operation_id)
+            if operation is None:
+                return
+            operation.status = status
+            operation.detail = detail
+            operation.result = result
+            operation.error = error
+            if target_patch:
+                operation.target.update(target_patch)
+            operation.updated_at = utc_now_iso()
 
     def _parse_json_body(self, body: bytes) -> dict[str, Any]:
         if not body:

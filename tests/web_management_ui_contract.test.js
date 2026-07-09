@@ -80,6 +80,7 @@ test('production html keeps all real control ids used by the web UI', () => {
     'clear-button',
     'resume-button',
     'delete-button',
+    'lifecycle-operation-status',
     'action-availability-status',
     'open-tui-button',
     'open-tui-status',
@@ -270,9 +271,14 @@ test('production stylesheet supports pending and loading feedback states', () =>
     '.inline-loading',
     '.message.pending',
     '.message.failed',
+    '.lifecycle-operation-status',
   ].forEach((marker) => {
     assertIncludes(stylesCss, marker);
   });
+  assertCssDeclarations('.lifecycle-operation-status', [
+    'color: var(--blue);',
+    'font-weight: 680;',
+  ]);
 });
 
 test('production stylesheet keeps hidden operational fallback frames collapsed', () => {

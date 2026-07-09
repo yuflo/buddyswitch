@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
 const path = require('path');
 
 const rendererModule = require(path.join(
@@ -97,6 +98,23 @@ function okResponse(payload) {
   };
 }
 
+function lifecycleOperation(overrides) {
+  const operation = Object.assign({
+    id: 'op-demo',
+    action: 'clear',
+    status: 'running',
+    label: 'Clearing thread for act-market-demo',
+    detail: 'Launcher command is running.',
+    target: { actor_id: 'act-market-demo', role: 'market' },
+    result: null,
+    error: null,
+  }, overrides || {});
+  if (!operation.target) {
+    operation.target = { actor_id: '', role: '' };
+  }
+  return operation;
+}
+
 function imNotFoundResponse() {
   return {
     ok: false,
@@ -189,6 +207,7 @@ function createRenderElements() {
     deleteButton: node(),
     clearButton: node(),
     resumeButton: node(),
+    lifecycleOperationStatus: node(),
     actionAvailabilityStatus: node(),
     openTuiButton: node(),
     openTuiStatus: node(),
@@ -199,9 +218,8 @@ function createRenderElements() {
 }
 
 test('create button requires selected role and no start busy state', () => {
-  assert.equal(app.computeCreateEnabled({ selectedRole: '', isCreating: false }), false);
-  assert.equal(app.computeCreateEnabled({ selectedRole: 'pm', isCreating: true }), false);
-  assert.equal(app.computeCreateEnabled({ selectedRole: 'pm', isCreating: false }), true);
+  assert.equal(app.computeCreateEnabled({ selectedRole: '' }), false);
+  assert.equal(app.computeCreateEnabled({ selectedRole: 'pm' }), true);
 });
 
 test('state defaults to Team room as the primary section', () => {
@@ -212,6 +230,9 @@ test('state defaults to Team room as the primary section', () => {
   assert.equal(state.selectedTrackId, '');
   assert.deepEqual(state.actors, []);
   assert.deepEqual(state.tracks, []);
+  assert.deepEqual(state.lifecycleOperations, {});
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'createPending'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'lifecycle' + 'PendingAction'), false);
   assert.equal(state.imConversationIdentityId, '');
 });
 
@@ -265,6 +286,38 @@ test('teammate roster renders prototype person rows from supported actor facts',
   assert.match(html, /active/);
   assert.match(html, /healthy/);
   assert.doesNotMatch(html, /Dev Actor|PM Actor|72%|capacity|current focus|last proof/i);
+});
+
+test('start operation rows distinguish queued from running lifecycle work', () => {
+  const state = app.createState();
+  state.roles = [
+    { id: 'market', label: 'Market', scope: 'product' },
+    { id: 'pm', label: 'PM', scope: 'product' },
+  ];
+  state.lifecycleOperations = {
+    'op-start-running': lifecycleOperation({
+      id: 'op-start-running',
+      action: 'start',
+      status: 'running',
+      label: 'Starting Market',
+      target: { actor_id: '', role: 'market' },
+    }),
+    'op-start-queued': lifecycleOperation({
+      id: 'op-start-queued',
+      action: 'start',
+      status: 'queued',
+      label: 'Starting PM',
+      detail: 'Waiting for lifecycle queue.',
+      target: { actor_id: '', role: 'pm' },
+    }),
+  };
+
+  const html = app.renderActorRowsHtml(state);
+
+  assert.match(html, /op-start-running/);
+  assert.match(html, /starting/);
+  assert.match(html, /op-start-queued/);
+  assert.match(html, /queued/);
 });
 
 test('role select repopulates role options after initial empty-shell render', () => {
@@ -793,7 +846,27 @@ test('create teammate keeps pending actor visible until roster reconciliation', 
     const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
     if (requestUrl === '/api/instances') {
       assert.equal(options && options.method, 'POST');
-      return okResponse({ actor_id: 'act-market-new' });
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-market',
+          action: 'start',
+          status: 'running',
+          label: 'Starting Market',
+          target: { actor_id: '', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-start-market') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-market',
+          action: 'start',
+          status: 'succeeded',
+          label: 'Starting Market',
+          target: { actor_id: 'act-market-new', role: 'market' },
+          result: { ok: true, actor_id: 'act-market-new' },
+        }),
+      });
     }
     if (requestUrl === '/api/actors') {
       actorRosterCalls += 1;
@@ -834,21 +907,126 @@ test('create teammate keeps pending actor visible until roster reconciliation', 
       { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-market-old';
+    state.lifecycleOperationPollDelaysMs = [];
     state.rosterReconcileDelaysMs = [0, 1];
 
     await app.createInstance(state, elements);
 
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.selectedLifecycleOperationId, 'op-start-market');
+    assert.match(elements.actorsList.innerHTML, /Starting Market/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /act-market-new/);
+
+    await app.pollLifecycleOperations(state, elements);
+
     assert.equal(state.selectedActorId, 'act-market-new');
     assert.equal(state.rosterPendingActorId, 'act-market-new');
     assert.match(elements.actorsList.innerHTML, /act-market-new/);
-    assert.match(elements.actorsList.innerHTML, /pending|confirming/i);
+    assert.match(elements.actorsList.innerHTML, /pending|initializing/i);
 
     await waitFor(() => state.rosterPendingActorId === '', 'roster confirmation');
 
     assert.equal(state.selectedActorId, 'act-market-new');
     assert.equal(state.rosterPendingActorId, '');
     assert.match(elements.actorsList.innerHTML, /act-market-new/);
-    assert.doesNotMatch(elements.actorsList.innerHTML, /pending|confirming/i);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /pending|initializing/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('create teammate accepts repeated start operations while one is still active', async () => {
+  const originalFetch = globalThis.fetch;
+  let createCalls = 0;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      assert.equal(options && options.method, 'POST');
+      createCalls += 1;
+      return okResponse({
+        operation: lifecycleOperation({
+          id: createCalls === 1 ? 'op-start-running' : 'op-start-queued',
+          action: 'start',
+          status: createCalls === 1 ? 'running' : 'queued',
+          label: createCalls === 1 ? 'Starting Market' : 'Starting Market',
+          detail: createCalls === 1 ? 'Launcher command is running.' : 'Waiting for lifecycle queue.',
+          target: { actor_id: '', role: 'market' },
+        }),
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.selectedRole = 'market';
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.createInstance(state, elements);
+
+    assert.equal(elements.createButton.disabled, false);
+    assert.equal(elements.createButton.textContent, 'Start');
+    assert.match(elements.actorsList.innerHTML, /op-start-running/);
+
+    await app.createInstance(state, elements);
+
+    assert.equal(createCalls, 2);
+    assert.equal(elements.createButton.disabled, false);
+    assert.match(elements.actorsList.innerHTML, /op-start-running/);
+    assert.match(elements.actorsList.innerHTML, /op-start-queued/);
+    assert.match(elements.actorsList.innerHTML, /queued/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('create teammate selects start operation context and protects actor actions', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-protect',
+          action: 'start',
+          status: 'running',
+          label: 'Starting Market',
+          detail: 'Launcher command is running.',
+          target: { actor_id: '', role: 'market' },
+        }),
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.selectedRole = 'market';
+    state.actors = [
+      { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread: { status: 'idle' } } },
+    ];
+    state.selectedActorId = 'act-market-old';
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.createInstance(state, elements);
+
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.selectedLifecycleOperationId, 'op-start-protect');
+    assert.match(elements.actorsList.innerHTML, /op-start-protect/);
+    assert.match(elements.actorsList.innerHTML, /is-selected/);
+    assert.equal(elements.stopButton.disabled, true);
+    assert.equal(elements.clearButton.disabled, true);
+    assert.equal(elements.deleteButton.disabled, true);
+    assert.match(elements.lifecycleOperationStatus.textContent, /Starting Market/);
+    assert.equal(
+      elements.actionAvailabilityStatus.textContent,
+      'Start in progress. Actor actions are protected until Start completes.'
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -890,6 +1068,66 @@ test('failed create preserves previous selection and leaves no pending actor', a
   }
 });
 
+test('failed start operation surfaces backend error and removes pending operation', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-failed',
+          action: 'start',
+          status: 'running',
+          label: 'Starting Market',
+          target: { actor_id: '', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-start-failed') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-failed',
+          action: 'start',
+          status: 'failed',
+          label: 'Starting Market',
+          target: { actor_id: '', role: 'market' },
+          error: { code: 'COMMAND_FAILED', message: 'Thread bootstrap failed' },
+        }),
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.selectedRole = 'market';
+    state.actors = [
+      { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-market-old';
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.createInstance(state, elements);
+
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.selectedLifecycleOperationId, 'op-start-failed');
+    assert.match(elements.actorsList.innerHTML, /Starting Market/);
+
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-market-old');
+    assert.equal(state.selectedLifecycleOperationId, '');
+    assert.deepEqual(state.lifecycleOperations, {});
+    assert.doesNotMatch(elements.actorsList.innerHTML, /Starting Market/);
+    assert.match(elements.messageBanner.textContent, /Thread bootstrap failed/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('create reconciliation timeout keeps selected pending row and manual refresh can confirm it', async () => {
   const originalFetch = globalThis.fetch;
   let actorRosterCalls = 0;
@@ -897,7 +1135,27 @@ test('create reconciliation timeout keeps selected pending row and manual refres
     const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
     if (requestUrl === '/api/instances') {
       assert.equal(options && options.method, 'POST');
-      return okResponse({ actor_id: 'act-market-late' });
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-late',
+          action: 'start',
+          status: 'running',
+          label: 'Starting Market',
+          target: { actor_id: '', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-start-late') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-late',
+          action: 'start',
+          status: 'succeeded',
+          label: 'Starting Market',
+          target: { actor_id: 'act-market-late', role: 'market' },
+          result: { ok: true, actor_id: 'act-market-late' },
+        }),
+      });
     }
     if (requestUrl === '/api/actors') {
       actorRosterCalls += 1;
@@ -947,9 +1205,11 @@ test('create reconciliation timeout keeps selected pending row and manual refres
       { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-market-old';
+    state.lifecycleOperationPollDelaysMs = [];
     state.rosterReconcileDelaysMs = [0];
 
     await app.createInstance(state, elements);
+    await app.pollLifecycleOperations(state, elements);
     await waitFor(
       () => /has not confirmed/.test(elements.messageBanner.textContent),
       'roster timeout message',
@@ -959,14 +1219,343 @@ test('create reconciliation timeout keeps selected pending row and manual refres
     assert.equal(state.selectedActorId, 'act-market-late');
     assert.equal(state.rosterPendingActorId, 'act-market-late');
     assert.match(elements.actorsList.innerHTML, /act-market-late/);
-    assert.match(elements.actorsList.innerHTML, /confirming/);
+    assert.match(elements.actorsList.innerHTML, /initializing/);
 
     await app.refreshVisibleRegionsWithFeedback(state, elements);
 
     assert.equal(state.selectedActorId, 'act-market-late');
     assert.equal(state.rosterPendingActorId, '');
     assert.match(elements.actorsList.innerHTML, /act-market-late/);
-    assert.doesNotMatch(elements.actorsList.innerHTML, /confirming/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /initializing/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('clear lifecycle operation polls to terminal result and refreshes selected actor', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-clear-demo/clear') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-clear-demo',
+          action: 'clear',
+          status: 'running',
+          label: 'Clearing thread for act-clear-demo',
+          target: { actor_id: 'act-clear-demo', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-clear-demo') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-clear-demo',
+          action: 'clear',
+          status: 'succeeded',
+          label: 'Clearing thread for act-clear-demo',
+          target: { actor_id: 'act-clear-demo', role: 'market' },
+          result: {
+            ok: true,
+            previous_thread_id: 'thread-old',
+            thread_id: 'thread-new',
+            instance: {
+              actor_id: 'act-clear-demo',
+              status: 'active',
+              app_server_health: 'healthy',
+              thread_id: 'thread-new',
+              thread: { status: 'idle' },
+            },
+          },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors/act-clear-demo/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-clear-demo', role: 'market' },
+          runtime: {
+            status: 'active',
+            app_server_health: 'healthy',
+            thread_id: 'thread-new',
+            thread_status: 'idle',
+          },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-clear-demo', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-clear-demo', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-new' } },
+        ],
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-clear-demo', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-old' } },
+    ];
+    state.selectedActorId = 'act-clear-demo';
+    state.actorConsole = {
+      actor: { actor_id: 'act-clear-demo', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-old', thread_status: 'idle' },
+    };
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.runLifecycleAction(state, elements, 'clear');
+
+    assert.match(elements.actorsList.innerHTML, /clearing/);
+    assert.equal(elements.clearButton.textContent, 'Clearing...');
+    assert.match(elements.lifecycleOperationStatus.textContent, /Clearing thread for act-clear-demo/);
+
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.deepEqual(state.lifecycleOperations, {});
+    assert.equal(app.selectedActorRuntime(state).thread_id, 'thread-new');
+    assert.match(elements.messageBanner.textContent, /completed/);
+    assert.match(elements.messageBanner.textContent, /thread-new/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /clearing/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('delete lifecycle operation removes actor after terminal operation result', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-delete-demo') {
+      assert.equal(options && options.method, 'DELETE');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-demo',
+          action: 'delete',
+          status: 'running',
+          label: 'Deleting act-delete-demo',
+          target: { actor_id: 'act-delete-demo', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-delete-demo') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-demo',
+          action: 'delete',
+          status: 'succeeded',
+          label: 'Deleting act-delete-demo',
+          target: { actor_id: 'act-delete-demo', role: 'market' },
+          result: { ok: true, actor_id: 'act-delete-demo' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-other-demo', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+        ],
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-delete-demo', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-other-demo', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+    ];
+    state.selectedActorId = 'act-delete-demo';
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.runLifecycleAction(state, elements, 'delete');
+
+    assert.match(elements.actorsList.innerHTML, /deleting/);
+    assert.equal(elements.deleteButton.textContent, 'Deleting...');
+    assert.match(elements.lifecycleOperationStatus.textContent, /Deleting act-delete-demo/);
+
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.deepEqual(state.lifecycleOperations, {});
+    assert.equal(state.selectedActorId, '');
+    assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-other-demo']);
+    assert.match(elements.messageBanner.textContent, /Deleting act-delete-demo completed/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /act-delete-demo/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stop lifecycle operation applies terminal instance before removing pending badge', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-stop-demo/stop') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-stop-demo',
+          action: 'stop',
+          status: 'running',
+          label: 'Stopping act-stop-demo',
+          target: { actor_id: 'act-stop-demo', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-stop-demo') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-stop-demo',
+          action: 'stop',
+          status: 'succeeded',
+          label: 'Stopping act-stop-demo',
+          target: { actor_id: 'act-stop-demo', role: 'market' },
+          result: {
+            ok: true,
+            instance: {
+              actor_id: 'act-stop-demo',
+              role: 'market',
+              status: 'inactive',
+              app_server_health: 'unhealthy',
+              thread_id: 'thread-stop',
+              thread: { status: 'idle' },
+            },
+          },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors/act-stop-demo/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-stop-demo', role: 'market' },
+          runtime: {
+            status: 'inactive',
+            app_server_health: 'unhealthy',
+            thread_id: 'thread-stop',
+            thread_status: 'idle',
+          },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-stop-demo', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-stop-demo', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy', thread_id: 'thread-stop' } },
+        ],
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    const actorListWrites = [];
+    let actorsHtml = '';
+    Object.defineProperty(elements.actorsList, 'innerHTML', {
+      get() {
+        return actorsHtml;
+      },
+      set(value) {
+        actorsHtml = value;
+        actorListWrites.push(value);
+      },
+    });
+    state.actors = [
+      { actor_id: 'act-stop-demo', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-stop' } },
+    ];
+    state.selectedActorId = 'act-stop-demo';
+    state.actorConsole = {
+      actor: { actor_id: 'act-stop-demo', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-stop', thread_status: 'idle' },
+    };
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.runLifecycleAction(state, elements, 'stop');
+    await app.pollLifecycleOperations(state, elements);
+
+    const stoppingIndex = actorListWrites.findIndex((html) => html.indexOf('stopping') >= 0);
+    const staleActiveAfterStopping = actorListWrites.slice(stoppingIndex + 1).some((html) => (
+      html.indexOf('>active<') >= 0
+      && html.indexOf('>healthy<') >= 0
+      && html.indexOf('stopping') < 0
+    ));
+    assert.notEqual(stoppingIndex, -1);
+    assert.equal(staleActiveAfterStopping, false);
+    assert.equal(app.selectedActorRuntime(state).status, 'inactive');
+    assert.equal(app.selectedActorRuntime(state).app_server_health, 'unhealthy');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('failed clear lifecycle operation removes pending state and re-enables controls', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-clear-demo/clear') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-clear-failed',
+          action: 'clear',
+          status: 'running',
+          label: 'Clearing thread for act-clear-demo',
+          target: { actor_id: 'act-clear-demo', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-clear-failed') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-clear-failed',
+          action: 'clear',
+          status: 'failed',
+          label: 'Clearing thread for act-clear-demo',
+          target: { actor_id: 'act-clear-demo', role: 'market' },
+          error: { code: 'COMMAND_FAILED', message: 'Daemon start failed' },
+        }),
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-clear-demo', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread: { status: 'idle' } } },
+    ];
+    state.selectedActorId = 'act-clear-demo';
+    state.actorConsole = {
+      actor: { actor_id: 'act-clear-demo', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+    };
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.runLifecycleAction(state, elements, 'clear');
+
+    assert.match(elements.actorsList.innerHTML, /clearing/);
+    assert.equal(elements.clearButton.disabled, true);
+
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.deepEqual(state.lifecycleOperations, {});
+    assert.match(elements.messageBanner.textContent, /Daemon start failed/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /clearing/);
+    assert.equal(elements.clearButton.disabled, false);
+    assert.equal(elements.stopButton.disabled, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1629,6 +2218,54 @@ test('rapid actor switching keeps stale conversation from overwriting latest sel
   }
 });
 
+test('stale selected actor console refresh cannot overwrite a newer lifecycle selection', async () => {
+  const originalFetch = globalThis.fetch;
+  const staleConsole = deferred();
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-design-old/console') {
+      return staleConsole.promise;
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-design-old', role: 'design', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-pm-new', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-design-old';
+    state.actorConsole = {
+      actor: { actor_id: 'act-design-old', role: 'design' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+    };
+
+    const refresh = app.refreshSelectedActorConsoleAndRender(state, elements);
+    refresh.catch(function () {});
+    state.selectedActorId = 'act-pm-new';
+    state.actorConsole = null;
+    app.renderActorRowsHtml(state);
+
+    staleConsole.resolve(okResponse({
+      console: {
+        actor: { actor_id: 'act-design-old', role: 'design' },
+        runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+        task_sys: { active_tasks: [] },
+        tracks: { items: [] },
+        im: { target: { identity_id: 'act-design-old', role_id: 'design' } },
+      },
+    }));
+    await refresh;
+
+    assert.equal(state.selectedActorId, 'act-pm-new');
+    assert.equal(state.actorConsole, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('selected actor runtime drives existing lifecycle controls', () => {
   const state = app.createState();
   app.applyActorConsolePayload(state, {
@@ -1650,7 +2287,7 @@ test('selected actor runtime drives existing lifecycle controls', () => {
     app.computeInstanceActionState(app.selectedActorRuntime(state), {
       draftText: 'ping',
       sendPending: false,
-      lifecyclePendingAction: '',
+      lifecycleOperation: null,
     }),
     {
       canSend: true,
@@ -1668,7 +2305,7 @@ test('action state explains why clear is disabled', () => {
     app.describeInstanceActionState(null, {
       draftText: '',
       sendPending: false,
-      lifecyclePendingAction: '',
+      lifecycleOperation: null,
     }).clearReason,
     'Select an actor.'
   );
@@ -1682,7 +2319,7 @@ test('action state explains why clear is disabled', () => {
       {
         draftText: '',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ).clearReason,
     'Thread running.'
@@ -1697,11 +2334,131 @@ test('action state explains why clear is disabled', () => {
       {
         draftText: '',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ).clearReason,
     ''
   );
+});
+
+test('lifecycle operation disables conflicting actor actions without disabling send', () => {
+  assert.deepEqual(
+    app.computeInstanceActionState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread: { status: 'idle' },
+      },
+      {
+        draftText: 'keep typing',
+        sendPending: false,
+        lifecycleOperation: lifecycleOperation({
+          action: 'clear',
+          status: 'running',
+          target: { actor_id: 'act-market-demo', role: 'market' },
+        }),
+      }
+    ),
+    {
+      canSend: true,
+      canInterrupt: false,
+      canStop: false,
+      canDelete: false,
+      canClear: false,
+      canResume: false,
+    }
+  );
+});
+
+test('queued lifecycle operation protects selected actor controls without blocking send', () => {
+  const actionState = app.describeInstanceActionState(
+    {
+      status: 'active',
+      app_server_health: 'healthy',
+      thread: { status: 'idle' },
+    },
+    {
+      draftText: 'keep typing',
+      sendPending: false,
+      lifecycleOperation: lifecycleOperation({
+        action: 'stop',
+        status: 'queued',
+        label: 'Stopping act-market-demo',
+        detail: 'Waiting for lifecycle queue.',
+        target: { actor_id: 'act-market-demo', role: 'market' },
+      }),
+    }
+  );
+
+  assert.equal(actionState.canSend, true);
+  assert.equal(actionState.canStop, false);
+  assert.equal(actionState.canClear, false);
+  assert.equal(actionState.canResume, false);
+  assert.match(actionState.lifecycleStatus, /Waiting for lifecycle queue/);
+  assert.equal(actionState.clearReason, 'Stopping act-market-demo.');
+  assert.equal(
+    actionState.lifecycleProtectionStatus,
+    'Stop queued. Other lifecycle actions are protected until Stop completes.'
+  );
+});
+
+test('action state describes active lifecycle operation with action-specific text', () => {
+  const actionState = app.describeInstanceActionState(
+    {
+      status: 'active',
+      app_server_health: 'healthy',
+      thread: { status: 'idle' },
+    },
+    {
+      draftText: '',
+      sendPending: false,
+      lifecycleOperation: lifecycleOperation({
+        action: 'clear',
+        status: 'running',
+        label: 'Clearing thread for act-market-demo',
+      }),
+    }
+  );
+
+  assert.equal(actionState.clearReason, 'Clearing thread for act-market-demo.');
+  assert.match(actionState.lifecycleStatus, /Clearing thread for act-market-demo/);
+  assert.equal(
+    actionState.lifecycleProtectionStatus,
+    'Clear in progress. Other lifecycle actions are protected until Clear completes.'
+  );
+});
+
+test('rendered actions describe lifecycle protection instead of a single disabled button', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.selectedActorId = 'act-market-demo';
+  state.actors = [
+    {
+      actor_id: 'act-market-demo',
+      role: 'market',
+      runtime: {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread: { status: 'idle' },
+      },
+    },
+  ];
+  app.recordLifecycleOperation(state, lifecycleOperation({
+    action: 'stop',
+    status: 'running',
+    label: 'Stopping act-market-demo',
+    target: { actor_id: 'act-market-demo', role: 'market' },
+  }));
+
+  app.renderComposer(state, elements);
+
+  assert.equal(
+    elements.actionAvailabilityStatus.textContent,
+    'Stop in progress. Other lifecycle actions are protected until Stop completes.'
+  );
+  assert.equal(elements.stopButton.textContent, 'Stopping...');
+  assert.equal(elements.clearButton.disabled, true);
+  assert.equal(elements.resumeButton.disabled, true);
 });
 
 test('selected actor console refresh is limited to visible actor workspace', () => {
@@ -1766,7 +2523,7 @@ test('no selection disables all instance actions', () => {
     app.computeInstanceActionState(null, {
       draftText: 'Advance the brief',
       sendPending: false,
-      lifecyclePendingAction: '',
+      lifecycleOperation: null,
     }),
     {
       canSend: false,
@@ -1790,7 +2547,7 @@ test('active healthy instance allows send, stop, and clear, but not delete', () 
       {
         draftText: 'Advance the brief',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ),
     {
@@ -1815,7 +2572,7 @@ test('active in-progress instance enables interrupt and still allows steering in
       {
         draftText: 'Refine the plan',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ),
     {
@@ -1840,7 +2597,7 @@ test('active app-server thread enables interrupt and still allows steering input
       {
         draftText: 'Refine the plan',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ),
     {
@@ -1865,7 +2622,7 @@ test('inactive instance allows resume and delete only', () => {
       {
         draftText: 'Advance the brief',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ),
     {
@@ -1890,7 +2647,7 @@ test('send pending disables only send while preserving independent actor control
       {
         draftText: 'Advance the brief',
         sendPending: true,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ),
     {
@@ -1904,7 +2661,7 @@ test('send pending disables only send while preserving independent actor control
   );
 });
 
-test('lifecycle pending disables lifecycle buttons without disabling send', () => {
+test('active lifecycle operation disables lifecycle buttons without disabling send', () => {
   assert.deepEqual(
     app.computeInstanceActionState(
       {
@@ -1915,7 +2672,11 @@ test('lifecycle pending disables lifecycle buttons without disabling send', () =
       {
         draftText: 'keep typing',
         sendPending: false,
-        lifecyclePendingAction: 'clear',
+        lifecycleOperation: lifecycleOperation({
+          action: 'clear',
+          status: 'running',
+          target: { actor_id: 'act-market-demo', role: 'market' },
+        }),
       }
     ),
     {
@@ -1940,7 +2701,7 @@ test('active idle instance allows clear even without draft text', () => {
       {
         draftText: '',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ),
     {
@@ -1965,7 +2726,7 @@ test('active in-progress instance disables clear while allowing interrupt', () =
       {
         draftText: 'Steer',
         sendPending: false,
-        lifecyclePendingAction: '',
+        lifecycleOperation: null,
       }
     ),
     {
@@ -2427,4 +3188,22 @@ test('polling external-session-wide events acks off-selected actor message witho
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('active WebUI sources do not carry retired lifecycle feedback residue', () => {
+  const root = path.join(__dirname, '..');
+  const sources = [
+    path.join(root, 'tools', 'launcher', 'assets', 'web-management', 'app.js'),
+    path.join(root, 'tools', 'launcher', 'assets', 'web-management', 'index.html'),
+    path.join(root, 'tests', 'web_management_ui_contract.test.js'),
+  ].map((filePath) => fs.readFileSync(filePath, 'utf8')).join('\n');
+  const retiredMarkers = [
+    'lifecycle' + 'PendingAction',
+    'Action ' + 'completed.',
+    'clear ' + 'running',
+    'confirm' + 'ing',
+  ];
+  retiredMarkers.forEach((marker) => {
+    assert.equal(sources.includes(marker), false, 'retired lifecycle residue found: ' + marker);
+  });
 });

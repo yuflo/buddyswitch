@@ -10,15 +10,197 @@
   const ACTOR_CONSOLE_REFRESH_INTERVAL_MS = 3000;
 
   function computeCreateEnabled(options) {
-    return Boolean(options && options.selectedRole && !options.isCreating);
+    return Boolean(options && options.selectedRole);
+  }
+
+  function operationIsActive(operation) {
+    return Boolean(operation && (operation.status === 'queued' || operation.status === 'running'));
+  }
+
+  function operationIsTerminal(operation) {
+    return Boolean(operation && (operation.status === 'succeeded' || operation.status === 'failed'));
+  }
+
+  function lifecycleOperationList(state) {
+    if (!state || !state.lifecycleOperations || typeof state.lifecycleOperations !== 'object') {
+      return [];
+    }
+    return Object.keys(state.lifecycleOperations).map(function (operationId) {
+      return state.lifecycleOperations[operationId];
+    }).filter(Boolean);
+  }
+
+  function activeLifecycleOperationForActor(state, actorId) {
+    if (!actorId) {
+      return null;
+    }
+    return lifecycleOperationList(state).find(function (operation) {
+      const target = operation && operation.target ? operation.target : {};
+      return operationIsActive(operation) && target.actor_id === actorId;
+    }) || null;
+  }
+
+  function selectedLifecycleOperation(state) {
+    if (!state || !state.selectedLifecycleOperationId) {
+      return null;
+    }
+    const operation = state.lifecycleOperations
+      ? state.lifecycleOperations[state.selectedLifecycleOperationId]
+      : null;
+    return operationIsActive(operation) ? operation : null;
+  }
+
+  function recordLifecycleOperation(state, operation) {
+    if (!state || !operation || typeof operation.id !== 'string' || !operation.id) {
+      return null;
+    }
+    state.lifecycleOperations[operation.id] = operation;
+    return operation;
+  }
+
+  function forgetLifecycleOperation(state, operationOrId) {
+    if (!state || !state.lifecycleOperations) {
+      return;
+    }
+    const operationId = typeof operationOrId === 'string'
+      ? operationOrId
+      : operationOrId && operationOrId.id;
+    if (operationId) {
+      delete state.lifecycleOperations[operationId];
+    }
+  }
+
+  function lifecycleOperationActorId(operation) {
+    if (!operation) {
+      return '';
+    }
+    const result = operation.result && typeof operation.result === 'object' ? operation.result : {};
+    const target = operation.target && typeof operation.target === 'object' ? operation.target : {};
+    return (typeof result.actor_id === 'string' && result.actor_id)
+      || (result.instance && typeof result.instance.actor_id === 'string' && result.instance.actor_id)
+      || (typeof target.actor_id === 'string' && target.actor_id)
+      || '';
+  }
+
+  function lifecycleOperationRoleId(operation) {
+    const target = operation && operation.target && typeof operation.target === 'object' ? operation.target : {};
+    return typeof target.role === 'string' ? target.role : '';
+  }
+
+  function lifecycleActionVerb(action) {
+    if (action === 'start') {
+      return 'Starting';
+    }
+    if (action === 'stop') {
+      return 'Stopping';
+    }
+    if (action === 'resume') {
+      return 'Resuming';
+    }
+    if (action === 'clear') {
+      return 'Clearing';
+    }
+    if (action === 'delete') {
+      return 'Deleting';
+    }
+    return 'Working';
+  }
+
+  function lifecycleActionName(action) {
+    if (action === 'start') {
+      return 'Start';
+    }
+    if (action === 'stop') {
+      return 'Stop';
+    }
+    if (action === 'resume') {
+      return 'Resume';
+    }
+    if (action === 'clear') {
+      return 'Clear';
+    }
+    if (action === 'delete') {
+      return 'Delete';
+    }
+    return 'Lifecycle operation';
+  }
+
+  function lifecycleOperationBadgeText(operation) {
+    if (operation && operation.status === 'queued') {
+      return 'queued';
+    }
+    const action = operation && operation.action;
+    if (action === 'start') {
+      return 'starting';
+    }
+    if (action === 'stop') {
+      return 'stopping';
+    }
+    if (action === 'resume') {
+      return 'resuming';
+    }
+    if (action === 'clear') {
+      return 'clearing';
+    }
+    if (action === 'delete') {
+      return 'deleting';
+    }
+    return 'initializing';
+  }
+
+  function lifecycleOperationLabel(operation) {
+    if (!operation) {
+      return '';
+    }
+    if (typeof operation.label === 'string' && operation.label) {
+      return operation.label;
+    }
+    const actorId = lifecycleOperationActorId(operation);
+    const roleId = lifecycleOperationRoleId(operation);
+    const suffix = actorId || roleId;
+    return lifecycleActionVerb(operation.action) + (suffix ? ' ' + suffix : '');
+  }
+
+  function lifecycleOperationStatusText(operation) {
+    if (!operation) {
+      return '';
+    }
+    const label = lifecycleOperationLabel(operation);
+    if (operation.status === 'failed') {
+      const message = operation.error && operation.error.message ? operation.error.message : 'Operation failed.';
+      return label ? label + ' failed: ' + message : message;
+    }
+    if (operation.status === 'succeeded') {
+      const result = operation.result && typeof operation.result === 'object' ? operation.result : {};
+      const threadId = operation.action === 'clear' && typeof result.thread_id === 'string' && result.thread_id
+        ? result.thread_id
+        : '';
+      const completed = label ? label + ' completed.' : 'Lifecycle operation completed.';
+      return threadId ? completed + ' Thread ' + threadId + '.' : completed;
+    }
+    const detail = typeof operation.detail === 'string' && operation.detail ? operation.detail : 'Operation is running.';
+    return label ? label + '. ' + detail : detail;
+  }
+
+  function lifecycleProtectionStatusText(operation) {
+    if (!operationIsActive(operation)) {
+      return '';
+    }
+    const name = lifecycleActionName(operation.action);
+    const phase = operation.status === 'queued' ? 'queued' : 'in progress';
+    if (operation.action === 'start') {
+      return name + ' ' + phase + '. Actor actions are protected until ' + name + ' completes.';
+    }
+    return name + ' ' + phase + '. Other lifecycle actions are protected until ' + name + ' completes.';
   }
 
   function computeInstanceActionState(instance, options) {
     const draftText = options && typeof options.draftText === 'string' ? options.draftText.trim() : '';
     const sendPending = Boolean(options && options.sendPending);
-    const lifecyclePendingAction = options && typeof options.lifecyclePendingAction === 'string'
-      ? options.lifecyclePendingAction
-      : '';
+    const lifecycleOperation = options && operationIsActive(options.lifecycleOperation)
+      ? options.lifecycleOperation
+      : null;
+    const interruptPending = Boolean(options && options.interruptPending);
     if (!instance) {
       return {
         canSend: false,
@@ -39,11 +221,11 @@
     const isActive = status === 'active';
     const isInactive = status === 'inactive';
     const threadBusy = threadStatus === 'active' || threadStatus === 'in_progress';
-    const lifecyclePending = Boolean(lifecyclePendingAction);
+    const lifecyclePending = Boolean(lifecycleOperation);
 
     return {
       canSend: isActive && appServerHealthy && draftText.length > 0 && !sendPending,
-      canInterrupt: isActive && appServerHealthy && threadBusy && !lifecyclePending,
+      canInterrupt: isActive && appServerHealthy && threadBusy && !lifecyclePending && !interruptPending,
       canStop: isActive && !lifecyclePending,
       canDelete: isInactive && !lifecyclePending,
       canClear: isActive && appServerHealthy && !threadBusy && !lifecyclePending,
@@ -53,9 +235,9 @@
 
   function describeInstanceActionState(instance, options) {
     const state = computeInstanceActionState(instance, options);
-    const lifecyclePendingAction = options && typeof options.lifecyclePendingAction === 'string'
-      ? options.lifecyclePendingAction
-      : '';
+    const lifecycleOperation = options && operationIsActive(options.lifecycleOperation)
+      ? options.lifecycleOperation
+      : null;
     const status = instance && instance.status ? instance.status : '';
     const threadStatus = instance && instance.thread && typeof instance.thread.status === 'string'
       ? instance.thread.status
@@ -68,8 +250,8 @@
     let clearReason = '';
     if (!instance) {
       clearReason = 'Select an actor.';
-    } else if (lifecyclePendingAction) {
-      clearReason = lifecyclePendingAction + ' running.';
+    } else if (lifecycleOperation) {
+      clearReason = lifecycleOperationLabel(lifecycleOperation) + '.';
     } else if (status !== 'active') {
       clearReason = 'Resume actor first.';
     } else if (!appServerHealthy) {
@@ -80,6 +262,8 @@
 
     return Object.assign({}, state, {
       clearReason: state.canClear ? '' : clearReason,
+      lifecycleStatus: lifecycleOperation ? lifecycleOperationStatusText(lifecycleOperation) : '',
+      lifecycleProtectionStatus: lifecycleOperation ? lifecycleProtectionStatusText(lifecycleOperation) : '',
     });
   }
 
@@ -149,10 +333,15 @@
       draftText: '',
       healthOk: false,
       message: '',
-      createPending: false,
       sendPending: false,
       refreshPending: false,
-      lifecyclePendingAction: '',
+      lifecycleOperations: {},
+      selectedLifecycleOperationId: '',
+      lifecycleOperationPreviousActorIds: {},
+      lifecycleOperationPollTimer: null,
+      lifecycleOperationPollInFlight: false,
+      lifecycleOperationPollDelaysMs: null,
+      interruptPending: false,
       openTuiPending: false,
       appBasicsLoading: false,
       appBasicsError: '',
@@ -163,6 +352,7 @@
       rosterReconcileAttempt: 0,
       rosterReconcileTimer: null,
       rosterReconcileDelaysMs: null,
+      suppressNextRosterAutoSelection: false,
       tracksListLoading: false,
       tracksError: '',
       selectedTrackDetailLoading: false,
@@ -350,7 +540,7 @@
       role: roleId || '',
       pending: true,
       runtime: {
-        status: 'confirming',
+        status: 'initializing',
         app_server_health: '',
       },
     };
@@ -405,9 +595,13 @@
       return actor.actor_id === state.selectedActorId;
     });
     if (!stillPresent) {
-      state.selectedActorId = state.actors.length ? state.actors[0].actor_id : '';
+      const protectAutoSelection = Boolean(selectedLifecycleOperation(state) || state.suppressNextRosterAutoSelection);
+      state.selectedActorId = protectAutoSelection ? '' : (state.actors.length ? state.actors[0].actor_id : '');
+      state.suppressNextRosterAutoSelection = false;
       state.actorConsole = null;
       syncActorModelConfigFromConsole(state, { force: true });
+    } else {
+      state.suppressNextRosterAutoSelection = false;
     }
     if (state.selectedActorId !== previousActorId) {
       clearOpenTuiFeedback(state);
@@ -580,6 +774,83 @@
     return state.actors.find(function (actor) {
       return actor.actor_id === actorId;
     }) || null;
+  }
+
+  function runtimeRowFromLifecycleInstance(instance, fallbackActorId, fallbackRole) {
+    if (!instance || typeof instance !== 'object') {
+      return null;
+    }
+    const actorId = typeof instance.actor_id === 'string' && instance.actor_id
+      ? instance.actor_id
+      : fallbackActorId;
+    if (!actorId) {
+      return null;
+    }
+    const thread = instance.thread && typeof instance.thread === 'object' ? instance.thread : {};
+    const appServer = instance.app_server && typeof instance.app_server === 'object' ? instance.app_server : {};
+    const threadStatus = typeof instance.thread_status === 'string'
+      ? instance.thread_status
+      : (typeof thread.status === 'string' ? thread.status : '');
+    const appServerHealth = typeof instance.app_server_health === 'string'
+      ? instance.app_server_health
+      : (typeof appServer.healthy === 'boolean' ? (appServer.healthy ? 'healthy' : 'unhealthy') : '');
+    const role = typeof instance.role === 'string' && instance.role ? instance.role : fallbackRole;
+    const runtime = {
+      status: instance.status,
+      app_server_health: appServerHealth,
+      thread_id: instance.thread_id,
+      thread_status: threadStatus,
+      browser_port: instance.browser_port,
+      updated_at: instance.updated_at,
+      workspace_dir: instance.workspace_dir,
+    };
+    return {
+      actor_id: actorId,
+      role,
+      status: instance.status,
+      app_server_health: appServerHealth,
+      thread_id: instance.thread_id,
+      browser_port: instance.browser_port,
+      updated_at: instance.updated_at,
+      workspace_dir: instance.workspace_dir,
+      runtime,
+    };
+  }
+
+  function applyLifecycleOperationInstanceResult(state, operation) {
+    const result = operation && operation.result && typeof operation.result === 'object'
+      ? operation.result
+      : {};
+    const instance = result.instance && typeof result.instance === 'object' ? result.instance : null;
+    const actorId = lifecycleOperationActorId(operation);
+    const existing = actorById(state, actorId);
+    const fallbackRole = (existing && existing.role) || lifecycleOperationRoleId(operation);
+    const actorRow = runtimeRowFromLifecycleInstance(instance, actorId, fallbackRole);
+    if (!actorRow) {
+      return;
+    }
+    const replaced = state.actors.some(function (actor, index) {
+      if (actor.actor_id !== actorRow.actor_id) {
+        return false;
+      }
+      state.actors[index] = Object.assign({}, actor, actorRow, {
+        role: actorRow.role || actor.role,
+        runtime: Object.assign({}, actor.runtime || {}, actorRow.runtime),
+      });
+      return true;
+    });
+    if (!replaced) {
+      state.actors = state.actors.concat([actorRow]);
+    }
+    if (state.selectedActorId === actorRow.actor_id && state.actorConsole) {
+      state.actorConsole = Object.assign({}, state.actorConsole, {
+        actor: Object.assign({}, state.actorConsole.actor || {}, {
+          actor_id: actorRow.actor_id,
+          role: actorRow.role || (state.actorConsole.actor && state.actorConsole.actor.role),
+        }),
+        runtime: Object.assign({}, state.actorConsole.runtime || {}, actorRow.runtime),
+      });
+    }
   }
 
   function selectedActorRuntime(state) {
@@ -875,13 +1146,35 @@
   }
 
   function renderActorRowsHtml(state) {
-    if (!state.actors.length) {
+    const startOperationRows = lifecycleOperationList(state).filter(function (operation) {
+      return operationIsActive(operation) && operation.action === 'start';
+    }).map(function (operation) {
+      const roleId = lifecycleOperationRoleId(operation);
+      const roleLabel = formatValue(roleLabelById(state, roleId));
+      const initials = actorInitials(roleId, '');
+      const label = lifecycleOperationLabel(operation) || ('Starting ' + roleLabel);
+      const selected = operation.id === state.selectedLifecycleOperationId;
+      return [
+        '<button class="person-row selectable-row actor-row is-pending is-operation' + (selected ? ' is-selected' : '') + '" type="button" data-operation-id="' + escapeHtml(operation.id) + '">',
+        '<span class="avatar teal" aria-hidden="true">' + escapeHtml(initials) + '</span>',
+        '<span>',
+        '<strong>' + escapeHtml(label) + '</strong>',
+        '<span class="micro mono">' + escapeHtml(operation.id) + '</span>',
+        '</span>',
+        '<span class="row-status">',
+        badge(lifecycleOperationBadgeText(operation), 'busy'),
+        '</span>',
+        '</button>',
+      ].join('');
+    });
+    if (!state.actors.length && !startOperationRows.length) {
       return renderEmpty('No actors available.');
     }
-    return state.actors.map(function (actor) {
+    const actorRows = state.actors.map(function (actor) {
       const selected = actor.actor_id === state.selectedActorId;
       const loading = actor.actor_id === state.actorSelectionPendingId;
-      const pending = Boolean(actor.pending || (state.rosterPendingActorId && actor.actor_id === state.rosterPendingActorId));
+      const lifecycleOperation = activeLifecycleOperationForActor(state, actor.actor_id);
+      const pending = Boolean(actor.pending || lifecycleOperation || (state.rosterPendingActorId && actor.actor_id === state.rosterPendingActorId));
       const runtime = actor.runtime || actor;
       const roleLabel = formatValue(roleLabelById(state, actor.role));
       const initials = actorInitials(actor.role, actor.actor_id);
@@ -894,13 +1187,14 @@
         '<span class="micro mono">' + escapeHtml(formatValue(actor.actor_id)) + '</span>',
         '</span>',
         '<span class="row-status">',
-        pending ? badge('confirming', 'busy') : badge(runtime.status),
+        lifecycleOperation ? badge(lifecycleOperationBadgeText(lifecycleOperation), 'busy') : (pending ? badge('initializing', 'busy') : badge(runtime.status)),
         pending ? '' : badge(runtime.app_server_health),
         pending ? '' : '<span class="' + escapeHtml(actorDotClass(runtime)) + '" aria-hidden="true"></span>',
         '</span>',
         '</button>',
       ].join('');
-    }).join('');
+    });
+    return startOperationRows.concat(actorRows).join('');
   }
 
   function renderTrackRowsHtml(state) {
@@ -1268,8 +1562,9 @@
     elements.tracksNavButton.classList.toggle('is-active', state.selectedSection === 'tracks');
     elements.createButton.disabled = !computeCreateEnabled({
       selectedRole: state.selectedRole,
-      isCreating: state.createPending,
     });
+    elements.createButton.textContent = 'Start';
+    elements.createButton.classList.toggle('is-pending', false);
   }
 
   function roleSelectExpectedOptions(state) {
@@ -1411,20 +1706,38 @@
   function renderComposer(state, elements) {
     elements.instructionInput.value = state.draftText;
     const runtime = selectedActorRuntime(state);
+    const lifecycleOperation = selectedLifecycleOperation(state)
+      || activeLifecycleOperationForActor(state, state.selectedActorId);
     const actionState = describeInstanceActionState(runtime, {
       draftText: state.draftText,
       sendPending: state.sendPending,
-      lifecyclePendingAction: state.lifecyclePendingAction,
+      lifecycleOperation,
+      interruptPending: state.interruptPending,
     });
     elements.sendButton.disabled = !actionState.canSend;
     elements.sendButton.textContent = state.sendPending ? 'Sending...' : 'Send';
     elements.sendButton.classList.toggle('is-pending', state.sendPending);
     elements.interruptButton.disabled = !actionState.canInterrupt;
+    elements.interruptButton.textContent = state.interruptPending ? 'Interrupting...' : 'Interrupt';
+    elements.interruptButton.classList.toggle('is-pending', state.interruptPending);
     elements.stopButton.disabled = !actionState.canStop;
+    elements.stopButton.textContent = lifecycleOperation && lifecycleOperation.action === 'stop' ? 'Stopping...' : 'Stop';
+    elements.stopButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'stop'));
     elements.deleteButton.disabled = !actionState.canDelete;
+    elements.deleteButton.textContent = lifecycleOperation && lifecycleOperation.action === 'delete' ? 'Deleting...' : 'Delete';
+    elements.deleteButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'delete'));
     elements.clearButton.disabled = !actionState.canClear;
+    elements.clearButton.textContent = lifecycleOperation && lifecycleOperation.action === 'clear' ? 'Clearing...' : 'Clear';
+    elements.clearButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'clear'));
     elements.resumeButton.disabled = !actionState.canResume;
-    elements.actionAvailabilityStatus.textContent = !actionState.canClear && actionState.clearReason
+    elements.resumeButton.textContent = lifecycleOperation && lifecycleOperation.action === 'resume' ? 'Resuming...' : 'Resume';
+    elements.resumeButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'resume'));
+    if (elements.lifecycleOperationStatus) {
+      elements.lifecycleOperationStatus.textContent = actionState.lifecycleStatus;
+    }
+    elements.actionAvailabilityStatus.textContent = actionState.lifecycleProtectionStatus
+      ? actionState.lifecycleProtectionStatus
+      : !actionState.canClear && actionState.clearReason
       ? 'Clear disabled: ' + actionState.clearReason
       : '';
   }
@@ -1623,13 +1936,23 @@
   }
 
   async function refreshSelectedActorConsole(state) {
-    if (!state.selectedActorId) {
+    const requestedActorId = state.selectedActorId;
+    if (!requestedActorId) {
       state.actorConsole = null;
       syncActorModelConfigFromConsole(state, { force: true });
       clearImConversation(state, '');
       return;
     }
-    const payload = await fetchJson(buildActorConsoleUrl(state.selectedActorId));
+    const payload = await fetchJson(buildActorConsoleUrl(requestedActorId));
+    const consoleActorId = payload
+      && payload.console
+      && payload.console.actor
+      && typeof payload.console.actor.actor_id === 'string'
+      ? payload.console.actor.actor_id
+      : '';
+    if (state.selectedActorId !== requestedActorId || (consoleActorId && consoleActorId !== requestedActorId)) {
+      return;
+    }
     applyActorConsolePayload(state, payload);
   }
 
@@ -1756,6 +2079,7 @@
     if (!actorId || actorId === state.selectedActorId) {
       return;
     }
+    state.selectedLifecycleOperationId = '';
     if (state.actorConsoleAbortController) {
       state.actorConsoleAbortController.abort();
     }
@@ -1815,6 +2139,40 @@
     }
   }
 
+  function selectLifecycleOperationContext(state, elements, operationId) {
+    const operation = state.lifecycleOperations ? state.lifecycleOperations[operationId] : null;
+    if (!operationIsActive(operation)) {
+      return;
+    }
+    if (state.actorConsoleAbortController) {
+      state.actorConsoleAbortController.abort();
+      state.actorConsoleAbortController = null;
+    }
+    if (state.actorConversationAbortController) {
+      state.actorConversationAbortController.abort();
+      state.actorConversationAbortController = null;
+    }
+    state.actorSelectionRequestId += 1;
+    state.selectedLifecycleOperationId = operationId;
+    state.selectedActorId = '';
+    state.actorConsole = null;
+    syncActorModelConfigFromConsole(state, { force: true });
+    state.actorSelectionPendingId = '';
+    state.actorCardLoading = false;
+    state.actorCardError = '';
+    state.conversationLoading = false;
+    state.conversationError = '';
+    state.message = lifecycleOperationStatusText(operation);
+    clearImConversation(state, '');
+    clearOpenTuiFeedback(state);
+    renderShell(state, elements);
+    renderActorList(state, elements);
+    renderActorDetail(state, elements);
+    renderComposer(state, elements);
+    renderOpenTui(state, elements);
+    renderImConversation(state, elements);
+  }
+
   async function selectTrack(state, elements, trackId) {
     if (!trackId || trackId === state.selectedTrackId || state.trackSelectionPendingId) {
       return;
@@ -1836,60 +2194,66 @@
   }
 
   async function runLifecycleAction(state, elements, action) {
-    if (!action || state.lifecyclePendingAction) {
+    if (!action || ['stop', 'resume', 'clear', 'delete'].indexOf(action) < 0 || !state.selectedActorId) {
       return;
     }
-    state.lifecyclePendingAction = action;
+    if (activeLifecycleOperationForActor(state, state.selectedActorId)) {
+      return;
+    }
     state.message = '';
     renderComposer(state, elements);
     try {
-      const payload = await fetchJson(actorActionUrl(state, action), {
-        method: 'POST',
-      });
-      state.message = payload && payload.turn_id
-        ? 'Action completed for ' + state.selectedActorId + ' (' + payload.turn_id + ').'
-        : 'Action completed.';
+      const payload = action === 'delete'
+        ? await fetchJson('/api/instances/' + encodeURIComponent(state.selectedActorId), { method: 'DELETE' })
+        : await fetchJson(actorActionUrl(state, action), { method: 'POST' });
+      const operation = payload && payload.operation ? payload.operation : null;
+      if (!operation || typeof operation.id !== 'string' || operation.action !== action) {
+        throw new Error('Lifecycle response did not include operation.');
+      }
+      recordLifecycleOperation(state, operation);
+      state.message = lifecycleOperationStatusText(operation);
       clearOpenTuiFeedback(state);
-      await refreshSelectedActorConsole(state);
-      renderActorDetail(state, elements);
+      renderShell(state, elements);
+      renderActorList(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
+      if (operationIsTerminal(operation)) {
+        await reconcileLifecycleOperation(state, elements, operation);
+      } else {
+        scheduleLifecycleOperationPolling(state, elements);
+      }
     } catch (error) {
       state.message = error.message;
-    } finally {
-      state.lifecyclePendingAction = '';
       renderShell(state, elements);
       renderComposer(state, elements);
       renderOpenTui(state, elements);
     }
   }
 
-  async function deleteSelectedActor(state, elements) {
-    if (!state.selectedActorId || state.lifecyclePendingAction) {
+  async function runInterruptAction(state, elements) {
+    if (!state.selectedActorId || state.interruptPending || activeLifecycleOperationForActor(state, state.selectedActorId)) {
       return;
     }
-    const actorId = state.selectedActorId;
-    state.lifecyclePendingAction = 'delete';
+    state.interruptPending = true;
     state.message = '';
     renderComposer(state, elements);
     try {
-      const payload = await fetchJson('/api/instances/' + encodeURIComponent(actorId), {
-        method: 'DELETE',
+      const payload = await fetchJson(actorActionUrl(state, 'interrupt'), {
+        method: 'POST',
       });
-      state.message = payload && payload.ok ? 'Deleted ' + actorId + '.' : 'Deleted actor.';
-      state.selectedActorId = '';
-      state.actorConsole = null;
-      clearImConversation(state, '');
+      state.message = payload && payload.turn_id
+        ? 'Interrupted ' + state.selectedActorId + ' (' + payload.turn_id + ').'
+        : 'Interrupt sent.';
       clearOpenTuiFeedback(state);
-      await refreshRoster(state, elements);
+      await refreshSelectedActorConsole(state);
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
-      renderOpenTui(state, elements);
-      renderImConversation(state, elements);
     } catch (error) {
       state.message = error.message;
-      renderShell(state, elements);
     } finally {
-      state.lifecyclePendingAction = '';
-      renderVisibleRegions(state, elements);
+      state.interruptPending = false;
+      renderShell(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
     }
   }
 
@@ -1944,9 +2308,245 @@
     renderActorList(state, elements);
   }
 
+  function lifecycleOperationPollDelays(state) {
+    return Array.isArray(state.lifecycleOperationPollDelaysMs)
+      ? state.lifecycleOperationPollDelaysMs
+      : [150, 300, 600, 1000, 1500, 2500];
+  }
+
+  function activeLifecycleOperations(state) {
+    return lifecycleOperationList(state).filter(operationIsActive);
+  }
+
+  function buildOperationUrl(operationId) {
+    return '/api/operations/' + encodeURIComponent(operationId || '');
+  }
+
+  function scheduleLifecycleOperationPolling(state, elements) {
+    if (!activeLifecycleOperations(state).length || state.lifecycleOperationPollTimer || state.lifecycleOperationPollInFlight) {
+      return;
+    }
+    const delays = lifecycleOperationPollDelays(state);
+    if (!delays.length) {
+      return;
+    }
+    const delay = Number.isFinite(delays[0]) && delays[0] >= 0 ? delays[0] : 150;
+    state.lifecycleOperationPollTimer = setTimeout(function () {
+      state.lifecycleOperationPollTimer = null;
+      pollLifecycleOperations(state, elements).catch(function (error) {
+        state.message = error.message;
+        renderShell(state, elements);
+        renderActorList(state, elements);
+        renderComposer(state, elements);
+        renderOpenTui(state, elements);
+        scheduleLifecycleOperationPolling(state, elements);
+      });
+    }, delay);
+  }
+
+  async function pollLifecycleOperations(state, elements) {
+    if (state.lifecycleOperationPollInFlight) {
+      return;
+    }
+    const operations = activeLifecycleOperations(state);
+    if (!operations.length) {
+      return;
+    }
+    state.lifecycleOperationPollInFlight = true;
+    try {
+      for (const operation of operations) {
+        const payload = await fetchJson(buildOperationUrl(operation.id));
+        const updatedOperation = payload && payload.operation ? payload.operation : null;
+        if (!updatedOperation || typeof updatedOperation.id !== 'string') {
+          throw new Error('Operation response did not include operation.');
+        }
+        recordLifecycleOperation(state, updatedOperation);
+        if (operationIsTerminal(updatedOperation)) {
+          await reconcileLifecycleOperation(state, elements, updatedOperation);
+        } else {
+          state.message = lifecycleOperationStatusText(updatedOperation);
+          renderShell(state, elements);
+          renderActorList(state, elements);
+          renderComposer(state, elements);
+          renderOpenTui(state, elements);
+        }
+      }
+    } finally {
+      state.lifecycleOperationPollInFlight = false;
+    }
+    scheduleLifecycleOperationPolling(state, elements);
+  }
+
+  function beginCreatedActorReconciliation(state, elements, actorId, roleId) {
+    if (state.actorConsoleAbortController) {
+      state.actorConsoleAbortController.abort();
+    }
+    if (state.actorConversationAbortController) {
+      state.actorConversationAbortController.abort();
+    }
+    state.actorSelectionRequestId += 1;
+    const requestId = state.actorSelectionRequestId;
+    state.selectedActorId = actorId;
+    state.selectedSection = 'actors';
+    state.rosterPendingActorId = actorId;
+    state.rosterReconcileActorId = actorId;
+    state.rosterReconcileAttempt = 0;
+    state.actorConsole = null;
+    syncActorModelConfigFromConsole(state, { force: true });
+    state.actorCardLoading = true;
+    state.actorCardError = '';
+    state.conversationLoading = true;
+    state.conversationError = '';
+    state.actorSelectionPendingId = actorId;
+    state.message = 'Started ' + actorId + '. Waiting for roster confirmation.';
+    upsertPendingActor(state, actorId, roleId);
+    clearImConversation(state, actorId);
+    clearOpenTuiFeedback(state);
+    renderShell(state, elements);
+    renderActorList(state, elements);
+    renderActorDetail(state, elements);
+    renderComposer(state, elements);
+    renderOpenTui(state, elements);
+    renderImConversation(state, elements);
+    const consoleAbortController = createAbortController();
+    const conversationAbortController = createAbortController();
+    state.actorConsoleAbortController = consoleAbortController;
+    state.actorConversationAbortController = conversationAbortController;
+    refreshActorCard(state, elements, actorId, requestId, consoleAbortController
+      ? { signal: consoleAbortController.signal }
+      : undefined).catch(function (error) {
+      if (!isAbortError(error)) {
+        state.message = error.message;
+        renderShell(state, elements);
+      }
+    });
+    refreshConversation(state, elements, actorId, actorId, requestId, conversationAbortController
+      ? { signal: conversationAbortController.signal }
+      : undefined).catch(function (error) {
+      if (!isAbortError(error)) {
+        state.conversationError = error.message;
+        renderImConversation(state, elements);
+      }
+    });
+    scheduleCreatedActorReconciliation(state, elements, actorId);
+  }
+
+  async function reconcileLifecycleOperation(state, elements, operation) {
+    if (!operation) {
+      return;
+    }
+    if (operation.status === 'failed') {
+      state.message = lifecycleOperationStatusText(operation);
+      if (state.selectedLifecycleOperationId === operation.id) {
+        state.selectedLifecycleOperationId = '';
+        const previousActorId = state.lifecycleOperationPreviousActorIds
+          ? state.lifecycleOperationPreviousActorIds[operation.id]
+          : '';
+        if (previousActorId && actorById(state, previousActorId)) {
+          state.selectedActorId = previousActorId;
+        }
+      }
+      if (state.lifecycleOperationPreviousActorIds) {
+        delete state.lifecycleOperationPreviousActorIds[operation.id];
+      }
+      forgetLifecycleOperation(state, operation);
+      renderShell(state, elements);
+      renderActorList(state, elements);
+      renderActorDetail(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
+      return;
+    }
+    if (operation.status !== 'succeeded') {
+      return;
+    }
+    if (operation.action === 'start') {
+      const actorId = lifecycleOperationActorId(operation);
+      if (!actorId) {
+        state.message = 'Start operation completed without actor id.';
+        forgetLifecycleOperation(state, operation);
+        renderShell(state, elements);
+        renderActorList(state, elements);
+        renderComposer(state, elements);
+        renderOpenTui(state, elements);
+        return;
+      }
+      const roleId = lifecycleOperationRoleId(operation) || state.selectedRole;
+      if (state.selectedLifecycleOperationId === operation.id) {
+        state.selectedLifecycleOperationId = '';
+      }
+      if (state.lifecycleOperationPreviousActorIds) {
+        delete state.lifecycleOperationPreviousActorIds[operation.id];
+      }
+      forgetLifecycleOperation(state, operation);
+      beginCreatedActorReconciliation(state, elements, actorId, roleId);
+      return;
+    }
+    const actorId = lifecycleOperationActorId(operation);
+    state.message = lifecycleOperationStatusText(operation);
+    if (operation.action === 'delete') {
+      if (state.selectedLifecycleOperationId === operation.id) {
+        state.selectedLifecycleOperationId = '';
+      }
+      if (state.lifecycleOperationPreviousActorIds) {
+        delete state.lifecycleOperationPreviousActorIds[operation.id];
+      }
+      forgetLifecycleOperation(state, operation);
+      state.actors = state.actors.filter(function (actor) {
+        return actor.actor_id !== actorId;
+      });
+      if (state.selectedActorId === actorId) {
+        state.selectedActorId = '';
+        state.actorConsole = null;
+        syncActorModelConfigFromConsole(state, { force: true });
+        clearImConversation(state, '');
+        clearOpenTuiFeedback(state);
+      }
+      state.suppressNextRosterAutoSelection = true;
+      renderShell(state, elements);
+      renderActorList(state, elements);
+      renderActorDetail(state, elements);
+      renderComposer(state, elements);
+      renderOpenTui(state, elements);
+      renderImConversation(state, elements);
+      try {
+        await refreshRoster(state, elements);
+        renderActorList(state, elements);
+      } catch (_error) {
+        return;
+      }
+      return;
+    }
+    applyLifecycleOperationInstanceResult(state, operation);
+    forgetLifecycleOperation(state, operation);
+    renderShell(state, elements);
+    renderActorList(state, elements);
+    renderComposer(state, elements);
+    renderOpenTui(state, elements);
+    if (actorId && state.selectedActorId === actorId) {
+      try {
+        await refreshSelectedActorConsole(state);
+        renderActorDetail(state, elements);
+        renderComposer(state, elements);
+        renderOpenTui(state, elements);
+      } catch (error) {
+        state.message = error.message;
+        renderShell(state, elements);
+      }
+    }
+    try {
+      await refreshRoster(state, elements);
+    } catch (_error) {
+      return;
+    }
+  }
+
   async function createInstance(state, elements) {
+    if (!state.selectedRole) {
+      return;
+    }
     const previousActorId = state.selectedActorId;
-    state.createPending = true;
+    state.message = '';
     renderShell(state, elements);
     try {
       const payload = await fetchJson('/api/instances', {
@@ -1954,66 +2554,24 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: state.selectedRole }),
       });
-      const actorId = payload && typeof payload.actor_id === 'string' ? payload.actor_id : '';
-      if (!actorId) {
-        throw new Error('Create response did not include actor id.');
+      const operation = payload && payload.operation ? payload.operation : null;
+      if (!operation || typeof operation.id !== 'string' || operation.action !== 'start') {
+        throw new Error('Start response did not include operation.');
       }
-      if (state.actorConsoleAbortController) {
-        state.actorConsoleAbortController.abort();
-      }
-      if (state.actorConversationAbortController) {
-        state.actorConversationAbortController.abort();
-      }
-      state.actorSelectionRequestId += 1;
-      const requestId = state.actorSelectionRequestId;
-      state.selectedActorId = actorId;
-      state.selectedSection = 'actors';
-      state.rosterPendingActorId = actorId;
-      state.rosterReconcileActorId = actorId;
-      state.rosterReconcileAttempt = 0;
-      state.actorConsole = null;
-      state.actorCardLoading = true;
-      state.actorCardError = '';
-      state.conversationLoading = true;
-      state.conversationError = '';
-      state.actorSelectionPendingId = actorId;
-      state.message = 'Created ' + actorId + '. Waiting for roster confirmation.';
-      upsertPendingActor(state, actorId, state.selectedRole);
-      clearImConversation(state, actorId);
-      clearOpenTuiFeedback(state);
+      recordLifecycleOperation(state, operation);
+      state.lifecycleOperationPreviousActorIds[operation.id] = previousActorId;
+      selectLifecycleOperationContext(state, elements, operation.id);
+      state.message = lifecycleOperationStatusText(operation);
       renderShell(state, elements);
       renderActorList(state, elements);
-      renderActorDetail(state, elements);
       renderComposer(state, elements);
-      renderOpenTui(state, elements);
-      renderImConversation(state, elements);
-      const consoleAbortController = createAbortController();
-      const conversationAbortController = createAbortController();
-      state.actorConsoleAbortController = consoleAbortController;
-      state.actorConversationAbortController = conversationAbortController;
-      refreshActorCard(state, elements, actorId, requestId, consoleAbortController
-        ? { signal: consoleAbortController.signal }
-        : undefined).catch(function (error) {
-        if (!isAbortError(error)) {
-          state.message = error.message;
-          renderShell(state, elements);
-        }
-      });
-      refreshConversation(state, elements, actorId, actorId, requestId, conversationAbortController
-        ? { signal: conversationAbortController.signal }
-        : undefined).catch(function (error) {
-        if (!isAbortError(error)) {
-          state.conversationError = error.message;
-          renderImConversation(state, elements);
-        }
-      });
-      scheduleCreatedActorReconciliation(state, elements, actorId);
+      if (operationIsTerminal(operation)) {
+        await reconcileLifecycleOperation(state, elements, operation);
+      } else {
+        scheduleLifecycleOperationPolling(state, elements);
+      }
     } catch (error) {
-      state.selectedActorId = previousActorId;
       state.message = error.message;
-      renderShell(state, elements);
-    } finally {
-      state.createPending = false;
       renderShell(state, elements);
       renderActorList(state, elements);
     }
@@ -2317,6 +2875,7 @@
       openTuiCommand: document.getElementById('open-tui-command'),
       copyTuiCommandButton: document.getElementById('copy-tui-command-button'),
       messageBanner: document.getElementById('message-banner'),
+      lifecycleOperationStatus: document.getElementById('lifecycle-operation-status'),
       actionAvailabilityStatus: document.getElementById('action-availability-status'),
       roomThread: document.getElementById('room-thread'),
       imConversation: document.getElementById('im-conversation'),
@@ -2336,6 +2895,13 @@
       renderShell(state, elements);
     });
     elements.actorsList.addEventListener('click', function (event) {
+      const operationRow = event.target && event.target.closest
+        ? event.target.closest('[data-operation-id]')
+        : null;
+      if (operationRow) {
+        selectLifecycleOperationContext(state, elements, operationRow.getAttribute('data-operation-id') || '');
+        return;
+      }
       const row = event.target && event.target.closest
         ? event.target.closest('[data-actor-id]')
         : null;
@@ -2406,7 +2972,6 @@
     elements.createButton.addEventListener('click', function () {
       createInstance(state, elements).catch(function (error) {
         state.message = error.message;
-        state.createPending = false;
         renderVisibleRegions(state, elements);
       });
     });
@@ -2419,9 +2984,9 @@
       });
     });
     elements.interruptButton.addEventListener('click', function () {
-      runLifecycleAction(state, elements, 'interrupt').catch(function (error) {
+      runInterruptAction(state, elements).catch(function (error) {
         state.message = error.message;
-        state.lifecyclePendingAction = '';
+        state.interruptPending = false;
         renderShell(state, elements);
         renderComposer(state, elements);
       });
@@ -2429,7 +2994,6 @@
     elements.stopButton.addEventListener('click', function () {
       runLifecycleAction(state, elements, 'stop').catch(function (error) {
         state.message = error.message;
-        state.lifecyclePendingAction = '';
         renderShell(state, elements);
         renderComposer(state, elements);
       });
@@ -2437,7 +3001,6 @@
     elements.clearButton.addEventListener('click', function () {
       runLifecycleAction(state, elements, 'clear').catch(function (error) {
         state.message = error.message;
-        state.lifecyclePendingAction = '';
         renderShell(state, elements);
         renderComposer(state, elements);
       });
@@ -2445,7 +3008,6 @@
     elements.resumeButton.addEventListener('click', function () {
       runLifecycleAction(state, elements, 'resume').catch(function (error) {
         state.message = error.message;
-        state.lifecyclePendingAction = '';
         renderShell(state, elements);
         renderComposer(state, elements);
       });
@@ -2465,9 +3027,8 @@
       });
     });
     elements.deleteButton.addEventListener('click', function () {
-      deleteSelectedActor(state, elements).catch(function (error) {
+      runLifecycleAction(state, elements, 'delete').catch(function (error) {
         state.message = error.message;
-        state.lifecyclePendingAction = '';
         renderVisibleRegions(state, elements);
       });
     });
@@ -2553,6 +3114,13 @@
     createState,
     clearImConversation,
     describeInstanceActionState,
+    activeLifecycleOperationForActor,
+    forgetLifecycleOperation,
+    lifecycleOperationStatusText,
+    operationIsActive,
+    operationIsTerminal,
+    pollLifecycleOperations,
+    recordLifecycleOperation,
     recordImProjectedMessage,
     recordImPendingSend,
     recordImSent,
@@ -2560,6 +3128,7 @@
     recordSelectedActorEventMessage,
     removeImEntry,
     replaceImPendingSend,
+    refreshSelectedActorConsoleAndRender,
     refreshSelectedActorConversation,
     refreshVisibleRegionsWithFeedback,
     pollImEventsOnce,
@@ -2572,6 +3141,7 @@
     renderTrackStudioRailHtml,
     revertActorModelConfigDraft,
     renderComposer,
+    runLifecycleAction,
     saveActorModelConfig,
     sectionCopy,
     selectActor,

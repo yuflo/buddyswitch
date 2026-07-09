@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import tempfile
+import time
 import unittest
 from unittest import mock
 from dataclasses import dataclass
@@ -97,6 +98,35 @@ def command_json(payload: dict[str, object]) -> WEB_MANAGEMENT.CommandResult:
 
 def command_error(*, returncode: int, stderr: str, timed_out: bool = False) -> WEB_MANAGEMENT.CommandResult:
     return WEB_MANAGEMENT.CommandResult(returncode=returncode, stdout="", stderr=stderr, timed_out=timed_out)
+
+
+def wait_for_condition(predicate: Callable[[], bool], *, timeout_seconds: float = 1.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def wait_for_operation_status(
+    service: object,
+    operation_id: str,
+    expected_status: str,
+    *,
+    timeout_seconds: float = 2.0,
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout_seconds
+    last_payload: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        status, payload = service.handle_api("GET", f"/api/operations/{operation_id}", b"")
+        assert status == 200
+        last_payload = payload
+        operation = payload["operation"]
+        if operation["status"] == expected_status:
+            return operation
+        time.sleep(0.01)
+    raise AssertionError(f"operation {operation_id} did not reach {expected_status}: {last_payload!r}")
 
 
 def active_status(actor_id: str, thread_id: str, thread_status: str) -> dict[str, object]:
@@ -251,6 +281,26 @@ class WebManagementServerTestCase(unittest.TestCase):
                 return int(response.status), response.read().decode("utf-8")
         except HTTPError as exc:
             return int(exc.code), exc.read().decode("utf-8")
+
+    def _wait_for_http_operation_status(
+        self,
+        base_url: str,
+        operation_id: str,
+        expected_status: str,
+        *,
+        timeout_seconds: float = 2.0,
+    ) -> dict[str, object]:
+        deadline = time.monotonic() + timeout_seconds
+        last_payload: dict[str, object] | None = None
+        while time.monotonic() < deadline:
+            status, payload = self._request_json(base_url, method="GET", path=f"/api/operations/{operation_id}")
+            self.assertEqual(status, 200)
+            last_payload = payload
+            operation = payload["operation"]
+            if operation["status"] == expected_status:
+                return operation
+            time.sleep(0.01)
+        raise AssertionError(f"operation {operation_id} did not reach {expected_status}: {last_payload!r}")
 
 
 class WebManagementUnitTests(unittest.TestCase):
@@ -698,6 +748,105 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
         self.assertEqual(runner.calls, [["instance", "roles", "--json"]])
 
+    def test_start_route_returns_operation_before_launcher_finishes(self) -> None:
+        runner = FakeRunner()
+        release_start = threading.Event()
+        runner.add(
+            ["instance", "roles", "--json"],
+            command_json({"roles": [{"id": "market", "label": "Market", "scope": "research"}]}),
+        )
+        runner.block(["instance", "start", "--role", "market", "--json"], release_start)
+        runner.add(["instance", "start", "--role", "market", "--json"], command_json({"actor_id": "act-market-demo"}))
+        runner.add(
+            ["instance", "status", "act-market-demo", "--json"],
+            command_json(active_status("act-market-demo", "thread-1", "idle")),
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        result: dict[str, object] = {}
+
+        def call_start() -> None:
+            result["value"] = service.handle_api("POST", "/api/instances", b'{"role":"market"}')
+
+        thread = threading.Thread(target=call_start)
+        thread.start()
+        try:
+            self.assertTrue(
+                wait_for_condition(lambda: "value" in result, timeout_seconds=0.2),
+                "start route should return before launcher start command is released",
+            )
+            status, payload = result["value"]  # type: ignore[misc]
+            self.assertEqual(status, 202)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["operation"]["action"], "start")
+            self.assertIn(payload["operation"]["status"], {"queued", "running"})
+            self.assertEqual(payload["operation"]["target"]["role"], "market")
+            self.assertEqual(payload["operation"]["target"]["actor_id"], "")
+            operation_id = payload["operation"]["id"]
+        finally:
+            release_start.set()
+            thread.join(2)
+        operation = wait_for_operation_status(service, operation_id, "succeeded")
+        self.assertEqual(operation["target"]["actor_id"], "act-market-demo")
+        self.assertEqual(operation["result"]["actor_id"], "act-market-demo")
+
+    def test_start_route_queues_second_start_while_first_is_running(self) -> None:
+        runner = FakeRunner()
+        release_market_start = threading.Event()
+        runner.add(
+            ["instance", "roles", "--json"],
+            command_json(
+                {
+                    "roles": [
+                        {"id": "market", "label": "Market", "scope": "research"},
+                        {"id": "pm", "label": "PM", "scope": "product"},
+                    ]
+                }
+            ),
+        )
+        runner.block(["instance", "start", "--role", "market", "--json"], release_market_start)
+        runner.add(["instance", "start", "--role", "market", "--json"], command_json({"actor_id": "act-market-demo"}))
+        runner.add(["instance", "start", "--role", "pm", "--json"], command_json({"actor_id": "act-pm-demo"}))
+        runner.add(
+            ["instance", "status", "act-market-demo", "--json"],
+            command_json(active_status("act-market-demo", "thread-market", "idle")),
+        )
+        runner.add(
+            ["instance", "status", "act-pm-demo", "--json"],
+            command_json(active_status("act-pm-demo", "thread-pm", "idle")),
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        first_status, first_payload = service.handle_api("POST", "/api/instances", b'{"role":"market"}')
+        first_operation_id = first_payload["operation"]["id"]
+        wait_for_operation_status(service, first_operation_id, "running")
+
+        second_status, second_payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
+        second_operation = second_payload["operation"]
+
+        self.assertEqual(first_status, 202)
+        self.assertEqual(second_status, 202)
+        self.assertEqual(second_operation["action"], "start")
+        self.assertEqual(second_operation["status"], "queued")
+        self.assertEqual(second_operation["target"]["role"], "pm")
+        self.assertEqual(
+            [call for call in runner.calls if call[:2] == ["instance", "start"]],
+            [["instance", "start", "--role", "market", "--json"]],
+        )
+
+        release_market_start.set()
+        wait_for_operation_status(service, first_operation_id, "succeeded")
+        second_final = wait_for_operation_status(service, second_operation["id"], "succeeded")
+
+        self.assertEqual(second_final["target"]["actor_id"], "act-pm-demo")
+        self.assertEqual(second_final["result"]["actor_id"], "act-pm-demo")
+        self.assertEqual(
+            [call for call in runner.calls if call[:2] == ["instance", "start"]],
+            [
+                ["instance", "start", "--role", "market", "--json"],
+                ["instance", "start", "--role", "pm", "--json"],
+            ],
+        )
+
     def test_create_instance_delegates_to_launcher_start_without_initialize_input(self) -> None:
         runner = OrderedRunner(
             [
@@ -719,11 +868,13 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 202)
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["actor_id"], "act-pm-demo")
-        self.assertEqual(payload["instance"]["thread"]["status"], "idle")
-        self.assertEqual(payload["instance"]["thread_id"], "thread-1")
+        self.assertEqual(payload["operation"]["action"], "start")
+        operation = wait_for_operation_status(service, payload["operation"]["id"], "succeeded")
+        self.assertEqual(operation["result"]["actor_id"], "act-pm-demo")
+        self.assertEqual(operation["result"]["instance"]["thread"]["status"], "idle")
+        self.assertEqual(operation["result"]["instance"]["thread_id"], "thread-1")
         self.assertEqual(len(runner.calls), 3)
         self.assertNotIn("Initialize this " "BuddySwitch thread", json.dumps(runner.calls))
         self.assertEqual(runner.steps, [])
@@ -743,12 +894,12 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         )
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
 
-        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
-            service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
+        status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
-        self.assertEqual(raised.exception.status, 502)
-        self.assertEqual(raised.exception.code, "COMMAND_FAILED")
-        self.assertIn("Thread bootstrap failed", raised.exception.message)
+        self.assertEqual(status, 202)
+        operation = wait_for_operation_status(service, payload["operation"]["id"], "failed")
+        self.assertEqual(operation["error"]["code"], "COMMAND_FAILED")
+        self.assertIn("Thread bootstrap failed", operation["error"]["message"])
         self.assertEqual(len(runner.calls), 2)
 
     def test_clear_route_delegates_to_launcher_clear_without_initialize_input(self) -> None:
@@ -774,11 +925,13 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 202)
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["previous_thread_id"], "thread-old")
-        self.assertEqual(payload["thread_id"], "thread-new")
-        self.assertEqual(payload["instance"]["thread_id"], "thread-new")
+        self.assertEqual(payload["operation"]["action"], "clear")
+        operation = wait_for_operation_status(service, payload["operation"]["id"], "succeeded")
+        self.assertEqual(operation["result"]["previous_thread_id"], "thread-old")
+        self.assertEqual(operation["result"]["thread_id"], "thread-new")
+        self.assertEqual(operation["result"]["instance"]["thread_id"], "thread-new")
         self.assertEqual(len(runner.calls), 2)
         self.assertNotIn("Initialize this " "BuddySwitch thread", json.dumps(runner.calls))
 
@@ -793,13 +946,23 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         )
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
 
-        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
-            service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
+        status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
-        self.assertEqual(raised.exception.status, 502)
-        self.assertEqual(raised.exception.code, "COMMAND_FAILED")
+        self.assertEqual(status, 202)
+        operation = wait_for_operation_status(service, payload["operation"]["id"], "failed")
+        self.assertEqual(operation["error"]["code"], "COMMAND_FAILED")
+        self.assertIn("Daemon start failed", operation["error"]["message"])
         self.assertEqual(len(runner.calls), 1)
         self.assertEqual(runner.calls[0][0], ["instance", "clear", "act-pm-demo", "--json"])
+
+    def test_unknown_lifecycle_operation_returns_404(self) -> None:
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("GET", "/api/operations/op-missing", b"")
+
+        self.assertEqual(raised.exception.status, 404)
+        self.assertEqual(raised.exception.code, "NOT_FOUND")
 
     def test_initialize_route_is_removed(self) -> None:
         runner = OrderedRunner([])
@@ -829,10 +992,52 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
 
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 202)
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["instance"]["status"], "active")
+        self.assertEqual(payload["operation"]["action"], "resume")
+        operation = wait_for_operation_status(service, payload["operation"]["id"], "succeeded")
+        self.assertEqual(operation["result"]["instance"]["status"], "active")
         self.assertEqual(runner.calls[0][0], ["instance", "resume", "act-pm-demo", "--json"])
+
+    def test_resume_operation_records_command_failure_after_acceptance(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "resume", "act-pm-demo", "--json"],
+                    command_error(returncode=1, stderr="thread/resume failed for thread-1"),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
+
+        self.assertEqual(status, 202)
+        operation = wait_for_operation_status(service, payload["operation"]["id"], "failed")
+        self.assertEqual(operation["error"]["code"], "COMMAND_FAILED")
+        self.assertIn("thread/resume failed", operation["error"]["message"])
+
+    def test_lifecycle_operation_rejects_second_action_for_same_actor_while_running(self) -> None:
+        runner = FakeRunner()
+        release_stop = threading.Event()
+        runner.block(["instance", "stop", "act-pm-demo", "--json"], release_stop)
+        runner.add(["instance", "stop", "act-pm-demo", "--json"], command_json({"actor_id": "act-pm-demo", "status": "inactive"}))
+        runner.add(
+            ["instance", "status", "act-pm-demo", "--json"],
+            command_json(active_status("act-pm-demo", "thread-1", "idle")),
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/stop", b"")
+        self.assertEqual(status, 202)
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.code, "BUSY")
+        self.assertIn("Resume available after Stop completes", raised.exception.message)
+        release_stop.set()
+        wait_for_operation_status(service, payload["operation"]["id"], "succeeded")
 
     def test_open_tui_route_requires_web_headers_before_status_lookup(self) -> None:
         for headers in (
@@ -1086,8 +1291,9 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             path="/api/instances",
             payload={"role": "pm"},
         )
-        self.assertEqual(status, 502)
-        self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
+        self.assertEqual(status, 202)
+        operation = self._wait_for_http_operation_status(base_url, payload["operation"]["id"], "failed")
+        self.assertEqual(operation["error"]["code"], "COMMAND_FAILED")
 
     def test_input_route_returns_404_without_launcher_call(self) -> None:
         runner, base_url = self._start_server()
@@ -2386,8 +2592,10 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             method="POST",
             path="/api/instances/act-pm-demo/stop",
         )
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["instance"]["status"], "inactive")
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["operation"]["action"], "stop")
+        operation = self._wait_for_http_operation_status(base_url, payload["operation"]["id"], "succeeded")
+        self.assertEqual(operation["result"]["instance"]["status"], "inactive")
         self.assertEqual(
             runner.calls,
             [
@@ -2396,8 +2604,10 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             ],
         )
 
-    def test_delete_route_delegates_and_maps_active_block(self) -> None:
+    def test_delete_route_returns_operation_before_launcher_finishes(self) -> None:
         runner = FakeRunner()
+        release_delete = threading.Event()
+        runner.block(["instance", "delete", "act-pm-demo", "--yes", "--json"], release_delete)
         runner.add(
             ["instance", "delete", "act-pm-demo", "--yes", "--json"],
             WEB_MANAGEMENT.CommandResult(
@@ -2416,12 +2626,19 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             method="DELETE",
             path="/api/instances/act-pm-demo",
         )
-        self.assertEqual(status, 200)
-        self.assertEqual(payload, {"ok": True, "actor_id": "act-pm-demo"})
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["operation"]["action"], "delete")
+        self.assertIn(payload["operation"]["status"], {"queued", "running"})
+        self.assertEqual(payload["operation"]["target"]["actor_id"], "act-pm-demo")
+        operation_id = payload["operation"]["id"]
+        release_delete.set()
+        operation = self._wait_for_http_operation_status(base_url, operation_id, "succeeded")
+        self.assertEqual(operation["result"], {"ok": True, "actor_id": "act-pm-demo"})
         self.assertEqual(runner.calls, [["instance", "delete", "act-pm-demo", "--yes", "--json"]])
 
-        blocked_runner = FakeRunner()
-        blocked_runner.add(
+    def test_delete_operation_records_command_failure_after_acceptance(self) -> None:
+        runner = FakeRunner()
+        runner.add(
             ["instance", "delete", "act-pm-demo", "--yes", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=3,
@@ -2430,14 +2647,17 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
                 timed_out=False,
             ),
         )
-        _, blocked_base_url = self._start_server(blocked_runner)
+        _, base_url = self._start_server(runner)
         status, payload = self._request_json(
-            blocked_base_url,
+            base_url,
             method="DELETE",
             path="/api/instances/act-pm-demo",
         )
-        self.assertEqual(status, 409)
-        self.assertEqual(payload["error"]["code"], "LIFECYCLE_BLOCKED")
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["operation"]["action"], "delete")
+        operation = self._wait_for_http_operation_status(base_url, payload["operation"]["id"], "failed")
+        self.assertEqual(operation["error"]["code"], "LIFECYCLE_BLOCKED")
+        self.assertIn("active app-server", operation["error"]["message"])
 
     def test_invalid_json_body_returns_structured_error(self) -> None:
         runner, base_url = self._start_server()
