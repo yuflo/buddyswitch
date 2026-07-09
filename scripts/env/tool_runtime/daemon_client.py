@@ -27,6 +27,9 @@ CENTRAL_DAEMON_PROTOCOL = "buddyswitch-central-daemon/v1"
 MAILBOX_PROTOCOL = "buddyswitch-daemon-mailbox/v1"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 0.75
 DEFAULT_RESPONSE_TIMEOUT_SECONDS = 5.0
+# Task Sys mailbox commands wrap app-server lifecycle RPCs. A single parent
+# handoff can include interrupt, settings update, thread read, and submit calls.
+TASK_SYS_MAILBOX_RESPONSE_TIMEOUT_SECONDS = 65.0
 
 
 class DaemonClientError(RuntimeError):
@@ -192,12 +195,19 @@ def request_central_daemon(
     return result
 
 
-def request_mailbox(method: str, params: dict[str, Any], *, socket_path: Path) -> dict[str, Any]:
+def request_mailbox(
+    method: str,
+    params: dict[str, Any],
+    *,
+    socket_path: Path,
+    response_timeout_seconds: float = DEFAULT_RESPONSE_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
     return _request_envelope(
         protocol_name=MAILBOX_PROTOCOL,
         method=method,
         params=params,
         socket_path=Path(socket_path),
+        response_timeout_seconds=response_timeout_seconds,
         retry_until_connected=True,
     )
 
@@ -257,6 +267,7 @@ def execute_task_sys_instruction(
         "mailbox.task_sys.execute_instruction",
         {"instruction": dict(instruction)},
         socket_path=Path(socket_path) if socket_path is not None else mailbox_socket_path_for_instance_root(instance_root),
+        response_timeout_seconds=TASK_SYS_MAILBOX_RESPONSE_TIMEOUT_SECONDS,
     )
     return _mailbox_success_result(
         envelope,
@@ -275,6 +286,7 @@ def cleanup_task_sys_side_lease(
         "mailbox.task_sys.cleanup_side_lease",
         {"task_id": task_id},
         socket_path=Path(socket_path) if socket_path is not None else mailbox_socket_path_for_instance_root(instance_root),
+        response_timeout_seconds=TASK_SYS_MAILBOX_RESPONSE_TIMEOUT_SECONDS,
     )
     return _mailbox_success_result(
         envelope,

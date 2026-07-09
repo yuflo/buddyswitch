@@ -434,8 +434,21 @@ class DaemonMailboxTests(unittest.TestCase):
         calls: list[dict[str, Any]] = []
         original_request_mailbox = self.client.request_mailbox
 
-        def fake_request_mailbox(method: str, params: dict[str, Any], *, socket_path: Path) -> dict[str, Any]:
-            calls.append({"method": method, "params": params, "socket_path": socket_path})
+        def fake_request_mailbox(
+            method: str,
+            params: dict[str, Any],
+            *,
+            socket_path: Path,
+            response_timeout_seconds: float | None = None,
+        ) -> dict[str, Any]:
+            calls.append(
+                {
+                    "method": method,
+                    "params": params,
+                    "socket_path": socket_path,
+                    "response_timeout_seconds": response_timeout_seconds,
+                }
+            )
             return {
                 "protocol": self.client.MAILBOX_PROTOCOL,
                 "request_id": "req-test",
@@ -465,6 +478,53 @@ class DaemonMailboxTests(unittest.TestCase):
             [call["socket_path"] for call in calls],
             [self.client.mailbox_socket_path_for_instance_root(instance_root)] * 2,
         )
+
+    def test_daemon_client_task_sys_helpers_use_lifecycle_response_timeout(self) -> None:
+        calls: list[dict[str, Any]] = []
+        original_request_mailbox = self.client.request_mailbox
+
+        def fake_request_mailbox(
+            method: str,
+            params: dict[str, Any],
+            *,
+            socket_path: Path,
+            response_timeout_seconds: float | None = None,
+        ) -> dict[str, Any]:
+            calls.append(
+                {
+                    "method": method,
+                    "params": params,
+                    "socket_path": socket_path,
+                    "response_timeout_seconds": response_timeout_seconds,
+                }
+            )
+            return {
+                "protocol": self.client.MAILBOX_PROTOCOL,
+                "request_id": "req-test",
+                "ok": True,
+                "result": {"ok": True, **params},
+            }
+
+        self.addCleanup(setattr, self.client, "request_mailbox", original_request_mailbox)
+        self.client.request_mailbox = fake_request_mailbox
+        instance_root = Path("/tmp/instance-task-sys-mailbox-timeout")
+        instruction = {
+            "type": "submit_parent",
+            "task_id": "task-user-input-timeout123",
+            "actor_target": {"actor_id": "act-dev-daemon", "role_id": "dev"},
+        }
+
+        self.client.execute_task_sys_instruction(instance_root=instance_root, instruction=instruction)
+        self.client.cleanup_task_sys_side_lease(instance_root=instance_root, task_id="task-user-input-timeout123")
+
+        self.assertEqual(
+            [call["method"] for call in calls],
+            ["mailbox.task_sys.execute_instruction", "mailbox.task_sys.cleanup_side_lease"],
+        )
+        for call in calls:
+            timeout = call.get("response_timeout_seconds")
+            self.assertIsInstance(timeout, (int, float), msg=call)
+            self.assertGreaterEqual(timeout, 60.0, msg=call)
 
     def test_local_trigger_rejects_wrong_actor_and_invalid_generic_shape_before_dispatch(self) -> None:
         dispatcher = RecordingTriggerDispatcher()
