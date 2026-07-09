@@ -26,6 +26,7 @@ EXPECTED_HANDLER_TYPES = [
     "TrackCommentAddedHandler",
     "BrowserPageExpiredHandler",
     "BrowserReleaseHandler",
+    "BrowserFailedOpenPageCleanupHandler",
 ]
 EXPECTED_HANDLER_NAMES = [
     "task_checkout",
@@ -33,6 +34,7 @@ EXPECTED_HANDLER_NAMES = [
     "track_comment_added",
     "browser_page_expired",
     "browser_cockpit_release",
+    "browser_failed_open_page_cleanup",
 ]
 
 

@@ -2918,6 +2918,7 @@ exec "$real_git" "$@"
                     "track_comment_added",
                     "browser_page_expired",
                     "browser_cockpit_release",
+                    "browser_failed_open_page_cleanup",
                 ],
             )
             task_checkout_status = status_payload["daemon"]["handlers"]["items"]["task_checkout"]
@@ -2935,6 +2936,11 @@ exec "$real_git" "$@"
             browser_release_status = status_payload["daemon"]["handlers"]["items"]["browser_cockpit_release"]
             self.assertIs(browser_release_status["enabled"], True)
             self.assertIs(browser_release_status["active"], True)
+            browser_failed_cleanup_status = status_payload["daemon"]["handlers"]["items"][
+                "browser_failed_open_page_cleanup"
+            ]
+            self.assertIs(browser_failed_cleanup_status["enabled"], True)
+            self.assertIs(browser_failed_cleanup_status["active"], True)
 
             calls = self._read_json_lines(Path(str(ctx["calls_path"])))
             daemon_resume = next(
@@ -5937,6 +5943,7 @@ exec "$real_git" "$@"
                     "track_comment_added",
                     "browser_page_expired",
                     "browser_cockpit_release",
+                    "browser_failed_open_page_cleanup",
                 ],
             )
             self.assertTrue(payload["daemon"]["handlers"]["items"]["task_checkout"]["active"])
@@ -5944,6 +5951,7 @@ exec "$real_git" "$@"
             self.assertTrue(payload["daemon"]["handlers"]["items"]["track_comment_added"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["browser_page_expired"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["browser_cockpit_release"]["active"])
+            self.assertTrue(payload["daemon"]["handlers"]["items"]["browser_failed_open_page_cleanup"]["active"])
             self.assertEqual(payload["thread"]["status"], "idle")
 
     def test_instance_status_json_reports_task_sys_active_summary(self) -> None:
