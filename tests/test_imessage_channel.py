@@ -182,6 +182,18 @@ class _FailingImsg(_FakeImsg):
         raise imessage_channel.ChannelError("iMessage send status failed")
 
 
+class _RecoveringImsg(_FakeImsg):
+    def __init__(self, *, failures: int) -> None:
+        super().__init__()
+        self.failures = failures
+
+    def send(self, *, route: dict[str, Any], text: str) -> None:
+        self.sent.append({"route": dict(route), "text": text})
+        if self.failures > 0:
+            self.failures -= 1
+            raise imessage_channel.ChannelError("AppleEvent timed out -1712")
+
+
 def _actor(role_id: str, identity_id: str, *, status: str = "online") -> dict[str, Any]:
     return {
         "identity": {"id": identity_id, "type": "actor"},
@@ -249,23 +261,27 @@ def _wait_until(predicate: Any, *, timeout: float = 1.0) -> bool:
 
 
 class ImessageChannelTests(unittest.TestCase):
-    def test_default_state_path_uses_imessage_channel_schema_v4(self) -> None:
+    def test_default_state_path_uses_imessage_channel_schema_v5(self) -> None:
         config = imessage_channel.ChannelConfig(server="http://127.0.0.1:8765")
         self.assertEqual(config.effective_state_path().parts[-2:], ("imessage-channel", "state.json"))
 
         with tempfile.TemporaryDirectory() as temp_root:
             store = imessage_channel.ImessageChannelStateStore(Path(temp_root) / "state.json")
-            self.assertEqual(store.load(), {"schema_version": 4, "contacts": {}})
+            self.assertEqual(store.load(), {"schema_version": 5, "contacts": {}})
 
     def test_first_sender_message_creates_external_session_and_reuses_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
 
             first = controller.handle_inbound_message(_row(text="hello", guid="guid-1"))
+            first_delivery = controller.poll_control_delivery_once()
             second = controller.handle_inbound_message(_row(text="hello again", guid="guid-2"))
+            second_delivery = controller.poll_control_delivery_once()
 
         self.assertEqual(first["status"], "needs_actor")
         self.assertEqual(second["status"], "needs_actor")
+        self.assertEqual(first_delivery["sent"], 1)
+        self.assertEqual(second_delivery["sent"], 1)
         self.assertEqual([row["external_session_key"] for row in api.created], ["imsk-1"])
         self.assertEqual([row["text"] for row in imsg.sent], [PROMPT, PROMPT])
 
@@ -276,9 +292,11 @@ class ImessageChannelTests(unittest.TestCase):
             result = controller.handle_inbound_message(
                 _row(sender="a@example.com", text="/actors", guid="guid-bind", chat_id="7")
             )
+            delivery = controller.poll_control_delivery_once()
             state = controller.state_store.load()
 
-        self.assertEqual(result["status"], "actors_listed")
+        self.assertEqual(result["status"], "actors_list_queued")
+        self.assertEqual(delivery["sent"], 1)
         self.assertEqual(api.created[0]["external_session_key"], "imsk-1")
         contact = state["contacts"]["sender:a@example.com"]
         self.assertEqual(contact["external_session_key"], "imsk-1")
@@ -290,10 +308,14 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(sender="a@example.com", text="/actors", guid="guid-a1", chat_id="1"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(sender="b@example.com", text="/actors", guid="guid-b1", chat_id="2"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(sender="a@example.com", text="1", guid="guid-a2", chat_id="1"))
+            controller.poll_control_delivery_once()
             sent = controller.handle_inbound_message(_row(sender="a@example.com", text="ping", guid="guid-a3", chat_id="1"))
             prompted = controller.handle_inbound_message(_row(sender="b@example.com", text="ping", guid="guid-b2", chat_id="2"))
+            controller.poll_control_delivery_once()
             duplicate = controller.handle_inbound_message(_row(sender="a@example.com", text="ping", guid="guid-a3", chat_id="1"))
             state = controller.state_store.load()
 
@@ -323,9 +345,13 @@ class ImessageChannelTests(unittest.TestCase):
             controller, _api, imsg = _controller(Path(temp_root), api=_FakeBuddySwitchImApi(actors=actors), now_fn=lambda: now)
 
             result = controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            state_after_inbound = controller.state_store.load()
+            delivery = controller.poll_control_delivery_once()
             state = controller.state_store.load()
 
-        self.assertEqual(result["status"], "actors_listed")
+        self.assertEqual(result["status"], "actors_list_queued")
+        self.assertEqual(delivery["sent"], 1)
+        self.assertEqual(state_after_inbound["contacts"]["sender:user-a@example.com"]["pending_actor_choices"], {})
         self.assertEqual(imsg.sent[0]["text"], "[1] market act-market-online\n[2] pm act-pm-online")
         self.assertEqual(
             state["contacts"]["sender:user-a@example.com"]["pending_actor_choices"],
@@ -336,6 +362,59 @@ class ImessageChannelTests(unittest.TestCase):
             _format_test_utc(now + timedelta(seconds=imessage_channel.PENDING_ACTOR_CHOICE_SECONDS)),
         )
 
+    def test_actors_choices_activate_only_after_actor_list_delivery_succeeds(self) -> None:
+        current = [_fixed_now()]
+        with tempfile.TemporaryDirectory() as temp_root:
+            imsg = _RecoveringImsg(failures=1)
+            controller, _api, _imsg = _controller(Path(temp_root), imsg=imsg, now_fn=lambda: current[0])
+
+            result = controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            state_after_inbound = controller.state_store.load()
+            first_delivery = controller.poll_control_delivery_once()
+            state_after_failure = controller.state_store.load()
+            imsg.failures = 0
+            current[0] = current[0] + timedelta(seconds=2)
+            second_delivery = controller.poll_control_delivery_once()
+            state_after_success = controller.state_store.load()
+
+        contact_after_inbound = state_after_inbound["contacts"]["sender:user-a@example.com"]
+        contact_after_failure = state_after_failure["contacts"]["sender:user-a@example.com"]
+        contact_after_success = state_after_success["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(result["status"], "actors_list_queued")
+        self.assertEqual(contact_after_inbound["pending_actor_choices"], {})
+        self.assertEqual(contact_after_failure["pending_actor_choices"], {})
+        self.assertEqual(first_delivery["sent"], 0)
+        self.assertEqual(first_delivery["failed"], 0)
+        self.assertEqual(first_delivery["retrying"], 1)
+        self.assertEqual(second_delivery["sent"], 1)
+        self.assertEqual(second_delivery["failed"], 0)
+        self.assertEqual(contact_after_success["pending_actor_choices"], {"1": "act-market-demo"})
+        self.assertNotIn("control_delivery", contact_after_success)
+
+    def test_control_delivery_fails_after_three_attempts_with_error_visible(self) -> None:
+        current = [_fixed_now()]
+        with tempfile.TemporaryDirectory() as temp_root:
+            imsg = _RecoveringImsg(failures=3)
+            controller, _api, _imsg = _controller(Path(temp_root), imsg=imsg, now_fn=lambda: current[0])
+
+            result = controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            first_delivery = controller.poll_control_delivery_once()
+            current[0] = current[0] + timedelta(seconds=2)
+            second_delivery = controller.poll_control_delivery_once()
+            current[0] = current[0] + timedelta(seconds=2)
+            third_delivery = controller.poll_control_delivery_once()
+            state_after_failure = controller.state_store.load()
+
+        contact_after_failure = state_after_failure["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(result["status"], "actors_list_queued")
+        self.assertEqual(first_delivery, {"ok": True, "sent": 0, "retrying": 1, "failed": 0})
+        self.assertEqual(second_delivery, {"ok": True, "sent": 0, "retrying": 1, "failed": 0})
+        self.assertEqual(third_delivery, {"ok": True, "sent": 0, "retrying": 0, "failed": 1})
+        self.assertEqual(contact_after_failure["pending_actor_choices"], {})
+        self.assertEqual(contact_after_failure["control_delivery"]["status"], "failed")
+        self.assertEqual(contact_after_failure["control_delivery"]["attempts"], 3)
+        self.assertEqual(contact_after_failure["control_delivery"]["last_error"], "AppleEvent timed out -1712")
+
     def test_numeric_selection_uses_pending_snapshot_without_posting_message(self) -> None:
         actors = [_actor("market", "act-market-first"), _actor("dev", "act-dev-second")]
         with tempfile.TemporaryDirectory() as temp_root:
@@ -343,12 +422,17 @@ class ImessageChannelTests(unittest.TestCase):
             now = _fixed_now()
             controller, _api, imsg = _controller(Path(temp_root), api=api, now_fn=lambda: now)
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            controller.poll_control_delivery_once()
             api.actors = [_actor("design", "act-design-later")]
 
             result = controller.handle_inbound_message(_row(text="2", guid="guid-select"))
+            state_after_inbound = controller.state_store.load()
+            delivery = controller.poll_control_delivery_once()
             state = controller.state_store.load()
 
-        self.assertEqual(result["status"], "actor_selected")
+        self.assertEqual(result["status"], "actor_selection_queued")
+        self.assertNotIn("active_identity_id", state_after_inbound["contacts"]["sender:user-a@example.com"])
+        self.assertEqual(delivery["sent"], 1)
         contact = state["contacts"]["sender:user-a@example.com"]
         self.assertEqual(contact["active_identity_id"], "act-dev-second")
         self.assertEqual(
@@ -360,13 +444,45 @@ class ImessageChannelTests(unittest.TestCase):
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent[-1]["text"], "act-dev-second")
 
+    def test_numeric_selection_activates_actor_only_after_confirmation_delivery(self) -> None:
+        current = [_fixed_now()]
+        with tempfile.TemporaryDirectory() as temp_root:
+            imsg = _RecoveringImsg(failures=0)
+            controller, _api, _imsg = _controller(Path(temp_root), imsg=imsg, now_fn=lambda: current[0])
+            controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            controller.poll_control_delivery_once()
+
+            imsg.failures = 1
+            selected = controller.handle_inbound_message(_row(text="1", guid="guid-select"))
+            state_after_inbound = controller.state_store.load()
+            first_delivery = controller.poll_control_delivery_once()
+            state_after_failure = controller.state_store.load()
+            imsg.failures = 0
+            current[0] = current[0] + timedelta(seconds=2)
+            second_delivery = controller.poll_control_delivery_once()
+            state_after_success = controller.state_store.load()
+
+        contact_after_inbound = state_after_inbound["contacts"]["sender:user-a@example.com"]
+        contact_after_failure = state_after_failure["contacts"]["sender:user-a@example.com"]
+        contact_after_success = state_after_success["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(selected["status"], "actor_selection_queued")
+        self.assertNotIn("active_identity_id", contact_after_inbound)
+        self.assertNotIn("active_identity_id", contact_after_failure)
+        self.assertEqual(contact_after_failure["pending_actor_choices"], {"1": "act-market-demo"})
+        self.assertEqual(first_delivery["retrying"], 1)
+        self.assertEqual(second_delivery["sent"], 1)
+        self.assertEqual(contact_after_success["active_identity_id"], "act-market-demo")
+        self.assertEqual(contact_after_success["pending_actor_choices"], {})
+
     def test_numeric_without_pending_choices_is_ordinary_message_and_prompts_when_no_active_actor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
 
             result = controller.handle_inbound_message(_row(text="2", guid="guid-number"))
+            delivery = controller.poll_control_delivery_once()
 
         self.assertEqual(result["status"], "needs_actor")
+        self.assertEqual(delivery["sent"], 1)
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent, [{"route": {"chat_id": "6", "sender": "user-a@example.com"}, "text": PROMPT}])
 
@@ -375,8 +491,10 @@ class ImessageChannelTests(unittest.TestCase):
             controller, api, imsg = _controller(Path(temp_root))
 
             result = controller.handle_inbound_message(_row(text="plain message", guid="guid-plain"))
+            delivery = controller.poll_control_delivery_once()
 
         self.assertEqual(result["status"], "needs_actor")
+        self.assertEqual(delivery["sent"], 1)
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent[0]["text"], PROMPT)
 
@@ -384,7 +502,9 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, _imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="1", guid="guid-select"))
+            controller.poll_control_delivery_once()
 
             result = controller.handle_inbound_message(_row(text="  hello actor  ", guid="guid-message"))
 
@@ -416,9 +536,11 @@ class ImessageChannelTests(unittest.TestCase):
 
             result = controller.handle_inbound_message(_row(text="late ping", guid="guid-late"))
             state = controller.state_store.load()
+            delivery = controller.poll_control_delivery_once()
 
         contact = state["contacts"]["sender:user-a@example.com"]
         self.assertEqual(result["status"], "needs_actor")
+        self.assertEqual(delivery["sent"], 1)
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent, [{"route": {"chat_id": "6", "sender": "user-a@example.com"}, "text": PROMPT}])
         self.assertNotIn("active_identity_id", contact)
@@ -447,9 +569,11 @@ class ImessageChannelTests(unittest.TestCase):
 
             result = controller.handle_inbound_message(_row(text="1", guid="guid-stale-choice"))
             state = controller.state_store.load()
+            delivery = controller.poll_control_delivery_once()
 
         contact = state["contacts"]["sender:user-a@example.com"]
         self.assertEqual(result["status"], "needs_actor")
+        self.assertEqual(delivery["sent"], 1)
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent, [{"route": {"chat_id": "6", "sender": "user-a@example.com"}, "text": PROMPT}])
         self.assertEqual(contact["pending_actor_choices"], {})
@@ -466,7 +590,9 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, _imsg = _controller(Path(temp_root), now_fn=now_fn)
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="1", guid="guid-select"))
+            controller.poll_control_delivery_once()
             current[0] = _fixed_now() + timedelta(minutes=10)
 
             result = controller.handle_inbound_message(_row(text="hello after idle", guid="guid-refresh"))
@@ -529,7 +655,9 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
             api.events_by_key["imsk-1"] = [
                 {
@@ -562,7 +690,9 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
+            controller.poll_control_delivery_once()
             api.events_by_key["imsk-1"] = [
                 {
                     "event_id": "imev-proactive-1",
@@ -594,7 +724,9 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, _imsg = _controller(Path(temp_root), imsg=_FailingImsg(fail_on_call=3))
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
             api.events_by_key["imsk-1"] = [
                 {
@@ -622,7 +754,9 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             controller, api, imsg = _controller(Path(temp_root))
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors", chat_id="9"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="1", guid="guid-select", chat_id="9"))
+            controller.poll_control_delivery_once()
             controller.handle_inbound_message(_row(text="ping", guid="guid-message", chat_id="9"))
             api.events_by_key["imsk-1"] = [
                 {
@@ -741,6 +875,41 @@ class ImessageChannelTests(unittest.TestCase):
                 "actor list was not sent while outbound read was blocked",
             )
             api.release_read.set()
+            worker.stop()
+
+        self.assertTrue(imsg.stopped)
+
+    def test_worker_keeps_processing_after_actors_response_send_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            api = _FakeBuddySwitchImApi()
+            imsg = _QueueImsg()
+            original_send = imsg.send
+            failures = {"remaining": 1}
+
+            def fail_first_send(*, route: dict[str, Any], text: str) -> None:
+                imsg.sent.append({"route": dict(route), "text": text})
+                if failures["remaining"] > 0:
+                    failures["remaining"] -= 1
+                    raise imessage_channel.ChannelError("AppleEvent timed out -1712")
+
+            imsg.send = fail_first_send  # type: ignore[method-assign]
+            controller, _api, _imsg = _controller(Path(temp_root), api=api, imsg=imsg)
+            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=1)
+            worker.start()
+            self.addCleanup(worker.stop)
+
+            self.assertTrue(imsg.watch_started.wait(timeout=1), "inbound watch did not start")
+            imsg.push(_row(text="/actors", guid="guid-actors-1", chat_id="9"))
+            self.assertTrue(
+                _wait_until(lambda: len(imsg.sent) >= 1, timeout=1),
+                "first actor list send was not attempted",
+            )
+            imsg.send = original_send  # type: ignore[method-assign]
+            imsg.push(_row(text="/actors", guid="guid-actors-2", chat_id="9"))
+            self.assertTrue(
+                _wait_until(lambda: any(row["text"] == "[1] market act-market-demo" for row in imsg.sent), timeout=1),
+                "second actor list was not delivered after first send failure",
+            )
             worker.stop()
 
         self.assertTrue(imsg.stopped)
@@ -996,6 +1165,7 @@ class ImessageChannelResidueTests(unittest.TestCase):
 
         retired_paths = (
             "SCHEMA_VERSION = " + "3",
+            "SCHEMA_VERSION = " + "4",
             "contact" + '["active_identity_id"] = selected',
             "contact" + '.get("pending_actor_choices")',
             "def _active_identity_id" + "(contact: dict[str, Any]) -> str",
@@ -1003,8 +1173,25 @@ class ImessageChannelResidueTests(unittest.TestCase):
         hits = [pattern for pattern in retired_paths if pattern in source]
         self.assertEqual(hits, [])
 
+    def test_control_handlers_do_not_send_imessage_synchronously(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "imessage_channel.py").read_text(encoding="utf-8")
+        handler_names = ("_handle_actors", "_handle_numeric_choice", "_handle_ordinary_message")
+        hits: list[str] = []
+        for handler_name in handler_names:
+            match = re.search(rf"def {handler_name}\([\s\S]*?\n    def ", source)
+            if match is None:
+                hits.append(f"{handler_name}: missing")
+                continue
+            body = match.group(0)
+            if "self.imsg.send" in body:
+                hits.append(f"{handler_name}: synchronous imsg send")
+        self.assertEqual(hits, [])
+
     def test_channel_semantics_stay_out_of_web_http_and_core(self) -> None:
         forbidden_terms = (
+            "control_delivery",
+            "CONTROL_DELIVERY_MAX_ATTEMPTS",
+            "CONTROL_KIND_ACTOR_CHOICES",
             "pending_actor_choices",
             "active_actor_id",
             "[Message From",

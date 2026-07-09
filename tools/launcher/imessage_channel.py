@@ -25,17 +25,26 @@ for candidate in (HELPER_DIR, SCRIPTS):
 from env.repos import runtime_files  # noqa: E402
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_DISPLAY_NAME = "BuddySwitch iMessage"
 DEFAULT_NO_ACTOR_PROMPT = "Send /actors to choose an actor."
 DEFAULT_REPLY_WAIT_MS = 30000
 ACTIVE_ACTOR_IDLE_SECONDS = 30 * 60
 PENDING_ACTOR_CHOICE_SECONDS = 5 * 60
+CONTROL_DELIVERY_MAX_ATTEMPTS = 3
+CONTROL_DELIVERY_RETRY_SECONDS = 2
 BLOCKED_ACTOR_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
 ACTIVE_IDENTITY_ID_FIELD = "active_identity_id"
 ACTIVE_IDENTITY_EXPIRES_AT_FIELD = "active_identity_expires_at"
 PENDING_ACTOR_CHOICES_FIELD = "pending_actor_choices"
 PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD = "pending_actor_choices_expires_at"
+CONTROL_DELIVERY_FIELD = "control_delivery"
+CONTROL_KIND_ACTOR_CHOICES = "actor_choices"
+CONTROL_KIND_ACTOR_SELECTED = "actor_selected"
+CONTROL_KIND_NEEDS_ACTOR_PROMPT = "needs_actor_prompt"
+CONTROL_STATUS_PENDING = "pending"
+CONTROL_STATUS_RETRY_WAIT = "retry_wait"
+CONTROL_STATUS_FAILED = "failed"
 
 
 class ChannelError(RuntimeError):
@@ -446,9 +455,11 @@ class ImessageChannelController:
             external_session_key, _external_identity_id = self._external_session_binding(contact)
 
             if content == "/actors":
-                return self._handle_actors(state, contact, external_session_key, route, now=now)
+                inbound_key = _inbound_key(row)
+                return self._handle_actors(state, contact, external_session_key, route, inbound_key=inbound_key, now=now)
             if _is_numeric_choice(content) and _pending_choices(contact, now=now):
-                return self._handle_numeric_choice(state, contact, content, route, now=now)
+                inbound_key = _inbound_key(row)
+                return self._handle_numeric_choice(state, contact, content, route, inbound_key=inbound_key, now=now)
             return self._handle_ordinary_message(
                 state,
                 contact,
@@ -459,6 +470,38 @@ class ImessageChannelController:
                 route=route,
                 now=now,
             )
+
+    def poll_control_delivery_once(self) -> dict[str, Any]:
+        now = _as_utc(self._now_fn())
+        sent = 0
+        retrying = 0
+        failed = 0
+        with self._state_lock:
+            state = self.state_store.load()
+            for contact in _contacts(state).values():
+                delivery = _normalize_control_delivery(contact.get(CONTROL_DELIVERY_FIELD))
+                if delivery is None:
+                    _clear_control_delivery(contact)
+                    continue
+                if delivery["status"] == CONTROL_STATUS_FAILED:
+                    continue
+                next_attempt_at = _parse_utc(delivery.get("next_attempt_at"))
+                if next_attempt_at is not None and next_attempt_at > now:
+                    continue
+                try:
+                    self.imsg.send(route=delivery["route"], text=delivery["text"])
+                except Exception as exc:
+                    if _mark_control_delivery_failed_or_retrying(contact, delivery, str(exc), now=now):
+                        failed += 1
+                    else:
+                        retrying += 1
+                    self.state_store.save(state)
+                    continue
+                _apply_control_delivery_effect(contact, delivery, now=now)
+                _clear_control_delivery(contact)
+                self.state_store.save(state)
+                sent += 1
+        return {"ok": True, "sent": sent, "retrying": retrying, "failed": failed}
 
     def poll_outbound_once(self, *, wait_ms: int = 0, limit: int = 50) -> dict[str, Any]:
         with self._state_lock:
@@ -522,6 +565,7 @@ class ImessageChannelController:
         external_session_key: str,
         route: dict[str, Any],
         *,
+        inbound_key: str,
         now: datetime,
     ) -> dict[str, Any]:
         payload = self.api.list_actors(external_session_key=external_session_key)
@@ -539,10 +583,23 @@ class ImessageChannelController:
             number = str(len(lines) + 1)
             choices[number] = actor_id
             lines.append(f"[{number}] {role_id} {actor_id}")
-        _set_pending_choices(contact, choices, now=now)
+        text = "\n".join(lines) if lines else DEFAULT_NO_ACTOR_PROMPT
+        effect = (
+            {"type": "set_pending_actor_choices", "choices": choices}
+            if choices
+            else {"type": "none"}
+        )
+        _set_control_delivery(
+            contact,
+            delivery_id=_control_delivery_id(inbound_key=inbound_key, kind=CONTROL_KIND_ACTOR_CHOICES),
+            kind=CONTROL_KIND_ACTOR_CHOICES,
+            route=route,
+            text=text,
+            effect=effect,
+            now=now,
+        )
         self.state_store.save(state)
-        self.imsg.send(route=route, text="\n".join(lines))
-        return {"ok": True, "status": "actors_listed", "count": len(lines)}
+        return {"ok": True, "status": "actors_list_queued", "count": len(lines)}
 
     def _handle_numeric_choice(
         self,
@@ -551,22 +608,37 @@ class ImessageChannelController:
         content: str,
         route: dict[str, Any],
         *,
+        inbound_key: str,
         now: datetime,
     ) -> dict[str, Any]:
         choices = _pending_choices(contact, now=now)
         selected = choices.get(str(int(content)))
         if not selected:
             if not _active_identity_id(contact, now=now):
+                _set_control_delivery(
+                    contact,
+                    delivery_id=_control_delivery_id(inbound_key=inbound_key, kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT),
+                    kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT,
+                    route=route,
+                    text=DEFAULT_NO_ACTOR_PROMPT,
+                    effect={"type": "none"},
+                    now=now,
+                )
                 self.state_store.save(state)
-                self.imsg.send(route=route, text=DEFAULT_NO_ACTOR_PROMPT)
                 return {"ok": True, "status": "needs_actor"}
             self.state_store.save(state)
             return {"ok": True, "status": "ignored_invalid_choice"}
-        _set_active_identity(contact, selected, now=now)
-        _clear_pending_choices(contact)
+        _set_control_delivery(
+            contact,
+            delivery_id=_control_delivery_id(inbound_key=inbound_key, kind=CONTROL_KIND_ACTOR_SELECTED),
+            kind=CONTROL_KIND_ACTOR_SELECTED,
+            route=route,
+            text=selected,
+            effect={"type": "select_active_actor", "actor_id": selected},
+            now=now,
+        )
         self.state_store.save(state)
-        self.imsg.send(route=route, text=selected)
-        return {"ok": True, "status": "actor_selected", "actor_id": selected}
+        return {"ok": True, "status": "actor_selection_queued", "actor_id": selected}
 
     def _handle_ordinary_message(
         self,
@@ -582,8 +654,19 @@ class ImessageChannelController:
     ) -> dict[str, Any]:
         active_identity_id = _active_identity_id(contact, now=now)
         if not active_identity_id:
+            _set_control_delivery(
+                contact,
+                delivery_id=_control_delivery_id(
+                    inbound_key=_inbound_key(row),
+                    kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT,
+                ),
+                kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT,
+                route=route,
+                text=DEFAULT_NO_ACTOR_PROMPT,
+                effect={"type": "none"},
+                now=now,
+            )
             self.state_store.save(state)
-            self.imsg.send(route=route, text=DEFAULT_NO_ACTOR_PROMPT)
             return {"ok": True, "status": "needs_actor"}
         inbound_key = _inbound_key(row)
         seen = set(_string_list(contact.get("seen_inbound_keys")))
@@ -659,12 +742,27 @@ class ImessageChannelWorker:
         for row in self.controller.imsg.watch_messages():
             if self._stop_event.is_set():
                 break
-            self.controller.handle_inbound_message(row)
+            try:
+                self.controller.handle_inbound_message(row)
+            except Exception as exc:
+                print(f"iMessage channel inbound message failed: {exc}", file=sys.stderr, flush=True)
+                continue
+            try:
+                self.controller.poll_control_delivery_once()
+            except Exception as exc:
+                print(f"iMessage channel control delivery failed: {exc}", file=sys.stderr, flush=True)
 
     def run_outbound_forever(self) -> None:
         wait_ms = max(self.reply_wait_ms, 0)
         while not self._stop_event.is_set():
-            self.controller.poll_outbound_once(wait_ms=wait_ms)
+            try:
+                self.controller.poll_control_delivery_once()
+            except Exception as exc:
+                print(f"iMessage channel control delivery failed: {exc}", file=sys.stderr, flush=True)
+            try:
+                self.controller.poll_outbound_once(wait_ms=wait_ms)
+            except Exception as exc:
+                print(f"iMessage channel outbound poll failed: {exc}", file=sys.stderr, flush=True)
             self._stop_event.wait(0.01)
 
     def stop(self) -> None:
@@ -722,6 +820,67 @@ def _default_contact() -> dict[str, Any]:
     }
 
 
+def _normalize_control_effect(value: dict[str, Any]) -> dict[str, Any] | None:
+    effect_type = str(value.get("type") or "").strip()
+    if effect_type == "set_pending_actor_choices":
+        choices = _string_dict(value.get("choices"))
+        if not choices:
+            return None
+        return {"type": effect_type, "choices": choices}
+    if effect_type == "select_active_actor":
+        actor_id = str(value.get("actor_id") or "").strip()
+        if not actor_id:
+            return None
+        return {"type": effect_type, "actor_id": actor_id}
+    if effect_type == "none":
+        return {"type": effect_type}
+    return None
+
+
+def _normalize_control_delivery(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    kind = str(value.get("kind") or "").strip()
+    status = str(value.get("status") or "").strip()
+    delivery_id = str(value.get("id") or "").strip()
+    text = str(value.get("text") or "")
+    route = value.get("route")
+    created_at = _parse_utc(value.get("created_at"))
+    updated_at = _parse_utc(value.get("updated_at"))
+    next_attempt_at = _parse_utc(value.get("next_attempt_at"))
+    effect = value.get("effect")
+    if kind not in {CONTROL_KIND_ACTOR_CHOICES, CONTROL_KIND_ACTOR_SELECTED, CONTROL_KIND_NEEDS_ACTOR_PROMPT}:
+        return None
+    if status not in {CONTROL_STATUS_PENDING, CONTROL_STATUS_RETRY_WAIT, CONTROL_STATUS_FAILED}:
+        return None
+    if not delivery_id or not text or not isinstance(route, dict) or not _valid_route(route):
+        return None
+    if created_at is None or updated_at is None:
+        return None
+    if status != CONTROL_STATUS_FAILED and next_attempt_at is None:
+        return None
+    if not isinstance(effect, dict):
+        return None
+    normalized_effect = _normalize_control_effect(effect)
+    if normalized_effect is None:
+        return None
+    normalized = {
+        "id": delivery_id,
+        "kind": kind,
+        "status": status,
+        "route": dict(route),
+        "text": text,
+        "attempts": _nonnegative_int(value.get("attempts")),
+        "created_at": _format_utc(created_at),
+        "updated_at": _format_utc(updated_at),
+        "last_error": str(value.get("last_error") or ""),
+        "effect": normalized_effect,
+    }
+    if next_attempt_at is not None:
+        normalized["next_attempt_at"] = _format_utc(next_attempt_at)
+    return normalized
+
+
 def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
     contact = _default_contact()
     external_session_key = payload.get("external_session_key")
@@ -747,6 +906,9 @@ def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
         contact[PENDING_ACTOR_CHOICES_FIELD] = {}
     contact["seen_inbound_keys"] = _string_list(payload.get("seen_inbound_keys"))
     contact["sent_outbound_event_ids"] = _string_list(payload.get("sent_outbound_event_ids"))
+    control_delivery = _normalize_control_delivery(payload.get(CONTROL_DELIVERY_FIELD))
+    if control_delivery is not None:
+        contact[CONTROL_DELIVERY_FIELD] = control_delivery
     return contact
 
 
@@ -772,6 +934,13 @@ def _string_dict(value: Any) -> dict[str, str]:
         if isinstance(key, (str, int)) and isinstance(row, (str, int)) and str(key) and str(row):
             result[str(key)] = str(row)
     return result
+
+
+def _nonnegative_int(value: Any) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _sender_key(sender: str) -> str:
@@ -881,6 +1050,80 @@ def _pending_choices(contact: dict[str, Any], *, now: datetime) -> dict[str, str
         return {}
     contact[PENDING_ACTOR_CHOICES_FIELD] = choices
     return choices
+
+
+def _control_delivery_id(*, inbound_key: str, kind: str) -> str:
+    safe = "".join(ch if ch.isalnum() else "-" for ch in inbound_key).strip("-")
+    return f"ctrl-{safe}-{kind}"
+
+
+def _set_control_delivery(
+    contact: dict[str, Any],
+    *,
+    delivery_id: str,
+    kind: str,
+    route: dict[str, Any],
+    text: str,
+    effect: dict[str, Any],
+    now: datetime,
+) -> None:
+    current = _as_utc(now)
+    contact[CONTROL_DELIVERY_FIELD] = {
+        "id": delivery_id,
+        "kind": kind,
+        "status": CONTROL_STATUS_PENDING,
+        "route": dict(route),
+        "text": text,
+        "attempts": 0,
+        "created_at": _format_utc(current),
+        "updated_at": _format_utc(current),
+        "next_attempt_at": _format_utc(current),
+        "last_error": "",
+        "effect": dict(effect),
+    }
+
+
+def _clear_control_delivery(contact: dict[str, Any]) -> None:
+    contact.pop(CONTROL_DELIVERY_FIELD, None)
+
+
+def _mark_control_delivery_failed_or_retrying(
+    contact: dict[str, Any],
+    delivery: dict[str, Any],
+    error_message: str,
+    *,
+    now: datetime,
+) -> bool:
+    attempts = int(delivery.get("attempts") or 0) + 1
+    current = _as_utc(now)
+    delivery["attempts"] = attempts
+    delivery["updated_at"] = _format_utc(current)
+    delivery["last_error"] = error_message
+    if attempts >= CONTROL_DELIVERY_MAX_ATTEMPTS:
+        delivery["status"] = CONTROL_STATUS_FAILED
+        delivery.pop("next_attempt_at", None)
+        contact[CONTROL_DELIVERY_FIELD] = delivery
+        return True
+    delivery["status"] = CONTROL_STATUS_RETRY_WAIT
+    delivery["next_attempt_at"] = _format_utc(current + timedelta(seconds=CONTROL_DELIVERY_RETRY_SECONDS))
+    contact[CONTROL_DELIVERY_FIELD] = delivery
+    return False
+
+
+def _apply_control_delivery_effect(contact: dict[str, Any], delivery: dict[str, Any], *, now: datetime) -> None:
+    effect = delivery.get("effect")
+    if not isinstance(effect, dict):
+        return
+    effect_type = effect.get("type")
+    if effect_type == "set_pending_actor_choices":
+        choices = _string_dict(effect.get("choices"))
+        _set_pending_choices(contact, choices, now=now)
+        return
+    if effect_type == "select_active_actor":
+        actor_id = str(effect.get("actor_id") or "").strip()
+        if actor_id:
+            _set_active_identity(contact, actor_id, now=now)
+            _clear_pending_choices(contact)
 
 
 def _contact_external_session_key(contact: dict[str, Any]) -> str:
