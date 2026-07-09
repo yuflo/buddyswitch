@@ -3190,6 +3190,80 @@ test('polling external-session-wide events acks off-selected actor message witho
   }
 });
 
+test('actor task summary renders task sys execution relation contract', async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-task/console') {
+      return Promise.resolve(okResponse({
+        console: {
+          actor: { actor_id: 'act-task', role: 'dev' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread: { status: 'idle' } },
+          task_sys: {
+            active_count: 1,
+            recoverable_count: 1,
+            active_tasks: [
+              {
+                task_id: 'task-ui-current',
+                source_type: 'test.ui',
+                status: 'in_progress',
+                task_desc: 'Draft brief',
+                task_relation: { kind: 'after', target_task_id: 'task-ui-prior' },
+                execution: { processor: 'side', handoff: null, result: null },
+              },
+            ],
+            recoverable_tasks: [
+              {
+                task_id: 'task-ui-failed',
+                source_type: 'test.ui',
+                status: 'in_progress',
+                task_desc: 'Retry brief',
+                task_relation: { kind: 'independent', target_task_id: null },
+                execution: {
+                  processor: null,
+                  handoff: null,
+                  result: { type: 'failure', reason: 'runtime_failed' },
+                },
+              },
+            ],
+          },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-task', role_id: 'dev' } },
+        },
+      }));
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-task&limit=50') {
+      return Promise.resolve(imNotFoundResponse());
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-task', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+
+    await app.selectActor(state, elements, 'act-task');
+
+    assert.match(elements.actorTaskSummary.innerHTML, /Draft brief/);
+    assert.match(elements.actorTaskSummary.innerHTML, /side/);
+    assert.match(elements.actorTaskSummary.innerHTML, /after/);
+    assert.match(elements.actorTaskSummary.innerHTML, /task-ui-prior/);
+    assert.match(elements.actorTaskSummary.innerHTML, /runtime_failed/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /active_processor/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /failure_result/);
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('active WebUI sources do not carry retired lifecycle feedback residue', () => {
   const root = path.join(__dirname, '..');
   const sources = [

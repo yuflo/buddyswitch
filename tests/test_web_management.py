@@ -2153,7 +2153,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         task_sys.record_side_runtime_failure(
             failed_result["task_id"],
             {
-                "status": "runtime_failed",
+                "reason": "runtime_failed",
                 "stage": "side_input",
                 "processor": "side",
                 "error": "thread not loaded",
@@ -2171,9 +2171,18 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(console["task_sys"]["active_count"], 1)
         self.assertEqual(console["task_sys"]["recoverable_count"], 1)
         self.assertEqual(console["task_sys"]["active_tasks"][0]["task_id"], task_result["task_id"])
+        self.assertEqual(console["task_sys"]["active_tasks"][0]["status"], "in_progress")
+        self.assertEqual(console["task_sys"]["active_tasks"][0]["execution"]["processor"], "side")
+        self.assertIn("task_desc", console["task_sys"]["active_tasks"][0])
+        self.assertIn("task_relation", console["task_sys"]["active_tasks"][0])
+        self.assertNotIn("active_processor", console["task_sys"]["active_tasks"][0])
         self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["task_id"], failed_result["task_id"])
-        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["status"], "runtime_failed")
-        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["failure_result"]["stage"], "side_input")
+        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["status"], "in_progress")
+        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["execution"]["result"]["type"], "failure")
+        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["execution"]["result"]["reason"], "runtime_failed")
+        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["execution"]["result"]["stage"], "side_input")
+        self.assertNotIn("active_processor", console["task_sys"]["recoverable_tasks"][0])
+        self.assertNotIn("failure_result", console["task_sys"]["recoverable_tasks"][0])
         self.assertEqual(console["im"]["target"]["identity"], {"id": "act-pm-demo", "type": "actor"})
         self.assertEqual(console["im"]["target"]["identity_id"], "act-pm-demo")
         self.assertEqual(console["im"]["target"]["role_id"], "pm")

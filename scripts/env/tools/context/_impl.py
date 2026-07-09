@@ -280,12 +280,16 @@ def _candidate_track_row(*, track: dict[str, Any], current_identity: dict[str, A
 
 def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
     source_ref = task.get("source_ref")
+    task_relation = task.get("task_relation")
+    execution = task.get("execution")
     return {
         "task_id": task.get("id"),
         "source_type": task.get("source_type"),
         "source_ref": source_ref if isinstance(source_ref, dict) else {},
         "status": task.get("status"),
-        "active_processor": task.get("active_processor"),
+        "task_desc": task.get("task_desc"),
+        "task_relation": dict(task_relation) if isinstance(task_relation, dict) else None,
+        "execution": dict(execution) if isinstance(execution, dict) else {},
         "updated_at": task.get("updated_at"),
     }
 

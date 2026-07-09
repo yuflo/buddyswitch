@@ -1653,6 +1653,23 @@ def _task_sys_status_payload(context: DaemonContext) -> dict[str, Any]:
     tasks_dir = context.instance_root.parent.parent / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks"
     active_tasks: list[dict[str, Any]] = []
     recoverable_tasks: list[dict[str, Any]] = []
+
+    def _execution_result(record: dict[str, Any]) -> dict[str, Any] | None:
+        execution = record.get("execution")
+        if not isinstance(execution, dict):
+            return None
+        result = execution.get("result")
+        return dict(result) if isinstance(result, dict) else None
+
+    def _is_recoverable(record: dict[str, Any]) -> bool:
+        if record.get("status") != "in_progress":
+            return False
+        result = _execution_result(record)
+        return isinstance(result, dict) and result.get("type") == "failure" and result.get("reason") in task_sys.RECOVERABLE_TASK_REASONS
+
+    def _is_active(record: dict[str, Any]) -> bool:
+        return record.get("status") in task_sys.ACTIVE_TASK_STATUSES and not _is_recoverable(record)
+
     if tasks_dir.exists():
         for path in sorted(tasks_dir.glob("*.json")):
             try:
@@ -1664,9 +1681,9 @@ def _task_sys_status_payload(context: DaemonContext) -> dict[str, Any]:
                 continue
             if target.get("actor_id") != actor_target["actor_id"] or target.get("role_id") != actor_target["role_id"]:
                 continue
-            if record.get("status") in task_sys.ACTIVE_TASK_STATUSES:
+            if _is_active(record):
                 active_tasks.append(record)
-            elif record.get("status") in task_sys.RECOVERABLE_TASK_STATUSES:
+            elif _is_recoverable(record):
                 recoverable_tasks.append(record)
 
     def _summaries(records: list[dict[str, Any]], *, include_failure: bool = False) -> tuple[dict[str, int], list[dict[str, Any]]]:
@@ -1674,20 +1691,23 @@ def _task_sys_status_payload(context: DaemonContext) -> dict[str, Any]:
         summaries: list[dict[str, Any]] = []
         for record in records:
             status = record.get("status")
-            status_key = status if isinstance(status, str) and status else "unknown"
+            result = _execution_result(record)
+            reason = result.get("reason") if isinstance(result, dict) else None
+            status_key = reason if include_failure and isinstance(reason, str) and reason else status if isinstance(status, str) and status else "unknown"
             by_status[status_key] = by_status.get(status_key, 0) + 1
             source_ref = record.get("source_ref")
+            task_relation = record.get("task_relation")
+            execution = record.get("execution")
             row = {
                 "task_id": record.get("id"),
                 "source_type": record.get("source_type"),
                 "source_ref": dict(source_ref) if isinstance(source_ref, dict) else {},
                 "status": status,
-                "active_processor": record.get("active_processor"),
+                "task_desc": record.get("task_desc"),
+                "task_relation": dict(task_relation) if isinstance(task_relation, dict) else None,
+                "execution": dict(execution) if isinstance(execution, dict) else {},
                 "updated_at": record.get("updated_at"),
             }
-            if include_failure:
-                failure_result = record.get("failure_result")
-                row["failure_result"] = dict(failure_result) if isinstance(failure_result, dict) else {}
             summaries.append(row)
         return by_status, summaries
 

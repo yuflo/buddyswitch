@@ -1006,33 +1006,28 @@ class WebManagementService:
         del instance_payload
         task_sys_tasks = task_sys.active_tasks_for_actor(actor_target)
         recoverable_task_sys_tasks = task_sys.recoverable_tasks_for_actor(actor_target)
+
+        def task_sys_row(row: dict[str, Any]) -> dict[str, Any]:
+            task_relation = row.get("task_relation")
+            execution = row.get("execution")
+            return {
+                "task_id": row.get("id"),
+                "source_type": row.get("source_type"),
+                "status": row.get("status"),
+                "task_desc": row.get("task_desc"),
+                "task_relation": dict(task_relation) if isinstance(task_relation, dict) else None,
+                "execution": dict(execution) if isinstance(execution, dict) else {},
+                "updated_at": row.get("updated_at"),
+            }
+
         return {
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
             "task_sys": {
                 "active_count": len(task_sys_tasks),
                 "recoverable_count": len(recoverable_task_sys_tasks),
-                "active_tasks": [
-                    {
-                        "task_id": row.get("id"),
-                        "source_type": row.get("source_type"),
-                        "status": row.get("status"),
-                        "active_processor": row.get("active_processor"),
-                        "updated_at": row.get("updated_at"),
-                    }
-                    for row in task_sys_tasks[:10]
-                ],
-                "recoverable_tasks": [
-                    {
-                        "task_id": row.get("id"),
-                        "source_type": row.get("source_type"),
-                        "status": row.get("status"),
-                        "active_processor": row.get("active_processor"),
-                        "failure_result": dict(row.get("failure_result")) if isinstance(row.get("failure_result"), dict) else {},
-                        "updated_at": row.get("updated_at"),
-                    }
-                    for row in recoverable_task_sys_tasks[:10]
-                ],
+                "active_tasks": [task_sys_row(row) for row in task_sys_tasks[:10]],
+                "recoverable_tasks": [task_sys_row(row) for row in recoverable_task_sys_tasks[:10]],
             },
             "tracks": {
                 "items": track_read.list_track_summaries(owner_identity=current_identity),

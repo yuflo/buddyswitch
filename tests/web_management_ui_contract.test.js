@@ -94,6 +94,15 @@ test('production html keeps all real control ids used by the web UI', () => {
   });
 });
 
+test('task sys panel uses execution relation fields only', () => {
+  ['task_desc', 'task_relation', 'execution'].forEach((marker) => {
+    assertIncludes(appJs, marker);
+  });
+  ['active_processor', 'failure_result'].forEach((marker) => {
+    assertExcludes(appJs, marker);
+  });
+});
+
 test('production html uses the Team Room and Track Studio workspace layout', () => {
   [
     'class="webui-root"',
