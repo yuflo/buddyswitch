@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 from urllib import error, request
@@ -24,11 +25,17 @@ for candidate in (HELPER_DIR, SCRIPTS):
 from env.repos import runtime_files  # noqa: E402
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_DISPLAY_NAME = "BuddySwitch iMessage"
 DEFAULT_NO_ACTOR_PROMPT = "Send /actors to choose an actor."
 DEFAULT_REPLY_WAIT_MS = 30000
+ACTIVE_ACTOR_IDLE_SECONDS = 30 * 60
+PENDING_ACTOR_CHOICE_SECONDS = 5 * 60
 BLOCKED_ACTOR_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
+ACTIVE_IDENTITY_ID_FIELD = "active_identity_id"
+ACTIVE_IDENTITY_EXPIRES_AT_FIELD = "active_identity_expires_at"
+PENDING_ACTOR_CHOICES_FIELD = "pending_actor_choices"
+PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD = "pending_actor_choices_expires_at"
 
 
 class ChannelError(RuntimeError):
@@ -411,11 +418,13 @@ class ImessageChannelController:
         api: Any | None = None,
         imsg: Any | None = None,
         state_store: ImessageChannelStateStore | None = None,
+        now_fn: Callable[[], datetime] | None = None,
     ) -> None:
         self.config = config
         self.api = api or BuddySwitchImApi(config.server)
         self.imsg = imsg or CommandImsgClient(config.imsg_bin)
         self.state_store = state_store or ImessageChannelStateStore(config.effective_state_path())
+        self._now_fn = now_fn or _utc_now
         self._state_lock = threading.RLock()
 
     def handle_inbound_message(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -429,6 +438,7 @@ class ImessageChannelController:
             return {"ok": True, "status": "ignored_empty"}
 
         with self._state_lock:
+            now = _as_utc(self._now_fn())
             state = self.state_store.load()
             contact = self._contact(state, sender)
             route = _route_from_row(row, sender=sender)
@@ -436,9 +446,9 @@ class ImessageChannelController:
             external_session_key, _external_identity_id = self._external_session_binding(contact)
 
             if content == "/actors":
-                return self._handle_actors(state, contact, external_session_key, route)
-            if _is_numeric_choice(content) and contact.get("pending_actor_choices"):
-                return self._handle_numeric_choice(state, contact, content, route)
+                return self._handle_actors(state, contact, external_session_key, route, now=now)
+            if _is_numeric_choice(content) and _pending_choices(contact, now=now):
+                return self._handle_numeric_choice(state, contact, content, route, now=now)
             return self._handle_ordinary_message(
                 state,
                 contact,
@@ -447,6 +457,7 @@ class ImessageChannelController:
                 sender=sender,
                 content=content,
                 route=route,
+                now=now,
             )
 
     def poll_outbound_once(self, *, wait_ms: int = 0, limit: int = 50) -> dict[str, Any]:
@@ -510,6 +521,8 @@ class ImessageChannelController:
         contact: dict[str, Any],
         external_session_key: str,
         route: dict[str, Any],
+        *,
+        now: datetime,
     ) -> dict[str, Any]:
         payload = self.api.list_actors(external_session_key=external_session_key)
         if payload.get("ok") is not True:
@@ -526,7 +539,7 @@ class ImessageChannelController:
             number = str(len(lines) + 1)
             choices[number] = actor_id
             lines.append(f"[{number}] {role_id} {actor_id}")
-        contact["pending_actor_choices"] = choices
+        _set_pending_choices(contact, choices, now=now)
         self.state_store.save(state)
         self.imsg.send(route=route, text="\n".join(lines))
         return {"ok": True, "status": "actors_listed", "count": len(lines)}
@@ -537,17 +550,20 @@ class ImessageChannelController:
         contact: dict[str, Any],
         content: str,
         route: dict[str, Any],
+        *,
+        now: datetime,
     ) -> dict[str, Any]:
-        choices = _pending_choices(contact)
+        choices = _pending_choices(contact, now=now)
         selected = choices.get(str(int(content)))
         if not selected:
-            if not _active_identity_id(contact):
+            if not _active_identity_id(contact, now=now):
                 self.state_store.save(state)
                 self.imsg.send(route=route, text=DEFAULT_NO_ACTOR_PROMPT)
                 return {"ok": True, "status": "needs_actor"}
             self.state_store.save(state)
             return {"ok": True, "status": "ignored_invalid_choice"}
-        contact["active_identity_id"] = selected
+        _set_active_identity(contact, selected, now=now)
+        _clear_pending_choices(contact)
         self.state_store.save(state)
         self.imsg.send(route=route, text=selected)
         return {"ok": True, "status": "actor_selected", "actor_id": selected}
@@ -562,8 +578,9 @@ class ImessageChannelController:
         sender: str,
         content: str,
         route: dict[str, Any],
+        now: datetime,
     ) -> dict[str, Any]:
-        active_identity_id = _active_identity_id(contact)
+        active_identity_id = _active_identity_id(contact, now=now)
         if not active_identity_id:
             self.state_store.save(state)
             self.imsg.send(route=route, text=DEFAULT_NO_ACTOR_PROMPT)
@@ -587,6 +604,7 @@ class ImessageChannelController:
             raise ChannelError("BuddySwitch send response did not include message.id")
         seen.add(inbound_key)
         contact["seen_inbound_keys"] = sorted(seen)
+        _set_active_identity(contact, active_identity_id, now=now)
         self.state_store.save(state)
         return {"ok": True, "status": "delivered", "message_id": message_id, "sender": _sender_key(sender)}
 
@@ -669,9 +687,36 @@ def _default_state() -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "contacts": {}}
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _format_utc(value: datetime) -> str:
+    return _as_utc(value).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return _as_utc(parsed)
+
+
 def _default_contact() -> dict[str, Any]:
     return {
-        "pending_actor_choices": {},
+        PENDING_ACTOR_CHOICES_FIELD: {},
         "seen_inbound_keys": [],
         "sent_outbound_event_ids": [],
     }
@@ -688,10 +733,18 @@ def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
     route = payload.get("route")
     if isinstance(route, dict) and _valid_route(route):
         contact["route"] = dict(route)
-    active_identity_id = payload.get("active_identity_id")
-    if isinstance(active_identity_id, str) and active_identity_id.strip():
-        contact["active_identity_id"] = active_identity_id.strip()
-    contact["pending_actor_choices"] = _string_dict(payload.get("pending_actor_choices"))
+    active_identity_id = payload.get(ACTIVE_IDENTITY_ID_FIELD)
+    active_expires_at = _parse_utc(payload.get(ACTIVE_IDENTITY_EXPIRES_AT_FIELD))
+    if isinstance(active_identity_id, str) and active_identity_id.strip() and active_expires_at is not None:
+        contact[ACTIVE_IDENTITY_ID_FIELD] = active_identity_id.strip()
+        contact[ACTIVE_IDENTITY_EXPIRES_AT_FIELD] = _format_utc(active_expires_at)
+    pending_choices = _string_dict(payload.get(PENDING_ACTOR_CHOICES_FIELD))
+    pending_expires_at = _parse_utc(payload.get(PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD))
+    if pending_choices and pending_expires_at is not None:
+        contact[PENDING_ACTOR_CHOICES_FIELD] = pending_choices
+        contact[PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD] = _format_utc(pending_expires_at)
+    else:
+        contact[PENDING_ACTOR_CHOICES_FIELD] = {}
     contact["seen_inbound_keys"] = _string_list(payload.get("seen_inbound_keys"))
     contact["sent_outbound_event_ids"] = _string_list(payload.get("sent_outbound_event_ids"))
     return contact
@@ -784,17 +837,50 @@ def _is_numeric_choice(content: str) -> bool:
     return content.strip().isdigit()
 
 
-def _pending_choices(contact: dict[str, Any]) -> dict[str, str]:
-    choices = contact.get("pending_actor_choices")
-    if not isinstance(choices, dict):
-        choices = {}
-        contact["pending_actor_choices"] = choices
-    return {str(key): str(value) for key, value in choices.items() if isinstance(key, (str, int)) and isinstance(value, str)}
+def _set_active_identity(contact: dict[str, Any], identity_id: str, *, now: datetime) -> None:
+    contact[ACTIVE_IDENTITY_ID_FIELD] = identity_id
+    contact[ACTIVE_IDENTITY_EXPIRES_AT_FIELD] = _format_utc(
+        _as_utc(now) + timedelta(seconds=ACTIVE_ACTOR_IDLE_SECONDS)
+    )
 
 
-def _active_identity_id(contact: dict[str, Any]) -> str:
-    value = contact.get("active_identity_id")
-    return value.strip() if isinstance(value, str) and value.strip() else ""
+def _clear_active_identity(contact: dict[str, Any]) -> None:
+    contact.pop(ACTIVE_IDENTITY_ID_FIELD, None)
+    contact.pop(ACTIVE_IDENTITY_EXPIRES_AT_FIELD, None)
+
+
+def _active_identity_id(contact: dict[str, Any], *, now: datetime) -> str:
+    value = contact.get(ACTIVE_IDENTITY_ID_FIELD)
+    expires_at = _parse_utc(contact.get(ACTIVE_IDENTITY_EXPIRES_AT_FIELD))
+    if not isinstance(value, str) or not value.strip() or expires_at is None or expires_at <= _as_utc(now):
+        _clear_active_identity(contact)
+        return ""
+    return value.strip()
+
+
+def _set_pending_choices(contact: dict[str, Any], choices: dict[str, str], *, now: datetime) -> None:
+    if not choices:
+        _clear_pending_choices(contact)
+        return
+    contact[PENDING_ACTOR_CHOICES_FIELD] = dict(choices)
+    contact[PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD] = _format_utc(
+        _as_utc(now) + timedelta(seconds=PENDING_ACTOR_CHOICE_SECONDS)
+    )
+
+
+def _clear_pending_choices(contact: dict[str, Any]) -> None:
+    contact[PENDING_ACTOR_CHOICES_FIELD] = {}
+    contact.pop(PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD, None)
+
+
+def _pending_choices(contact: dict[str, Any], *, now: datetime) -> dict[str, str]:
+    choices = _string_dict(contact.get(PENDING_ACTOR_CHOICES_FIELD))
+    expires_at = _parse_utc(contact.get(PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD))
+    if not choices or expires_at is None or expires_at <= _as_utc(now):
+        _clear_pending_choices(contact)
+        return {}
+    contact[PENDING_ACTOR_CHOICES_FIELD] = choices
+    return choices
 
 
 def _contact_external_session_key(contact: dict[str, Any]) -> str:

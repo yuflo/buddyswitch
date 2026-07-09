@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -216,6 +217,7 @@ def _controller(
     *,
     api: _FakeBuddySwitchImApi | None = None,
     imsg: _FakeImsg | None = None,
+    now_fn: Any | None = None,
 ) -> tuple[imessage_channel.ImessageChannelController, _FakeBuddySwitchImApi, _FakeImsg]:
     api = api or _FakeBuddySwitchImApi()
     imsg = imsg or _FakeImsg()
@@ -223,7 +225,18 @@ def _controller(
         server="http://127.0.0.1:8765",
         state_path=temp_root / "state.json",
     )
-    return imessage_channel.ImessageChannelController(config=config, api=api, imsg=imsg), api, imsg
+    kwargs: dict[str, Any] = {"config": config, "api": api, "imsg": imsg}
+    if now_fn is not None:
+        kwargs["now_fn"] = now_fn
+    return imessage_channel.ImessageChannelController(**kwargs), api, imsg
+
+
+def _fixed_now() -> datetime:
+    return datetime(2026, 7, 8, 4, 0, 0, tzinfo=timezone.utc)
+
+
+def _format_test_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _wait_until(predicate: Any, *, timeout: float = 1.0) -> bool:
@@ -236,13 +249,13 @@ def _wait_until(predicate: Any, *, timeout: float = 1.0) -> bool:
 
 
 class ImessageChannelTests(unittest.TestCase):
-    def test_default_state_path_uses_imessage_channel_schema_v3(self) -> None:
+    def test_default_state_path_uses_imessage_channel_schema_v4(self) -> None:
         config = imessage_channel.ChannelConfig(server="http://127.0.0.1:8765")
         self.assertEqual(config.effective_state_path().parts[-2:], ("imessage-channel", "state.json"))
 
         with tempfile.TemporaryDirectory() as temp_root:
             store = imessage_channel.ImessageChannelStateStore(Path(temp_root) / "state.json")
-            self.assertEqual(store.load(), {"schema_version": 3, "contacts": {}})
+            self.assertEqual(store.load(), {"schema_version": 4, "contacts": {}})
 
     def test_first_sender_message_creates_external_session_and_reuses_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -290,7 +303,9 @@ class ImessageChannelTests(unittest.TestCase):
         self.assertEqual(duplicate["status"], "duplicate")
         self.assertEqual(api.sent[0]["external_session_key"], "imsk-1")
         self.assertEqual(state["contacts"]["sender:a@example.com"]["active_identity_id"], "act-market-demo")
+        self.assertIn("active_identity_expires_at", state["contacts"]["sender:a@example.com"])
         self.assertNotIn("active_identity_id", state["contacts"]["sender:b@example.com"])
+        self.assertNotIn("active_identity_expires_at", state["contacts"]["sender:b@example.com"])
         self.assertEqual(state["contacts"]["sender:a@example.com"]["route"], {"chat_id": "1", "sender": "a@example.com"})
         self.assertEqual(state["contacts"]["sender:b@example.com"]["route"], {"chat_id": "2", "sender": "b@example.com"})
         self.assertNotIn("routes", state["contacts"]["sender:a@example.com"])
@@ -304,7 +319,8 @@ class ImessageChannelTests(unittest.TestCase):
             _actor("pm", "act-pm-online"),
         ]
         with tempfile.TemporaryDirectory() as temp_root:
-            controller, _api, imsg = _controller(Path(temp_root), api=_FakeBuddySwitchImApi(actors=actors))
+            now = _fixed_now()
+            controller, _api, imsg = _controller(Path(temp_root), api=_FakeBuddySwitchImApi(actors=actors), now_fn=lambda: now)
 
             result = controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
             state = controller.state_store.load()
@@ -315,12 +331,17 @@ class ImessageChannelTests(unittest.TestCase):
             state["contacts"]["sender:user-a@example.com"]["pending_actor_choices"],
             {"1": "act-market-online", "2": "act-pm-online"},
         )
+        self.assertEqual(
+            state["contacts"]["sender:user-a@example.com"]["pending_actor_choices_expires_at"],
+            _format_test_utc(now + timedelta(seconds=imessage_channel.PENDING_ACTOR_CHOICE_SECONDS)),
+        )
 
     def test_numeric_selection_uses_pending_snapshot_without_posting_message(self) -> None:
         actors = [_actor("market", "act-market-first"), _actor("dev", "act-dev-second")]
         with tempfile.TemporaryDirectory() as temp_root:
             api = _FakeBuddySwitchImApi(actors=actors)
-            controller, _api, imsg = _controller(Path(temp_root), api=api)
+            now = _fixed_now()
+            controller, _api, imsg = _controller(Path(temp_root), api=api, now_fn=lambda: now)
             controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
             api.actors = [_actor("design", "act-design-later")]
 
@@ -328,7 +349,14 @@ class ImessageChannelTests(unittest.TestCase):
             state = controller.state_store.load()
 
         self.assertEqual(result["status"], "actor_selected")
-        self.assertEqual(state["contacts"]["sender:user-a@example.com"]["active_identity_id"], "act-dev-second")
+        contact = state["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(contact["active_identity_id"], "act-dev-second")
+        self.assertEqual(
+            contact["active_identity_expires_at"],
+            _format_test_utc(now + timedelta(seconds=imessage_channel.ACTIVE_ACTOR_IDLE_SECONDS)),
+        )
+        self.assertEqual(contact["pending_actor_choices"], {})
+        self.assertNotIn("pending_actor_choices_expires_at", contact)
         self.assertEqual(api.sent, [])
         self.assertEqual(imsg.sent[-1]["text"], "act-dev-second")
 
@@ -363,6 +391,139 @@ class ImessageChannelTests(unittest.TestCase):
         self.assertEqual(result["status"], "delivered")
         self.assertEqual(api.sent[0]["target_identity_id"], "act-market-demo")
         self.assertEqual(api.sent[0]["content"], "hello actor")
+
+    def test_expired_active_actor_prompts_without_posting_message(self) -> None:
+        now = _fixed_now()
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, imsg = _controller(Path(temp_root), now_fn=lambda: now)
+            controller.state_store.save(
+                {
+                    "schema_version": imessage_channel.SCHEMA_VERSION,
+                    "contacts": {
+                        "sender:user-a@example.com": {
+                            "external_session_key": "imsk-1",
+                            "external_identity_id": "ext-fake-1",
+                            "route": {"chat_id": "6", "sender": "user-a@example.com"},
+                            "active_identity_id": "act-market-demo",
+                            "active_identity_expires_at": _format_test_utc(now - timedelta(seconds=1)),
+                            "pending_actor_choices": {},
+                            "seen_inbound_keys": [],
+                            "sent_outbound_event_ids": [],
+                        }
+                    },
+                }
+            )
+
+            result = controller.handle_inbound_message(_row(text="late ping", guid="guid-late"))
+            state = controller.state_store.load()
+
+        contact = state["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(result["status"], "needs_actor")
+        self.assertEqual(api.sent, [])
+        self.assertEqual(imsg.sent, [{"route": {"chat_id": "6", "sender": "user-a@example.com"}, "text": PROMPT}])
+        self.assertNotIn("active_identity_id", contact)
+        self.assertNotIn("active_identity_expires_at", contact)
+
+    def test_expired_pending_choice_is_not_used_for_numeric_selection(self) -> None:
+        now = _fixed_now()
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, imsg = _controller(Path(temp_root), now_fn=lambda: now)
+            controller.state_store.save(
+                {
+                    "schema_version": imessage_channel.SCHEMA_VERSION,
+                    "contacts": {
+                        "sender:user-a@example.com": {
+                            "external_session_key": "imsk-1",
+                            "external_identity_id": "ext-fake-1",
+                            "route": {"chat_id": "6", "sender": "user-a@example.com"},
+                            "pending_actor_choices": {"1": "act-market-demo"},
+                            "pending_actor_choices_expires_at": _format_test_utc(now - timedelta(seconds=1)),
+                            "seen_inbound_keys": [],
+                            "sent_outbound_event_ids": [],
+                        }
+                    },
+                }
+            )
+
+            result = controller.handle_inbound_message(_row(text="1", guid="guid-stale-choice"))
+            state = controller.state_store.load()
+
+        contact = state["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(result["status"], "needs_actor")
+        self.assertEqual(api.sent, [])
+        self.assertEqual(imsg.sent, [{"route": {"chat_id": "6", "sender": "user-a@example.com"}, "text": PROMPT}])
+        self.assertEqual(contact["pending_actor_choices"], {})
+        self.assertNotIn("pending_actor_choices_expires_at", contact)
+        self.assertNotIn("active_identity_id", contact)
+        self.assertNotIn("active_identity_expires_at", contact)
+
+    def test_successful_ordinary_message_refreshes_active_actor_idle_ttl(self) -> None:
+        current = [_fixed_now()]
+
+        def now_fn() -> datetime:
+            return current[0]
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, _imsg = _controller(Path(temp_root), now_fn=now_fn)
+            controller.handle_inbound_message(_row(text="/actors", guid="guid-actors"))
+            controller.handle_inbound_message(_row(text="1", guid="guid-select"))
+            current[0] = _fixed_now() + timedelta(minutes=10)
+
+            result = controller.handle_inbound_message(_row(text="hello after idle", guid="guid-refresh"))
+            state = controller.state_store.load()
+
+        contact = state["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(result["status"], "delivered")
+        self.assertEqual(api.sent[0]["target_identity_id"], "act-market-demo")
+        self.assertEqual(
+            contact["active_identity_expires_at"],
+            _format_test_utc(current[0] + timedelta(seconds=imessage_channel.ACTIVE_ACTOR_IDLE_SECONDS)),
+        )
+
+    def test_outbound_delivery_ignores_active_actor_ttl(self) -> None:
+        now = _fixed_now()
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, imsg = _controller(Path(temp_root), now_fn=lambda: now)
+            controller.state_store.save(
+                {
+                    "schema_version": imessage_channel.SCHEMA_VERSION,
+                    "contacts": {
+                        "sender:user-a@example.com": {
+                            "external_session_key": "imsk-1",
+                            "external_identity_id": "ext-fake-1",
+                            "route": {"chat_id": "9", "sender": "user-a@example.com"},
+                            "active_identity_id": "act-market-demo",
+                            "active_identity_expires_at": _format_test_utc(now - timedelta(minutes=30)),
+                            "pending_actor_choices": {},
+                            "seen_inbound_keys": [],
+                            "sent_outbound_event_ids": [],
+                        }
+                    },
+                }
+            )
+            api.events_by_key["imsk-1"] = [
+                {
+                    "event_id": "imev-late-outbound",
+                    "message_id": "msg-late-outbound",
+                    "reply_to": None,
+                    **_actor_reply_identity(),
+                }
+            ]
+            api.messages["msg-late-outbound"] = {
+                "id": "msg-late-outbound",
+                "content": "still delivered",
+                "reply_to": None,
+                **_actor_reply_identity(),
+            }
+
+            result = controller.poll_outbound_once(wait_ms=0)
+
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(
+            imsg.sent,
+            [{"route": {"chat_id": "9", "sender": "user-a@example.com"}, "text": "[Message From act-market-demo]\n\nstill delivered"}],
+        )
+        self.assertEqual(api.acked, [{"external_session_key": "imsk-1", "event_id": "imev-late-outbound"}])
 
     def test_actor_reply_uses_contact_route_not_reply_to_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -822,13 +983,42 @@ class ImessageChannelResidueTests(unittest.TestCase):
                         hits.append(f"{file_path.relative_to(ROOT)}: contains {term}")
         self.assertEqual(hits, [])
 
+    def test_selected_actor_ttl_source_uses_expiry_helpers_not_permanent_paths(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "imessage_channel.py").read_text(encoding="utf-8")
+
+        for required_term in (
+            "active_identity_expires_at",
+            "pending_actor_choices_expires_at",
+            "ACTIVE_ACTOR_IDLE_SECONDS",
+            "PENDING_ACTOR_CHOICE_SECONDS",
+        ):
+            self.assertIn(required_term, source)
+
+        retired_paths = (
+            "SCHEMA_VERSION = " + "3",
+            "contact" + '["active_identity_id"] = selected',
+            "contact" + '.get("pending_actor_choices")',
+            "def _active_identity_id" + "(contact: dict[str, Any]) -> str",
+        )
+        hits = [pattern for pattern in retired_paths if pattern in source]
+        self.assertEqual(hits, [])
+
     def test_channel_semantics_stay_out_of_web_http_and_core(self) -> None:
-        forbidden_terms = ("pending_actor_choices", "active_actor_id", "[Message From")
+        forbidden_terms = (
+            "pending_actor_choices",
+            "active_actor_id",
+            "[Message From",
+            "active_identity_expires_at",
+            "pending_actor_choices_expires_at",
+            "ACTIVE_ACTOR_IDLE_SECONDS",
+            "PENDING_ACTOR_CHOICE_SECONDS",
+        )
         paths = [
             ROOT / "tools" / "launcher" / "web_management.py",
             ROOT / "tools" / "launcher" / "im_http_router.py",
             ROOT / "scripts" / "env" / "services",
             ROOT / "scripts" / "env" / "repos",
+            ROOT / "scripts" / "env" / "tool_runtime",
         ]
         hits: list[str] = []
         for path in paths:
