@@ -1257,21 +1257,47 @@ exec "$real_git" "$@"
         actor_id: str,
         role_id: str,
         task_id: str = "task-im-message-created-status001",
-        status: str = "parent_processing",
-        active_processor: str | None = "parent",
+        processor: str | None = "parent",
+        failure_reason: str | None = None,
     ) -> dict[str, object]:
         tasks_dir = shared_root / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks"
         tasks_dir.mkdir(parents=True, exist_ok=True)
+        execution: dict[str, object] = {
+            "processor": processor,
+            "handoff": {
+                "parent_frame_context": {"next": "Reply from parent."},
+                "interrupt": False,
+                "ordering": {},
+                "side_thread_id": None,
+                "cleanup": {},
+            },
+            "result": None,
+        }
+        if failure_reason is not None:
+            execution = {
+                "processor": None,
+                "handoff": None,
+                "result": {
+                    "type": "failure",
+                    "reason": failure_reason,
+                    "stage": "side_input",
+                    "processor": "side",
+                    "error": "thread not loaded",
+                    "retryable": True,
+                    "attempts": 2,
+                    "updated_at": "2026-06-30T00:00:01+00:00",
+                },
+            }
         record: dict[str, object] = {
             "id": task_id,
             "source_type": "im.message.created",
             "source_ref": {"message_id": "msg-status-1"},
             "actor_target": {"actor_id": actor_id, "role_id": role_id},
             "inbound_context": {"text": "Need parent help", "surface": "imessage"},
-            "status": status,
-            "active_processor": active_processor,
-            "parent_handoff_params": {"parent_frame_context": {"next": "Reply from parent."}},
-            "side_result": {"outcome": "need_parent", "params": {"interrupt": False}},
+            "status": "in_progress",
+            "task_desc": "Need parent help",
+            "task_relation": {"kind": "independent", "target_task_id": None},
+            "execution": execution,
             "events": [
                 {"type": "created", "at": "2026-06-30T00:00:00+00:00"},
                 {"type": "side_frame_started", "at": "2026-06-30T00:00:00+00:00"},
@@ -1280,15 +1306,6 @@ exec "$real_git" "$@"
             "created_at": "2026-06-30T00:00:00+00:00",
             "updated_at": "2026-06-30T00:00:01+00:00",
         }
-        if status in {"runtime_failed", "side_no_result", "side_timed_out"}:
-            record["failure_result"] = {
-                "stage": "side_input",
-                "processor": "side",
-                "error": "thread not loaded",
-                "retryable": True,
-                "attempts": 2,
-                "updated_at": "2026-06-30T00:00:01+00:00",
-            }
         (tasks_dir / f"{task_id}.json").write_text(json.dumps(record, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         return record
 
@@ -1362,8 +1379,10 @@ exec "$real_git" "$@"
         self.assertEqual(record["inbound_context"]["surface"], "cli")
         self.assertEqual(record["actor_target"]["actor_id"], payload["actor_id"])
         self.assertEqual(record["actor_target"]["role_id"], payload["role_id"])
-        self.assertEqual(record["status"], "side_processing")
-        self.assertEqual(record["active_processor"], "side")
+        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["execution"]["processor"], "side")
+        self.assertEqual(record["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertNotIn("active_processor", record)
         return record
 
     def _runtime_sparse_list(self, workspace_dir: Path) -> list[str]:
@@ -5970,8 +5989,8 @@ exec "$real_git" "$@"
                 actor_id=str(ctx["actor_id"]),
                 role_id="pm",
                 task_id="task-im-message-created-runtimefailed",
-                status="runtime_failed",
-                active_processor=None,
+                processor=None,
+                failure_reason="runtime_failed",
             )
 
             status_result = subprocess.run(
@@ -5995,15 +6014,18 @@ exec "$real_git" "$@"
             self.assertEqual(task_sys_status["scope"], "task_sys_state_projection")
             self.assertEqual(task_sys_status["active_count"], 1)
             self.assertEqual(task_sys_status["recoverable_count"], 1)
-            self.assertEqual(task_sys_status["by_status"], {"parent_processing": 1})
+            self.assertEqual(task_sys_status["by_status"], {"in_progress": 1})
             self.assertEqual(task_sys_status["recoverable_by_status"], {"runtime_failed": 1})
             self.assertEqual(task_sys_status["active_tasks"][0]["task_id"], "task-im-message-created-status001")
             self.assertEqual(task_sys_status["active_tasks"][0]["source_type"], "im.message.created")
             self.assertEqual(task_sys_status["active_tasks"][0]["source_ref"], {"message_id": "msg-status-1"})
-            self.assertEqual(task_sys_status["active_tasks"][0]["active_processor"], "parent")
+            self.assertEqual(task_sys_status["active_tasks"][0]["task_desc"], "Need parent help")
+            self.assertEqual(task_sys_status["active_tasks"][0]["task_relation"], {"kind": "independent", "target_task_id": None})
+            self.assertEqual(task_sys_status["active_tasks"][0]["execution"]["processor"], "parent")
             self.assertEqual(task_sys_status["recoverable_tasks"][0]["task_id"], "task-im-message-created-runtimefailed")
-            self.assertEqual(task_sys_status["recoverable_tasks"][0]["status"], "runtime_failed")
-            self.assertEqual(task_sys_status["recoverable_tasks"][0]["failure_result"]["stage"], "side_input")
+            self.assertEqual(task_sys_status["recoverable_tasks"][0]["status"], "in_progress")
+            self.assertEqual(task_sys_status["recoverable_tasks"][0]["execution"]["result"]["reason"], "runtime_failed")
+            self.assertEqual(task_sys_status["recoverable_tasks"][0]["execution"]["result"]["stage"], "side_input")
 
     def test_instance_status_json_reports_log_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -6106,7 +6128,7 @@ exec "$real_git" "$@"
 
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
             self.assertIn("Task Sys active: 1", status_result.stdout)
-            self.assertIn("Task Sys active statuses: parent_processing=1", status_result.stdout)
+            self.assertIn("Task Sys active statuses: in_progress=1", status_result.stdout)
             self.assertIn(
                 "Delivery scope: daemon handler status is trigger-dispatch only; external channel delivery is separate.",
                 status_result.stdout,

@@ -236,8 +236,10 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertEqual(record["inbound_context"]["thread_id"], str(comment["thread_id"]))
         self.assertEqual(record["inbound_context"]["source_identity_id"], "act-pm-track-source")
         self.assertEqual(record["inbound_context"]["source_role_id"], "pm")
-        self.assertEqual(record["status"], "side_processing")
-        self.assertEqual(record["active_processor"], "side")
+        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["execution"]["processor"], "side")
+        self.assertEqual(record["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertNotIn("active_processor", record)
         execute_calls = [call for call in runtime.calls if call["method"] == "execute_task_sys_instruction"]
         self.assertEqual(len(execute_calls), 1)
         self.assertEqual(execute_calls[0]["instruction"]["type"], "start_side")

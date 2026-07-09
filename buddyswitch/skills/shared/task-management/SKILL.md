@@ -9,6 +9,7 @@ description: Use when processing Task Sys side frames, parent-thread decisions, 
 - Task state is owned by Task Sys, not by actor-private files.
 - Primary route: use native BuddySwitch env MCP tools through `env.tool`.
 - Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.
+- Use `task_sys.update_task_analysis` to record `task_desc` and `task_relation` before side close or parent handoff.
 - Use `task_sys.close` when a `task_sys.side_frame` is completed in side.
 - Use `task_sys.need_parent` when a `task_sys.side_frame` needs parent-thread work; `interrupt` is only a parameter.
 - When a `task_sys.parent_frame` completes required frame work, call `task_sys.close`.
@@ -21,7 +22,8 @@ description: Use when processing Task Sys side frames, parent-thread decisions, 
 - Broker method remains `env.tool`; do not edit runtime task objects or private runtime files directly.
 
 ## Judge The Frame
-- If the frame kind is `task_sys.side_frame`, use `task_sys.close` when completed in side or `task_sys.need_parent` when parent resources outside the frame's allowed tools are required.
+- If the frame kind is `task_sys.side_frame`: Generate `task_desc`, read relation context, call `task_sys.update_task_analysis`, then close or hand off.
+- Use `task_sys.close` when side completes the frame after analysis; use `task_sys.need_parent` when parent resources outside the frame's allowed tools are required.
 - If the frame kind is `task_sys.parent_frame`, complete the required frame work, perform required message actions first when this is an IM source frame, then call `task_sys.close`.
 - Use `context.get` only when exact schemas or runtime source descriptions are needed.
 
