@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import queue
 import sys
 import tempfile
@@ -15,6 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -170,6 +172,16 @@ class _QueueImsg(_FakeImsg):
         self.rows.put(None)
 
 
+class _UnavailableImsg(_QueueImsg):
+    def __init__(self) -> None:
+        super().__init__()
+        self.status_calls = 0
+
+    def status(self) -> None:
+        self.status_calls += 1
+        raise imessage_channel.ChannelError("imsg unavailable")
+
+
 class _FailingImsg(_FakeImsg):
     def __init__(self, *, fail_on_call: int) -> None:
         super().__init__()
@@ -251,6 +263,25 @@ def _format_test_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _schema_v4_state() -> dict[str, Any]:
+    return {
+        "schema_version": 4,
+        "contacts": {
+            "sender:user-a@example.com": {
+                "external_session_key": "imsk-existing",
+                "external_identity_id": "ext-existing",
+                "route": {"chat_id": "9", "sender": "user-a@example.com"},
+                "active_identity_id": "act-market-demo",
+                "active_identity_expires_at": "2026-07-10T12:30:00Z",
+                "pending_actor_choices": {"1": "act-market-demo"},
+                "pending_actor_choices_expires_at": "2026-07-10T12:05:00Z",
+                "seen_inbound_keys": ["guid:seen"],
+                "sent_outbound_event_ids": ["imev-sent"],
+            }
+        },
+    }
+
+
 def _wait_until(predicate: Any, *, timeout: float = 1.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -268,6 +299,124 @@ class ImessageChannelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             store = imessage_channel.ImessageChannelStateStore(Path(temp_root) / "state.json")
             self.assertEqual(store.load(), {"schema_version": 5, "contacts": {}})
+
+    def test_schema_v4_state_migrates_binding_and_clears_unconfirmed_interaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            state_path = Path(temp_root) / "state.json"
+            state_path.write_text(json.dumps(_schema_v4_state()), encoding="utf-8")
+            store = imessage_channel.ImessageChannelStateStore(state_path)
+
+            try:
+                migrated = store.load()
+            except imessage_channel.ChannelError as exc:
+                self.fail(f"schema v4 state was not migrated: {exc}")
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+        contact = migrated["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(migrated, saved)
+        self.assertEqual(migrated["schema_version"], 5)
+        self.assertEqual(contact["external_session_key"], "imsk-existing")
+        self.assertEqual(contact["external_identity_id"], "ext-existing")
+        self.assertEqual(contact["route"], {"chat_id": "9", "sender": "user-a@example.com"})
+        self.assertEqual(contact["seen_inbound_keys"], ["guid:seen"])
+        self.assertEqual(contact["sent_outbound_event_ids"], ["imev-sent"])
+        self.assertEqual(contact["pending_actor_choices"], {})
+        self.assertNotIn("active_identity_id", contact)
+        self.assertNotIn("active_identity_expires_at", contact)
+        self.assertNotIn("pending_actor_choices_expires_at", contact)
+        self.assertNotIn("control_delivery", contact)
+
+    def test_state_save_uses_runtime_atomic_json_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            state_path = Path(temp_root) / "state.json"
+            store = imessage_channel.ImessageChannelStateStore(state_path)
+
+            with mock.patch.object(
+                imessage_channel.runtime_files,
+                "write_json_object",
+                wraps=imessage_channel.runtime_files.write_json_object,
+            ) as atomic_write:
+                store.save({"schema_version": 5, "contacts": {}})
+
+        atomic_write.assert_called_once_with(state_path, {"schema_version": 5, "contacts": {}})
+
+    def test_state_save_wraps_atomic_writer_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            store = imessage_channel.ImessageChannelStateStore(Path(temp_root) / "state.json")
+
+            with mock.patch.object(
+                imessage_channel.runtime_files,
+                "write_json_object",
+                side_effect=OSError("disk full"),
+            ), self.assertRaisesRegex(
+                imessage_channel.ChannelStateError,
+                "failed to save iMessage channel state: disk full",
+            ):
+                store.save({"schema_version": 5, "contacts": {}})
+
+    def test_worker_rejects_unsupported_state_before_starting_threads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            state_path = Path(temp_root) / "state.json"
+            state_path.write_text(json.dumps({"schema_version": 3, "contacts": {}}), encoding="utf-8")
+            imsg = _QueueImsg()
+            controller, _api, _imsg = _controller(Path(temp_root), imsg=imsg)
+            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=1)
+            self.addCleanup(worker.stop)
+
+            with mock.patch("sys.stderr"), self.assertRaisesRegex(
+                imessage_channel.ChannelError,
+                "schema is retired",
+            ):
+                worker.start()
+
+            self.assertEqual(worker._threads, [])
+            self.assertFalse(imsg.watch_started.is_set())
+
+    def test_worker_rejects_unavailable_imsg_before_starting_threads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            imsg = _UnavailableImsg()
+            controller, _api, _imsg = _controller(Path(temp_root), imsg=imsg)
+            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=1)
+            self.addCleanup(worker.stop)
+
+            with mock.patch("sys.stderr"), self.assertRaisesRegex(
+                imessage_channel.ChannelError,
+                "imsg unavailable",
+            ):
+                worker.start()
+
+            self.assertEqual(imsg.status_calls, 1)
+            self.assertEqual(worker._threads, [])
+            self.assertFalse(imsg.watch_started.is_set())
+
+    def test_worker_start_migrates_schema_v4_from_default_runtime_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            local_root = Path(temp_root) / "buddyswitch" / "local"
+            state_path = local_root / "imessage-channel" / "state.json"
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text(json.dumps(_schema_v4_state()), encoding="utf-8")
+            imsg = _QueueImsg()
+
+            with mock.patch.object(imessage_channel.runtime_files, "LOCAL_ROOT", local_root):
+                config = imessage_channel.ChannelConfig(server="http://127.0.0.1:8765")
+                controller = imessage_channel.ImessageChannelController(
+                    config=config,
+                    api=_FakeBuddySwitchImApi(),
+                    imsg=imsg,
+                )
+                worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=1)
+                self.addCleanup(worker.stop)
+                with mock.patch("sys.stderr"):
+                    worker.start()
+                    saved = json.loads(state_path.read_text(encoding="utf-8"))
+                    worker.stop()
+
+        contact = saved["contacts"]["sender:user-a@example.com"]
+        self.assertEqual(saved["schema_version"], 5)
+        self.assertEqual(contact["external_session_key"], "imsk-existing")
+        self.assertEqual(contact["external_identity_id"], "ext-existing")
+        self.assertEqual(contact["pending_actor_choices"], {})
+        self.assertNotIn("active_identity_id", contact)
 
     def test_first_sender_message_creates_external_session_and_reuses_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -1028,6 +1177,24 @@ class ImessageChannelTests(unittest.TestCase):
 
 
 class CommandImsgClientSendStatusTests(unittest.TestCase):
+    def test_status_uses_bounded_timeout_and_wraps_expiry(self) -> None:
+        calls: list[dict[str, Any]] = []
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append({"command": command, **kwargs})
+            raise subprocess.TimeoutExpired(command, timeout=kwargs.get("timeout"))
+
+        client = imessage_channel.CommandImsgClient(imsg_bin="imsg", subprocess_run=fake_run)
+
+        try:
+            with self.assertRaisesRegex(imessage_channel.ChannelError, "iMessage status check timed out"):
+                client.status()
+        except subprocess.TimeoutExpired as exc:
+            self.fail(f"status timeout was not wrapped as ChannelError: {exc}")
+
+        self.assertEqual(calls[0]["command"], ["imsg", "status"])
+        self.assertEqual(calls[0]["timeout"], imessage_channel.IMSG_STATUS_TIMEOUT_SECONDS)
+
     def test_send_accepts_route_scoped_successful_message_row(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             db_path = Path(temp_root) / "chat.db"

@@ -26,9 +26,11 @@ from env.repos import runtime_files  # noqa: E402
 
 
 SCHEMA_VERSION = 5
+MIGRATABLE_STATE_VERSION = 4
 DEFAULT_DISPLAY_NAME = "BuddySwitch iMessage"
 DEFAULT_NO_ACTOR_PROMPT = "Send /actors to choose an actor."
 DEFAULT_REPLY_WAIT_MS = 30000
+IMSG_STATUS_TIMEOUT_SECONDS = 5.0
 ACTIVE_ACTOR_IDLE_SECONDS = 30 * 60
 PENDING_ACTOR_CHOICE_SECONDS = 5 * 60
 CONTROL_DELIVERY_MAX_ATTEMPTS = 3
@@ -49,6 +51,10 @@ CONTROL_STATUS_FAILED = "failed"
 
 class ChannelError(RuntimeError):
     """Raised when the iMessage channel cannot safely continue."""
+
+
+class ChannelStateError(ChannelError):
+    """Raised when persisted iMessage channel state cannot be used safely."""
 
 
 @dataclass(frozen=True)
@@ -84,11 +90,16 @@ class ImessageChannelStateStore:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise ChannelError(f"invalid iMessage channel state: {exc}") from exc
+            raise ChannelStateError(f"invalid iMessage channel state: {exc}") from exc
         if not isinstance(payload, dict):
-            raise ChannelError("invalid iMessage channel state: root must be an object")
-        if payload.get("schema_version") != SCHEMA_VERSION:
-            raise ChannelError("iMessage channel state schema is retired; reset the channel state file")
+            raise ChannelStateError("invalid iMessage channel state: root must be an object")
+        schema_version = payload.get("schema_version")
+        if schema_version == MIGRATABLE_STATE_VERSION:
+            state = _migrate_schema_v4_state(payload)
+            self.save(state)
+            return state
+        if schema_version != SCHEMA_VERSION:
+            raise ChannelStateError("iMessage channel state schema is retired; reset the channel state file")
         contacts_payload = payload.get("contacts")
         contacts: dict[str, dict[str, Any]] = {}
         if isinstance(contacts_payload, dict):
@@ -102,8 +113,10 @@ class ImessageChannelStateStore:
             "schema_version": SCHEMA_VERSION,
             "contacts": state.get("contacts") if isinstance(state.get("contacts"), dict) else {},
         }
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            runtime_files.write_json_object(self.path, payload)
+        except (OSError, TypeError, ValueError) as exc:
+            raise ChannelStateError(f"failed to save iMessage channel state: {exc}") from exc
         try:
             os.chmod(self.path, 0o600)
         except OSError:
@@ -222,12 +235,16 @@ class CommandImsgClient:
         self._watch_process: subprocess.Popen[str] | None = None
 
     def status(self) -> None:
-        result = self._subprocess_run(
-            [self.imsg_bin, "status"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            result = self._subprocess_run(
+                [self.imsg_bin, "status"],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=IMSG_STATUS_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ChannelError("iMessage status check timed out") from exc
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "imsg status failed"
             raise ChannelError(detail)
@@ -435,6 +452,11 @@ class ImessageChannelController:
         self.state_store = state_store or ImessageChannelStateStore(config.effective_state_path())
         self._now_fn = now_fn or _utc_now
         self._state_lock = threading.RLock()
+
+    def prepare(self) -> None:
+        with self._state_lock:
+            self.state_store.load()
+        self.imsg.status()
 
     def handle_inbound_message(self, row: dict[str, Any]) -> dict[str, Any]:
         if _truthy(row.get("is_from_me")):
@@ -729,6 +751,7 @@ class ImessageChannelWorker:
     def start(self) -> None:
         if any(thread.is_alive() for thread in self._threads):
             return
+        self.controller.prepare()
         self._stop_event.clear()
         self._threads = [
             threading.Thread(target=self._run_with_error_capture, args=("inbound", self.run_forever), daemon=True),
@@ -738,7 +761,6 @@ class ImessageChannelWorker:
             thread.start()
 
     def run_forever(self) -> None:
-        self.controller.imsg.status()
         for row in self.controller.imsg.watch_messages():
             if self._stop_event.is_set():
                 break
@@ -783,6 +805,28 @@ class ImessageChannelWorker:
 
 def _default_state() -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "contacts": {}}
+
+
+def _migrate_schema_v4_state(payload: dict[str, Any]) -> dict[str, Any]:
+    contacts_payload = payload.get("contacts")
+    contacts: dict[str, dict[str, Any]] = {}
+    if isinstance(contacts_payload, dict):
+        for key, value in contacts_payload.items():
+            if not isinstance(key, str) or not isinstance(value, dict):
+                continue
+            preserved = {
+                field: value[field]
+                for field in (
+                    "external_session_key",
+                    "external_identity_id",
+                    "route",
+                    "seen_inbound_keys",
+                    "sent_outbound_event_ids",
+                )
+                if field in value
+            }
+            contacts[key] = _normalize_contact(preserved)
+    return {"schema_version": SCHEMA_VERSION, "contacts": contacts}
 
 
 def _utc_now() -> datetime:
