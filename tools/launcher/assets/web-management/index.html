@@ -45,13 +45,28 @@
           </aside>
 
           <section class="room-main" aria-labelledby="conversation-heading">
-            <header class="room-header">
-              <div>
-                <h2 id="conversation-heading">Direct thread</h2>
-                <p class="micro">Selected teammate conversation from the Web IM session and direct conversation APIs.</p>
+            <header class="room-header selected-context-header">
+              <div class="conversation-identity">
+                <span id="selected-context-avatar" class="avatar teal" aria-hidden="true">BS</span>
+                <div class="conversation-context-copy">
+                  <h2 id="conversation-heading"><span id="selected-context-role">Direct thread</span></h2>
+                  <div class="conversation-context-meta">
+                    <span id="selected-context-id" class="conversation-context-id mono micro">No teammate selected</span>
+                    <span id="selected-context-runtime" class="status-badge neutral" hidden></span>
+                    <span id="selected-context-health" class="status-badge neutral" hidden></span>
+                  </div>
+                  <div class="conversation-status-stack">
+                    <p id="lifecycle-operation-status" class="inline-status lifecycle-operation-status" aria-live="polite"></p>
+                    <p id="action-availability-status" class="inline-status action-availability-status" aria-live="polite"></p>
+                    <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
+                  </div>
+                </div>
               </div>
-              <div class="pill-row">
+              <div class="conversation-actions">
                 <button id="refresh-button" class="mini-button" type="button">Refresh</button>
+                <button id="stop-button" class="mini-button" type="button">Stop</button>
+                <button id="resume-button" class="mini-button" type="button">Resume</button>
+                <button id="delete-button" class="mini-button danger" type="button">Delete</button>
               </div>
             </header>
             <div id="room-thread" class="room-thread">
@@ -131,22 +146,16 @@
               <div id="actor-track-summary" class="summary-stack"></div>
             </section>
             <section class="person-card actions-card">
-              <h3>Actions</h3>
+              <h3>Tools</h3>
               <div class="pill-row left">
                 <button id="open-tui-button" class="mini-button" type="button">Open TUI</button>
                 <button id="clear-button" class="mini-button" type="button">Clear</button>
-                <button id="stop-button" class="mini-button" type="button">Stop</button>
-                <button id="resume-button" class="mini-button" type="button">Resume</button>
-                <button id="delete-button" class="mini-button danger" type="button">Delete</button>
               </div>
               <p id="open-tui-status" class="inline-status"></p>
               <div id="open-tui-fallback" class="command-fallback" hidden>
                 <code id="open-tui-command" class="mono-value long-value"></code>
                 <button id="copy-tui-command-button" class="mini-button" type="button">Copy command</button>
               </div>
-              <p id="lifecycle-operation-status" class="inline-status lifecycle-operation-status" aria-live="polite"></p>
-              <p id="action-availability-status" class="inline-status action-availability-status" aria-live="polite"></p>
-              <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
             </section>
           </aside>
         </article>
@@ -181,6 +190,31 @@
         </article>
       </section>
     </main>
+    <div id="delete-confirmation-backdrop" class="modal-backdrop" hidden>
+      <section
+        id="delete-confirmation-dialog"
+        class="confirmation-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-confirmation-title"
+        aria-describedby="delete-confirmation-warning"
+      >
+        <h2 id="delete-confirmation-title">Delete actor instance</h2>
+        <div id="delete-confirmation-warning" class="confirmation-warning">
+          <strong id="delete-confirmation-target" class="mono"></strong>
+          <span>Role <b id="delete-confirmation-role"></b> · state <b id="delete-confirmation-state"></b></span>
+          <span>This permanently removes the actor instance.</span>
+        </div>
+        <label class="field">
+          <span id="delete-confirmation-label">Type the actor id to confirm</span>
+          <input id="delete-confirmation-input" type="text" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="confirmation-actions">
+          <button id="delete-confirmation-cancel" class="mini-button" type="button">Cancel</button>
+          <button id="delete-confirmation-confirm" class="mini-button danger" type="button" disabled>Delete actor</button>
+        </div>
+      </section>
+    </div>
     <script src="/static/vendor/markdown-it/markdown-it.min.js"></script>
     <script src="/static/vendor/dompurify/purify.min.js"></script>
     <script src="/static/vendor/highlightjs/highlight.min.js"></script>

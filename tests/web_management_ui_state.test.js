@@ -168,6 +168,7 @@ function createRenderElements() {
         return Object.prototype.hasOwnProperty.call(attributes, name) ? attributes[name] : null;
       },
       removeAttribute(name) { delete attributes[name]; },
+      focus() { this.focused = true; },
     };
   };
   return {
@@ -182,6 +183,11 @@ function createRenderElements() {
     createButton: node(),
     roleSelect: Object.assign(node(), { options: [{}], appendChild() {} }),
     actorsList: node(),
+    selectedContextAvatar: node(),
+    selectedContextRole: node(),
+    selectedContextId: node(),
+    selectedContextRuntime: node(),
+    selectedContextHealth: node(),
     actorRuntimeDetail: node(),
     actorTaskSummary: node(),
     actorTrackSummary: node(),
@@ -214,6 +220,14 @@ function createRenderElements() {
     openTuiCommand: node(),
     openTuiFallback: node(),
     copyTuiCommandButton: node(),
+    deleteConfirmationBackdrop: node(),
+    deleteConfirmationTarget: node(),
+    deleteConfirmationRole: node(),
+    deleteConfirmationState: node(),
+    deleteConfirmationLabel: node(),
+    deleteConfirmationInput: node(),
+    deleteConfirmationConfirm: node(),
+    deleteConfirmationCancel: node(),
   };
 }
 
@@ -264,6 +278,42 @@ test('actor payload sync chooses first actor and clears stale selection', () => 
   assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-pm-demo', 'act-dev-demo']);
 });
 
+test('actor payload reconciliation retains each unconfirmed created actor independently', () => {
+  const state = app.createState();
+  state.selectedActorId = 'act-dev-two';
+  state.rosterPendingActors = {
+    'act-market-one': 'market',
+    'act-dev-two': 'dev',
+  };
+  state.actors = [
+    { actor_id: 'act-market-one', role: 'market', pending: true, runtime: { status: 'initializing' } },
+    { actor_id: 'act-dev-two', role: 'dev', pending: true, runtime: { status: 'initializing' } },
+  ];
+
+  app.applyActorsPayload(state, {
+    actors: [
+      { actor_id: 'act-market-one', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ],
+  });
+
+  assert.deepEqual(state.rosterPendingActors, { 'act-dev-two': 'dev' });
+  assert.equal(state.selectedActorId, 'act-dev-two');
+  assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-market-one', 'act-dev-two']);
+  assert.equal(state.actors[0].pending, undefined);
+  assert.equal(state.actors[1].pending, true);
+
+  app.applyActorsPayload(state, {
+    actors: [
+      { actor_id: 'act-market-one', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-dev-two', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ],
+  });
+
+  assert.deepEqual(state.rosterPendingActors, {});
+  assert.equal(state.selectedActorId, 'act-dev-two');
+  assert.equal(state.actors[1].pending, undefined);
+});
+
 test('teammate roster renders prototype person rows from supported actor facts', () => {
   const state = app.createState();
   state.roles = [{ id: 'dev', label: 'Developer', scope: 'product' }];
@@ -286,6 +336,80 @@ test('teammate roster renders prototype person rows from supported actor facts',
   assert.match(html, /active/);
   assert.match(html, /healthy/);
   assert.doesNotMatch(html, /Dev Actor|PM Actor|72%|capacity|current focus|last proof/i);
+});
+
+test('actor roster groups starting active and stopped work with accurate counts', () => {
+  const state = app.createState();
+  state.roles = [
+    { id: 'market', label: 'Market', scope: 'product' },
+    { id: 'dev', label: 'Developer', scope: 'product' },
+    { id: 'pm', label: 'PM', scope: 'product' },
+  ];
+  state.actors = [
+    { actor_id: 'act-dev-active', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    { actor_id: 'act-pm-stopped', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+  ];
+  state.lifecycleOperations = {
+    'op-start-market': lifecycleOperation({
+      id: 'op-start-market',
+      action: 'start',
+      status: 'running',
+      label: 'Starting Market',
+      target: { actor_id: '', role: 'market' },
+    }),
+  };
+  state.selectedLifecycleOperationId = 'op-start-market';
+
+  const collapsedHtml = app.renderActorRowsHtml(state);
+
+  assert.match(collapsedHtml, /data-roster-group="starting"/);
+  assert.match(collapsedHtml, />Starting<[^]*>1</);
+  assert.match(collapsedHtml, /data-roster-group="active"/);
+  assert.match(collapsedHtml, />Active<[^]*>1</);
+  assert.match(collapsedHtml, /data-roster-group="stopped"/);
+  assert.match(collapsedHtml, />Stopped<[^]*>1</);
+  assert.match(collapsedHtml, /act-dev-active/);
+  assert.doesNotMatch(collapsedHtml, /act-pm-stopped/);
+  assert.match(collapsedHtml, /data-operation-id="op-start-market"[^>]*role="option"[^>]*aria-selected="true"/);
+  assert.match(collapsedHtml, /data-roster-toggle="stopped"[^>]*aria-expanded="false"/);
+
+  state.rosterStoppedExpanded = true;
+  const expandedHtml = app.renderActorRowsHtml(state);
+
+  assert.match(expandedHtml, /act-pm-stopped/);
+  assert.match(expandedHtml, /data-actor-id="act-pm-stopped"[^>]*role="option"[^>]*aria-selected="false"/);
+  assert.match(expandedHtml, /data-roster-toggle="stopped"[^>]*aria-expanded="true"/);
+});
+
+test('initial roster selection prefers active actor over stopped inventory', () => {
+  const state = app.createState();
+
+  app.applyActorsPayload(state, {
+    actors: [
+      { actor_id: 'act-stopped-first', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-active-second', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ],
+  });
+
+  assert.equal(state.selectedActorId, 'act-active-second');
+  assert.equal(state.rosterStoppedExpanded, false);
+  assert.match(app.renderActorRowsHtml(state), /data-actor-id="act-active-second"[^>]*aria-selected="true"/);
+});
+
+test('stopped-only roster expands stopped group for its automatic selection', () => {
+  const state = app.createState();
+
+  app.applyActorsPayload(state, {
+    actors: [
+      { actor_id: 'act-stopped-only', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+    ],
+  });
+
+  assert.equal(state.selectedActorId, 'act-stopped-only');
+  assert.equal(state.rosterStoppedExpanded, true);
+  const html = app.renderActorRowsHtml(state);
+  assert.match(html, /data-actor-id="act-stopped-only"[^>]*aria-selected="true"/);
+  assert.match(html, /data-roster-toggle="stopped"[^>]*aria-expanded="true"/);
 });
 
 test('start operation rows distinguish queued from running lifecycle work', () => {
@@ -318,6 +442,214 @@ test('start operation rows distinguish queued from running lifecycle work', () =
   assert.match(html, /starting/);
   assert.match(html, /op-start-queued/);
   assert.match(html, /queued/);
+});
+
+test('selected actor context binds full identity to lifecycle state and actions', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+  state.actors = [
+    {
+      actor_id: 'act-market-0123456789ab',
+      role: 'market',
+      runtime: { status: 'active', app_server_health: 'healthy', thread: { status: 'idle' } },
+    },
+  ];
+  state.selectedActorId = 'act-market-0123456789ab';
+
+  app.renderSelectedActorContext(state, elements);
+
+  assert.equal(elements.selectedContextRole.textContent, 'Market');
+  assert.equal(elements.selectedContextId.textContent, 'act-market-0123456789ab');
+  assert.equal(elements.selectedContextRuntime.textContent, 'active');
+  assert.equal(elements.selectedContextHealth.textContent, 'healthy');
+  assert.equal(elements.stopButton.hidden, false);
+  assert.equal(elements.stopButton.disabled, false);
+  assert.equal(elements.resumeButton.hidden, true);
+  assert.equal(elements.deleteButton.disabled, true);
+});
+
+test('selected start operation context shows operation identity without inventing actor id', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+  state.lifecycleOperations = {
+    'op-start-market': lifecycleOperation({
+      id: 'op-start-market',
+      action: 'start',
+      status: 'running',
+      label: 'Starting Market',
+      target: { actor_id: '', role: 'market' },
+    }),
+  };
+  state.selectedLifecycleOperationId = 'op-start-market';
+
+  app.renderSelectedActorContext(state, elements);
+
+  assert.equal(elements.selectedContextRole.textContent, 'Market');
+  assert.equal(elements.selectedContextId.textContent, 'op-start-market');
+  assert.equal(elements.selectedContextRuntime.textContent, 'starting');
+  assert.equal(elements.selectedContextHealth.hidden, true);
+  assert.equal(elements.stopButton.hidden, true);
+  assert.equal(elements.resumeButton.hidden, true);
+  assert.equal(elements.deleteButton.hidden, true);
+  assert.match(elements.lifecycleOperationStatus.textContent, /Starting Market/);
+});
+
+test('delete confirmation opens for exact selected actor without sending a request', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = function () {
+    fetchCalls += 1;
+    throw new Error('Delete confirmation must not fetch while opening.');
+  };
+  state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+  state.actors = [
+    { actor_id: 'act-market-delete', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+  ];
+  state.selectedActorId = 'act-market-delete';
+
+  try {
+    app.openDeleteConfirmation(state, elements, elements.deleteButton);
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(state.deleteConfirmationActorId, 'act-market-delete');
+    assert.equal(elements.deleteConfirmationBackdrop.hidden, false);
+    assert.equal(elements.deleteConfirmationTarget.textContent, 'act-market-delete');
+    assert.equal(elements.deleteConfirmationRole.textContent, 'Market');
+    assert.equal(elements.deleteConfirmationState.textContent, 'inactive');
+    assert.equal(elements.deleteConfirmationConfirm.disabled, true);
+    assert.equal(elements.deleteConfirmationInput.focused, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('delete confirmation requires exact actor id and keeps captured request target', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    requests.push({ url: requestUrl, method: options && options.method });
+    if (requestUrl === '/api/instances/act-delete-captured') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-captured',
+          action: 'delete',
+          status: 'running',
+          label: 'Deleting act-delete-captured',
+          target: { actor_id: 'act-delete-captured', role: 'market' },
+        }),
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.actors = [
+      { actor_id: 'act-delete-captured', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-other-active', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-delete-captured';
+    state.lifecycleOperationPollDelaysMs = [];
+
+    app.openDeleteConfirmation(state, elements, elements.deleteButton);
+    app.updateDeleteConfirmationInput(state, elements, 'act-delete');
+    assert.equal(app.deleteConfirmationMatches(state), false);
+    assert.equal(elements.deleteConfirmationConfirm.disabled, true);
+
+    app.updateDeleteConfirmationInput(state, elements, 'act-delete-captured');
+    assert.equal(app.deleteConfirmationMatches(state), true);
+    assert.equal(elements.deleteConfirmationConfirm.disabled, false);
+
+    state.selectedActorId = 'act-other-active';
+    await app.confirmDelete(state, elements);
+
+    assert.deepEqual(requests, [{ url: '/api/instances/act-delete-captured', method: 'DELETE' }]);
+    assert.equal(elements.deleteConfirmationBackdrop.hidden, true);
+    assert.match(elements.actorsList.innerHTML, /act-delete-captured/);
+    assert.match(elements.actorsList.innerHTML, /deleting/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('delete confirmation revalidates target runtime before submitting', async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async function () {
+    fetchCalls += 1;
+    throw new Error('Delete must not submit after the target becomes active.');
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
+    state.actors = [
+      { actor_id: 'act-delete-stale', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+    ];
+    state.selectedActorId = 'act-delete-stale';
+
+    app.openDeleteConfirmation(state, elements, elements.deleteButton);
+    app.updateDeleteConfirmationInput(state, elements, 'act-delete-stale');
+    assert.equal(elements.deleteConfirmationConfirm.disabled, false);
+
+    state.actors[0].runtime = { status: 'active', app_server_health: 'healthy' };
+    state.actorConsole = {
+      actor: { actor_id: 'act-delete-stale', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+    };
+    await app.confirmDelete(state, elements);
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(state.deleteConfirmationActorId, 'act-delete-stale');
+    assert.equal(elements.deleteConfirmationBackdrop.hidden, false);
+    assert.equal(elements.deleteConfirmationConfirm.disabled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('delete confirmation stays closed while actor lifecycle is protected', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.actors = [
+    { actor_id: 'act-delete-protected', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+  ];
+  state.selectedActorId = 'act-delete-protected';
+  app.recordLifecycleOperation(state, lifecycleOperation({
+    id: 'op-resume-protected',
+    action: 'resume',
+    status: 'running',
+    target: { actor_id: 'act-delete-protected', role: 'market' },
+  }));
+
+  app.openDeleteConfirmation(state, elements, elements.deleteButton);
+
+  assert.equal(state.deleteConfirmationActorId, '');
+  assert.equal(elements.deleteConfirmationBackdrop.hidden, true);
+});
+
+test('closing delete confirmation restores trigger focus without a request', () => {
+  const state = app.createState();
+  const elements = createRenderElements();
+  state.actors = [
+    { actor_id: 'act-delete-cancel', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+  ];
+  state.selectedActorId = 'act-delete-cancel';
+
+  app.openDeleteConfirmation(state, elements, elements.deleteButton);
+  app.closeDeleteConfirmation(state, elements);
+
+  assert.equal(state.deleteConfirmationActorId, '');
+  assert.equal(elements.deleteConfirmationBackdrop.hidden, true);
+  assert.equal(elements.deleteButton.focused, true);
 });
 
 test('role select repopulates role options after initial empty-shell render', () => {
@@ -828,6 +1160,7 @@ test('actor selection clears stale feedback before fetch completes', async () =>
     assert.equal(elements.messageBanner.textContent, '');
     assert.deepEqual(state.imConversation, []);
     assert.match(elements.actorRuntimeDetail.innerHTML, /skeleton-card/);
+    assert.equal(elements.selectedContextId.textContent, 'act-new');
 
     await selection;
     if (state.actorRefreshTimer) {
@@ -920,14 +1253,14 @@ test('create teammate keeps pending actor visible until roster reconciliation', 
     await app.pollLifecycleOperations(state, elements);
 
     assert.equal(state.selectedActorId, 'act-market-new');
-    assert.equal(state.rosterPendingActorId, 'act-market-new');
+    assert.deepEqual(state.rosterPendingActors, { 'act-market-new': 'market' });
     assert.match(elements.actorsList.innerHTML, /act-market-new/);
     assert.match(elements.actorsList.innerHTML, /pending|initializing/i);
 
-    await waitFor(() => state.rosterPendingActorId === '', 'roster confirmation');
+    await waitFor(() => Object.keys(state.rosterPendingActors).length === 0, 'roster confirmation');
 
     assert.equal(state.selectedActorId, 'act-market-new');
-    assert.equal(state.rosterPendingActorId, '');
+    assert.deepEqual(state.rosterPendingActors, {});
     assert.match(elements.actorsList.innerHTML, /act-market-new/);
     assert.doesNotMatch(elements.actorsList.innerHTML, /pending|initializing/i);
   } finally {
@@ -977,6 +1310,201 @@ test('create teammate accepts repeated start operations while one is still activ
     assert.match(elements.actorsList.innerHTML, /op-start-running/);
     assert.match(elements.actorsList.innerHTML, /op-start-queued/);
     assert.match(elements.actorsList.innerHTML, /queued/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('start terminal reconciliation preserves a newer actor selection', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      assert.equal(options && options.method, 'POST');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-latest-intent',
+          action: 'start',
+          status: 'running',
+          label: 'Starting Market',
+          target: { actor_id: '', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors/act-user-intent/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-user-intent', role: 'pm' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-user', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-user-intent', role_id: 'pm' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-user-intent&limit=50') {
+      return imNotFoundResponse();
+    }
+    if (requestUrl === '/api/operations/op-start-latest-intent') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-latest-intent',
+          action: 'start',
+          status: 'succeeded',
+          label: 'Starting Market',
+          target: { actor_id: 'act-market-new', role: 'market' },
+          result: { ok: true, actor_id: 'act-market-new' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors/act-market-new/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-market-new', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-new', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-market-new', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-market-new&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [
+      { id: 'market', label: 'Market', scope: 'product' },
+      { id: 'pm', label: 'PM', scope: 'product' },
+    ];
+    state.selectedRole = 'market';
+    state.actors = [
+      { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-user-intent', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-market-old';
+    state.lifecycleOperationPollDelaysMs = [];
+    state.rosterReconcileDelaysMs = [];
+
+    await app.createInstance(state, elements);
+    await app.selectActor(state, elements, 'act-user-intent');
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-user-intent');
+    assert.equal(state.selectedLifecycleOperationId, '');
+    assert.deepEqual(state.rosterPendingActors, { 'act-market-new': 'market' });
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-user-intent"[^>]*aria-selected="true"/);
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-market-new"[^>]*aria-selected="false"/);
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('parallel start completions keep operation and pending actor contexts isolated', async () => {
+  const originalFetch = globalThis.fetch;
+  let createCalls = 0;
+  let secondOperationPolls = 0;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances') {
+      assert.equal(options && options.method, 'POST');
+      createCalls += 1;
+      return okResponse({
+        operation: lifecycleOperation({
+          id: createCalls === 1 ? 'op-start-one' : 'op-start-two',
+          action: 'start',
+          status: 'running',
+          label: createCalls === 1 ? 'Starting Market' : 'Starting Dev',
+          target: { actor_id: '', role: createCalls === 1 ? 'market' : 'dev' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-start-one') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-one',
+          action: 'start',
+          status: 'succeeded',
+          label: 'Starting Market',
+          target: { actor_id: 'act-market-one', role: 'market' },
+          result: { ok: true, actor_id: 'act-market-one' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-start-two') {
+      secondOperationPolls += 1;
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-two',
+          action: 'start',
+          status: secondOperationPolls === 1 ? 'running' : 'succeeded',
+          label: 'Starting Dev',
+          target: { actor_id: secondOperationPolls === 1 ? '' : 'act-dev-two', role: 'dev' },
+          result: secondOperationPolls === 1 ? null : { ok: true, actor_id: 'act-dev-two' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors/act-market-one/console' || requestUrl === '/api/actors/act-dev-two/console') {
+      const actorId = requestUrl.indexOf('act-market-one') >= 0 ? 'act-market-one' : 'act-dev-two';
+      const role = actorId === 'act-market-one' ? 'market' : 'dev';
+      return okResponse({
+        console: {
+          actor: { actor_id: actorId, role },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-' + actorId, thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: actorId, role_id: role } },
+        },
+      });
+    }
+    if (requestUrl.indexOf('/api/im/conversations/direct?identity_id=') === 0) {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.roles = [
+      { id: 'market', label: 'Market', scope: 'product' },
+      { id: 'dev', label: 'Dev', scope: 'product' },
+    ];
+    state.selectedRole = 'market';
+    state.lifecycleOperationPollDelaysMs = [];
+    state.rosterReconcileDelaysMs = [];
+
+    await app.createInstance(state, elements);
+    state.selectedRole = 'dev';
+    await app.createInstance(state, elements);
+    assert.equal(state.selectedLifecycleOperationId, 'op-start-two');
+
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.selectedLifecycleOperationId, 'op-start-two');
+    assert.deepEqual(state.rosterPendingActors, { 'act-market-one': 'market' });
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-market-one"[^>]*aria-selected="false"/);
+    assert.match(elements.actorsList.innerHTML, /data-operation-id="op-start-two"[^>]*aria-selected="true"/);
+
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-dev-two');
+    assert.equal(state.selectedLifecycleOperationId, '');
+    assert.deepEqual(state.rosterPendingActors, {
+      'act-market-one': 'market',
+      'act-dev-two': 'dev',
+    });
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-market-one"[^>]*aria-selected="false"/);
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-dev-two"[^>]*aria-selected="true"/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1060,7 +1588,7 @@ test('failed create preserves previous selection and leaves no pending actor', a
     await app.createInstance(state, elements);
 
     assert.equal(state.selectedActorId, 'act-market-old');
-    assert.equal(state.rosterPendingActorId, '');
+    assert.deepEqual(state.rosterPendingActors, {});
     assert.doesNotMatch(elements.actorsList.innerHTML, /act-market-new/);
     assert.match(elements.messageBanner.textContent, /launcher refused start/);
   } finally {
@@ -1217,14 +1745,14 @@ test('create reconciliation timeout keeps selected pending row and manual refres
     );
 
     assert.equal(state.selectedActorId, 'act-market-late');
-    assert.equal(state.rosterPendingActorId, 'act-market-late');
+    assert.deepEqual(state.rosterPendingActors, { 'act-market-late': 'market' });
     assert.match(elements.actorsList.innerHTML, /act-market-late/);
     assert.match(elements.actorsList.innerHTML, /initializing/);
 
     await app.refreshVisibleRegionsWithFeedback(state, elements);
 
     assert.equal(state.selectedActorId, 'act-market-late');
-    assert.equal(state.rosterPendingActorId, '');
+    assert.deepEqual(state.rosterPendingActors, {});
     assert.match(elements.actorsList.innerHTML, /act-market-late/);
     assert.doesNotMatch(elements.actorsList.innerHTML, /initializing/);
   } finally {
@@ -1310,7 +1838,7 @@ test('clear lifecycle operation polls to terminal result and refreshes selected 
     };
     state.lifecycleOperationPollDelaysMs = [];
 
-    await app.runLifecycleAction(state, elements, 'clear');
+    await app.runLifecycleAction(state, elements, 'clear', state.selectedActorId);
 
     assert.match(elements.actorsList.innerHTML, /clearing/);
     assert.equal(elements.clearButton.textContent, 'Clearing...');
@@ -1363,6 +1891,20 @@ test('delete lifecycle operation removes actor after terminal operation result',
         ],
       });
     }
+    if (requestUrl === '/api/actors/act-other-demo/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-other-demo', role: 'market' },
+          runtime: { status: 'inactive', app_server_health: 'unhealthy', thread_id: 'thread-other', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-other-demo', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-other-demo&limit=50') {
+      return imNotFoundResponse();
+    }
     throw new Error('unexpected fetch ' + requestUrl);
   };
 
@@ -1376,7 +1918,7 @@ test('delete lifecycle operation removes actor after terminal operation result',
     state.selectedActorId = 'act-delete-demo';
     state.lifecycleOperationPollDelaysMs = [];
 
-    await app.runLifecycleAction(state, elements, 'delete');
+    await app.runLifecycleAction(state, elements, 'delete', state.selectedActorId);
 
     assert.match(elements.actorsList.innerHTML, /deleting/);
     assert.equal(elements.deleteButton.textContent, 'Deleting...');
@@ -1385,10 +1927,81 @@ test('delete lifecycle operation removes actor after terminal operation result',
     await app.pollLifecycleOperations(state, elements);
 
     assert.deepEqual(state.lifecycleOperations, {});
-    assert.equal(state.selectedActorId, '');
+    assert.equal(state.selectedActorId, 'act-other-demo');
     assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-other-demo']);
     assert.match(elements.messageBanner.textContent, /Deleting act-delete-demo completed/);
     assert.doesNotMatch(elements.actorsList.innerHTML, /act-delete-demo/);
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-other-demo"[^>]*aria-selected="true"/);
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('delete terminal reconciliation preserves a newer actor selection', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-delete-old') {
+      assert.equal(options && options.method, 'DELETE');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-old',
+          action: 'delete',
+          status: 'running',
+          label: 'Deleting act-delete-old',
+          target: { actor_id: 'act-delete-old', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-delete-old') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-old',
+          action: 'delete',
+          status: 'succeeded',
+          label: 'Deleting act-delete-old',
+          target: { actor_id: 'act-delete-old', role: 'market' },
+          result: { ok: true, actor_id: 'act-delete-old' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-delete-neighbor', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+          { actor_id: 'act-user-intent', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-delete-old', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-delete-neighbor', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-user-intent', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-delete-old';
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.runLifecycleAction(state, elements, 'delete', 'act-delete-old');
+    state.selectedActorId = 'act-user-intent';
+    state.actorConsole = {
+      actor: { actor_id: 'act-user-intent', role: 'pm' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+    };
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-user-intent');
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-user-intent"[^>]*aria-selected="true"/);
+    assert.doesNotMatch(elements.actorsList.innerHTML, /act-delete-old/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1482,7 +2095,7 @@ test('stop lifecycle operation applies terminal instance before removing pending
     };
     state.lifecycleOperationPollDelaysMs = [];
 
-    await app.runLifecycleAction(state, elements, 'stop');
+    await app.runLifecycleAction(state, elements, 'stop', state.selectedActorId);
     await app.pollLifecycleOperations(state, elements);
 
     const stoppingIndex = actorListWrites.findIndex((html) => html.indexOf('stopping') >= 0);
@@ -1495,6 +2108,9 @@ test('stop lifecycle operation applies terminal instance before removing pending
     assert.equal(staleActiveAfterStopping, false);
     assert.equal(app.selectedActorRuntime(state).status, 'inactive');
     assert.equal(app.selectedActorRuntime(state).app_server_health, 'unhealthy');
+    assert.equal(state.rosterStoppedExpanded, true);
+    assert.match(elements.actorsList.innerHTML, /data-roster-group="stopped"/);
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-stop-demo"[^>]*aria-selected="true"/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1544,7 +2160,7 @@ test('failed clear lifecycle operation removes pending state and re-enables cont
     };
     state.lifecycleOperationPollDelaysMs = [];
 
-    await app.runLifecycleAction(state, elements, 'clear');
+    await app.runLifecycleAction(state, elements, 'clear', state.selectedActorId);
 
     assert.match(elements.actorsList.innerHTML, /clearing/);
     assert.equal(elements.clearButton.disabled, true);
@@ -1767,13 +2383,16 @@ test('manual refresh renders roster before selected conversation completes', asy
     refresh.catch(function () {});
     await conversationStarted.promise;
     await waitFor(
-      () => /act-roster-new/.test(elements.actorsList.innerHTML) && /Status/.test(elements.actorRuntimeDetail.innerHTML),
+      () => /data-roster-group="stopped"/.test(elements.actorsList.innerHTML)
+        && />Stopped<[^]*>1</.test(elements.actorsList.innerHTML)
+        && /Status/.test(elements.actorRuntimeDetail.innerHTML),
       'progressive roster and card render before conversation resolves',
       200
     );
 
     try {
-      assert.match(elements.actorsList.innerHTML, /act-roster-new/);
+      assert.match(elements.actorsList.innerHTML, />Stopped<[^]*>1</);
+      assert.doesNotMatch(elements.actorsList.innerHTML, /act-roster-new/);
       assert.match(elements.actorRuntimeDetail.innerHTML, /Status/);
       assert.match(elements.imConversation.innerHTML, /thread|conversation|skeleton|loading/i);
     } catch (error) {
@@ -2450,7 +3069,7 @@ test('rendered actions describe lifecycle protection instead of a single disable
     target: { actor_id: 'act-market-demo', role: 'market' },
   }));
 
-  app.renderComposer(state, elements);
+  app.renderSelectedActorContext(state, elements);
 
   assert.equal(
     elements.actionAvailabilityStatus.textContent,
@@ -2510,12 +3129,14 @@ test('renderComposer updates the input and send button without actor list writes
     runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
   };
   elements.actorsList.innerHTML = 'unchanged';
+  elements.stopButton.textContent = 'lifecycle-owned';
 
   app.renderComposer(state, elements);
 
   assert.equal(elements.instructionInput.value, 'ping');
   assert.equal(elements.sendButton.disabled, false);
   assert.equal(elements.actorsList.innerHTML, 'unchanged');
+  assert.equal(elements.stopButton.textContent, 'lifecycle-owned');
 });
 
 test('no selection disables all instance actions', () => {

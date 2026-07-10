@@ -112,7 +112,7 @@ test('production html uses the Team Room and Track Studio workspace layout', () 
     'class="proto-shell team-room"',
     'class="room-sidebar"',
     'class="room-main"',
-    'class="room-header"',
+    'class="room-header selected-context-header"',
     'class="room-thread"',
     'class="composer"',
     'class="person-panel"',
@@ -287,6 +287,39 @@ test('production stylesheet supports pending and loading feedback states', () =>
   assertCssDeclarations('.lifecycle-operation-status', [
     'color: var(--blue);',
     'font-weight: 680;',
+  ]);
+});
+
+test('production roster exposes grouped lifecycle hierarchy and unmistakable selection', () => {
+  [
+    '.roster-group',
+    '.roster-group-head',
+    '.roster-group-toggle',
+    '.roster-group-rows',
+    '.person-row.is-selected::before',
+    '.person-row:focus-visible',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+  [
+    'data-roster-group',
+    'data-roster-toggle',
+    'aria-selected',
+    'aria-expanded',
+    'rosterStoppedExpanded',
+    'rosterPendingActors',
+  ].forEach((marker) => {
+    assertIncludes(appJs, marker);
+  });
+  assertExcludes(appJs, 'rosterPendingActorId');
+  assertExcludes(appJs, 'rosterReconcileActorId');
+  assertCssDeclarations('.person-row.is-selected', [
+    'border-color: var(--teal);',
+    'background: var(--teal-soft);',
+  ]);
+  assertCssDeclarations('.person-row:focus-visible', [
+    'outline: 3px solid rgba(31, 111, 119, 0.24);',
+    'outline-offset: 1px;',
   ]);
 });
 
@@ -476,7 +509,8 @@ test('production javascript keeps the real api surface', () => {
   });
 
   assertIncludes(appJs, "method: 'DELETE'");
-  assertIncludes(appJs, 'actor_id: state.selectedActorId');
+  assertIncludes(appJs, 'actor_id: actorId');
+  assertIncludes(appJs, 'actorRuntimeForId');
   assertIncludes(appJs, 'content: content');
   assertExcludes(appJs, 'content: state.draftText');
   assertIncludes(appJs, 'target_identity_id: target.identity_id');
@@ -559,7 +593,7 @@ test('production assets expose scoped skeleton and aria busy states', () => {
     "aria-busy",
     'actorCardLoading',
     'conversationLoading',
-    'rosterPendingActorId',
+    'rosterPendingActors',
   ].forEach((marker) => {
     assertIncludes(appJs, marker);
   });
@@ -585,11 +619,23 @@ test('primary navigation has exactly two visible destinations', () => {
   assert.deepEqual(buttonLabels, ['Team room', 'Tracks']);
 });
 
-test('Team room keeps direct thread centered and actions in the teammate card', () => {
+test('Team room binds selected actor actions to a compact thread header', () => {
   const roomMain = indexHtml.match(/<section class="room-main"[\s\S]*?<\/section>\s*<aside id="actor-console"/);
   assert.ok(roomMain, 'Expected center room main before teammate rail');
   [
-    'class="room-header"',
+    'class="room-header selected-context-header"',
+    'class="conversation-identity"',
+    'class="conversation-actions"',
+    'id="selected-context-avatar"',
+    'id="selected-context-role"',
+    'id="selected-context-id"',
+    'id="selected-context-runtime"',
+    'id="selected-context-health"',
+    'id="stop-button"',
+    'id="resume-button"',
+    'id="delete-button"',
+    'id="lifecycle-operation-status"',
+    'id="action-availability-status"',
     'class="room-thread"',
     'id="im-conversation"',
     'class="composer"',
@@ -604,9 +650,6 @@ test('Team room keeps direct thread centered and actions in the teammate card', 
   [
     'id="open-tui-button"',
     'id="clear-button"',
-    'id="stop-button"',
-    'id="resume-button"',
-    'id="delete-button"',
   ].forEach((forbidden) => {
     assertExcludes(roomMain[0], forbidden);
   });
@@ -620,11 +663,6 @@ test('Team room keeps direct thread centered and actions in the teammate card', 
     'id="actor-track-summary"',
     'id="open-tui-button"',
     'id="clear-button"',
-    'id="stop-button"',
-    'id="resume-button"',
-    'id="delete-button"',
-    'id="action-availability-status"',
-    'id="message-banner"',
   ].forEach((marker) => {
     assertIncludes(teammateRail[0], marker);
   });
@@ -635,6 +673,80 @@ test('Team room keeps direct thread centered and actions in the teammate card', 
   ].forEach((forbidden) => {
     assertExcludes(teammateRail[0], forbidden);
   });
+
+  ['stop-button', 'resume-button', 'delete-button'].forEach((id) => {
+    const matches = indexHtml.match(new RegExp('id="' + id + '"', 'g')) || [];
+    assert.equal(matches.length, 1, `Expected one production control for ${id}`);
+  });
+  [
+    'id="stop-button"',
+    'id="resume-button"',
+    'id="delete-button"',
+    'id="lifecycle-operation-status"',
+    'id="action-availability-status"',
+  ].forEach((forbidden) => {
+    assertExcludes(teammateRail[0], forbidden);
+  });
+});
+
+test('selected context stays compact and does not replace direct-thread structure', () => {
+  [
+    '.selected-context-header',
+    '.conversation-identity',
+    '.conversation-context-copy',
+    '.conversation-context-meta',
+    '.conversation-actions',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+  assertCssDeclarations('.selected-context-header', [
+    'min-height: 64px;',
+    'align-items: center;',
+  ]);
+  assertIncludes(appJs, 'renderSelectedActorContext');
+  assertIncludes(indexHtml, '<div id="room-thread" class="room-thread">');
+  assertIncludes(indexHtml, '<div id="im-conversation" class="im-conversation" aria-live="polite"></div>');
+  assertIncludes(indexHtml, 'src="/static/markdown-renderer.js"');
+  assertIncludes(indexHtml, 'src="/static/app.js"');
+  assertExcludes(combinedAssets, 'selected-workbar');
+});
+
+test('delete uses one accessible exact-target confirmation boundary', () => {
+  [
+    'id="delete-confirmation-backdrop"',
+    'id="delete-confirmation-dialog"',
+    'id="delete-confirmation-title"',
+    'id="delete-confirmation-target"',
+    'id="delete-confirmation-role"',
+    'id="delete-confirmation-state"',
+    'id="delete-confirmation-input"',
+    'id="delete-confirmation-cancel"',
+    'id="delete-confirmation-confirm"',
+    'role="dialog"',
+    'aria-modal="true"',
+    'aria-labelledby="delete-confirmation-title"',
+  ].forEach((marker) => {
+    assertIncludes(indexHtml, marker);
+  });
+  [
+    '.modal-backdrop',
+    '.modal-backdrop[hidden]',
+    '.confirmation-dialog',
+    '.confirmation-warning',
+    '.confirmation-actions',
+  ].forEach((marker) => {
+    assertIncludes(stylesCss, marker);
+  });
+  [
+    'openDeleteConfirmation',
+    'updateDeleteConfirmationInput',
+    'deleteConfirmationMatches',
+    'confirmDelete',
+  ].forEach((marker) => {
+    assertIncludes(appJs, marker);
+  });
+  assertIncludes(appJs, "elements.deleteButton.addEventListener('click', function () {\n      openDeleteConfirmation");
+  assertNotMatches(appJs, /elements\.deleteButton\.addEventListener\('click',[\s\S]{0,180}runLifecycleAction/);
 });
 
 test('Tracks shell presents read-only Track Studio labels', () => {

@@ -233,6 +233,29 @@
     };
   }
 
+  function lifecycleActionAllowed(state, action, actorId) {
+    const lifecycleOperation = activeLifecycleOperationForActor(state, actorId);
+    const actionState = computeInstanceActionState(actorRuntimeForId(state, actorId), {
+      draftText: state.draftText,
+      sendPending: state.sendPending,
+      lifecycleOperation,
+      interruptPending: state.interruptPending,
+    });
+    if (action === 'stop') {
+      return actionState.canStop;
+    }
+    if (action === 'resume') {
+      return actionState.canResume;
+    }
+    if (action === 'clear') {
+      return actionState.canClear;
+    }
+    if (action === 'delete') {
+      return actionState.canDelete;
+    }
+    return false;
+  }
+
   function describeInstanceActionState(instance, options) {
     const state = computeInstanceActionState(instance, options);
     const lifecycleOperation = options && operationIsActive(options.lifecycleOperation)
@@ -347,8 +370,8 @@
       appBasicsError: '',
       rosterLoading: false,
       rosterError: '',
-      rosterPendingActorId: '',
-      rosterReconcileActorId: '',
+      rosterStoppedExpanded: false,
+      rosterPendingActors: {},
       rosterReconcileAttempt: 0,
       rosterReconcileTimer: null,
       rosterReconcileDelaysMs: null,
@@ -367,6 +390,9 @@
       trackSelectionPendingId: '',
       actorSelectionRequestId: 0,
       trackSelectionRequestId: 0,
+      deleteConfirmationActorId: '',
+      deleteConfirmationInput: '',
+      deleteConfirmationTrigger: null,
       openTuiMessage: '',
       openTuiCommand: '',
       imSessionReady: false,
@@ -563,32 +589,50 @@
     }
   }
 
+  function pendingCreatedActorIds(state) {
+    return state && state.rosterPendingActors && typeof state.rosterPendingActors === 'object'
+      ? Object.keys(state.rosterPendingActors)
+      : [];
+  }
+
+  function recordPendingCreatedActor(state, actorId, roleId) {
+    if (!actorId) {
+      return;
+    }
+    state.rosterPendingActors[actorId] = roleId || '';
+    state.rosterReconcileAttempt = 0;
+  }
+
   function applyActorsPayload(state, payload) {
     const previousActorId = state.selectedActorId;
     const previousActors = state.actors.slice();
+    const previousSelectedActor = previousActors.find(function (actor) {
+      return actor.actor_id === previousActorId;
+    }) || null;
     const incomingActors = payload && Array.isArray(payload.actors) ? payload.actors : [];
-    const pendingActorId = state.rosterPendingActorId;
-    const pendingConfirmed = pendingActorId && incomingActors.some(function (actor) {
-      return actor.actor_id === pendingActorId;
-    });
+    const pendingActorIds = pendingCreatedActorIds(state);
     state.actors = incomingActors.slice();
-    if (pendingActorId) {
+    pendingActorIds.forEach(function (pendingActorId) {
+      const pendingConfirmed = incomingActors.some(function (actor) {
+        return actor.actor_id === pendingActorId;
+      });
       if (pendingConfirmed) {
-        state.rosterPendingActorId = '';
-        state.rosterReconcileActorId = '';
-        state.rosterReconcileAttempt = 0;
-        if (state.rosterReconcileTimer) {
-          clearTimeout(state.rosterReconcileTimer);
-          state.rosterReconcileTimer = null;
-        }
-      } else {
-        const previousPending = previousActors.find(function (actor) {
-          return actor.actor_id === pendingActorId;
-        });
-        const roleId = previousPending && previousPending.role
-          ? previousPending.role
-          : state.selectedRole;
-        state.actors.push(buildPendingActor(pendingActorId, roleId));
+        delete state.rosterPendingActors[pendingActorId];
+        return;
+      }
+      const previousPending = previousActors.find(function (actor) {
+        return actor.actor_id === pendingActorId;
+      });
+      const roleId = (previousPending && previousPending.role)
+        || state.rosterPendingActors[pendingActorId]
+        || '';
+      state.actors.push(buildPendingActor(pendingActorId, roleId));
+    });
+    if (!pendingCreatedActorIds(state).length) {
+      state.rosterReconcileAttempt = 0;
+      if (state.rosterReconcileTimer) {
+        clearTimeout(state.rosterReconcileTimer);
+        state.rosterReconcileTimer = null;
       }
     }
     const stillPresent = state.actors.some(function (actor) {
@@ -596,7 +640,7 @@
     });
     if (!stillPresent) {
       const protectAutoSelection = Boolean(selectedLifecycleOperation(state) || state.suppressNextRosterAutoSelection);
-      state.selectedActorId = protectAutoSelection ? '' : (state.actors.length ? state.actors[0].actor_id : '');
+      state.selectedActorId = protectAutoSelection ? '' : preferredActorId(state.actors);
       state.suppressNextRosterAutoSelection = false;
       state.actorConsole = null;
       syncActorModelConfigFromConsole(state, { force: true });
@@ -606,6 +650,16 @@
     if (state.selectedActorId !== previousActorId) {
       clearOpenTuiFeedback(state);
       clearImConversation(state, state.selectedActorId);
+    }
+    const selectedActor = actorById(state, state.selectedActorId);
+    const previousSelectedRuntime = previousSelectedActor && (previousSelectedActor.runtime || previousSelectedActor);
+    const selectedRuntime = selectedActor && (selectedActor.runtime || selectedActor);
+    if (selectedRuntime && selectedRuntime.status === 'inactive' && (
+      state.selectedActorId !== previousActorId
+      || !previousSelectedRuntime
+      || previousSelectedRuntime.status !== 'inactive'
+    )) {
+      state.rosterStoppedExpanded = true;
     }
   }
 
@@ -776,6 +830,20 @@
     }) || null;
   }
 
+  function actorIsStopped(actor) {
+    const runtime = actor && (actor.runtime || actor);
+    return Boolean(runtime && runtime.status === 'inactive');
+  }
+
+  function preferredActorId(actors) {
+    const rows = Array.isArray(actors) ? actors : [];
+    const activeActor = rows.find(function (actor) {
+      return !actorIsStopped(actor);
+    });
+    const preferred = activeActor || rows[0] || null;
+    return preferred && typeof preferred.actor_id === 'string' ? preferred.actor_id : '';
+  }
+
   function runtimeRowFromLifecycleInstance(instance, fallbackActorId, fallbackRole) {
     if (!instance || typeof instance !== 'object') {
       return null;
@@ -842,6 +910,9 @@
     if (!replaced) {
       state.actors = state.actors.concat([actorRow]);
     }
+    if (state.selectedActorId === actorRow.actor_id && actorIsStopped(actorRow)) {
+      state.rosterStoppedExpanded = true;
+    }
     if (state.selectedActorId === actorRow.actor_id && state.actorConsole) {
       state.actorConsole = Object.assign({}, state.actorConsole, {
         actor: Object.assign({}, state.actorConsole.actor || {}, {
@@ -853,17 +924,22 @@
     }
   }
 
-  function selectedActorRuntime(state) {
-    const consoleRuntime = state.actorConsole && state.actorConsole.runtime ? state.actorConsole.runtime : null;
-    const actor = actorById(state, state.selectedActorId);
+  function actorRuntimeForId(state, actorId) {
+    const actor = actorById(state, actorId);
+    const consoleActor = state.actorConsole && state.actorConsole.actor ? state.actorConsole.actor : null;
+    const consoleActorId = consoleActor && typeof consoleActor.actor_id === 'string' ? consoleActor.actor_id : '';
+    const consoleMatches = Boolean(state.actorConsole && (
+      consoleActorId ? consoleActorId === actorId : state.selectedActorId === actorId
+    ));
+    const consoleRuntime = consoleMatches && state.actorConsole.runtime ? state.actorConsole.runtime : null;
     const runtime = consoleRuntime || (actor && actor.runtime) || actor || null;
     if (!runtime) {
       return null;
     }
     const threadStatus = runtime.thread_status || (runtime.thread && runtime.thread.status) || '';
     return {
-      actor_id: state.selectedActorId,
-      role: state.actorConsole && state.actorConsole.actor ? state.actorConsole.actor.role : actor && actor.role,
+      actor_id: actorId,
+      role: consoleMatches && consoleActor ? consoleActor.role : actor && actor.role,
       status: runtime.status,
       app_server_health: runtime.app_server_health,
       thread_id: runtime.thread_id,
@@ -873,6 +949,10 @@
       thread: { status: threadStatus },
       app_server: { healthy: runtime.app_server_health === 'healthy' },
     };
+  }
+
+  function selectedActorRuntime(state) {
+    return actorRuntimeForId(state, state.selectedActorId);
   }
 
   function selectedActorImTarget(state) {
@@ -1145,56 +1225,120 @@
     return 'dot';
   }
 
+  function renderStartOperationRowHtml(state, operation) {
+    const roleId = lifecycleOperationRoleId(operation);
+    const roleLabel = formatValue(roleLabelById(state, roleId));
+    const initials = actorInitials(roleId, '');
+    const label = lifecycleOperationLabel(operation) || ('Starting ' + roleLabel);
+    const selected = operation.id === state.selectedLifecycleOperationId;
+    const accessibleLabel = label + ', ' + lifecycleOperationBadgeText(operation) + (selected ? ', selected' : '');
+    return [
+      '<button class="person-row selectable-row actor-row is-pending is-operation' + (selected ? ' is-selected' : '') + '" type="button" data-operation-id="' + escapeHtml(operation.id) + '" role="option" aria-selected="' + selected + '" aria-label="' + escapeHtml(accessibleLabel) + '">',
+      '<span class="avatar teal" aria-hidden="true">' + escapeHtml(initials) + '</span>',
+      '<span>',
+      '<strong>' + escapeHtml(label) + '</strong>',
+      '<span class="micro mono">' + escapeHtml(operation.id) + '</span>',
+      '</span>',
+      '<span class="row-status">',
+      badge(lifecycleOperationBadgeText(operation), 'busy'),
+      '</span>',
+      '</button>',
+    ].join('');
+  }
+
+  function renderActorRowHtml(state, actor) {
+    const selected = actor.actor_id === state.selectedActorId;
+    const loading = actor.actor_id === state.actorSelectionPendingId;
+    const lifecycleOperation = activeLifecycleOperationForActor(state, actor.actor_id);
+    const pending = Boolean(actor.pending
+      || lifecycleOperation
+      || (state.rosterPendingActors && Object.prototype.hasOwnProperty.call(state.rosterPendingActors, actor.actor_id)));
+    const runtime = actor.runtime || actor;
+    const roleLabel = formatValue(roleLabelById(state, actor.role));
+    const initials = actorInitials(actor.role, actor.actor_id);
+    const tone = actorVisualTone(runtime);
+    const status = lifecycleOperation
+      ? lifecycleOperationBadgeText(lifecycleOperation)
+      : (pending ? 'initializing' : formatValue(runtime.status));
+    const accessibleLabel = roleLabel + ' actor ' + formatValue(actor.actor_id) + ', ' + status + (selected ? ', selected' : '');
+    return [
+      '<button class="person-row selectable-row actor-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + (pending ? ' is-pending' : '') + '" type="button" data-actor-id="' + escapeHtml(actor.actor_id) + '" role="option" aria-selected="' + selected + '" aria-label="' + escapeHtml(accessibleLabel) + '">',
+      '<span class="avatar ' + escapeHtml(tone) + '" aria-hidden="true">' + escapeHtml(initials) + '</span>',
+      '<span>',
+      '<strong>' + escapeHtml(roleLabel) + '</strong>',
+      '<span class="micro mono">' + escapeHtml(formatValue(actor.actor_id)) + '</span>',
+      '</span>',
+      '<span class="row-status">',
+      lifecycleOperation ? badge(status, 'busy') : (pending ? badge('initializing', 'busy') : badge(runtime.status)),
+      pending ? '' : badge(runtime.app_server_health),
+      pending ? '' : '<span class="' + escapeHtml(actorDotClass(runtime)) + '" aria-hidden="true"></span>',
+      '</span>',
+      '</button>',
+    ].join('');
+  }
+
+  function renderRosterGroupHtml(group) {
+    const rows = Array.isArray(group.rows) ? group.rows : [];
+    const expanded = !group.collapsible || Boolean(group.expanded);
+    const heading = group.collapsible
+      ? [
+          '<button class="roster-group-head roster-group-toggle" type="button" data-roster-toggle="' + escapeHtml(group.key) + '" aria-expanded="' + expanded + '">',
+          '<span><span class="roster-group-chevron" aria-hidden="true">›</span>' + escapeHtml(group.title) + '</span>',
+          '<span class="roster-group-count">' + rows.length + '</span>',
+          '</button>',
+        ].join('')
+      : [
+          '<div class="roster-group-head">',
+          '<span>' + escapeHtml(group.title) + '</span>',
+          '<span class="roster-group-count">' + rows.length + '</span>',
+          '</div>',
+        ].join('');
+    const rowHtml = expanded
+      ? '<div class="roster-group-rows" role="listbox" aria-label="' + escapeHtml(group.title) + '">' + rows.join('') + '</div>'
+      : '';
+    return '<section class="roster-group" data-roster-group="' + escapeHtml(group.key) + '">' + heading + rowHtml + '</section>';
+  }
+
   function renderActorRowsHtml(state) {
     const startOperationRows = lifecycleOperationList(state).filter(function (operation) {
       return operationIsActive(operation) && operation.action === 'start';
     }).map(function (operation) {
-      const roleId = lifecycleOperationRoleId(operation);
-      const roleLabel = formatValue(roleLabelById(state, roleId));
-      const initials = actorInitials(roleId, '');
-      const label = lifecycleOperationLabel(operation) || ('Starting ' + roleLabel);
-      const selected = operation.id === state.selectedLifecycleOperationId;
-      return [
-        '<button class="person-row selectable-row actor-row is-pending is-operation' + (selected ? ' is-selected' : '') + '" type="button" data-operation-id="' + escapeHtml(operation.id) + '">',
-        '<span class="avatar teal" aria-hidden="true">' + escapeHtml(initials) + '</span>',
-        '<span>',
-        '<strong>' + escapeHtml(label) + '</strong>',
-        '<span class="micro mono">' + escapeHtml(operation.id) + '</span>',
-        '</span>',
-        '<span class="row-status">',
-        badge(lifecycleOperationBadgeText(operation), 'busy'),
-        '</span>',
-        '</button>',
-      ].join('');
+      return renderStartOperationRowHtml(state, operation);
     });
     if (!state.actors.length && !startOperationRows.length) {
       return renderEmpty('No actors available.');
     }
-    const actorRows = state.actors.map(function (actor) {
-      const selected = actor.actor_id === state.selectedActorId;
-      const loading = actor.actor_id === state.actorSelectionPendingId;
-      const lifecycleOperation = activeLifecycleOperationForActor(state, actor.actor_id);
-      const pending = Boolean(actor.pending || lifecycleOperation || (state.rosterPendingActorId && actor.actor_id === state.rosterPendingActorId));
-      const runtime = actor.runtime || actor;
-      const roleLabel = formatValue(roleLabelById(state, actor.role));
-      const initials = actorInitials(actor.role, actor.actor_id);
-      const tone = actorVisualTone(runtime);
-      return [
-        '<button class="person-row selectable-row actor-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + (pending ? ' is-pending' : '') + '" type="button" data-actor-id="' + escapeHtml(actor.actor_id) + '">',
-        '<span class="avatar ' + escapeHtml(tone) + '" aria-hidden="true">' + escapeHtml(initials) + '</span>',
-        '<span>',
-        '<strong>' + escapeHtml(roleLabel) + '</strong>',
-        '<span class="micro mono">' + escapeHtml(formatValue(actor.actor_id)) + '</span>',
-        '</span>',
-        '<span class="row-status">',
-        lifecycleOperation ? badge(lifecycleOperationBadgeText(lifecycleOperation), 'busy') : (pending ? badge('initializing', 'busy') : badge(runtime.status)),
-        pending ? '' : badge(runtime.app_server_health),
-        pending ? '' : '<span class="' + escapeHtml(actorDotClass(runtime)) + '" aria-hidden="true"></span>',
-        '</span>',
-        '</button>',
-      ].join('');
+    const activeRows = [];
+    const stoppedRows = [];
+    state.actors.forEach(function (actor) {
+      const rowHtml = renderActorRowHtml(state, actor);
+      if (actorIsStopped(actor)) {
+        stoppedRows.push(rowHtml);
+      } else {
+        activeRows.push(rowHtml);
+      }
     });
-    return startOperationRows.concat(actorRows).join('');
+    const groups = [];
+    if (startOperationRows.length) {
+      groups.push(renderRosterGroupHtml({
+        key: 'starting',
+        title: 'Starting',
+        rows: startOperationRows,
+      }));
+    }
+    groups.push(renderRosterGroupHtml({
+      key: 'active',
+      title: 'Active',
+      rows: activeRows,
+    }));
+    groups.push(renderRosterGroupHtml({
+      key: 'stopped',
+      title: 'Stopped',
+      rows: stoppedRows,
+      collapsible: true,
+      expanded: state.rosterStoppedExpanded,
+    }));
+    return groups.join('');
   }
 
   function renderTrackRowsHtml(state) {
@@ -1713,6 +1857,73 @@
       : renderTrackStudioRailHtml(state.selectedTrackDetail);
   }
 
+  function renderSelectedActorContext(state, elements) {
+    const runtime = selectedActorRuntime(state);
+    const lifecycleOperation = selectedLifecycleOperation(state)
+      || activeLifecycleOperationForActor(state, state.selectedActorId);
+    const selectedActor = actorById(state, state.selectedActorId);
+    const operationRoleId = lifecycleOperationRoleId(lifecycleOperation);
+    const roleId = (runtime && runtime.role) || (selectedActor && selectedActor.role) || operationRoleId;
+    const hasActor = Boolean(state.selectedActorId && selectedActor);
+    const hasOperationContext = Boolean(!hasActor && lifecycleOperation);
+    const roleLabel = roleId ? formatValue(roleLabelById(state, roleId)) : 'Direct thread';
+    const contextId = hasActor
+      ? state.selectedActorId
+      : (hasOperationContext ? lifecycleOperation.id : 'No teammate selected');
+    const lifecycleValue = lifecycleOperation
+      ? lifecycleOperationBadgeText(lifecycleOperation)
+      : (runtime && runtime.status ? formatValue(runtime.status) : '');
+    const healthValue = hasActor && runtime && runtime.app_server_health
+      ? formatValue(runtime.app_server_health)
+      : '';
+    const initials = actorInitials(roleId, state.selectedActorId);
+
+    elements.selectedContextAvatar.textContent = initials;
+    elements.selectedContextAvatar.className = 'avatar ' + (hasActor ? actorVisualTone(runtime) : 'teal');
+    elements.selectedContextAvatar.hidden = !hasActor && !hasOperationContext;
+    elements.selectedContextRole.textContent = roleLabel;
+    elements.selectedContextId.textContent = contextId;
+    elements.selectedContextRuntime.textContent = lifecycleValue;
+    elements.selectedContextRuntime.className = 'status-badge ' + (lifecycleOperation ? 'busy' : resolveStatusTone(lifecycleValue));
+    elements.selectedContextRuntime.hidden = !lifecycleValue;
+    elements.selectedContextHealth.textContent = healthValue;
+    elements.selectedContextHealth.className = 'status-badge ' + resolveStatusTone(healthValue);
+    elements.selectedContextHealth.hidden = !healthValue;
+
+    const actionState = describeInstanceActionState(runtime, {
+      draftText: state.draftText,
+      sendPending: state.sendPending,
+      lifecycleOperation,
+      interruptPending: state.interruptPending,
+    });
+    elements.stopButton.disabled = !actionState.canStop;
+    elements.stopButton.hidden = !hasActor || Boolean(runtime && runtime.status === 'inactive');
+    elements.stopButton.textContent = lifecycleOperation && lifecycleOperation.action === 'stop' ? 'Stopping...' : 'Stop';
+    elements.stopButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'stop'));
+    elements.stopButton.setAttribute('aria-label', hasActor ? 'Stop actor ' + state.selectedActorId : 'Stop selected actor');
+    elements.deleteButton.disabled = !actionState.canDelete;
+    elements.deleteButton.hidden = !hasActor;
+    elements.deleteButton.textContent = lifecycleOperation && lifecycleOperation.action === 'delete' ? 'Deleting...' : 'Delete';
+    elements.deleteButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'delete'));
+    elements.deleteButton.setAttribute('aria-label', hasActor ? 'Delete actor ' + state.selectedActorId : 'Delete selected actor');
+    elements.clearButton.disabled = !actionState.canClear;
+    elements.clearButton.textContent = lifecycleOperation && lifecycleOperation.action === 'clear' ? 'Clearing...' : 'Clear';
+    elements.clearButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'clear'));
+    elements.resumeButton.disabled = !actionState.canResume;
+    elements.resumeButton.hidden = !hasActor || !runtime || runtime.status !== 'inactive';
+    elements.resumeButton.textContent = lifecycleOperation && lifecycleOperation.action === 'resume' ? 'Resuming...' : 'Resume';
+    elements.resumeButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'resume'));
+    elements.resumeButton.setAttribute('aria-label', hasActor ? 'Resume actor ' + state.selectedActorId : 'Resume selected actor');
+    if (elements.lifecycleOperationStatus) {
+      elements.lifecycleOperationStatus.textContent = actionState.lifecycleStatus;
+    }
+    elements.actionAvailabilityStatus.textContent = actionState.lifecycleProtectionStatus
+      ? actionState.lifecycleProtectionStatus
+      : !actionState.canClear && actionState.clearReason
+      ? 'Clear disabled: ' + actionState.clearReason
+      : '';
+  }
+
   function renderComposer(state, elements) {
     elements.instructionInput.value = state.draftText;
     const runtime = selectedActorRuntime(state);
@@ -1730,26 +1941,95 @@
     elements.interruptButton.disabled = !actionState.canInterrupt;
     elements.interruptButton.textContent = state.interruptPending ? 'Interrupting...' : 'Interrupt';
     elements.interruptButton.classList.toggle('is-pending', state.interruptPending);
-    elements.stopButton.disabled = !actionState.canStop;
-    elements.stopButton.textContent = lifecycleOperation && lifecycleOperation.action === 'stop' ? 'Stopping...' : 'Stop';
-    elements.stopButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'stop'));
-    elements.deleteButton.disabled = !actionState.canDelete;
-    elements.deleteButton.textContent = lifecycleOperation && lifecycleOperation.action === 'delete' ? 'Deleting...' : 'Delete';
-    elements.deleteButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'delete'));
-    elements.clearButton.disabled = !actionState.canClear;
-    elements.clearButton.textContent = lifecycleOperation && lifecycleOperation.action === 'clear' ? 'Clearing...' : 'Clear';
-    elements.clearButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'clear'));
-    elements.resumeButton.disabled = !actionState.canResume;
-    elements.resumeButton.textContent = lifecycleOperation && lifecycleOperation.action === 'resume' ? 'Resuming...' : 'Resume';
-    elements.resumeButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'resume'));
-    if (elements.lifecycleOperationStatus) {
-      elements.lifecycleOperationStatus.textContent = actionState.lifecycleStatus;
-    }
-    elements.actionAvailabilityStatus.textContent = actionState.lifecycleProtectionStatus
-      ? actionState.lifecycleProtectionStatus
-      : !actionState.canClear && actionState.clearReason
-      ? 'Clear disabled: ' + actionState.clearReason
+  }
+
+  function renderActorInteractionRegions(state, elements) {
+    renderSelectedActorContext(state, elements);
+    return renderComposer(state, elements);
+  }
+
+  function deleteConfirmationMatches(state) {
+    return Boolean(
+      state
+      && state.deleteConfirmationActorId
+      && state.deleteConfirmationInput === state.deleteConfirmationActorId
+    );
+  }
+
+  function renderDeleteConfirmation(state, elements) {
+    const actorId = state.deleteConfirmationActorId;
+    const actor = actorById(state, actorId);
+    const runtime = actor && (actor.runtime || actor);
+    const lifecycleOperation = activeLifecycleOperationForActor(state, actorId);
+    const open = Boolean(actorId && actor);
+    elements.deleteConfirmationBackdrop.hidden = !open;
+    elements.deleteConfirmationTarget.textContent = open ? actorId : '';
+    elements.deleteConfirmationRole.textContent = open
+      ? formatValue(roleLabelById(state, actor.role))
       : '';
+    elements.deleteConfirmationState.textContent = open
+      ? formatValue(runtime && runtime.status)
+      : '';
+    elements.deleteConfirmationLabel.textContent = open
+      ? 'Type ' + actorId + ' to confirm'
+      : 'Type the actor id to confirm';
+    elements.deleteConfirmationInput.value = state.deleteConfirmationInput;
+    elements.deleteConfirmationConfirm.disabled = !open
+      || !deleteConfirmationMatches(state)
+      || Boolean(lifecycleOperation)
+      || !lifecycleActionAllowed(state, 'delete', actorId);
+  }
+
+  function openDeleteConfirmation(state, elements, trigger) {
+    const actorId = state.selectedActorId;
+    const runtime = selectedActorRuntime(state);
+    const lifecycleOperation = activeLifecycleOperationForActor(state, actorId);
+    const actionState = computeInstanceActionState(runtime, {
+      draftText: state.draftText,
+      sendPending: state.sendPending,
+      lifecycleOperation,
+      interruptPending: state.interruptPending,
+    });
+    if (!actorId || !actorById(state, actorId) || !actionState.canDelete) {
+      renderDeleteConfirmation(state, elements);
+      return;
+    }
+    state.deleteConfirmationActorId = actorId;
+    state.deleteConfirmationInput = '';
+    state.deleteConfirmationTrigger = trigger || elements.deleteButton || null;
+    renderDeleteConfirmation(state, elements);
+    if (elements.deleteConfirmationInput && typeof elements.deleteConfirmationInput.focus === 'function') {
+      elements.deleteConfirmationInput.focus();
+    }
+  }
+
+  function closeDeleteConfirmation(state, elements, options) {
+    const trigger = state.deleteConfirmationTrigger;
+    const restoreFocus = !options || options.restoreFocus !== false;
+    state.deleteConfirmationActorId = '';
+    state.deleteConfirmationInput = '';
+    state.deleteConfirmationTrigger = null;
+    renderDeleteConfirmation(state, elements);
+    if (restoreFocus && trigger && typeof trigger.focus === 'function') {
+      trigger.focus();
+    }
+  }
+
+  function updateDeleteConfirmationInput(state, elements, value) {
+    state.deleteConfirmationInput = typeof value === 'string' ? value : '';
+    renderDeleteConfirmation(state, elements);
+  }
+
+  async function confirmDelete(state, elements) {
+    const actorId = state.deleteConfirmationActorId;
+    if (!deleteConfirmationMatches(state)
+      || !actorById(state, actorId)
+      || !lifecycleActionAllowed(state, 'delete', actorId)) {
+      renderDeleteConfirmation(state, elements);
+      return;
+    }
+    closeDeleteConfirmation(state, elements, { restoreFocus: false });
+    await runLifecycleAction(state, elements, 'delete', actorId);
   }
 
   function renderOpenTui(state, elements) {
@@ -1776,9 +2056,10 @@
     renderTrackList(state, elements);
     renderTrackDetail(state, elements);
     renderTrackStudioRail(state, elements);
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     renderOpenTui(state, elements);
     renderImConversation(state, elements);
+    renderDeleteConfirmation(state, elements);
   }
 
   async function refreshAppBasics(state, elements) {
@@ -1853,14 +2134,14 @@
       state.actorCardLoading = false;
       state.actorCardError = '';
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
       return;
     }
     state.actorCardLoading = true;
     state.actorCardError = '';
     renderActorDetail(state, elements);
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     renderOpenTui(state, elements);
     try {
       const payload = await fetchJson(buildActorConsoleUrl(actorId), options || undefined);
@@ -1880,7 +2161,7 @@
       state.actorCardLoading = false;
       state.actorCardError = '';
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
     } catch (error) {
       if (isAbortError(error) || !isCurrentActorRequest(state, actorId, requestId)) {
@@ -1891,7 +2172,7 @@
       state.message = error.message;
       renderShell(state, elements);
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
       throw error;
     }
@@ -2015,7 +2296,7 @@
     try {
       await refreshSelectedActorConsole(state);
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
     } catch (error) {
       state.message = error.message;
@@ -2089,6 +2370,9 @@
     if (!actorId || actorId === state.selectedActorId) {
       return;
     }
+    if (state.deleteConfirmationActorId) {
+      closeDeleteConfirmation(state, elements, { restoreFocus: false });
+    }
     state.selectedLifecycleOperationId = '';
     if (state.actorConsoleAbortController) {
       state.actorConsoleAbortController.abort();
@@ -2099,6 +2383,9 @@
     const requestId = state.actorSelectionRequestId + 1;
     state.actorSelectionRequestId = requestId;
     state.selectedActorId = actorId;
+    if (actorIsStopped(actorById(state, actorId))) {
+      state.rosterStoppedExpanded = true;
+    }
     state.actorConsole = null;
     syncActorModelConfigFromConsole(state, { force: true });
     state.actorSelectionPendingId = actorId;
@@ -2116,7 +2403,7 @@
     renderShell(state, elements);
     renderActorList(state, elements);
     renderActorDetail(state, elements);
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     renderOpenTui(state, elements);
     renderImConversation(state, elements);
     const target = selectedActorImTarget(state);
@@ -2141,7 +2428,7 @@
         state.actorSelectionPendingId = '';
         renderActorList(state, elements);
         renderActorDetail(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
         renderOpenTui(state, elements);
         renderImConversation(state, elements);
         scheduleActorConsoleRefresh(state, elements);
@@ -2178,7 +2465,7 @@
     renderShell(state, elements);
     renderActorList(state, elements);
     renderActorDetail(state, elements);
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     renderOpenTui(state, elements);
     renderImConversation(state, elements);
   }
@@ -2203,29 +2490,32 @@
     }
   }
 
-  async function runLifecycleAction(state, elements, action) {
-    if (!action || ['stop', 'resume', 'clear', 'delete'].indexOf(action) < 0 || !state.selectedActorId) {
+  async function runLifecycleAction(state, elements, action, actorId) {
+    if (!action || ['stop', 'resume', 'clear', 'delete'].indexOf(action) < 0 || !actorId || !actorById(state, actorId)) {
       return;
     }
-    if (activeLifecycleOperationForActor(state, state.selectedActorId)) {
+    if (!lifecycleActionAllowed(state, action, actorId)) {
       return;
     }
     state.message = '';
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     try {
       const payload = action === 'delete'
-        ? await fetchJson('/api/instances/' + encodeURIComponent(state.selectedActorId), { method: 'DELETE' })
-        : await fetchJson(actorActionUrl(state, action), { method: 'POST' });
+        ? await fetchJson('/api/instances/' + encodeURIComponent(actorId), { method: 'DELETE' })
+        : await fetchJson(actorActionUrl(actorId, action), { method: 'POST' });
       const operation = payload && payload.operation ? payload.operation : null;
       if (!operation || typeof operation.id !== 'string' || operation.action !== action) {
         throw new Error('Lifecycle response did not include operation.');
       }
       recordLifecycleOperation(state, operation);
+      if (actorIsStopped(actorById(state, actorId))) {
+        state.rosterStoppedExpanded = true;
+      }
       state.message = lifecycleOperationStatusText(operation);
       clearOpenTuiFeedback(state);
       renderShell(state, elements);
       renderActorList(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
       if (operationIsTerminal(operation)) {
         await reconcileLifecycleOperation(state, elements, operation);
@@ -2235,7 +2525,7 @@
     } catch (error) {
       state.message = error.message;
       renderShell(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
     }
   }
@@ -2246,9 +2536,9 @@
     }
     state.interruptPending = true;
     state.message = '';
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     try {
-      const payload = await fetchJson(actorActionUrl(state, 'interrupt'), {
+      const payload = await fetchJson(actorActionUrl(state.selectedActorId, 'interrupt'), {
         method: 'POST',
       });
       state.message = payload && payload.turn_id
@@ -2262,7 +2552,7 @@
     } finally {
       state.interruptPending = false;
       renderShell(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
     }
   }
@@ -2273,9 +2563,10 @@
       : [0, 150, 300, 600, 1000, 1500, 2500];
   }
 
-  function scheduleCreatedActorReconciliation(state, elements, actorId) {
+  function scheduleCreatedActorReconciliation(state, elements) {
     const delays = rosterReconcileDelays(state);
-    if (!actorId || state.rosterPendingActorId !== actorId) {
+    const pendingActorIds = pendingCreatedActorIds(state);
+    if (!pendingActorIds.length) {
       return;
     }
     if (state.rosterReconcileTimer) {
@@ -2284,36 +2575,47 @@
     }
     const attempt = state.rosterReconcileAttempt;
     if (attempt >= delays.length) {
-      state.message = 'Created ' + actorId + '. Roster has not confirmed it yet.';
+      state.message = pendingActorIds.length === 1
+        ? 'Created ' + pendingActorIds[0] + '. Roster has not confirmed it yet.'
+        : 'Created ' + pendingActorIds.length + ' actors. Roster has not confirmed them yet.';
       renderShell(state, elements);
       renderActorList(state, elements);
       return;
     }
     state.rosterReconcileTimer = setTimeout(function () {
       state.rosterReconcileTimer = null;
-      reconcileCreatedActorInRoster(state, elements, actorId).catch(function (error) {
+      reconcileCreatedActorsInRoster(state, elements).catch(function (error) {
+        const remainingActorIds = pendingCreatedActorIds(state);
         state.rosterError = error.message;
-        state.message = 'Created ' + actorId + '. Waiting for roster confirmation.';
+        state.message = remainingActorIds.length === 1
+          ? 'Created ' + remainingActorIds[0] + '. Waiting for roster confirmation.'
+          : 'Created actors. Waiting for roster confirmation.';
         renderShell(state, elements);
         renderActorList(state, elements);
-        scheduleCreatedActorReconciliation(state, elements, actorId);
+        scheduleCreatedActorReconciliation(state, elements);
       });
     }, delays[attempt]);
   }
 
-  async function reconcileCreatedActorInRoster(state, elements, actorId) {
-    if (!actorId || state.rosterPendingActorId !== actorId) {
+  async function reconcileCreatedActorsInRoster(state, elements) {
+    const actorIds = pendingCreatedActorIds(state);
+    if (!actorIds.length) {
       return;
     }
     state.rosterReconcileAttempt += 1;
     await refreshRoster(state, elements);
-    if (state.rosterPendingActorId === actorId) {
-      state.message = 'Created ' + actorId + '. Waiting for roster confirmation.';
+    const remainingActorIds = pendingCreatedActorIds(state);
+    if (remainingActorIds.length) {
+      state.message = remainingActorIds.length === 1
+        ? 'Created ' + remainingActorIds[0] + '. Waiting for roster confirmation.'
+        : 'Created ' + remainingActorIds.length + ' actors. Waiting for roster confirmation.';
       renderShell(state, elements);
-      scheduleCreatedActorReconciliation(state, elements, actorId);
+      scheduleCreatedActorReconciliation(state, elements);
       return;
     }
-    state.message = 'Created ' + actorId + '.';
+    state.message = actorIds.length === 1
+      ? 'Created ' + actorIds[0] + '.'
+      : 'Created ' + actorIds.length + ' actors.';
     renderShell(state, elements);
     renderActorList(state, elements);
   }
@@ -2347,7 +2649,7 @@
         state.message = error.message;
         renderShell(state, elements);
         renderActorList(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
         renderOpenTui(state, elements);
         scheduleLifecycleOperationPolling(state, elements);
       });
@@ -2377,7 +2679,7 @@
           state.message = lifecycleOperationStatusText(updatedOperation);
           renderShell(state, elements);
           renderActorList(state, elements);
-          renderComposer(state, elements);
+          renderActorInteractionRegions(state, elements);
           renderOpenTui(state, elements);
         }
       }
@@ -2387,58 +2689,92 @@
     scheduleLifecycleOperationPolling(state, elements);
   }
 
-  function beginCreatedActorReconciliation(state, elements, actorId, roleId) {
-    if (state.actorConsoleAbortController) {
-      state.actorConsoleAbortController.abort();
-    }
-    if (state.actorConversationAbortController) {
-      state.actorConversationAbortController.abort();
-    }
-    state.actorSelectionRequestId += 1;
-    const requestId = state.actorSelectionRequestId;
-    state.selectedActorId = actorId;
-    state.selectedSection = 'actors';
-    state.rosterPendingActorId = actorId;
-    state.rosterReconcileActorId = actorId;
-    state.rosterReconcileAttempt = 0;
-    state.actorConsole = null;
-    syncActorModelConfigFromConsole(state, { force: true });
-    state.actorCardLoading = true;
-    state.actorCardError = '';
-    state.conversationLoading = true;
-    state.conversationError = '';
-    state.actorSelectionPendingId = actorId;
+  function beginCreatedActorReconciliation(state, elements, actorId, roleId, options) {
+    const selectCreatedActor = Boolean(options && options.select);
+    recordPendingCreatedActor(state, actorId, roleId);
     state.message = 'Started ' + actorId + '. Waiting for roster confirmation.';
     upsertPendingActor(state, actorId, roleId);
-    clearImConversation(state, actorId);
-    clearOpenTuiFeedback(state);
-    renderShell(state, elements);
-    renderActorList(state, elements);
-    renderActorDetail(state, elements);
-    renderComposer(state, elements);
-    renderOpenTui(state, elements);
-    renderImConversation(state, elements);
-    const consoleAbortController = createAbortController();
-    const conversationAbortController = createAbortController();
-    state.actorConsoleAbortController = consoleAbortController;
-    state.actorConversationAbortController = conversationAbortController;
-    refreshActorCard(state, elements, actorId, requestId, consoleAbortController
-      ? { signal: consoleAbortController.signal }
-      : undefined).catch(function (error) {
-      if (!isAbortError(error)) {
-        state.message = error.message;
-        renderShell(state, elements);
+    if (selectCreatedActor) {
+      if (state.actorConsoleAbortController) {
+        state.actorConsoleAbortController.abort();
       }
-    });
-    refreshConversation(state, elements, actorId, actorId, requestId, conversationAbortController
-      ? { signal: conversationAbortController.signal }
-      : undefined).catch(function (error) {
-      if (!isAbortError(error)) {
-        state.conversationError = error.message;
-        renderImConversation(state, elements);
+      if (state.actorConversationAbortController) {
+        state.actorConversationAbortController.abort();
       }
+      state.actorSelectionRequestId += 1;
+      const requestId = state.actorSelectionRequestId;
+      state.selectedActorId = actorId;
+      state.selectedSection = 'actors';
+      state.actorConsole = null;
+      syncActorModelConfigFromConsole(state, { force: true });
+      state.actorCardLoading = true;
+      state.actorCardError = '';
+      state.conversationLoading = true;
+      state.conversationError = '';
+      state.actorSelectionPendingId = actorId;
+      clearImConversation(state, actorId);
+      clearOpenTuiFeedback(state);
+      renderShell(state, elements);
+      renderActorList(state, elements);
+      renderActorDetail(state, elements);
+      renderActorInteractionRegions(state, elements);
+      renderOpenTui(state, elements);
+      renderImConversation(state, elements);
+      const consoleAbortController = createAbortController();
+      const conversationAbortController = createAbortController();
+      state.actorConsoleAbortController = consoleAbortController;
+      state.actorConversationAbortController = conversationAbortController;
+      refreshActorCard(state, elements, actorId, requestId, consoleAbortController
+        ? { signal: consoleAbortController.signal }
+        : undefined).catch(function (error) {
+        if (!isAbortError(error)) {
+          state.message = error.message;
+          renderShell(state, elements);
+        }
+      });
+      refreshConversation(state, elements, actorId, actorId, requestId, conversationAbortController
+        ? { signal: conversationAbortController.signal }
+        : undefined).catch(function (error) {
+        if (!isAbortError(error)) {
+          state.conversationError = error.message;
+          renderImConversation(state, elements);
+        }
+      });
+    } else {
+      renderShell(state, elements);
+      renderActorList(state, elements);
+      renderActorInteractionRegions(state, elements);
+    }
+    scheduleCreatedActorReconciliation(state, elements);
+  }
+
+  function nextActorIdAfterRemoval(actors, actorId) {
+    const rows = Array.isArray(actors) ? actors : [];
+    const index = rows.findIndex(function (actor) {
+      return actor.actor_id === actorId;
     });
-    scheduleCreatedActorReconciliation(state, elements, actorId);
+    if (index < 0) {
+      return preferredActorId(rows);
+    }
+    const nextActor = rows[index + 1] || rows[index - 1] || null;
+    return nextActor && typeof nextActor.actor_id === 'string' ? nextActor.actor_id : '';
+  }
+
+  function focusSelectedActorRow(state, elements) {
+    if (!state.selectedActorId || !elements.actorsList || typeof elements.actorsList.querySelector !== 'function') {
+      return;
+    }
+    const focusRow = function () {
+      const row = elements.actorsList.querySelector('[data-actor-id="' + state.selectedActorId + '"]');
+      if (row && typeof row.focus === 'function') {
+        row.focus();
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(focusRow);
+    } else {
+      focusRow();
+    }
   }
 
   async function reconcileLifecycleOperation(state, elements, operation) {
@@ -2463,7 +2799,7 @@
       renderShell(state, elements);
       renderActorList(state, elements);
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
       return;
     }
@@ -2477,24 +2813,27 @@
         forgetLifecycleOperation(state, operation);
         renderShell(state, elements);
         renderActorList(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
         renderOpenTui(state, elements);
         return;
       }
       const roleId = lifecycleOperationRoleId(operation) || state.selectedRole;
-      if (state.selectedLifecycleOperationId === operation.id) {
+      const selectCreatedActor = state.selectedLifecycleOperationId === operation.id;
+      if (selectCreatedActor) {
         state.selectedLifecycleOperationId = '';
       }
       if (state.lifecycleOperationPreviousActorIds) {
         delete state.lifecycleOperationPreviousActorIds[operation.id];
       }
       forgetLifecycleOperation(state, operation);
-      beginCreatedActorReconciliation(state, elements, actorId, roleId);
+      beginCreatedActorReconciliation(state, elements, actorId, roleId, { select: selectCreatedActor });
       return;
     }
     const actorId = lifecycleOperationActorId(operation);
     state.message = lifecycleOperationStatusText(operation);
     if (operation.action === 'delete') {
+      const nextActorId = nextActorIdAfterRemoval(state.actors, actorId);
+      const completionMessage = state.message;
       if (state.selectedLifecycleOperationId === operation.id) {
         state.selectedLifecycleOperationId = '';
       }
@@ -2516,14 +2855,25 @@
       renderShell(state, elements);
       renderActorList(state, elements);
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
       renderImConversation(state, elements);
       try {
         await refreshRoster(state, elements);
-        renderActorList(state, elements);
       } catch (_error) {
-        return;
+        state.suppressNextRosterAutoSelection = false;
+      }
+      const currentSelectionStillExists = Boolean(actorById(state, state.selectedActorId));
+      const selectedNextActorId = currentSelectionStillExists
+        ? ''
+        : (actorById(state, nextActorId) ? nextActorId : preferredActorId(state.actors));
+      if (selectedNextActorId) {
+        await selectActor(state, elements, selectedNextActorId);
+        state.message = completionMessage;
+        renderShell(state, elements);
+        focusSelectedActorRow(state, elements);
+      } else {
+        renderActorList(state, elements);
       }
       return;
     }
@@ -2531,13 +2881,13 @@
     forgetLifecycleOperation(state, operation);
     renderShell(state, elements);
     renderActorList(state, elements);
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     renderOpenTui(state, elements);
     if (actorId && state.selectedActorId === actorId) {
       try {
         await refreshSelectedActorConsole(state);
         renderActorDetail(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
         renderOpenTui(state, elements);
       } catch (error) {
         state.message = error.message;
@@ -2574,7 +2924,7 @@
       state.message = lifecycleOperationStatusText(operation);
       renderShell(state, elements);
       renderActorList(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       if (operationIsTerminal(operation)) {
         await reconcileLifecycleOperation(state, elements, operation);
       } else {
@@ -2627,7 +2977,7 @@
     state.draftText = '';
     state.sendPending = true;
     state.message = '';
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     renderImConversation(state, elements);
     try {
       const payload = await sendImDraft(state, elements, content);
@@ -2645,7 +2995,7 @@
     } finally {
       state.sendPending = false;
       renderShell(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderImConversation(state, elements);
     }
   }
@@ -2692,7 +3042,7 @@
     }
     if (selectedActorMessageProcessed && state.selectedSection === 'actors') {
       renderActorDetail(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
       renderOpenTui(state, elements);
       renderImConversation(state, elements);
     }
@@ -2741,7 +3091,7 @@
     state.openTuiMessage = 'Opening...';
     state.openTuiCommand = '';
     renderOpenTui(state, elements);
-    renderComposer(state, elements);
+    renderActorInteractionRegions(state, elements);
     try {
       const payload = await fetchJson('/api/instances/' + encodeURIComponent(state.selectedActorId) + '/open-tui', {
         method: 'POST',
@@ -2759,7 +3109,7 @@
     } finally {
       state.openTuiPending = false;
       renderOpenTui(state, elements);
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
     }
   }
 
@@ -2795,8 +3145,8 @@
     renderOpenTui(state, elements);
   }
 
-  function actorActionUrl(state, action) {
-    return '/api/instances/' + encodeURIComponent(state.selectedActorId) + '/' + action;
+  function actorActionUrl(actorId, action) {
+    return '/api/instances/' + encodeURIComponent(actorId) + '/' + action;
   }
 
   async function refreshVisibleRegionsWithFeedback(state, elements) {
@@ -2853,6 +3203,11 @@
       refreshButton: document.getElementById('refresh-button'),
       serverStatus: document.getElementById('server-status'),
       actorsList: document.getElementById('actors-list'),
+      selectedContextAvatar: document.getElementById('selected-context-avatar'),
+      selectedContextRole: document.getElementById('selected-context-role'),
+      selectedContextId: document.getElementById('selected-context-id'),
+      selectedContextRuntime: document.getElementById('selected-context-runtime'),
+      selectedContextHealth: document.getElementById('selected-context-health'),
       selectedActorAvatar: document.getElementById('selected-actor-avatar'),
       selectedActorSubtitle: document.getElementById('selected-actor-subtitle'),
       actorRuntimeDetail: document.getElementById('actor-runtime-detail'),
@@ -2890,6 +3245,14 @@
       roomThread: document.getElementById('room-thread'),
       imConversation: document.getElementById('im-conversation'),
       newReplyChip: document.getElementById('new-reply-chip'),
+      deleteConfirmationBackdrop: document.getElementById('delete-confirmation-backdrop'),
+      deleteConfirmationTarget: document.getElementById('delete-confirmation-target'),
+      deleteConfirmationRole: document.getElementById('delete-confirmation-role'),
+      deleteConfirmationState: document.getElementById('delete-confirmation-state'),
+      deleteConfirmationLabel: document.getElementById('delete-confirmation-label'),
+      deleteConfirmationInput: document.getElementById('delete-confirmation-input'),
+      deleteConfirmationConfirm: document.getElementById('delete-confirmation-confirm'),
+      deleteConfirmationCancel: document.getElementById('delete-confirmation-cancel'),
     };
 
     const state = createState();
@@ -2905,6 +3268,16 @@
       renderShell(state, elements);
     });
     elements.actorsList.addEventListener('click', function (event) {
+      const rosterToggle = event.target && event.target.closest
+        ? event.target.closest('[data-roster-toggle]')
+        : null;
+      if (rosterToggle) {
+        if ((rosterToggle.getAttribute('data-roster-toggle') || '') === 'stopped') {
+          state.rosterStoppedExpanded = !state.rosterStoppedExpanded;
+          renderActorList(state, elements);
+        }
+        return;
+      }
       const operationRow = event.target && event.target.closest
         ? event.target.closest('[data-operation-id]')
         : null;
@@ -2970,7 +3343,7 @@
     });
     elements.instructionInput.addEventListener('input', function (event) {
       state.draftText = event.target.value;
-      renderComposer(state, elements);
+      renderActorInteractionRegions(state, elements);
     });
     elements.refreshButton.addEventListener('click', function () {
       refreshVisibleRegionsWithFeedback(state, elements).catch(function (error) {
@@ -2990,7 +3363,7 @@
         state.message = error.message;
         state.sendPending = false;
         renderShell(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
       });
     });
     elements.interruptButton.addEventListener('click', function () {
@@ -2998,28 +3371,28 @@
         state.message = error.message;
         state.interruptPending = false;
         renderShell(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
       });
     });
     elements.stopButton.addEventListener('click', function () {
-      runLifecycleAction(state, elements, 'stop').catch(function (error) {
+      runLifecycleAction(state, elements, 'stop', state.selectedActorId).catch(function (error) {
         state.message = error.message;
         renderShell(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
       });
     });
     elements.clearButton.addEventListener('click', function () {
-      runLifecycleAction(state, elements, 'clear').catch(function (error) {
+      runLifecycleAction(state, elements, 'clear', state.selectedActorId).catch(function (error) {
         state.message = error.message;
         renderShell(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
       });
     });
     elements.resumeButton.addEventListener('click', function () {
-      runLifecycleAction(state, elements, 'resume').catch(function (error) {
+      runLifecycleAction(state, elements, 'resume', state.selectedActorId).catch(function (error) {
         state.message = error.message;
         renderShell(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
       });
     });
     elements.openTuiButton.addEventListener('click', function () {
@@ -3027,7 +3400,7 @@
         state.openTuiMessage = error.message;
         state.openTuiPending = false;
         renderOpenTui(state, elements);
-        renderComposer(state, elements);
+        renderActorInteractionRegions(state, elements);
       });
     });
     elements.copyTuiCommandButton.addEventListener('click', function () {
@@ -3037,10 +3410,50 @@
       });
     });
     elements.deleteButton.addEventListener('click', function () {
-      runLifecycleAction(state, elements, 'delete').catch(function (error) {
+      openDeleteConfirmation(state, elements, elements.deleteButton);
+    });
+    elements.deleteConfirmationInput.addEventListener('input', function (event) {
+      updateDeleteConfirmationInput(state, elements, event.target.value);
+    });
+    elements.deleteConfirmationCancel.addEventListener('click', function () {
+      closeDeleteConfirmation(state, elements);
+    });
+    elements.deleteConfirmationConfirm.addEventListener('click', function () {
+      confirmDelete(state, elements).catch(function (error) {
         state.message = error.message;
         renderVisibleRegions(state, elements);
       });
+    });
+    elements.deleteConfirmationBackdrop.addEventListener('click', function (event) {
+      if (event.target === elements.deleteConfirmationBackdrop) {
+        closeDeleteConfirmation(state, elements);
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (elements.deleteConfirmationBackdrop.hidden) {
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeDeleteConfirmation(state, elements);
+        return;
+      }
+      if (event.key !== 'Tab') {
+        return;
+      }
+      const focusable = Array.from(elements.deleteConfirmationBackdrop.querySelectorAll('input, button:not([disabled])'));
+      if (!focusable.length) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     });
     if (elements.newReplyChip) {
       elements.newReplyChip.addEventListener('click', function () {
@@ -3120,9 +3533,12 @@
     computeCreateEnabled,
     computeInstanceActionState,
     computeOpenTuiState,
+    confirmDelete,
+    closeDeleteConfirmation,
     createInstance,
     createState,
     clearImConversation,
+    deleteConfirmationMatches,
     describeInstanceActionState,
     activeLifecycleOperationForActor,
     forgetLifecycleOperation,
@@ -3146,7 +3562,9 @@
     renderActorRowsHtml,
     renderActorModelConfig,
     renderImConversation,
+    openDeleteConfirmation,
     renderRoleSelect,
+    renderSelectedActorContext,
     renderTrackDetailHtml,
     renderTrackStudioRailHtml,
     revertActorModelConfigDraft,
@@ -3163,5 +3581,6 @@
     shouldRefreshSelectedActorConsole,
     syncActorModelConfigFromConsole,
     summarizeActorModelPayload,
+    updateDeleteConfirmationInput,
   };
 }));
