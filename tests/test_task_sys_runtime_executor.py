@@ -22,6 +22,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 from env.repos import runtime_files  # noqa: E402
 from env.domain import task_sys  # noqa: E402
+import actor_capability  # noqa: E402
 
 TASK_SYS_RUNTIME_PATH = ROOT / "tools" / "launcher" / ("task_sys_" + "runtime.py")
 MODULE_COUNTER = count()
@@ -603,20 +604,12 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertIn("task_sys.parent_frame", calls[0]["text"])
         self.assertIn("task-user-input-abcdef123456", calls[0]["text"])
 
-    def test_execute_submit_parent_applies_model_config_settings_before_turn_start(self) -> None:
+    def test_execute_submit_parent_applies_capability_settings_before_turn_start(self) -> None:
         context = self._context()
-        (context.instance_json.parent / "model-config.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "parent": {"model": "gpt-5.4", "effort": "high"},
-                    "side": {},
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
+        actor_capability.replace_actor_capabilities(
+            context.instance_json,
+            parent_level="deep",
+            side_level="fast",
         )
         calls: list[dict[str, Any]] = []
         original_update = self.module.parent_thread_submit.app_server.thread_settings_update
@@ -670,8 +663,8 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["action"], "submit_parent")
         self.assertEqual(result["turn_id"], "turn-parent-contract")
         self.assertEqual([call["helper"] for call in calls], ["thread_settings_update", "thread_read", "turn_start"])
-        self.assertEqual(calls[0]["model"], "gpt-5.4")
-        self.assertEqual(calls[0]["effort"], "high")
+        self.assertEqual(calls[0]["model"], "gpt-5.6-sol")
+        self.assertEqual(calls[0]["effort"], "xhigh")
         self.assertEqual(calls[2]["thread_id"], "thr-main")
         self.assertIn("task_sys.parent_frame", calls[2]["text"])
 

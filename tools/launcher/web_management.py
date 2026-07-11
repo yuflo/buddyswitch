@@ -29,7 +29,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import web_im_identity
 import im_http_router
 import imessage_channel
-import actor_model_config
+import actor_capability
 from env.domain import task_sys, track_read
 from env.repos import runtime_files
 from env.tool_runtime import daemon_client
@@ -401,12 +401,12 @@ class WebManagementService:
         operation_id = self._parse_operation_path(route)
         if method == "GET" and operation_id is not None:
             return 200, self._get_operation(operation_id)
-        actor_model_config_id = self._parse_actor_model_config_path(route)
-        if actor_model_config_id is not None:
+        actor_capability_id = self._parse_actor_capability_path(route)
+        if actor_capability_id is not None:
             if method == "GET":
-                return 200, self._read_actor_model_config(actor_model_config_id)
+                return 200, self._read_actor_capabilities(actor_capability_id)
             if method == "PUT":
-                return 200, self._replace_actor_model_config(actor_model_config_id, body)
+                return 200, self._replace_actor_capabilities(actor_capability_id, body)
             raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
         actor_console_id = self._parse_actor_console_path(route)
         if method == "GET" and actor_console_id is not None:
@@ -499,9 +499,9 @@ class WebManagementService:
             return actor_id, "delete"
         return None
 
-    def _parse_actor_model_config_path(self, path: str) -> str | None:
+    def _parse_actor_capability_path(self, path: str) -> str | None:
         prefix = "/api/actors/"
-        suffix = "/model-config"
+        suffix = "/capabilities"
         if path.startswith(prefix) and path.endswith(suffix):
             actor_id = path[len(prefix) : -len(suffix)]
             if "/" not in actor_id:
@@ -592,19 +592,15 @@ class WebManagementService:
         *,
         text: str,
         side_thread_id: str | None,
-        model: str | None,
-        effort: str | None,
+        capability: str | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
         args = ["instance", "side", actor_id]
         if side_thread_id is not None:
             args.extend(["--side-thread-id", side_thread_id])
         args.extend(["--text", text])
-        if side_thread_id is None:
-            if model:
-                args.extend(["--model", model])
-            if effort:
-                args.extend(["--effort", effort])
+        if side_thread_id is None and capability:
+            args.extend(["--capability", capability])
         args.append("--json")
         result = self._run_command(args, timeout_seconds=timeout_seconds)
         return load_command_json_object(
@@ -624,25 +620,28 @@ class WebManagementService:
 
     def _side(self, actor_id: str, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
+        unknown = set(payload) - {"text", "side_thread_id", "capability"}
+        if unknown:
+            raise HttpError(
+                status=400,
+                code="INVALID_REQUEST",
+                message=f"unknown side request key: {sorted(unknown)[0]}",
+            )
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():
             raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
         side_thread_id = payload.get("side_thread_id")
         if side_thread_id is not None and (not isinstance(side_thread_id, str) or not side_thread_id.strip()):
             raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
-        model = payload.get("model")
-        if model is not None and (not isinstance(model, str) or not model.strip()):
-            raise HttpError(status=400, code="INVALID_REQUEST", message="model must not be empty.")
-        effort = payload.get("effort")
-        if effort is not None and (not isinstance(effort, str) or not effort.strip()):
-            raise HttpError(status=400, code="INVALID_REQUEST", message="effort must not be empty.")
-        normalized_model = model.strip() if isinstance(model, str) else None
-        normalized_effort = effort.strip() if isinstance(effort, str) else None
-        if side_thread_id is not None and (normalized_model is not None or normalized_effort is not None):
+        capability = payload.get("capability")
+        if capability is not None and (not isinstance(capability, str) or not capability.strip()):
+            raise HttpError(status=400, code="INVALID_REQUEST", message="capability must not be empty.")
+        normalized_capability = capability.strip() if isinstance(capability, str) else None
+        if side_thread_id is not None and normalized_capability is not None:
             raise HttpError(
                 status=400,
                 code="INVALID_REQUEST",
-                message="model and effort only applies when starting a new side thread.",
+                message="capability only applies when starting a new side thread.",
             )
         return self._run_busy(
             f"instance:{actor_id}",
@@ -650,8 +649,7 @@ class WebManagementService:
                 actor_id,
                 text,
                 side_thread_id if isinstance(side_thread_id, str) else None,
-                normalized_model,
-                normalized_effort,
+                normalized_capability,
             ),
         )
 
@@ -660,15 +658,13 @@ class WebManagementService:
         actor_id: str,
         text: str,
         side_thread_id: str | None,
-        model: str | None,
-        effort: str | None,
+        capability: str | None,
     ) -> dict[str, Any]:
         parsed = self._run_side_command(
             actor_id,
             text=text,
             side_thread_id=side_thread_id,
-            model=model,
-            effort=effort,
+            capability=capability,
             timeout_seconds=60,
         )
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
@@ -681,9 +677,9 @@ class WebManagementService:
             "expected_turn_id",
             "model",
             "model_reasoning_effort",
-            "model_source",
-            "model_reasoning_effort_source",
-            "model_config_durability",
+            "capability_level",
+            "capability_source",
+            "capability_durability",
         ):
             value = parsed.get(key)
             if isinstance(value, str):
@@ -1040,7 +1036,7 @@ class WebManagementService:
                     "role_id": role,
                 }
             },
-            "model_config": self._read_actor_model_config(actor_id)["model_config"],
+            "capabilities": self._read_actor_capabilities(actor_id)["capabilities"],
         }
 
     def _shared_root(self) -> Path:
@@ -1068,25 +1064,41 @@ class WebManagementService:
             raise HttpError(status=404, code="NOT_FOUND", message=f"actor instance not found: {actor_id}")
         return instance_json
 
-    def _read_actor_model_config(self, actor_id: str) -> dict[str, Any]:
+    def _read_actor_capabilities(self, actor_id: str) -> dict[str, Any]:
         instance_json = self._instance_json_for_actor(actor_id)
         try:
-            model_config = actor_model_config.read_management_payload(instance_json)
-        except actor_model_config.ActorModelConfigError as exc:
-            raise HttpError(status=409, code="MODEL_CONFIG_INVALID", message=str(exc)) from exc
-        return {"ok": True, "actor_id": actor_id, "model_config": model_config}
+            capabilities = actor_capability.describe_actor_capabilities(
+                actor_capability.load_actor_capabilities(instance_json)
+            )
+        except actor_capability.ActorCapabilityError as exc:
+            raise HttpError(status=409, code="CAPABILITY_CONFIG_INVALID", message=str(exc)) from exc
+        return {"ok": True, "actor_id": actor_id, "capabilities": capabilities}
 
-    def _replace_actor_model_config(self, actor_id: str, body: bytes) -> dict[str, Any]:
+    def _replace_actor_capabilities(self, actor_id: str, body: bytes) -> dict[str, Any]:
         instance_json = self._instance_json_for_actor(actor_id)
         payload = self._parse_json_body(body)
+        if set(payload) != {"parent", "side"}:
+            raise HttpError(
+                status=400,
+                code="INVALID_REQUEST",
+                message="capability request must contain exactly parent and side.",
+            )
         try:
-            model_config = actor_model_config.replace_management_payload(instance_json, payload)
-        except actor_model_config.ActorModelConfigError as exc:
+            config = actor_capability.replace_actor_capabilities(
+                instance_json,
+                parent_level=payload["parent"],
+                side_level=payload["side"],
+            )
+        except actor_capability.ActorCapabilityError as exc:
             message = str(exc)
-            if "failed to write model config" in message:
-                raise HttpError(status=502, code="MODEL_CONFIG_WRITE_FAILED", message=message) from exc
+            if "failed to write capability config" in message:
+                raise HttpError(status=502, code="CAPABILITY_CONFIG_WRITE_FAILED", message=message) from exc
             raise HttpError(status=400, code="INVALID_REQUEST", message=message) from exc
-        return {"ok": True, "actor_id": actor_id, "model_config": model_config}
+        return {
+            "ok": True,
+            "actor_id": actor_id,
+            "capabilities": actor_capability.describe_actor_capabilities(config),
+        }
 
     def _wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return daemon_client.wake_im_actor(payload)

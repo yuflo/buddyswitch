@@ -8,7 +8,7 @@ WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
 SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"
-MODEL_CONFIG_HELPER="${REPO_ROOT}/tools/launcher/actor_model_config.py"
+ACTOR_CAPABILITY_CLI_HELPER="${REPO_ROOT}/tools/launcher/actor_capability_cli.py"
 ACTOR_SIDE_THREAD_HELPER="${REPO_ROOT}/tools/launcher/actor_side_thread.py"
 TASK_SYS_INGRESS_HELPER="${REPO_ROOT}/tools/launcher/task_sys_ingress.py"
 DAEMON_CLIENT_HELPER="${REPO_ROOT}/scripts/env/tool_runtime/daemon_client.py"
@@ -18,7 +18,7 @@ CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${MODEL_CONFIG_HELPER}" || ! -f "${ACTOR_SIDE_THREAD_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${DAEMON_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${ACTOR_CAPABILITY_CLI_HELPER}" || ! -f "${ACTOR_SIDE_THREAD_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${DAEMON_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -40,11 +40,11 @@ Usage:
   buddyswitch-codex instance roles [--json]
   buddyswitch-codex instance start --role <role> [--json]
   buddyswitch-codex instance input <actor-id> --text <text> [--json]
-  buddyswitch-codex instance side <actor-id> --text <text> [--json]
+  buddyswitch-codex instance side <actor-id> --text <text> [--capability <level>] [--json]
   buddyswitch-codex instance side <actor-id> --side-thread-id <side-thread-id> --text <text> [--json]
   buddyswitch-codex instance side close <actor-id> --side-thread-id <side-thread-id> [--json]
-  buddyswitch-codex instance model-config <actor-id> get [--json]
-  buddyswitch-codex instance model-config <actor-id> set --payload-json <json> [--json]
+  buddyswitch-codex instance capabilities <actor-id> get [--json]
+  buddyswitch-codex instance capabilities <actor-id> set --parent <level> --side <level> [--json]
   buddyswitch-codex instance goal <actor-id> get|set|clear [--json]
   buddyswitch-codex instance compact <actor-id> [--json]
   buddyswitch-codex instance clear <actor-id> [--json]
@@ -284,7 +284,7 @@ start_locked_bootstrap() {
   buddyswitch_workspace_repair_runtime_projects_app_projection
   buddyswitch_instance_ensure_private_writable_surface
   buddyswitch_instance_activate "${requested_actor_id}" "${requested_role}" "inactive" >/dev/null
-  python3 "${MODEL_CONFIG_HELPER}" seed --instance-json "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null
+  python3 "${ACTOR_CAPABILITY_CLI_HELPER}" seed --instance-json "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null
   buddyswitch_runtime_broker_ensure
   buddyswitch_patch_codex_config
   if ! buddyswitch_env_mcp_ensure; then
@@ -519,9 +519,9 @@ for key in ("turn_id", "expected_turn_id"):
 for key in (
     "model",
     "model_reasoning_effort",
-    "model_source",
-    "model_reasoning_effort_source",
-    "model_config_durability",
+    "capability_level",
+    "capability_source",
+    "capability_durability",
 ):
     value = source.get(key)
     if isinstance(value, str) and value:
@@ -560,7 +560,7 @@ PY
 }
 
 instance_side() {
-  local actor_id="${1:-}" text="" side_thread_id="" parent_thread_id="" model="" effort="" arg output json=0
+  local actor_id="${1:-}" text="" side_thread_id="" parent_thread_id="" capability="" arg output json=0
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
     return 2
@@ -586,20 +586,12 @@ instance_side() {
         side_thread_id="$2"
         shift 2
         ;;
-      --model)
+      --capability)
         if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "instance side requires --model <model>" >&2
+          echo "instance side requires --capability <level>" >&2
           return 2
         fi
-        model="$2"
-        shift 2
-        ;;
-      --effort)
-        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "instance side requires --effort <effort>" >&2
-          return 2
-        fi
-        effort="$2"
+        capability="$2"
         shift 2
         ;;
       --json)
@@ -617,8 +609,8 @@ instance_side() {
     echo "instance side requires --text <text>" >&2
     return 2
   fi
-  if [[ -n "${side_thread_id}" && ( -n "${model}" || -n "${effort}" ) ]]; then
-    echo "instance side --model/--effort only applies when starting a new side thread" >&2
+  if [[ -n "${side_thread_id}" && -n "${capability}" ]]; then
+    echo "instance side --capability only applies when starting a new side thread" >&2
     return 2
   fi
 
@@ -639,7 +631,7 @@ instance_side() {
     return $?
   fi
 
-  output="$(buddyswitch_actor_side_thread_start "${actor_id}" "${parent_thread_id}" "${text}" "${model}" "${effort}" 2>&1)" || {
+  output="$(buddyswitch_actor_side_thread_start "${actor_id}" "${parent_thread_id}" "${text}" "${capability}" 2>&1)" || {
     [[ -n "${output}" ]] && echo "${output}" >&2
     return 1
   }

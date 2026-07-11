@@ -31,12 +31,8 @@ def _optional_text(value: object, field_name: str) -> str | None:
     return value.strip()
 
 
-def _model_config_result(model: str | None, model_reasoning_effort: str | None) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "model_source": "override" if model is not None else "parent_thread",
-        "model_reasoning_effort_source": "override" if model_reasoning_effort is not None else "parent_thread",
-        "model_config_durability": "thread_fork_only",
-    }
+def _runtime_selection_result(model: str | None, model_reasoning_effort: str | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
     if model is not None:
         payload["model"] = model
     if model_reasoning_effort is not None:
@@ -140,7 +136,7 @@ def start_side_thread(
         "thread_action": sent.get("action") or "start",
         "turn_id": turn_id,
         "lease_registered": True,
-        **_model_config_result(normalized_model, normalized_effort),
+        **_runtime_selection_result(normalized_model, normalized_effort),
     }
 
 

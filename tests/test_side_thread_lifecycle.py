@@ -288,11 +288,8 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertEqual(fork_call["helper"], "thread_fork")
             self.assertEqual(fork_call["model"], "gpt-5.4")
             self.assertEqual(fork_call["model_reasoning_effort"], "high")
-            self.assertEqual(result["model_source"], "override")
             self.assertEqual(result["model"], "gpt-5.4")
-            self.assertEqual(result["model_reasoning_effort_source"], "override")
             self.assertEqual(result["model_reasoning_effort"], "high")
-            self.assertEqual(result["model_config_durability"], "thread_fork_only")
 
             row = self._payload(instance_json)["side_threads"][0]
             self.assertNotIn("model", row)
@@ -317,9 +314,6 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             fork_call = self.app_server.calls[0]
             self.assertIsNone(fork_call["model"])
             self.assertIsNone(fork_call["model_reasoning_effort"])
-            self.assertEqual(result["model_source"], "parent_thread")
-            self.assertEqual(result["model_reasoning_effort_source"], "parent_thread")
-            self.assertEqual(result["model_config_durability"], "thread_fork_only")
             self.assertNotIn("model", result)
             self.assertNotIn("model_reasoning_effort", result)
 

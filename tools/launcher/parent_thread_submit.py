@@ -12,7 +12,7 @@ import sys
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
-import actor_model_config  # noqa: E402
+import actor_capability  # noqa: E402
 import app_server  # noqa: E402
 import submit_turn  # noqa: E402
 
@@ -33,20 +33,19 @@ def submit_parent_turn(
     permissions: str,
 ) -> dict[str, object]:
     try:
-        options = actor_model_config.resolve_parent_options(instance_json)
-    except actor_model_config.ActorModelConfigError as exc:
-        raise ParentThreadSubmitError(f"parent model config invalid: {exc}") from exc
+        resolved = actor_capability.resolve_parent_capability(instance_json)
+    except actor_capability.ActorCapabilityError as exc:
+        raise ParentThreadSubmitError(f"parent capability invalid: {exc}") from exc
 
-    if options.has_values:
-        try:
-            app_server.thread_settings_update(
-                socket_path,
-                thread_id,
-                model=options.model,
-                effort=options.effort,
-            )
-        except app_server.AppServerError as exc:
-            raise ParentThreadSubmitError(f"parent settings update failed: {exc}") from exc
+    try:
+        app_server.thread_settings_update(
+            socket_path,
+            thread_id,
+            model=resolved.model,
+            effort=resolved.effort,
+        )
+    except app_server.AppServerError as exc:
+        raise ParentThreadSubmitError(f"parent settings update failed: {exc}") from exc
 
     return submit_turn.submit_turn(
         socket_path=socket_path,

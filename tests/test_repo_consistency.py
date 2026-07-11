@@ -470,61 +470,74 @@ print(json.dumps({{
             hits.extend(self._scan_targets(token, side_targets))
         self.assertEqual(hits, [], msg="\n".join(hits))
 
-    def test_actor_model_config_is_read_only_at_actor_aware_boundaries(self) -> None:
-        wrong_layers = [
+    def test_actor_capability_live_surfaces_have_no_retired_vocabulary(self) -> None:
+        live_targets = [
+            "buddyswitch-codex",
+            "tools/launcher",
+            "tests/test_actor_capability.py",
+            "tests/test_parent_thread_submit.py",
+            "tests/test_actor_side_thread.py",
+            "tests/test_buddyswitch_launcher.py",
+            "tests/test_web_management.py",
+            "tests/web_management_ui_state.test.js",
+            "tests/web_management_ui_contract.test.js",
+        ]
+        retired_patterns = (
+            "actor_" + "model_config",
+            "model-" + "config\\.json",
+            "/" + "model-config",
+            "instance " + "model-config",
+            "actorModel" + "Config",
+            "actor-model-" + "config",
+            "allowed_" + "efforts",
+            "VALID_" + "EFFORTS",
+            "model_" + "source",
+            "model_reasoning_effort_" + "source",
+            "model_config_" + "durability",
+            "_model_config_" + "result",
+            "\\-\\-" + "payload-json",
+        )
+        hits: list[str] = []
+        for pattern in retired_patterns:
+            hits.extend(self._scan_targets(pattern, live_targets))
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_capability_public_side_surfaces_do_not_accept_raw_overrides(self) -> None:
+        public_side_targets = [
+            "buddyswitch-codex",
+            "tools/launcher/instance.sh",
+            "tools/launcher/env.sh",
+            "tools/launcher/actor_side_thread.py",
+            "tools/launcher/web_management.py",
+        ]
+        hits = self._scan_targets("\\-\\-" + "model|\\-\\-" + "effort", public_side_targets)
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_capability_adapters_do_not_duplicate_catalog(self) -> None:
+        adapter_targets = [
+            "tools/launcher/web_management.py",
+            "tools/launcher/instance.sh",
+            "buddyswitch-codex",
+            "tools/launcher/assets/web-management",
+        ]
+        hits = self._scan_targets("gpt-5\\.6-(luna|terra|sol)", adapter_targets)
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_actor_capability_internal_rpc_layers_do_not_read_product_storage(self) -> None:
+        internal_targets = [
             "tools/launcher/app_server.py",
             "tools/launcher/submit_turn.py",
             "tools/launcher/side_thread_lifecycle.py",
             "tools/launcher/daemon_core.py",
             "tools/launcher/task_sys_" + "runtime.py",
         ]
-        hits = self._scan_targets("model-config\\.json", wrong_layers)
-        self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_actor_model_config_runtime_layers_do_not_use_management_api(self) -> None:
-        wrong_layers = [
-            "tools/launcher/app_server.py",
-            "tools/launcher/submit_turn.py",
-            "tools/launcher/side_thread_lifecycle.py",
-            "tools/launcher/daemon_core.py",
-            "tools/launcher/task_sys_" + "runtime.py",
-        ]
-        hits = self._scan_targets("read_management_payload|replace_management_payload", wrong_layers)
-        self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_actor_model_config_webui_assets_do_not_read_config_files(self) -> None:
-        hits = self._scan_targets("model-config\\.json", ["tools/launcher/assets/web-management"])
-        self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_actor_model_config_webui_assets_do_not_duplicate_schema(self) -> None:
         hits = self._scan_targets(
-            "allowed_efforts|VALID_EFFORTS|schema_version|minimal.*low.*medium.*high.*ultra|effort must be|must include parent and side",
-            ["tools/launcher/assets/web-management"],
+            "capability-config\\.json|load_actor_capabilities|replace_actor_capabilities",
+            internal_targets,
         )
         self.assertEqual(hits, [], msg="\n".join(hits))
 
-    def test_actor_model_config_webui_assets_do_not_keep_retired_form_controls(self) -> None:
-        hits = self._scan_targets(
-            "parent-model|side-model|parent-effort|side-effort|model-config\\.json|schema-strip",
-            ["tools/launcher/assets/web-management"],
-        )
-        self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_actor_model_config_management_routes_are_actor_scoped_only(self) -> None:
-        hits = self._scan_targets(
-            "/api/instances/.*/model-config|/api/instances/.*model-config",
-            ["tools/launcher/web_management.py"],
-        )
-        self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_actor_model_config_management_adapters_do_not_duplicate_schema_constants(self) -> None:
-        hits = self._scan_targets(
-            "allowed_efforts|VALID_EFFORTS|schema_version",
-            ["tools/launcher/web_management.py", "tools/launcher/instance.sh", "buddyswitch-codex"],
-        )
-        self.assertEqual(hits, [], msg="\n".join(hits))
-
-    def test_actor_model_config_retires_direct_start_and_submit_paths(self) -> None:
+    def test_actor_capability_retires_direct_start_and_submit_paths(self) -> None:
         direct_side_hits = self._scan_targets(
             "side_thread_lifecycle\\.start_side_thread",
             ["tools/launcher/task_sys_" + "runtime.py", "buddyswitch-codex", "tools/launcher/env.sh"],

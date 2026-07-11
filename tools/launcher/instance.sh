@@ -7,11 +7,11 @@ Usage:
   buddyswitch-codex instance roles [--json]
   buddyswitch-codex instance start --role <role> [--json]
   buddyswitch-codex instance input <actor-id> --text <text> [--json]
-  buddyswitch-codex instance side <actor-id> --text <text> [--json]
+  buddyswitch-codex instance side <actor-id> --text <text> [--capability <level>] [--json]
   buddyswitch-codex instance side <actor-id> --side-thread-id <side-thread-id> --text <text> [--json]
   buddyswitch-codex instance side close <actor-id> --side-thread-id <side-thread-id> [--json]
-  buddyswitch-codex instance model-config <actor-id> get [--json]
-  buddyswitch-codex instance model-config <actor-id> set --payload-json <json> [--json]
+  buddyswitch-codex instance capabilities <actor-id> get [--json]
+  buddyswitch-codex instance capabilities <actor-id> set --parent <level> --side <level> [--json]
   buddyswitch-codex instance goal <actor-id> get|set|clear [--json]
   buddyswitch-codex instance compact <actor-id> [--json]
   buddyswitch-codex instance clear <actor-id> [--json]
@@ -29,8 +29,8 @@ Commands:
   start   Start a fresh product-mode app-server service.
   input   Send text to a running product-mode instance.
   side    Create, continue, or close a side conversation child thread.
-  model-config
-          Get or replace actor parent/side model defaults.
+  capabilities
+          Get or replace actor Parent/Side capability levels.
   goal    Get, set, or clear the running instance goal.
   compact Start app-server thread compaction for a running instance.
   clear   Clear the running instance conversation with a fresh thread.
@@ -364,7 +364,7 @@ buddyswitch_instance_require_safe_delete_root() {
   printf '%s\n' "${instance_root}"
 }
 
-buddyswitch_instance_model_config_emit() {
+buddyswitch_instance_capabilities_emit() {
   local actor_id="$1" output="$2" json="$3"
   python3 - "${actor_id}" "${output}" "${json}" <<'PY'
 import json
@@ -379,25 +379,27 @@ if json_output:
     print(json.dumps(payload, ensure_ascii=True))
     raise SystemExit(0)
 
-model_config = payload.get("model_config") if isinstance(payload.get("model_config"), dict) else {}
+capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), dict) else {}
 
 def _value(section_name: str, field_name: str) -> str:
-    section = model_config.get(section_name) if isinstance(model_config.get(section_name), dict) else {}
+    section = capabilities.get(section_name) if isinstance(capabilities.get(section_name), dict) else {}
     value = section.get(field_name)
-    return str(value) if isinstance(value, str) and value else "(default)"
+    return str(value) if isinstance(value, str) and value else "(missing)"
 
 print(f"actor_id: {actor_id}")
+print(f"parent level: {_value('parent', 'level')}")
 print(f"parent model: {_value('parent', 'model')}")
 print(f"parent effort: {_value('parent', 'effort')}")
+print(f"side level: {_value('side', 'level')}")
 print(f"side model: {_value('side', 'model')}")
 print(f"side effort: {_value('side', 'effort')}")
 PY
 }
 
-buddyswitch_instance_model_config() {
-  local actor_id="${1:-}" action="${2:-}" json=0 payload_json="" arg instance_json output
+buddyswitch_instance_capabilities() {
+  local actor_id="${1:-}" action="${2:-}" json=0 parent_level="" side_level="" arg instance_json output
   if [[ -z "${actor_id}" || -z "${action}" ]]; then
-    echo "instance model-config requires <actor-id> get|set" >&2
+    echo "instance capabilities requires <actor-id> get|set" >&2
     return 2
   fi
   shift 2 || true
@@ -411,7 +413,7 @@ buddyswitch_instance_model_config() {
             shift
             ;;
           *)
-            echo "Unknown instance model-config get option: $1" >&2
+            echo "Unknown instance capabilities get option: $1" >&2
             return 2
             ;;
         esac
@@ -421,12 +423,20 @@ buddyswitch_instance_model_config() {
       while [[ $# -gt 0 ]]; do
         arg="$1"
         case "${arg}" in
-          --payload-json)
+          --parent)
             if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-              echo "instance model-config set requires --payload-json <json>" >&2
+              echo "instance capabilities set requires --parent <level>" >&2
               return 2
             fi
-            payload_json="$2"
+            parent_level="$2"
+            shift 2
+            ;;
+          --side)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+              echo "instance capabilities set requires --side <level>" >&2
+              return 2
+            fi
+            side_level="$2"
             shift 2
             ;;
           --json)
@@ -434,18 +444,18 @@ buddyswitch_instance_model_config() {
             shift
             ;;
           *)
-            echo "Unknown instance model-config set option: ${arg}" >&2
+            echo "Unknown instance capabilities set option: ${arg}" >&2
             return 2
             ;;
         esac
       done
-      if [[ -z "${payload_json}" ]]; then
-        echo "instance model-config set requires --payload-json <json>" >&2
+      if [[ -z "${parent_level}" || -z "${side_level}" ]]; then
+        echo "instance capabilities set requires --parent <level> and --side <level>" >&2
         return 2
       fi
       ;;
     *)
-      echo "Unknown instance model-config action: ${action}" >&2
+      echo "Unknown instance capabilities action: ${action}" >&2
       return 2
       ;;
   esac
@@ -459,11 +469,11 @@ buddyswitch_instance_model_config() {
   buddyswitch_env_bind_instance "${actor_id}" || return $?
 
   if [[ "${action}" == "get" ]]; then
-    output="$(python3 "${MODEL_CONFIG_HELPER}" get --instance-json "${instance_json}")" || return $?
+    output="$(python3 "${ACTOR_CAPABILITY_CLI_HELPER}" get --instance-json "${instance_json}")" || return $?
   else
-    output="$(python3 "${MODEL_CONFIG_HELPER}" replace --instance-json "${instance_json}" --payload-json "${payload_json}")" || return $?
+    output="$(python3 "${ACTOR_CAPABILITY_CLI_HELPER}" replace --instance-json "${instance_json}" --parent "${parent_level}" --side "${side_level}")" || return $?
   fi
-  buddyswitch_instance_model_config_emit "${actor_id}" "${output}" "${json}"
+  buddyswitch_instance_capabilities_emit "${actor_id}" "${output}" "${json}"
 }
 
 buddyswitch_instance_main() {
@@ -509,14 +519,14 @@ buddyswitch_instance_main() {
       fi
       instance_side "$@"
       ;;
-    model-config)
+    capabilities)
       shift || true
       if [[ $# -lt 2 ]]; then
-        echo "actor id and model-config action are required" >&2
+        echo "actor id and capabilities action are required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
-      buddyswitch_instance_model_config "$@"
+      buddyswitch_instance_capabilities "$@"
       ;;
     goal)
       shift || true

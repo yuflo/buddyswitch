@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for actor-aware parent thread submission."""
+"""Tests for capability-aware parent thread submission."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ HELPER_DIR = ROOT / "tools" / "launcher"
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
+import actor_capability  # noqa: E402
 import parent_thread_submit  # noqa: E402
 
 
@@ -25,52 +26,49 @@ class ParentThreadSubmitTests(unittest.TestCase):
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         instance_json.write_text(
-            json.dumps({"actor_id": "act-pm-test", "instance_root": str(instance_root)}, ensure_ascii=True) + "\n",
+            json.dumps({"actor_id": "act-pm-test", "instance_root": str(instance_root)}) + "\n",
             encoding="utf-8",
         )
         return instance_json
 
-    def _write_model_config(self, instance_json: Path, payload: dict[str, object]) -> None:
-        (instance_json.parent / "model-config.json").write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
+    def _install_calls(self) -> list[dict[str, Any]]:
+        calls: list[dict[str, Any]] = []
+        original_update = parent_thread_submit.app_server.thread_settings_update
+        original_submit = parent_thread_submit.submit_turn.submit_turn
 
-    def test_configured_parent_updates_settings_before_submit_turn(self) -> None:
+        def fake_update(
+            socket_path: Path,
+            thread_id: str,
+            *,
+            model: str | None,
+            effort: str | None,
+        ) -> dict[str, Any]:
+            calls.append(
+                {
+                    "helper": "thread_settings_update",
+                    "socket_path": socket_path,
+                    "thread_id": thread_id,
+                    "model": model,
+                    "effort": effort,
+                }
+            )
+            return {"threadId": thread_id, "model": model, "effort": effort}
+
+        def fake_submit(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"helper": "submit_turn", **kwargs})
+            return {"action": "start", "turn_id": "turn-parent-1"}
+
+        self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
+        self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
+        parent_thread_submit.app_server.thread_settings_update = fake_update
+        parent_thread_submit.submit_turn.submit_turn = fake_submit
+        return calls
+
+    def test_balanced_parent_updates_terra_high_before_submit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {"model": "gpt-5.4", "effort": "high"},
-                    "side": {},
-                },
-            )
-            calls: list[dict[str, Any]] = []
-            original_update = parent_thread_submit.app_server.thread_settings_update
-            original_submit = parent_thread_submit.submit_turn.submit_turn
-
-            def fake_update(socket_path: Path, thread_id: str, *, model: str | None, effort: str | None) -> dict[str, Any]:
-                calls.append(
-                    {
-                        "helper": "thread_settings_update",
-                        "socket_path": socket_path,
-                        "thread_id": thread_id,
-                        "model": model,
-                        "effort": effort,
-                    }
-                )
-                return {"threadId": thread_id, "model": model, "effort": effort}
-
-            def fake_submit(**kwargs: Any) -> dict[str, Any]:
-                calls.append({"helper": "submit_turn", **kwargs})
-                return {"action": "start", "turn_id": "turn-parent-1"}
-
-            self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
-            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
-            parent_thread_submit.app_server.thread_settings_update = fake_update
-            parent_thread_submit.submit_turn.submit_turn = fake_submit
+            actor_capability.seed_actor_capabilities(instance_json)
+            calls = self._install_calls()
 
             result = parent_thread_submit.submit_parent_turn(
                 socket_path=Path("/tmp/app-server.sock"),
@@ -82,136 +80,16 @@ class ParentThreadSubmitTests(unittest.TestCase):
 
             self.assertEqual(result["turn_id"], "turn-parent-1")
             self.assertEqual([call["helper"] for call in calls], ["thread_settings_update", "submit_turn"])
-            self.assertEqual(calls[0]["model"], "gpt-5.4")
+            self.assertEqual(calls[0]["model"], "gpt-5.6-terra")
             self.assertEqual(calls[0]["effort"], "high")
             self.assertEqual(calls[1]["thread_id"], "thread-main")
-            self.assertEqual(calls[1]["text"], "hello")
 
-    def test_missing_parent_config_applies_creation_defaults_before_submit(self) -> None:
+    def test_deep_parent_applies_sol_xhigh_before_submit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
-            original_update = parent_thread_submit.app_server.thread_settings_update
-            original_submit = parent_thread_submit.submit_turn.submit_turn
-            calls: list[dict[str, Any]] = []
-
-            def fake_update(socket_path: Path, thread_id: str, *, model: str | None, effort: str | None) -> dict[str, Any]:
-                calls.append({"helper": "thread_settings_update", "model": model, "effort": effort})
-                return {"threadId": thread_id}
-
-            def fake_submit(**kwargs: Any) -> dict[str, Any]:
-                calls.append({"helper": "submit_turn", **kwargs})
-                self.assertEqual(kwargs["thread_id"], "thread-main")
-                return {"action": "start", "turn_id": "turn-parent-created-default"}
-
-            self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
-            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
-            parent_thread_submit.app_server.thread_settings_update = fake_update
-            parent_thread_submit.submit_turn.submit_turn = fake_submit
-
-            result = parent_thread_submit.submit_parent_turn(
-                socket_path=Path("/tmp/app-server.sock"),
-                instance_json=instance_json,
-                thread_id="thread-main",
-                text="hello",
-                permissions="buddyswitch-runtime",
-            )
-
-            self.assertEqual(result["turn_id"], "turn-parent-created-default")
-            self.assertEqual([call["helper"] for call in calls], ["thread_settings_update", "submit_turn"])
-            self.assertEqual(calls[0]["model"], "gpt-5.5")
-            self.assertEqual(calls[0]["effort"], "medium")
-
-    def test_empty_parent_config_skips_settings_update_and_still_submits(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {},
-                    "side": {},
-                },
-            )
-            original_update = parent_thread_submit.app_server.thread_settings_update
-            original_submit = parent_thread_submit.submit_turn.submit_turn
-
-            def fake_update(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-                raise AssertionError("empty config must not update settings")
-
-            def fake_submit(**kwargs: Any) -> dict[str, Any]:
-                self.assertEqual(kwargs["thread_id"], "thread-main")
-                return {"action": "start", "turn_id": "turn-parent-codex-default"}
-
-            self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
-            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
-            parent_thread_submit.app_server.thread_settings_update = fake_update
-            parent_thread_submit.submit_turn.submit_turn = fake_submit
-
-            result = parent_thread_submit.submit_parent_turn(
-                socket_path=Path("/tmp/app-server.sock"),
-                instance_json=instance_json,
-                thread_id="thread-main",
-                text="hello",
-                permissions="buddyswitch-runtime",
-            )
-
-            self.assertEqual(result["turn_id"], "turn-parent-codex-default")
-
-    def test_invalid_parent_config_fails_before_submit(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {"effort": "maximum"},
-                    "side": {},
-                },
-            )
-            original_submit = parent_thread_submit.submit_turn.submit_turn
-
-            def fake_submit(**_kwargs: Any) -> dict[str, Any]:
-                raise AssertionError("invalid parent config must fail before submit")
-
-            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
-            parent_thread_submit.submit_turn.submit_turn = fake_submit
-
-            with self.assertRaisesRegex(parent_thread_submit.ParentThreadSubmitError, "parent model config"):
-                parent_thread_submit.submit_parent_turn(
-                    socket_path=Path("/tmp/app-server.sock"),
-                    instance_json=instance_json,
-                    thread_id="thread-main",
-                    text="hello",
-                    permissions="buddyswitch-runtime",
-                )
-
-    def test_active_parent_settings_apply_to_subsequent_turn_before_steer_delegate(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {"model": "gpt-5.4"},
-                    "side": {},
-                },
-            )
-            calls: list[str] = []
-            original_update = parent_thread_submit.app_server.thread_settings_update
-            original_submit = parent_thread_submit.submit_turn.submit_turn
-
-            def fake_update(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-                calls.append("settings_for_subsequent_turns")
-                return {"threadId": "thread-main"}
-
-            def fake_submit(**_kwargs: Any) -> dict[str, Any]:
-                calls.append("submit_turn_active_delegate")
-                return {"action": "steer", "turn_id": "turn-active-1"}
-
-            self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
-            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
-            parent_thread_submit.app_server.thread_settings_update = fake_update
-            parent_thread_submit.submit_turn.submit_turn = fake_submit
+            actor_capability.seed_actor_capabilities(instance_json)
+            actor_capability.replace_actor_capabilities(instance_json, parent_level="deep", side_level="fast")
+            calls = self._install_calls()
 
             result = parent_thread_submit.submit_parent_turn(
                 socket_path=Path("/tmp/app-server.sock"),
@@ -221,8 +99,64 @@ class ParentThreadSubmitTests(unittest.TestCase):
                 permissions="buddyswitch-runtime",
             )
 
-            self.assertEqual(result["action"], "steer")
-            self.assertEqual(calls, ["settings_for_subsequent_turns", "submit_turn_active_delegate"])
+            self.assertEqual(result["action"], "start")
+            self.assertEqual(calls[0]["model"], "gpt-5.6-sol")
+            self.assertEqual(calls[0]["effort"], "xhigh")
+            self.assertEqual([call["helper"] for call in calls], ["thread_settings_update", "submit_turn"])
+
+    def test_settings_update_failure_prevents_submit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(Path(temp_root))
+            actor_capability.seed_actor_capabilities(instance_json)
+            original_update = parent_thread_submit.app_server.thread_settings_update
+            original_submit = parent_thread_submit.submit_turn.submit_turn
+            submit_calls: list[dict[str, Any]] = []
+
+            def fail_update(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+                raise parent_thread_submit.app_server.AppServerError("settings rejected")
+
+            def record_submit(**kwargs: Any) -> dict[str, Any]:
+                submit_calls.append(kwargs)
+                return {"action": "start", "turn_id": "unexpected"}
+
+            self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
+            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
+            parent_thread_submit.app_server.thread_settings_update = fail_update
+            parent_thread_submit.submit_turn.submit_turn = record_submit
+
+            with self.assertRaisesRegex(parent_thread_submit.ParentThreadSubmitError, "parent settings update failed"):
+                parent_thread_submit.submit_parent_turn(
+                    socket_path=Path("/tmp/app-server.sock"),
+                    instance_json=instance_json,
+                    thread_id="thread-main",
+                    text="hello",
+                    permissions="buddyswitch-runtime",
+                )
+
+            self.assertEqual(submit_calls, [])
+
+    def test_missing_capability_config_fails_before_settings_or_submit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(Path(temp_root))
+            original_update = parent_thread_submit.app_server.thread_settings_update
+            original_submit = parent_thread_submit.submit_turn.submit_turn
+
+            def fail(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+                raise AssertionError("missing capability config must fail before runtime calls")
+
+            self.addCleanup(setattr, parent_thread_submit.app_server, "thread_settings_update", original_update)
+            self.addCleanup(setattr, parent_thread_submit.submit_turn, "submit_turn", original_submit)
+            parent_thread_submit.app_server.thread_settings_update = fail
+            parent_thread_submit.submit_turn.submit_turn = fail
+
+            with self.assertRaisesRegex(parent_thread_submit.ParentThreadSubmitError, "parent capability invalid"):
+                parent_thread_submit.submit_parent_turn(
+                    socket_path=Path("/tmp/app-server.sock"),
+                    instance_json=instance_json,
+                    thread_id="thread-main",
+                    text="hello",
+                    permissions="buddyswitch-runtime",
+                )
 
 
 if __name__ == "__main__":

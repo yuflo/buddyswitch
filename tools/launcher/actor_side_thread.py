@@ -14,7 +14,7 @@ HELPER_DIR = Path(__file__).resolve().parent
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
-import actor_model_config  # noqa: E402
+import actor_capability  # noqa: E402
 import side_thread_lifecycle  # noqa: E402
 
 
@@ -34,17 +34,15 @@ def start_actor_side_thread(
     shared_project_workspace_dir: Path,
     permissions: str,
     task_id: str | None = None,
-    model: str | None = None,
-    model_reasoning_effort: str | None = None,
+    capability_level: str | None = None,
 ) -> dict[str, Any]:
     try:
-        options = actor_model_config.resolve_side_options(
+        resolved = actor_capability.resolve_side_capability(
             instance_json,
-            explicit_model=model,
-            explicit_effort=model_reasoning_effort,
+            explicit_level=capability_level,
         )
-    except actor_model_config.ActorModelConfigError as exc:
-        raise ActorSideThreadError(f"side model config invalid: {exc}") from exc
+    except actor_capability.ActorCapabilityError as exc:
+        raise ActorSideThreadError(f"side capability invalid: {exc}") from exc
 
     payload = side_thread_lifecycle.start_side_thread(
         socket_path=socket_path,
@@ -57,10 +55,10 @@ def start_actor_side_thread(
         shared_project_workspace_dir=shared_project_workspace_dir,
         permissions=permissions,
         task_id=task_id,
-        model=options.model,
-        model_reasoning_effort=options.effort,
+        model=resolved.model,
+        model_reasoning_effort=resolved.effort,
     )
-    return actor_model_config.apply_side_source_metadata(payload, options)
+    return actor_capability.apply_side_capability_metadata(payload, resolved)
 
 
 def _print_json(payload: Any) -> None:
@@ -80,8 +78,7 @@ def _command_start(args: argparse.Namespace) -> int:
             shared_project_workspace_dir=Path(args.shared_project_workspace_dir),
             permissions=args.permissions,
             task_id=args.task_id,
-            model=args.model,
-            model_reasoning_effort=args.effort,
+            capability_level=args.capability,
         )
     )
     return 0
@@ -102,8 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--shared-project-workspace-dir", required=True)
     start.add_argument("--permissions", required=True)
     start.add_argument("--task-id")
-    start.add_argument("--model")
-    start.add_argument("--effort")
+    start.add_argument("--capability")
     start.set_defaults(func=_command_start)
 
     return parser

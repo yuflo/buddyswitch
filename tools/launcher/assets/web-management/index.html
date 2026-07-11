@@ -101,36 +101,42 @@
               </div>
               <div id="actor-runtime-detail" class="metric-grid"></div>
             </section>
-            <section id="actor-model-config-card" class="person-card actor-model-config-card" aria-labelledby="actor-model-config-heading">
-              <div class="model-config-card-head">
-                <h3 id="actor-model-config-heading">Model defaults</h3>
-                <div class="model-config-head-actions">
-                  <span id="actor-model-config-status" class="status-badge healthy">Saved</span>
-                  <button id="actor-model-config-toggle" class="mini-button" type="button" aria-expanded="false" aria-controls="actor-model-config-panel">Configure</button>
+            <section id="actor-capability-card" class="person-card actor-capability-card" aria-labelledby="actor-capability-heading">
+              <div class="capability-card-head">
+                <h3 id="actor-capability-heading">Capability</h3>
+                <div class="capability-head-actions">
+                  <span id="actor-capability-status" class="status-badge healthy">Saved</span>
+                  <button id="actor-capability-toggle" class="mini-button" type="button" aria-expanded="false" aria-controls="actor-capability-panel">Configure</button>
                 </div>
               </div>
-              <div class="model-config-summary" aria-label="Current actor model defaults">
-                <div class="model-config-summary-row">
+              <div class="capability-summary" aria-label="Current actor capabilities">
+                <div class="capability-summary-row">
                   <span>Parent</span>
-                  <strong id="actor-model-config-parent-summary">Codex default - default effort</strong>
+                  <strong id="actor-capability-parent-summary">Not set</strong>
                   <span class="tag blue">next</span>
                 </div>
-                <div class="model-config-summary-row">
+                <div class="capability-summary-row">
                   <span>Side</span>
-                  <strong id="actor-model-config-side-summary">Codex default - default effort</strong>
+                  <strong id="actor-capability-side-summary">Not set</strong>
                   <span class="tag blue">new</span>
                 </div>
               </div>
-              <div id="actor-model-config-panel" class="model-config-panel" hidden>
-                <label class="field model-config-payload-field">
-                  <span>Payload - PUT /api/actors/{actor_id}/model-config</span>
-                  <textarea id="actor-model-config-payload" class="model-config-payload-editor" rows="7" spellcheck="false" aria-describedby="actor-model-config-message"></textarea>
-                </label>
-                <div class="pill-row">
-                  <button id="actor-model-config-revert" class="mini-button" type="button" disabled>Revert</button>
-                  <button id="actor-model-config-save" class="mini-button primary" type="button" disabled>Save</button>
+              <div id="actor-capability-panel" class="capability-panel" hidden>
+                <div class="capability-matrix-head" aria-hidden="true">
+                  <span>Level</span>
+                  <span>Parent</span>
+                  <span>Side</span>
                 </div>
-                <p id="actor-model-config-message" class="inline-status" role="status" aria-live="polite" hidden></p>
+                <div id="actor-capability-matrix" class="capability-matrix" role="group" aria-label="Parent and Side capability levels"></div>
+                <details class="capability-details">
+                  <summary>Model details</summary>
+                  <div id="actor-capability-details" class="capability-detail-rows"></div>
+                </details>
+                <div class="pill-row">
+                  <button id="actor-capability-cancel" class="mini-button" type="button">Cancel</button>
+                  <button id="actor-capability-save" class="mini-button primary" type="button" disabled>Save config</button>
+                </div>
+                <p id="actor-capability-message" class="inline-status" role="status" aria-live="polite" hidden></p>
               </div>
             </section>
             <section class="person-card">

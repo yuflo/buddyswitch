@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for actor-aware side-thread creation."""
+"""Tests for capability-aware side-thread creation."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ HELPER_DIR = ROOT / "tools" / "launcher"
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
+import actor_capability  # noqa: E402
 import actor_side_thread  # noqa: E402
 
 
@@ -25,16 +26,10 @@ class ActorSideThreadTests(unittest.TestCase):
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         instance_json.write_text(
-            json.dumps({"actor_id": "act-dev-test", "instance_root": str(instance_root)}, ensure_ascii=True) + "\n",
+            json.dumps({"actor_id": "act-dev-test", "instance_root": str(instance_root)}) + "\n",
             encoding="utf-8",
         )
         return instance_json
-
-    def _write_model_config(self, instance_json: Path, payload: dict[str, object]) -> None:
-        (instance_json.parent / "model-config.json").write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
 
     def _start_kwargs(self, instance_json: Path) -> dict[str, Any]:
         return {
@@ -49,157 +44,77 @@ class ActorSideThreadTests(unittest.TestCase):
             "permissions": "buddyswitch-runtime",
         }
 
-    def test_configured_side_passes_model_and_effort_to_lifecycle(self) -> None:
+    def _install_start(self) -> list[dict[str, Any]]:
+        calls: list[dict[str, Any]] = []
+        original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
+
+        def fake_start(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {
+                "action": "start",
+                "side_thread_id": "thread-side-1",
+                "turn_id": "turn-side-1",
+            }
+
+        self.addCleanup(setattr, actor_side_thread.side_thread_lifecycle, "start_side_thread", original_start)
+        actor_side_thread.side_thread_lifecycle.start_side_thread = fake_start
+        return calls
+
+    def test_saved_fast_side_passes_luna_xhigh_to_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {},
-                    "side": {"model": "gpt-5.4-mini", "effort": "medium"},
-                },
-            )
-            calls: list[dict[str, Any]] = []
-            original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
-
-            def fake_start(**kwargs: Any) -> dict[str, Any]:
-                calls.append(kwargs)
-                return {
-                    "action": "start",
-                    "side_thread_id": "thread-side-1",
-                    "turn_id": "turn-side-1",
-                    "model_source": "override",
-                    "model_reasoning_effort_source": "override",
-                }
-
-            self.addCleanup(setattr, actor_side_thread.side_thread_lifecycle, "start_side_thread", original_start)
-            actor_side_thread.side_thread_lifecycle.start_side_thread = fake_start
+            actor_capability.seed_actor_capabilities(instance_json)
+            calls = self._install_start()
 
             result = actor_side_thread.start_actor_side_thread(**self._start_kwargs(instance_json))
 
-            self.assertEqual(calls[0]["model"], "gpt-5.4-mini")
-            self.assertEqual(calls[0]["model_reasoning_effort"], "medium")
-            self.assertEqual(result["model"], "gpt-5.4-mini")
-            self.assertEqual(result["model_reasoning_effort"], "medium")
-            self.assertEqual(result["model_source"], "actor_config")
-            self.assertEqual(result["model_reasoning_effort_source"], "actor_config")
-            self.assertEqual(result["model_config_durability"], "thread_fork_only")
+            self.assertEqual(calls[0]["model"], "gpt-5.6-luna")
+            self.assertEqual(calls[0]["model_reasoning_effort"], "xhigh")
+            self.assertEqual(result["capability_level"], "fast")
+            self.assertEqual(result["capability_source"], "actor_config")
+            self.assertEqual(result["capability_durability"], "thread_fork_only")
 
-    def test_explicit_side_values_override_config_field_by_field(self) -> None:
+    def test_explicit_deep_level_uses_same_catalog_for_one_new_side(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {},
-                    "side": {"model": "gpt-5.4-mini", "effort": "medium"},
-                },
-            )
-            calls: list[dict[str, Any]] = []
-            original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
-
-            def fake_start(**kwargs: Any) -> dict[str, Any]:
-                calls.append(kwargs)
-                return {"action": "start", "side_thread_id": "thread-side-1", "turn_id": "turn-side-1"}
-
-            self.addCleanup(setattr, actor_side_thread.side_thread_lifecycle, "start_side_thread", original_start)
-            actor_side_thread.side_thread_lifecycle.start_side_thread = fake_start
-
+            actor_capability.seed_actor_capabilities(instance_json)
+            calls = self._install_start()
             kwargs = self._start_kwargs(instance_json)
-            kwargs["model"] = "gpt-5.4"
+            kwargs["capability_level"] = "deep"
+
             result = actor_side_thread.start_actor_side_thread(**kwargs)
 
-            self.assertEqual(calls[0]["model"], "gpt-5.4")
-            self.assertEqual(calls[0]["model_reasoning_effort"], "medium")
-            self.assertEqual(result["model_source"], "override")
-            self.assertEqual(result["model_reasoning_effort_source"], "actor_config")
+            self.assertEqual(calls[0]["model"], "gpt-5.6-sol")
+            self.assertEqual(calls[0]["model_reasoning_effort"], "xhigh")
+            self.assertEqual(result["capability_level"], "deep")
+            self.assertEqual(result["capability_source"], "override")
+            self.assertEqual(result["capability_durability"], "thread_fork_only")
 
-    def test_missing_side_config_uses_creation_default_metadata(self) -> None:
+    def test_invalid_explicit_level_fails_before_lifecycle_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
-            calls: list[dict[str, Any]] = []
-            original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
+            actor_capability.seed_actor_capabilities(instance_json)
+            calls = self._install_start()
+            kwargs = self._start_kwargs(instance_json)
+            kwargs["capability_level"] = "custom"
 
-            def fake_start(**kwargs: Any) -> dict[str, Any]:
-                calls.append(kwargs)
-                return {
-                    "action": "start",
-                    "side_thread_id": "thread-side-1",
-                    "turn_id": "turn-side-1",
-                    "model_source": "parent_thread",
-                    "model_reasoning_effort_source": "parent_thread",
-                }
+            with self.assertRaisesRegex(actor_side_thread.ActorSideThreadError, "side capability invalid"):
+                actor_side_thread.start_actor_side_thread(**kwargs)
 
-            self.addCleanup(setattr, actor_side_thread.side_thread_lifecycle, "start_side_thread", original_start)
-            actor_side_thread.side_thread_lifecycle.start_side_thread = fake_start
+            self.assertEqual(calls, [])
 
-            result = actor_side_thread.start_actor_side_thread(**self._start_kwargs(instance_json))
-
-            self.assertEqual(calls[0]["model"], "gpt-5.5")
-            self.assertEqual(calls[0]["model_reasoning_effort"], "medium")
-            self.assertEqual(result["model"], "gpt-5.5")
-            self.assertEqual(result["model_reasoning_effort"], "medium")
-            self.assertEqual(result["model_source"], "actor_config")
-            self.assertEqual(result["model_reasoning_effort_source"], "actor_config")
-
-    def test_empty_side_config_uses_codex_default_metadata(self) -> None:
+    def test_missing_capability_config_fails_before_lifecycle_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {},
-                    "side": {},
-                },
-            )
-            calls: list[dict[str, Any]] = []
             original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
 
-            def fake_start(**kwargs: Any) -> dict[str, Any]:
-                calls.append(kwargs)
-                return {
-                    "action": "start",
-                    "side_thread_id": "thread-side-1",
-                    "turn_id": "turn-side-1",
-                    "model_source": "parent_thread",
-                    "model_reasoning_effort_source": "parent_thread",
-                }
+            def fail(**_kwargs: Any) -> dict[str, Any]:
+                raise AssertionError("missing capability config must fail before lifecycle")
 
             self.addCleanup(setattr, actor_side_thread.side_thread_lifecycle, "start_side_thread", original_start)
-            actor_side_thread.side_thread_lifecycle.start_side_thread = fake_start
+            actor_side_thread.side_thread_lifecycle.start_side_thread = fail
 
-            result = actor_side_thread.start_actor_side_thread(**self._start_kwargs(instance_json))
-
-            self.assertIsNone(calls[0]["model"])
-            self.assertIsNone(calls[0]["model_reasoning_effort"])
-            self.assertNotIn("model", result)
-            self.assertNotIn("model_reasoning_effort", result)
-            self.assertEqual(result["model_source"], "codex_default")
-            self.assertEqual(result["model_reasoning_effort_source"], "codex_default")
-
-    def test_invalid_side_config_fails_before_lifecycle_start(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_json = self._instance_json(Path(temp_root))
-            self._write_model_config(
-                instance_json,
-                {
-                    "schema_version": 1,
-                    "parent": {},
-                    "side": {"model": ""},
-                },
-            )
-            original_start = actor_side_thread.side_thread_lifecycle.start_side_thread
-
-            def fake_start(**_kwargs: Any) -> dict[str, Any]:
-                raise AssertionError("invalid side config must fail before lifecycle")
-
-            self.addCleanup(setattr, actor_side_thread.side_thread_lifecycle, "start_side_thread", original_start)
-            actor_side_thread.side_thread_lifecycle.start_side_thread = fake_start
-
-            with self.assertRaisesRegex(actor_side_thread.ActorSideThreadError, "side model config"):
+            with self.assertRaisesRegex(actor_side_thread.ActorSideThreadError, "side capability invalid"):
                 actor_side_thread.start_actor_side_thread(**self._start_kwargs(instance_json))
 
 

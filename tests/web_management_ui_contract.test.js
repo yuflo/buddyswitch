@@ -334,43 +334,51 @@ test('production stylesheet keeps hidden operational fallback frames collapsed',
   ]);
 });
 
-test('actor model config UI uses payload editor without schema or dropdown residue', () => {
+test('actor capability UI uses a quiet typed matrix with read-only model details', () => {
   [
-    'id="actor-model-config-card"',
-    'id="actor-model-config-toggle"',
-    'id="actor-model-config-status"',
-    'id="actor-model-config-parent-summary"',
-    'id="actor-model-config-side-summary"',
-    'id="actor-model-config-panel"',
-    'id="actor-model-config-payload"',
-    'id="actor-model-config-save"',
-    'id="actor-model-config-revert"',
+    'id="actor-capability-card"',
+    'id="actor-capability-toggle"',
+    'id="actor-capability-status"',
+    'id="actor-capability-parent-summary"',
+    'id="actor-capability-side-summary"',
+    'id="actor-capability-panel"',
+    'id="actor-capability-matrix"',
+    'id="actor-capability-details"',
+    'id="actor-capability-save"',
+    'id="actor-capability-cancel"',
+    '<summary>Model details</summary>',
   ].forEach((marker) => {
     assertIncludes(indexHtml, marker);
   });
 
   [
+    'actor-model-' + 'config',
+    'model-' + 'config',
+    'actorModel' + 'Config',
     'parent-model',
     'side-model',
     'parent-effort',
     'side-effort',
     'schema-strip',
     '<summary>Schema</summary>',
-    'allowed_efforts',
-    'VALID_EFFORTS',
-    'model-config.json',
+    'allowed_' + 'efforts',
+    'VALID_' + 'EFFORTS',
+    'capability-config.json',
     'effort must be',
-    'Payload must include parent and side',
+    'payload editor',
+    '<textarea id="actor-capability',
   ].forEach((forbidden) => {
     assertExcludes(combinedAssets, forbidden);
   });
-  assertNotMatches(combinedAssets, /minimal\s*[,\n]\s*low\s*[,\n]\s*medium\s*[,\n]\s*high\s*[,\n]\s*ultra/i);
-
-  assertIncludes(appJs, 'buildActorModelConfigUrl(actorId)');
-  assertIncludes(appJs, 'parseJsonObjectPayload(text)');
-  assertIncludes(appJs, 'summarizeActorModelPayload(payload)');
-  assertIncludes(stylesCss, '.actor-model-config-card');
-  assertIncludes(stylesCss, '.model-config-payload-editor');
+  assertIncludes(appJs, 'buildActorCapabilitiesUrl(actorId)');
+  assertIncludes(appJs, 'capabilitySelectionFromConsole(actorConsole)');
+  assertIncludes(appJs, 'sameCapabilitySelection(left, right)');
+  assertIncludes(stylesCss, '.actor-capability-card');
+  assertIncludes(stylesCss, '.capability-matrix-row');
+  assertIncludes(stylesCss, '.capability-choice.is-selected');
+  assertCssDeclarations('.capability-choice.is-selected', [
+    'background: var(--teal-soft);',
+  ]);
 });
 
 test('production stylesheet keeps long direct-thread message content inside bubbles', () => {

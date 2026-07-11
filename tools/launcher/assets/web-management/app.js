@@ -345,12 +345,14 @@
       selectedRole: '',
       selectedActorId: '',
       actorConsole: null,
-      actorModelConfigPanelOpen: false,
-      actorModelConfigSavedText: '',
-      actorModelConfigDraftText: '',
-      actorModelConfigError: '',
-      actorModelConfigSaving: false,
-      actorModelConfigStatus: '',
+      actorCapabilityActorId: '',
+      actorCapabilitySaved: { parent: '', side: '' },
+      actorCapabilityDraft: { parent: '', side: '' },
+      actorCapabilityCatalog: [],
+      actorCapabilityPanelOpen: false,
+      actorCapabilitySaving: false,
+      actorCapabilityStatus: '',
+      actorCapabilityError: '',
       selectedTrackId: '',
       selectedTrackDetail: null,
       draftText: '',
@@ -477,55 +479,54 @@
     return '/api/actors/' + encodeURIComponent(actorId) + '/console';
   }
 
-  function buildActorModelConfigUrl(actorId) {
-    return '/api/actors/' + encodeURIComponent(actorId) + '/model-config';
+  function buildActorCapabilitiesUrl(actorId) {
+    return '/api/actors/' + encodeURIComponent(actorId) + '/capabilities';
   }
 
-  function parseJsonObjectPayload(text) {
-    let payload;
-    try {
-      payload = JSON.parse(text);
-    } catch (error) {
-      return { ok: false, error: 'Invalid JSON: ' + error.message };
-    }
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      return { ok: false, error: 'Payload must be a JSON object.' };
-    }
-    return { ok: true, value: payload };
-  }
-
-  function stablePayloadText(payload) {
-    return JSON.stringify(payload || {}, null, 2);
-  }
-
-  function summarizeActorModelSection(section) {
-    if (!section || typeof section !== 'object' || Array.isArray(section)) {
-      return 'Custom payload';
-    }
-    if (!Object.prototype.hasOwnProperty.call(section, 'model')
-        && !Object.prototype.hasOwnProperty.call(section, 'effort')) {
-      return 'Custom payload';
-    }
-    const model = typeof section.model === 'string' && section.model.trim()
-      ? section.model.trim()
-      : 'Codex default';
-    const effort = typeof section.effort === 'string' && section.effort.trim()
-      ? section.effort.trim()
-      : 'default effort';
-    return model + ' · ' + effort;
-  }
-
-  function summarizeActorModelPayload(payload) {
+  function capabilitySelectionFromConsole(actorConsole) {
+    const capabilities = actorConsole && actorConsole.capabilities;
     return {
-      parent: summarizeActorModelSection(payload && payload.parent),
-      side: summarizeActorModelSection(payload && payload.side),
+      parent: capabilities && capabilities.parent && typeof capabilities.parent.level === 'string'
+        ? capabilities.parent.level
+        : '',
+      side: capabilities && capabilities.side && typeof capabilities.side.level === 'string'
+        ? capabilities.side.level
+        : '',
     };
   }
 
-  function sameJsonObjectText(leftText, rightText) {
-    const left = parseJsonObjectPayload(leftText);
-    const right = parseJsonObjectPayload(rightText);
-    return Boolean(left.ok && right.ok && JSON.stringify(left.value) === JSON.stringify(right.value));
+  function sameCapabilitySelection(left, right) {
+    return Boolean(left && right && left.parent === right.parent && left.side === right.side);
+  }
+
+  function capabilityPayloadIsComplete(payload) {
+    function nonEmptyText(value) {
+      return typeof value === 'string' && Boolean(value.trim());
+    }
+    function completeCatalogRow(row) {
+      return row && nonEmptyText(row.id) && nonEmptyText(row.label)
+        && nonEmptyText(row.description) && nonEmptyText(row.model) && nonEmptyText(row.effort);
+    }
+    function completeSelection(selection) {
+      return selection && nonEmptyText(selection.level) && nonEmptyText(selection.model)
+        && nonEmptyText(selection.effort) && nonEmptyText(selection.effect);
+    }
+    if (!payload || typeof payload !== 'object' || !Array.isArray(payload.levels)
+        || payload.levels.length !== 4
+        || !Number.isInteger(payload.catalog_version) || payload.catalog_version < 1
+        || !payload.levels.every(completeCatalogRow)
+        || !completeSelection(payload.parent) || !completeSelection(payload.side)) {
+      return false;
+    }
+    const ids = payload.levels.map(function (row) {
+      return row && typeof row.id === 'string' ? row.id : '';
+    });
+    return new Set(ids).size === 4
+      && ids.every(Boolean)
+      && typeof payload.parent.level === 'string'
+      && typeof payload.side.level === 'string'
+      && ids.includes(payload.parent.level)
+      && ids.includes(payload.side.level);
   }
 
   function buildTrackDetailUrl(trackId) {
@@ -643,7 +644,7 @@
       state.selectedActorId = protectAutoSelection ? '' : preferredActorId(state.actors);
       state.suppressNextRosterAutoSelection = false;
       state.actorConsole = null;
-      syncActorModelConfigFromConsole(state, { force: true });
+      syncActorCapabilitiesFromConsole(state, { force: true });
     } else {
       state.suppressNextRosterAutoSelection = false;
     }
@@ -671,131 +672,110 @@
     if (consolePayload && consolePayload.actor && typeof consolePayload.actor.actor_id === 'string') {
       state.selectedActorId = consolePayload.actor.actor_id;
     }
-    syncActorModelConfigFromConsole(state);
+    syncActorCapabilitiesFromConsole(state);
   }
 
-  function cloneJsonObject(value) {
-    return JSON.parse(JSON.stringify(value && typeof value === 'object' ? value : {}));
-  }
-
-  function editableActorModelConfigPayload(payload) {
-    const source = payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? payload
-      : {};
-    const hasParent = Object.prototype.hasOwnProperty.call(source, 'parent');
-    const hasSide = Object.prototype.hasOwnProperty.call(source, 'side');
-    if (!hasParent && !hasSide) {
-      return cloneJsonObject(source);
-    }
-    const parent = source.parent && typeof source.parent === 'object' && !Array.isArray(source.parent)
-      ? source.parent
-      : {};
-    const side = source.side && typeof source.side === 'object' && !Array.isArray(source.side)
-      ? source.side
-      : {};
-    return {
-      parent: cloneJsonObject(parent),
-      side: cloneJsonObject(side),
-    };
-  }
-
-  function actorConsoleModelConfigPayload(actorConsole) {
-    const modelConfig = actorConsole && actorConsole.model_config && typeof actorConsole.model_config === 'object'
-      ? actorConsole.model_config
-      : {};
-    return editableActorModelConfigPayload(modelConfig);
-  }
-
-  function actorModelConfigHasLocalChanges(state) {
-    if (state.actorModelConfigError) {
-      return true;
-    }
-    if (!state.actorModelConfigDraftText && !state.actorModelConfigSavedText) {
-      return false;
-    }
-    return !sameJsonObjectText(state.actorModelConfigDraftText || '{}', state.actorModelConfigSavedText || '{}');
-  }
-
-  function syncActorModelConfigFromConsole(state, options) {
+  function syncActorCapabilitiesFromConsole(state, options) {
     const force = Boolean(options && options.force);
-    if (!force && state.actorModelConfigPanelOpen && actorModelConfigHasLocalChanges(state)) {
+    const actorId = state.actorConsole && state.actorConsole.actor
+      && typeof state.actorConsole.actor.actor_id === 'string'
+      ? state.actorConsole.actor.actor_id
+      : state.selectedActorId;
+    const actorChanged = state.actorCapabilityActorId !== actorId;
+    if (!force && !actorChanged && state.actorCapabilityPanelOpen
+        && !sameCapabilitySelection(state.actorCapabilityDraft, state.actorCapabilitySaved)) {
       return;
     }
-    const panelOpen = state.actorModelConfigPanelOpen;
-    const payload = actorConsoleModelConfigPayload(state.actorConsole);
-    const text = stablePayloadText(payload);
-    state.actorModelConfigSavedText = text;
-    state.actorModelConfigDraftText = text;
-    state.actorModelConfigError = '';
-    state.actorModelConfigStatus = '';
-    state.actorModelConfigSaving = false;
-    state.actorModelConfigPanelOpen = force ? false : panelOpen;
+    const selection = capabilitySelectionFromConsole(state.actorConsole);
+    const capabilities = state.actorConsole && state.actorConsole.capabilities;
+    state.actorCapabilityActorId = actorId || '';
+    state.actorCapabilitySaved = { parent: selection.parent, side: selection.side };
+    state.actorCapabilityDraft = { parent: selection.parent, side: selection.side };
+    state.actorCapabilityCatalog = capabilities && Array.isArray(capabilities.levels)
+      ? capabilities.levels.slice()
+      : [];
+    state.actorCapabilityError = '';
+    state.actorCapabilityStatus = '';
+    state.actorCapabilitySaving = false;
+    if (force || actorChanged) {
+      state.actorCapabilityPanelOpen = false;
+    }
   }
 
-  function recordActorModelConfigDraft(state, text) {
-    state.actorModelConfigDraftText = text;
-    const result = parseJsonObjectPayload(text);
-    if (!result.ok) {
-      state.actorModelConfigError = result.error;
-      state.actorModelConfigStatus = result.error;
+  function selectActorCapability(state, role, level) {
+    if (role !== 'parent' && role !== 'side') {
       return false;
     }
-    state.actorModelConfigError = '';
-    state.actorModelConfigStatus = sameJsonObjectText(text, state.actorModelConfigSavedText || '{}')
+    const exists = state.actorCapabilityCatalog.some(function (row) {
+      return row && row.id === level;
+    });
+    if (!exists) {
+      return false;
+    }
+    state.actorCapabilityDraft = Object.assign({}, state.actorCapabilityDraft, { [role]: level });
+    state.actorCapabilityError = '';
+    state.actorCapabilityStatus = sameCapabilitySelection(state.actorCapabilityDraft, state.actorCapabilitySaved)
       ? ''
-      : 'Unsaved payload.';
+      : 'Unsaved changes.';
     return true;
   }
 
-  function revertActorModelConfigDraft(state) {
-    state.actorModelConfigDraftText = state.actorModelConfigSavedText || '{}';
-    state.actorModelConfigError = '';
-    state.actorModelConfigStatus = 'Reverted to saved payload.';
+  function cancelActorCapabilityDraft(state) {
+    state.actorCapabilityDraft = Object.assign({}, state.actorCapabilitySaved);
+    state.actorCapabilityError = '';
+    state.actorCapabilityStatus = '';
+    state.actorCapabilityPanelOpen = false;
   }
 
-  async function saveActorModelConfig(state) {
-    if (!state.selectedActorId || state.actorModelConfigSaving) {
+  async function saveActorCapabilities(state) {
+    if (!state.selectedActorId || state.actorCapabilityActorId !== state.selectedActorId
+        || state.actorCapabilitySaving
+        || sameCapabilitySelection(state.actorCapabilityDraft, state.actorCapabilitySaved)) {
       return null;
     }
-
-    const result = parseJsonObjectPayload(state.actorModelConfigDraftText || '{}');
-    if (!result.ok) {
-      state.actorModelConfigError = result.error;
-      state.actorModelConfigStatus = result.error;
-      return null;
+    const actorId = state.selectedActorId;
+    const requestId = state.actorSelectionRequestId;
+    function requestOwnsState() {
+      return state.selectedActorId === actorId
+        && state.actorCapabilityActorId === actorId
+        && state.actorSelectionRequestId === requestId;
     }
-
-    if (sameJsonObjectText(state.actorModelConfigDraftText || '{}', state.actorModelConfigSavedText || '{}')) {
-      return null;
-    }
-
-    state.actorModelConfigSaving = true;
-    state.actorModelConfigStatus = 'Saving payload...';
+    const draft = {
+      parent: state.actorCapabilityDraft.parent,
+      side: state.actorCapabilityDraft.side,
+    };
+    state.actorCapabilitySaving = true;
+    state.actorCapabilityStatus = 'Saving...';
     try {
-      const response = await fetchJson(buildActorModelConfigUrl(state.selectedActorId), {
+      const response = await fetchJson(buildActorCapabilitiesUrl(actorId), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result.value),
+        body: JSON.stringify(draft),
       });
-      const canonicalPayload = response && response.model_config && typeof response.model_config === 'object'
-        ? response.model_config
-        : result.value;
-      const editablePayload = editableActorModelConfigPayload(canonicalPayload);
-      state.actorModelConfigSavedText = stablePayloadText(editablePayload);
-      state.actorModelConfigDraftText = state.actorModelConfigSavedText;
-      state.actorModelConfigError = '';
-      state.actorModelConfigStatus = '';
-      state.actorModelConfigPanelOpen = false;
-      if (state.actorConsole) {
-        state.actorConsole.model_config = JSON.parse(JSON.stringify(canonicalPayload));
+      if (!requestOwnsState()) {
+        return response;
       }
+      const canonical = response && response.capabilities && typeof response.capabilities === 'object'
+        ? response.capabilities
+        : null;
+      if (!response || response.actor_id !== actorId || !capabilityPayloadIsComplete(canonical)) {
+        throw new Error('Capability response is invalid.');
+      }
+      if (state.actorConsole) {
+        state.actorConsole.capabilities = canonical;
+      }
+      syncActorCapabilitiesFromConsole(state, { force: true });
       return response;
     } catch (error) {
-      state.actorModelConfigError = error && error.message ? error.message : 'Request failed.';
-      state.actorModelConfigStatus = state.actorModelConfigError;
+      if (requestOwnsState()) {
+        state.actorCapabilityError = error && error.message ? error.message : 'Request failed.';
+        state.actorCapabilityStatus = state.actorCapabilityError;
+      }
       return null;
     } finally {
-      state.actorModelConfigSaving = false;
+      if (requestOwnsState()) {
+        state.actorCapabilitySaving = false;
+      }
     }
   }
 
@@ -1774,41 +1754,99 @@
     elements.actorsList.innerHTML = renderActorRowsHtml(state);
   }
 
-  function renderActorModelConfig(state, elements) {
-    if (!elements.actorModelConfigCard) {
+  function capabilityCatalogRow(state, level) {
+    return state.actorCapabilityCatalog.find(function (row) {
+      return row && row.id === level;
+    }) || null;
+  }
+
+  function capabilityLabel(state, level) {
+    const row = capabilityCatalogRow(state, level);
+    return row && typeof row.label === 'string' ? row.label : 'Not set';
+  }
+
+  function renderCapabilityMatrixHtml(state) {
+    return state.actorCapabilityCatalog.map(function (row) {
+      const parentSelected = state.actorCapabilityDraft.parent === row.id;
+      const sideSelected = state.actorCapabilityDraft.side === row.id;
+      function cell(role, selected) {
+        return [
+          '<label data-capability-role="' + role + '" data-capability-level="' + escapeHtml(row.id) + '" class="capability-choice' + (selected ? ' is-selected' : '') + '">',
+          '<input type="radio" name="capability-' + role + '" value="' + escapeHtml(row.id) + '"' + (selected ? ' checked' : '') + '>',
+          '<span class="sr-only">' + escapeHtml(role + ' ' + row.label) + '</span>',
+          '</label>',
+        ].join('');
+      }
+      return [
+        '<div class="capability-matrix-row">',
+        '<div class="capability-level-copy"><strong>' + escapeHtml(row.label || row.id) + '</strong><span>' + escapeHtml(row.description || '') + '</span></div>',
+        cell('parent', parentSelected),
+        cell('side', sideSelected),
+        '</div>',
+      ].join('');
+    }).join('');
+  }
+
+  function renderCapabilityDetailsHtml(state) {
+    function row(role, level) {
+      const roleId = role.toLowerCase();
+      const savedSection = state.actorConsole && state.actorConsole.capabilities
+        ? state.actorConsole.capabilities[roleId]
+        : null;
+      const usesSavedSnapshot = state.actorCapabilitySaved[roleId] === level;
+      const selection = usesSavedSnapshot && savedSection ? savedSection : capabilityCatalogRow(state, level);
+      return [
+        '<div class="capability-detail-row">',
+        '<span>' + escapeHtml(role) + '</span>',
+        '<strong>' + escapeHtml(selection && selection.model ? selection.model : 'Not set') + '</strong>',
+        '<span>' + escapeHtml(selection && selection.effort ? selection.effort : 'Not set') + '</span>',
+        '</div>',
+      ].join('');
+    }
+    return row('Parent', state.actorCapabilityDraft.parent)
+      + row('Side', state.actorCapabilityDraft.side);
+  }
+
+  function renderActorCapabilities(state, elements) {
+    if (!elements.actorCapabilityCard) {
       return;
     }
-    if (!state.actorModelConfigSavedText && !state.actorModelConfigDraftText) {
-      syncActorModelConfigFromConsole(state, { force: true });
+    if (state.actorCapabilityActorId !== state.selectedActorId) {
+      syncActorCapabilitiesFromConsole(state, { force: true });
     }
-
-    const draftText = state.actorModelConfigDraftText || '{}';
-    const savedText = state.actorModelConfigSavedText || '{}';
-    const parseResult = parseJsonObjectPayload(draftText);
-    const savedResult = parseJsonObjectPayload(savedText);
-    const errorMessage = state.actorModelConfigError || (!parseResult.ok ? parseResult.error : '');
-    const message = errorMessage || state.actorModelConfigStatus;
-    const payload = parseResult.ok
-      ? parseResult.value
-      : (savedResult.ok ? savedResult.value : {});
-    const summary = summarizeActorModelPayload(payload);
-    const dirty = !errorMessage && !sameJsonObjectText(draftText, savedText);
-
-    elements.actorModelConfigParentSummary.textContent = summary.parent;
-    elements.actorModelConfigSideSummary.textContent = summary.side;
-    elements.actorModelConfigPanel.hidden = !state.actorModelConfigPanelOpen;
-    elements.actorModelConfigPayload.value = draftText;
-    elements.actorModelConfigPayload.classList.toggle('is-invalid', Boolean(errorMessage));
-    elements.actorModelConfigSave.disabled = !dirty || state.actorModelConfigSaving || Boolean(errorMessage);
-    elements.actorModelConfigRevert.disabled = (!dirty && !errorMessage) || state.actorModelConfigSaving;
-    elements.actorModelConfigSave.textContent = state.actorModelConfigSaving ? 'Saving...' : 'Save';
-    elements.actorModelConfigStatus.textContent = errorMessage ? 'Invalid' : (dirty ? 'Unsaved' : 'Saved');
-    elements.actorModelConfigStatus.className = 'status-badge ' + (errorMessage ? 'danger' : (dirty ? 'busy' : 'healthy'));
-    elements.actorModelConfigToggle.textContent = state.actorModelConfigPanelOpen ? 'Close' : (dirty || Boolean(errorMessage) ? 'Review' : 'Configure');
-    elements.actorModelConfigToggle.setAttribute('aria-expanded', state.actorModelConfigPanelOpen ? 'true' : 'false');
-    elements.actorModelConfigToggle.classList.toggle('primary', !state.actorModelConfigPanelOpen && (dirty || Boolean(errorMessage)));
-    elements.actorModelConfigMessage.textContent = message || '';
-    elements.actorModelConfigMessage.hidden = !state.actorModelConfigPanelOpen || !message;
+    const editorAvailable = Boolean(
+      state.selectedActorId
+      && state.actorCapabilityActorId === state.selectedActorId
+      && state.actorCapabilityCatalog.length === 4
+    );
+    if (!editorAvailable) {
+      state.actorCapabilityPanelOpen = false;
+    }
+    const dirty = !sameCapabilitySelection(state.actorCapabilityDraft, state.actorCapabilitySaved);
+    const errorMessage = state.actorCapabilityError;
+    const message = errorMessage || state.actorCapabilityStatus;
+    elements.actorCapabilityParentSummary.textContent = capabilityLabel(state, state.actorCapabilitySaved.parent);
+    elements.actorCapabilitySideSummary.textContent = capabilityLabel(state, state.actorCapabilitySaved.side);
+    elements.actorCapabilityPanel.hidden = !state.actorCapabilityPanelOpen;
+    if (!state.actorCapabilityPanelOpen && elements.actorCapabilityDetails.parentElement) {
+      elements.actorCapabilityDetails.parentElement.open = false;
+    }
+    elements.actorCapabilityMatrix.innerHTML = renderCapabilityMatrixHtml(state);
+    elements.actorCapabilityDetails.innerHTML = renderCapabilityDetailsHtml(state);
+    elements.actorCapabilitySave.disabled = !editorAvailable || !dirty || state.actorCapabilitySaving;
+    elements.actorCapabilityCancel.disabled = !editorAvailable || state.actorCapabilitySaving;
+    elements.actorCapabilitySave.textContent = state.actorCapabilitySaving ? 'Saving...' : 'Save config';
+    elements.actorCapabilityStatus.textContent = !editorAvailable
+      ? 'Unavailable'
+      : (errorMessage ? 'Error' : (dirty ? 'Unsaved' : 'Saved'));
+    elements.actorCapabilityStatus.className = 'status-badge ' + (
+      !editorAvailable ? 'neutral' : (errorMessage ? 'danger' : (dirty ? 'busy' : 'healthy'))
+    );
+    elements.actorCapabilityToggle.disabled = !editorAvailable;
+    elements.actorCapabilityToggle.textContent = state.actorCapabilityPanelOpen ? 'Close' : 'Configure';
+    elements.actorCapabilityToggle.setAttribute('aria-expanded', state.actorCapabilityPanelOpen ? 'true' : 'false');
+    elements.actorCapabilityMessage.textContent = message || '';
+    elements.actorCapabilityMessage.hidden = !state.actorCapabilityPanelOpen || !message;
   }
 
   function renderActorDetail(state, elements) {
@@ -1832,7 +1870,7 @@
     }
     elements.actorTaskSummary.innerHTML = renderTaskSummaryHtml(state);
     elements.actorTrackSummary.innerHTML = renderActorTrackSummaryHtml(state);
-    renderActorModelConfig(state, elements);
+    renderActorCapabilities(state, elements);
   }
 
   function renderTrackList(state, elements) {
@@ -2130,7 +2168,7 @@
   async function refreshActorCard(state, elements, actorId, requestId, options) {
     if (!actorId) {
       state.actorConsole = null;
-      syncActorModelConfigFromConsole(state, { force: true });
+      syncActorCapabilitiesFromConsole(state, { force: true });
       state.actorCardLoading = false;
       state.actorCardError = '';
       renderActorDetail(state, elements);
@@ -2230,7 +2268,7 @@
     const requestedActorId = state.selectedActorId;
     if (!requestedActorId) {
       state.actorConsole = null;
-      syncActorModelConfigFromConsole(state, { force: true });
+      syncActorCapabilitiesFromConsole(state, { force: true });
       clearImConversation(state, '');
       return;
     }
@@ -2387,7 +2425,7 @@
       state.rosterStoppedExpanded = true;
     }
     state.actorConsole = null;
-    syncActorModelConfigFromConsole(state, { force: true });
+    syncActorCapabilitiesFromConsole(state, { force: true });
     state.actorSelectionPendingId = actorId;
     state.actorCardLoading = true;
     state.actorCardError = '';
@@ -2453,7 +2491,7 @@
     state.selectedLifecycleOperationId = operationId;
     state.selectedActorId = '';
     state.actorConsole = null;
-    syncActorModelConfigFromConsole(state, { force: true });
+    syncActorCapabilitiesFromConsole(state, { force: true });
     state.actorSelectionPendingId = '';
     state.actorCardLoading = false;
     state.actorCardError = '';
@@ -2706,7 +2744,7 @@
       state.selectedActorId = actorId;
       state.selectedSection = 'actors';
       state.actorConsole = null;
-      syncActorModelConfigFromConsole(state, { force: true });
+      syncActorCapabilitiesFromConsole(state, { force: true });
       state.actorCardLoading = true;
       state.actorCardError = '';
       state.conversationLoading = true;
@@ -2847,7 +2885,7 @@
       if (state.selectedActorId === actorId) {
         state.selectedActorId = '';
         state.actorConsole = null;
-        syncActorModelConfigFromConsole(state, { force: true });
+        syncActorCapabilitiesFromConsole(state, { force: true });
         clearImConversation(state, '');
         clearOpenTuiFeedback(state);
       }
@@ -3214,16 +3252,17 @@
       actorRuntimeSummary: document.getElementById('actor-runtime-summary'),
       actorTaskSummary: document.getElementById('actor-task-summary'),
       actorTrackSummary: document.getElementById('actor-track-summary'),
-      actorModelConfigCard: document.getElementById('actor-model-config-card'),
-      actorModelConfigStatus: document.getElementById('actor-model-config-status'),
-      actorModelConfigToggle: document.getElementById('actor-model-config-toggle'),
-      actorModelConfigParentSummary: document.getElementById('actor-model-config-parent-summary'),
-      actorModelConfigSideSummary: document.getElementById('actor-model-config-side-summary'),
-      actorModelConfigPanel: document.getElementById('actor-model-config-panel'),
-      actorModelConfigPayload: document.getElementById('actor-model-config-payload'),
-      actorModelConfigSave: document.getElementById('actor-model-config-save'),
-      actorModelConfigRevert: document.getElementById('actor-model-config-revert'),
-      actorModelConfigMessage: document.getElementById('actor-model-config-message'),
+      actorCapabilityCard: document.getElementById('actor-capability-card'),
+      actorCapabilityStatus: document.getElementById('actor-capability-status'),
+      actorCapabilityToggle: document.getElementById('actor-capability-toggle'),
+      actorCapabilityParentSummary: document.getElementById('actor-capability-parent-summary'),
+      actorCapabilitySideSummary: document.getElementById('actor-capability-side-summary'),
+      actorCapabilityPanel: document.getElementById('actor-capability-panel'),
+      actorCapabilityMatrix: document.getElementById('actor-capability-matrix'),
+      actorCapabilityDetails: document.getElementById('actor-capability-details'),
+      actorCapabilitySave: document.getElementById('actor-capability-save'),
+      actorCapabilityCancel: document.getElementById('actor-capability-cancel'),
+      actorCapabilityMessage: document.getElementById('actor-capability-message'),
       tracksList: document.getElementById('tracks-list'),
       trackDetail: document.getElementById('track-detail'),
       trackStudioRail: document.getElementById('track-studio-rail'),
@@ -3296,30 +3335,39 @@
         renderShell(state, elements);
       });
     });
-    if (elements.actorModelConfigToggle) {
-      elements.actorModelConfigToggle.addEventListener('click', function () {
-        state.actorModelConfigPanelOpen = !state.actorModelConfigPanelOpen;
-        if (state.actorModelConfigPanelOpen && state.actorModelConfigError) {
-          state.actorModelConfigStatus = state.actorModelConfigError;
+    if (elements.actorCapabilityToggle) {
+      elements.actorCapabilityToggle.addEventListener('click', function () {
+        state.actorCapabilityPanelOpen = !state.actorCapabilityPanelOpen;
+        renderActorDetail(state, elements);
+      });
+    }
+    if (elements.actorCapabilityMatrix) {
+      elements.actorCapabilityMatrix.addEventListener('change', function (event) {
+        const target = event.target;
+        if (!target || target.type !== 'radio') {
+          return;
         }
+        const label = target.closest('[data-capability-role][data-capability-level]');
+        if (!label) {
+          return;
+        }
+        selectActorCapability(
+          state,
+          label.getAttribute('data-capability-role') || '',
+          label.getAttribute('data-capability-level') || ''
+        );
         renderActorDetail(state, elements);
       });
     }
-    if (elements.actorModelConfigPayload) {
-      elements.actorModelConfigPayload.addEventListener('input', function () {
-        recordActorModelConfigDraft(state, elements.actorModelConfigPayload.value);
+    if (elements.actorCapabilityCancel) {
+      elements.actorCapabilityCancel.addEventListener('click', function () {
+        cancelActorCapabilityDraft(state);
         renderActorDetail(state, elements);
       });
     }
-    if (elements.actorModelConfigRevert) {
-      elements.actorModelConfigRevert.addEventListener('click', function () {
-        revertActorModelConfigDraft(state);
-        renderActorDetail(state, elements);
-      });
-    }
-    if (elements.actorModelConfigSave) {
-      elements.actorModelConfigSave.addEventListener('click', function () {
-        saveActorModelConfig(state).then(function () {
+    if (elements.actorCapabilitySave) {
+      elements.actorCapabilitySave.addEventListener('click', function () {
+        saveActorCapabilities(state).then(function () {
           renderActorDetail(state, elements);
         });
         renderActorDetail(state, elements);
@@ -3518,13 +3566,13 @@
   return {
     applyActorConsolePayload,
     applyActorsPayload,
-    actorConsoleModelConfigPayload,
+    capabilitySelectionFromConsole,
     actorInitials,
     applyImConversationPayload,
     applyTrackDetailPayload,
     applyTracksPayload,
     buildActorConsoleUrl,
-    buildActorModelConfigUrl,
+    buildActorCapabilitiesUrl,
     buildImAckPayload,
     buildImEventsUrl,
     buildImConversationUrl,
@@ -3550,7 +3598,6 @@
     recordImProjectedMessage,
     recordImPendingSend,
     recordImSent,
-    recordActorModelConfigDraft,
     recordSelectedActorEventMessage,
     removeImEntry,
     replaceImPendingSend,
@@ -3558,29 +3605,27 @@
     refreshSelectedActorConversation,
     refreshVisibleRegionsWithFeedback,
     pollImEventsOnce,
-    parseJsonObjectPayload,
     renderActorRowsHtml,
-    renderActorModelConfig,
+    renderActorCapabilities,
     renderImConversation,
     openDeleteConfirmation,
     renderRoleSelect,
     renderSelectedActorContext,
     renderTrackDetailHtml,
     renderTrackStudioRailHtml,
-    revertActorModelConfigDraft,
     renderComposer,
     runLifecycleAction,
-    saveActorModelConfig,
+    saveActorCapabilities,
     sectionCopy,
     selectActor,
     selectedActorRuntime,
     selectSection,
-    sameJsonObjectText,
+    sameCapabilitySelection,
     isConversationNearBottom,
-    stablePayloadText,
     shouldRefreshSelectedActorConsole,
-    syncActorModelConfigFromConsole,
-    summarizeActorModelPayload,
+    syncActorCapabilitiesFromConsole,
+    selectActorCapability,
+    cancelActorCapabilityDraft,
     updateDeleteConfirmationInput,
   };
 }));

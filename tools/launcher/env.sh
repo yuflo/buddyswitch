@@ -562,8 +562,7 @@ buddyswitch_actor_side_thread_start() {
   local actor_id="$1"
   local parent_thread_id="$2"
   local text="$3"
-  local model="${4:-}"
-  local effort="${5:-}"
+  local capability="${4:-}"
   local instance_json args
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
@@ -580,11 +579,8 @@ buddyswitch_actor_side_thread_start() {
     --shared-project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
     --permissions "buddyswitch-runtime"
   )
-  if [[ -n "${model}" ]]; then
-    args+=(--model "${model}")
-  fi
-  if [[ -n "${effort}" ]]; then
-    args+=(--effort "${effort}")
+  if [[ -n "${capability}" ]]; then
+    args+=(--capability "${capability}")
   fi
   python3 "${args[@]}"
 }

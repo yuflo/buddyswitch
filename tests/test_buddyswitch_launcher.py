@@ -1035,7 +1035,7 @@ exec "$real_git" "$@"
             for path in sorted(tasks_dir.glob("*.json"))
         ]
 
-    def _write_model_config_cli_instance(
+    def _write_capability_cli_instance(
         self,
         shared_root: Path,
         *,
@@ -1062,12 +1062,13 @@ exec "$real_git" "$@"
             + "\n",
             encoding="utf-8",
         )
-        (instance_root / "model-config.json").write_text(
+        (instance_root / "capability-config.json").write_text(
             json.dumps(
                 {
                     "schema_version": 1,
-                    "parent": {"model": "gpt-5.5", "effort": "medium"},
-                    "side": {"model": "gpt-5.5", "effort": "medium"},
+                    "catalog_version": 1,
+                    "parent": {"level": "balanced", "model": "gpt-5.6-terra", "effort": "high"},
+                    "side": {"level": "fast", "model": "gpt-5.6-luna", "effort": "xhigh"},
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -1077,7 +1078,7 @@ exec "$real_git" "$@"
         )
         return instance_json
 
-    def _model_config_cli_env(self, temp_root: Path, shared_root: Path) -> dict[str, str]:
+    def _capability_cli_env(self, temp_root: Path, shared_root: Path) -> dict[str, str]:
         source_home = temp_root / "source-home"
         source_home.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
@@ -1088,7 +1089,7 @@ exec "$real_git" "$@"
         env.pop("CODEX_HOME", None)
         return env
 
-    def test_instance_start_seeds_model_config_default_schema(self) -> None:
+    def test_instance_start_seeds_capability_default_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -1096,31 +1097,32 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             instance_root = Path(str(ctx["instance_root"]))
-            model_config = instance_root / "model-config.json"
+            capability_config = instance_root / "capability-config.json"
 
-            self.assertTrue(model_config.exists())
+            self.assertTrue(capability_config.exists())
             self.assertEqual(
-                json.loads(model_config.read_text(encoding="utf-8")),
+                json.loads(capability_config.read_text(encoding="utf-8")),
                 {
                     "schema_version": 1,
-                    "parent": {"model": "gpt-5.5", "effort": "medium"},
-                    "side": {"model": "gpt-5.5", "effort": "medium"},
+                    "catalog_version": 1,
+                    "parent": {"level": "balanced", "model": "gpt-5.6-terra", "effort": "high"},
+                    "side": {"level": "fast", "model": "gpt-5.6-luna", "effort": "xhigh"},
                 },
             )
 
             instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
-            for key in ("model", "effort", "parent", "side", "model_config"):
+            for key in ("model", "effort", "parent", "side", "capabilities"):
                 self.assertNotIn(key, instance_payload)
 
-    def test_instance_model_config_get_json_returns_creation_default_dto(self) -> None:
+    def test_instance_capabilities_get_json_returns_creation_default_dto(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
             shared_root = temp_root_path / "shared"
-            self._write_model_config_cli_instance(shared_root)
-            env = self._model_config_cli_env(temp_root_path, shared_root)
+            self._write_capability_cli_instance(shared_root)
+            env = self._capability_cli_env(temp_root_path, shared_root)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--json"],
+                [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get", "--json"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1132,29 +1134,27 @@ exec "$real_git" "$@"
             payload = json.loads(completed.stdout)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["actor_id"], "act-pm-demo")
-            self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.5", "effort": "medium"})
-            self.assertEqual(payload["model_config"]["side"], {"model": "gpt-5.5", "effort": "medium"})
+            self.assertEqual(payload["capabilities"]["parent"]["level"], "balanced")
+            self.assertEqual(payload["capabilities"]["side"]["level"], "fast")
 
-    def test_instance_model_config_set_json_writes_disk_and_get_returns_same_dto(self) -> None:
+    def test_instance_capabilities_set_json_writes_snapshot_and_get_returns_same_dto(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
             shared_root = temp_root_path / "shared"
-            instance_json = self._write_model_config_cli_instance(shared_root)
-            env = self._model_config_cli_env(temp_root_path, shared_root)
-            request_payload = {
-                "parent": {"model": "gpt-5.4", "effort": "high"},
-                "side": {"model": "gpt-5.4-mini", "effort": None},
-            }
+            instance_json = self._write_capability_cli_instance(shared_root)
+            env = self._capability_cli_env(temp_root_path, shared_root)
 
             set_result = subprocess.run(
                 [
                     str(LAUNCHER),
                     "instance",
-                    "model-config",
+                    "capabilities",
                     "act-pm-demo",
                     "set",
-                    "--payload-json",
-                    json.dumps(request_payload),
+                    "--parent",
+                    "deep",
+                    "--side",
+                    "maximum",
                     "--json",
                 ],
                 cwd=ROOT,
@@ -1164,7 +1164,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             get_result = subprocess.run(
-                [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--json"],
+                [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get", "--json"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1177,47 +1177,37 @@ exec "$real_git" "$@"
             set_payload = json.loads(set_result.stdout)
             get_payload = json.loads(get_result.stdout)
             self.assertEqual(set_payload["actor_id"], "act-pm-demo")
-            self.assertEqual(set_payload["model_config"], get_payload["model_config"])
+            self.assertEqual(set_payload["capabilities"], get_payload["capabilities"])
             self.assertEqual(
-                json.loads((instance_json.parent / "model-config.json").read_text(encoding="utf-8")),
+                json.loads((instance_json.parent / "capability-config.json").read_text(encoding="utf-8")),
                 {
                     "schema_version": 1,
-                    "parent": {"model": "gpt-5.4", "effort": "high"},
-                    "side": {"model": "gpt-5.4-mini"},
+                    "catalog_version": 1,
+                    "parent": {"level": "deep", "model": "gpt-5.6-sol", "effort": "xhigh"},
+                    "side": {"level": "maximum", "model": "gpt-5.6-sol", "effort": "max"},
                 },
             )
 
-    def test_instance_model_config_invalid_payload_exits_nonzero_and_preserves_file(self) -> None:
+    def test_instance_capabilities_invalid_level_exits_nonzero_and_preserves_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
             shared_root = temp_root_path / "shared"
-            instance_json = self._write_model_config_cli_instance(shared_root)
-            path = instance_json.parent / "model-config.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "parent": {"model": "gpt-5.4", "effort": "high"},
-                        "side": {},
-                    },
-                    ensure_ascii=True,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            instance_json = self._write_capability_cli_instance(shared_root)
+            path = instance_json.parent / "capability-config.json"
             before = path.read_text(encoding="utf-8")
-            env = self._model_config_cli_env(temp_root_path, shared_root)
+            env = self._capability_cli_env(temp_root_path, shared_root)
 
             completed = subprocess.run(
                 [
                     str(LAUNCHER),
                     "instance",
-                    "model-config",
+                    "capabilities",
                     "act-pm-demo",
                     "set",
-                    "--payload-json",
-                    '{"parent":{"model":null,"effort":"max"},"side":{"model":null,"effort":null}}',
+                    "--parent",
+                    "custom",
+                    "--side",
+                    "fast",
                     "--json",
                 ],
                 cwd=ROOT,
@@ -1228,18 +1218,18 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("effort", completed.stderr)
+            self.assertIn("parent_level", completed.stderr)
             self.assertEqual(path.read_text(encoding="utf-8"), before)
 
-    def test_instance_model_config_unknown_option_exits_two(self) -> None:
+    def test_instance_capabilities_unknown_option_exits_two(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
             shared_root = temp_root_path / "shared"
-            self._write_model_config_cli_instance(shared_root)
-            env = self._model_config_cli_env(temp_root_path, shared_root)
+            self._write_capability_cli_instance(shared_root)
+            env = self._capability_cli_env(temp_root_path, shared_root)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--bogus"],
+                [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get", "--bogus"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1248,7 +1238,7 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Unknown instance model-config get option: --bogus", completed.stderr)
+            self.assertIn("Unknown instance capabilities get option: --bogus", completed.stderr)
 
     def _write_task_sys_record(
         self,
@@ -3737,7 +3727,7 @@ exec "$real_git" "$@"
             self.assertEqual(side_thread["parent_thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(side_thread["status"], "open")
 
-    def test_side_start_accepts_model_and_effort_as_thread_fork_only_overrides(self) -> None:
+    def test_side_start_accepts_capability_as_thread_fork_only_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -3756,11 +3746,9 @@ exec "$real_git" "$@"
                     "side",
                     ctx["actor_id"],
                     "--text",
-                    "Use a specific side model",
-                    "--model",
-                    "gpt-5.4",
-                    "--effort",
-                    "high",
+                    "Use a specific side capability",
+                    "--capability",
+                    "deep",
                     "--json",
                 ],
                 cwd=ROOT,
@@ -3773,14 +3761,16 @@ exec "$real_git" "$@"
             self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
             payload = json.loads(side_result.stdout)
             self.assertEqual(payload["action"], "start")
-            self.assertEqual(payload["model"], "gpt-5.4")
-            self.assertEqual(payload["model_reasoning_effort"], "high")
-            self.assertEqual(payload["model_config_durability"], "thread_fork_only")
+            self.assertEqual(payload["model"], "gpt-5.6-sol")
+            self.assertEqual(payload["model_reasoning_effort"], "xhigh")
+            self.assertEqual(payload["capability_level"], "deep")
+            self.assertEqual(payload["capability_source"], "override")
+            self.assertEqual(payload["capability_durability"], "thread_fork_only")
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
-            self.assertEqual(fork["params"]["model"], "gpt-5.4")
-            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "high"})
+            self.assertEqual(fork["params"]["model"], "gpt-5.6-sol")
+            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "xhigh"})
             methods = [row["rpc_method"] for row in rpc_rows]
             self.assertNotIn("thread/" + "settings/update", methods)
             self.assertNotIn("config/" + "batchWrite", methods)
@@ -3790,7 +3780,7 @@ exec "$real_git" "$@"
             self.assertNotIn("model", side_thread)
             self.assertNotIn("model_reasoning_effort", side_thread)
 
-    def test_side_start_uses_model_config_side_defaults_as_thread_fork_only_actor_config(self) -> None:
+    def test_side_start_uses_saved_capability_snapshot_for_new_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -3800,12 +3790,13 @@ exec "$real_git" "$@"
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            (Path(str(ctx["instance_root"])) / "model-config.json").write_text(
+            (Path(str(ctx["instance_root"])) / "capability-config.json").write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
-                        "parent": {},
-                        "side": {"model": "gpt-5.4-mini", "effort": "medium"},
+                        "catalog_version": 1,
+                        "parent": {"level": "balanced", "model": "gpt-5.6-terra", "effort": "high"},
+                        "side": {"level": "maximum", "model": "gpt-5.6-sol", "effort": "max"},
                     },
                     ensure_ascii=True,
                     indent=2,
@@ -3835,16 +3826,16 @@ exec "$real_git" "$@"
             self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
             payload = json.loads(side_result.stdout)
             self.assertEqual(payload["action"], "start")
-            self.assertEqual(payload["model"], "gpt-5.4-mini")
-            self.assertEqual(payload["model_reasoning_effort"], "medium")
-            self.assertEqual(payload["model_source"], "actor_config")
-            self.assertEqual(payload["model_reasoning_effort_source"], "actor_config")
-            self.assertEqual(payload["model_config_durability"], "thread_fork_only")
+            self.assertEqual(payload["model"], "gpt-5.6-sol")
+            self.assertEqual(payload["model_reasoning_effort"], "max")
+            self.assertEqual(payload["capability_level"], "maximum")
+            self.assertEqual(payload["capability_source"], "actor_config")
+            self.assertEqual(payload["capability_durability"], "thread_fork_only")
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
-            self.assertEqual(fork["params"]["model"], "gpt-5.4-mini")
-            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "medium"})
+            self.assertEqual(fork["params"]["model"], "gpt-5.6-sol")
+            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "max"})
             methods = [row["rpc_method"] for row in rpc_rows]
             self.assertNotIn("thread/" + "settings/update", methods)
             self.assertNotIn("config/" + "batchWrite", methods)
@@ -3887,7 +3878,7 @@ exec "$real_git" "$@"
             self.assertIn("thread-side-1", side_result.stdout)
             self.assertNotIn("{", side_result.stdout)
 
-    def test_side_send_existing_active_child_ignores_model_config_and_steers_side_not_parent(self) -> None:
+    def test_side_send_existing_active_child_ignores_saved_capability_and_steers_side_not_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -3895,12 +3886,13 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            (Path(str(ctx["instance_root"])) / "model-config.json").write_text(
+            (Path(str(ctx["instance_root"])) / "capability-config.json").write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
-                        "parent": {},
-                        "side": {"model": "gpt-5.4-mini", "effort": "medium"},
+                        "catalog_version": 1,
+                        "parent": {"level": "balanced", "model": "gpt-5.6-terra", "effort": "high"},
+                        "side": {"level": "maximum", "model": "gpt-5.6-sol", "effort": "max"},
                     },
                     ensure_ascii=True,
                     indent=2,
@@ -3967,7 +3959,7 @@ exec "$real_git" "$@"
             self.assertEqual(payload["expected_turn_id"], "turn-side-1")
             self.assertNotIn("model", payload)
             self.assertNotIn("model_reasoning_effort", payload)
-            self.assertNotIn("model_source", payload)
+            self.assertNotIn("capability_source", payload)
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             methods = [row["rpc_method"] for row in rpc_rows]
@@ -4071,7 +4063,7 @@ exec "$real_git" "$@"
             self.assertNotIn("turn/steer", methods)
             self.assertNotIn("turn/interrupt", methods)
 
-    def test_side_send_rejects_model_and_effort_before_rpc_mutation(self) -> None:
+    def test_side_send_rejects_capability_override_before_rpc_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -4102,10 +4094,8 @@ exec "$real_git" "$@"
                     "thread-side-1",
                     "--text",
                     "Bad switch",
-                    "--model",
-                    "gpt-5.4",
-                    "--effort",
-                    "high",
+                    "--capability",
+                    "deep",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],

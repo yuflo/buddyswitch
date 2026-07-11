@@ -37,7 +37,7 @@ NO_PROXY_OPENER = build_opener(ProxyHandler({}))
 
 from env.services import messages as message_service  # noqa: E402
 from env.repos import identities as identity_repo  # noqa: E402
-import actor_model_config  # noqa: E402
+import actor_capability  # noqa: E402
 
 
 def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:
@@ -143,12 +143,12 @@ def active_status(actor_id: str, thread_id: str, thread_status: str) -> dict[str
     }
 
 
-def write_web_model_config_instance(
+def write_web_capability_instance(
     shared_root: Path,
     *,
     actor_id: str = "act-pm-demo",
     role: str = "pm",
-    model_config: dict[str, object] | None = None,
+    capability_config: dict[str, object] | None = None,
 ) -> Path:
     instance_root = shared_root / "instances" / actor_id
     instance_root.mkdir(parents=True, exist_ok=True)
@@ -171,13 +171,14 @@ def write_web_model_config_instance(
         + "\n",
         encoding="utf-8",
     )
-    default_model_config = {
+    default_capability_config = {
         "schema_version": 1,
-        "parent": {"model": "gpt-5.5", "effort": "medium"},
-        "side": {"model": "gpt-5.5", "effort": "medium"},
+        "catalog_version": 1,
+        "parent": {"level": "balanced", "model": "gpt-5.6-terra", "effort": "high"},
+        "side": {"level": "fast", "model": "gpt-5.6-luna", "effort": "xhigh"},
     }
-    payload = model_config if model_config is not None else default_model_config
-    (instance_root / "model-config.json").write_text(
+    payload = capability_config if capability_config is not None else default_capability_config
+    (instance_root / "capability-config.json").write_text(
         json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -1687,14 +1688,14 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
 
 
 class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _use_model_config_shared_root(self) -> Path:
+    def _use_capability_shared_root(self) -> Path:
         shared_root = self.runtime_root / "shared-root"
         original_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
         os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
         self.addCleanup(_restore_env_value, "BUDDYSWITCH_SHARED_ROOT", original_shared_root)
         return shared_root
 
-    def _launcher_env_for_model_config_shared_root(self, shared_root: Path) -> dict[str, str]:
+    def _launcher_env_for_capability_shared_root(self, shared_root: Path) -> dict[str, str]:
         source_home = self.runtime_root / "source-home"
         source_home.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
@@ -1889,62 +1890,56 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(payload["actors"][1]["runtime"]["status"], "inactive")
         self.assertEqual(runner.calls, [["instance", "list", "--json"]])
 
-    def test_actor_model_config_get_api_returns_creation_default_dto(self) -> None:
-        shared_root = self._use_model_config_shared_root()
-        write_web_model_config_instance(shared_root)
+    def test_actor_capabilities_get_api_returns_creation_default_dto(self) -> None:
+        shared_root = self._use_capability_shared_root()
+        write_web_capability_instance(shared_root)
         service = self._service()
 
-        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
+        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/capabilities", b"")
 
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["actor_id"], "act-pm-demo")
-        self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.5", "effort": "medium"})
-        self.assertEqual(payload["model_config"]["side"], {"model": "gpt-5.5", "effort": "medium"})
+        self.assertEqual(payload["capabilities"]["parent"]["level"], "balanced")
+        self.assertEqual(payload["capabilities"]["side"]["level"], "fast")
+        self.assertEqual([row["id"] for row in payload["capabilities"]["levels"]], ["fast", "balanced", "deep", "maximum"])
 
-    def test_actor_model_config_put_api_replaces_config_and_runtime_resolve_uses_same_core(self) -> None:
-        shared_root = self._use_model_config_shared_root()
-        instance_json = write_web_model_config_instance(shared_root)
+    def test_actor_capabilities_put_replaces_snapshot_and_runtime_uses_same_core(self) -> None:
+        shared_root = self._use_capability_shared_root()
+        instance_json = write_web_capability_instance(shared_root)
         service = self._service()
-        body = json.dumps(
-            {
-                "parent": {"model": "gpt-5.4", "effort": "high"},
-                "side": {"model": "gpt-5.4-mini", "effort": "medium"},
-            },
-            ensure_ascii=True,
-        ).encode("utf-8")
 
-        put_status, put_payload = service.handle_api("PUT", "/api/actors/act-pm-demo/model-config", body)
-        get_status, get_payload = service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
-        parent = actor_model_config.resolve_parent_options(instance_json)
-        side = actor_model_config.resolve_side_options(instance_json)
+        put_status, put_payload = service.handle_api(
+            "PUT",
+            "/api/actors/act-pm-demo/capabilities",
+            b'{"parent":"deep","side":"maximum"}',
+        )
+        get_status, get_payload = service.handle_api("GET", "/api/actors/act-pm-demo/capabilities", b"")
+        parent = actor_capability.resolve_parent_capability(instance_json)
+        side = actor_capability.resolve_side_capability(instance_json)
 
         self.assertEqual(put_status, 200)
         self.assertEqual(get_status, 200)
-        self.assertEqual(put_payload["model_config"], get_payload["model_config"])
-        self.assertEqual(parent.model, "gpt-5.4")
-        self.assertEqual(parent.effort, "high")
-        self.assertEqual(side.model, "gpt-5.4-mini")
-        self.assertEqual(side.effort, "medium")
+        self.assertEqual(put_payload["capabilities"], get_payload["capabilities"])
+        self.assertEqual((parent.level, parent.model, parent.effort), ("deep", "gpt-5.6-sol", "xhigh"))
+        self.assertEqual((side.level, side.model, side.effort), ("maximum", "gpt-5.6-sol", "max"))
 
-    def test_actor_model_config_cli_set_is_readable_from_web_api_and_core_resolve(self) -> None:
-        shared_root = self._use_model_config_shared_root()
-        instance_json = write_web_model_config_instance(shared_root)
-        env = self._launcher_env_for_model_config_shared_root(shared_root)
-        request_payload = {
-            "parent": {"model": "gpt-5.4", "effort": "high"},
-            "side": {"model": "gpt-5.4-mini", "effort": "medium"},
-        }
+    def test_actor_capabilities_cli_set_is_readable_from_web_api(self) -> None:
+        shared_root = self._use_capability_shared_root()
+        write_web_capability_instance(shared_root)
+        env = self._launcher_env_for_capability_shared_root(shared_root)
 
         completed = subprocess.run(
             [
                 str(LAUNCHER),
                 "instance",
-                "model-config",
+                "capabilities",
                 "act-pm-demo",
                 "set",
-                "--payload-json",
-                json.dumps(request_payload, ensure_ascii=True),
+                "--parent",
+                "deep",
+                "--side",
+                "maximum",
                 "--json",
             ],
             cwd=ROOT,
@@ -1954,32 +1949,26 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             check=False,
         )
         service = self._service()
-        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
-        parent = actor_model_config.resolve_parent_options(instance_json)
-        side = actor_model_config.resolve_side_options(instance_json)
+        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/capabilities", b"")
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         self.assertEqual(status, 200)
-        self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.4", "effort": "high"})
-        self.assertEqual(payload["model_config"]["side"], {"model": "gpt-5.4-mini", "effort": "medium"})
-        self.assertEqual(parent.model, "gpt-5.4")
-        self.assertEqual(parent.effort, "high")
-        self.assertEqual(side.model, "gpt-5.4-mini")
-        self.assertEqual(side.effort, "medium")
+        self.assertEqual(payload["capabilities"]["parent"]["level"], "deep")
+        self.assertEqual(payload["capabilities"]["side"]["level"], "maximum")
 
-    def test_actor_model_config_web_put_is_readable_from_cli_get(self) -> None:
-        shared_root = self._use_model_config_shared_root()
-        write_web_model_config_instance(shared_root)
-        env = self._launcher_env_for_model_config_shared_root(shared_root)
+    def test_actor_capabilities_web_put_is_readable_from_cli_get(self) -> None:
+        shared_root = self._use_capability_shared_root()
+        write_web_capability_instance(shared_root)
+        env = self._launcher_env_for_capability_shared_root(shared_root)
         service = self._service()
 
         status, payload = service.handle_api(
             "PUT",
-            "/api/actors/act-pm-demo/model-config",
-            b'{"parent":{"model":"gpt-5.4","effort":"high"},"side":{"model":null,"effort":"medium"}}',
+            "/api/actors/act-pm-demo/capabilities",
+            b'{"parent":"deep","side":"maximum"}',
         )
         completed = subprocess.run(
-            [str(LAUNCHER), "instance", "model-config", "act-pm-demo", "get", "--json"],
+            [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get", "--json"],
             cwd=ROOT,
             env=env,
             text=True,
@@ -1991,82 +1980,74 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         cli_payload = json.loads(completed.stdout)
         self.assertEqual(cli_payload["actor_id"], "act-pm-demo")
-        self.assertEqual(cli_payload["model_config"], payload["model_config"])
-        self.assertEqual(cli_payload["model_config"]["side"], {"model": None, "effort": "medium"})
+        self.assertEqual(cli_payload["capabilities"], payload["capabilities"])
 
-    def test_actor_model_config_api_rejects_invalid_actor_ids_and_missing_instances(self) -> None:
-        shared_root = self._use_model_config_shared_root()
+    def test_actor_capabilities_api_rejects_invalid_actor_ids_and_missing_instances(self) -> None:
+        shared_root = self._use_capability_shared_root()
         shared_root.mkdir(parents=True, exist_ok=True)
         service = self._service()
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as invalid_actor:
-            service.handle_api("GET", "/api/actors/not-an-actor/model-config", b"")
+            service.handle_api("GET", "/api/actors/not-an-actor/capabilities", b"")
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as missing_actor:
-            service.handle_api("GET", "/api/actors/act-pm-missing/model-config", b"")
+            service.handle_api("GET", "/api/actors/act-pm-missing/capabilities", b"")
 
         self.assertEqual(invalid_actor.exception.status, 400)
         self.assertEqual(invalid_actor.exception.code, "INVALID_REQUEST")
         self.assertEqual(missing_actor.exception.status, 404)
         self.assertEqual(missing_actor.exception.code, "NOT_FOUND")
 
-    def test_actor_model_config_put_invalid_payload_is_400_and_preserves_file(self) -> None:
-        shared_root = self._use_model_config_shared_root()
-        instance_json = write_web_model_config_instance(
-            shared_root,
-            model_config={
-                "schema_version": 1,
-                "parent": {"model": "gpt-5.4", "effort": "high"},
-                "side": {},
-            },
-        )
-        path = instance_json.parent / "model-config.json"
+    def test_actor_capabilities_put_invalid_payload_is_400_and_preserves_file(self) -> None:
+        shared_root = self._use_capability_shared_root()
+        instance_json = write_web_capability_instance(shared_root)
+        path = instance_json.parent / "capability-config.json"
         before = path.read_text(encoding="utf-8")
         service = self._service()
 
-        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
-            service.handle_api(
-                "PUT",
-                "/api/actors/act-pm-demo/model-config",
-                b'{"parent":{"model":null,"effort":"max"},"side":{"model":null,"effort":null}}',
-            )
+        for body in (
+            b'{"parent":"custom","side":"fast"}',
+            b'{"parent":"balanced","side":"fast","model":"gpt-5.6-sol"}',
+            b'{"parent":"balanced"}',
+        ):
+            with self.subTest(body=body), self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                service.handle_api("PUT", "/api/actors/act-pm-demo/capabilities", body)
+            self.assertEqual(raised.exception.status, 400)
+            self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+            self.assertEqual(path.read_text(encoding="utf-8"), before)
 
-        self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
-        self.assertEqual(path.read_text(encoding="utf-8"), before)
-
-    def test_actor_model_config_get_invalid_existing_config_is_409(self) -> None:
-        shared_root = self._use_model_config_shared_root()
-        instance_json = write_web_model_config_instance(shared_root)
-        (instance_json.parent / "model-config.json").write_text("{bad json\n", encoding="utf-8")
+    def test_actor_capabilities_get_invalid_existing_config_is_409(self) -> None:
+        shared_root = self._use_capability_shared_root()
+        instance_json = write_web_capability_instance(shared_root)
+        (instance_json.parent / "capability-config.json").write_text("{bad json\n", encoding="utf-8")
         service = self._service()
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
-            service.handle_api("GET", "/api/actors/act-pm-demo/model-config", b"")
+            service.handle_api("GET", "/api/actors/act-pm-demo/capabilities", b"")
 
         self.assertEqual(raised.exception.status, 409)
-        self.assertEqual(raised.exception.code, "MODEL_CONFIG_INVALID")
+        self.assertEqual(raised.exception.code, "CAPABILITY_CONFIG_INVALID")
 
-    def test_actor_model_config_put_write_failure_is_502(self) -> None:
-        shared_root = self._use_model_config_shared_root()
-        instance_json = write_web_model_config_instance(shared_root)
+    def test_actor_capabilities_put_write_failure_is_502(self) -> None:
+        shared_root = self._use_capability_shared_root()
+        instance_json = write_web_capability_instance(shared_root)
         service = self._service()
 
         with mock.patch.object(
-            WEB_MANAGEMENT.actor_model_config,
-            "replace_management_payload",
-            side_effect=actor_model_config.ActorModelConfigError(
-                f"{instance_json.parent / 'model-config.json'}: failed to write model config: denied"
+            WEB_MANAGEMENT.actor_capability,
+            "replace_actor_capabilities",
+            side_effect=actor_capability.ActorCapabilityError(
+                f"{instance_json.parent / 'capability-config.json'}: failed to write capability config: denied"
             ),
         ):
             with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
                 service.handle_api(
                     "PUT",
-                    "/api/actors/act-pm-demo/model-config",
-                    b'{"parent":{"model":null,"effort":null},"side":{"model":null,"effort":null}}',
+                    "/api/actors/act-pm-demo/capabilities",
+                    b'{"parent":"balanced","side":"fast"}',
                 )
 
         self.assertEqual(raised.exception.status, 502)
-        self.assertEqual(raised.exception.code, "MODEL_CONFIG_WRITE_FAILED")
+        self.assertEqual(raised.exception.code, "CAPABILITY_CONFIG_WRITE_FAILED")
 
     def test_web_im_send_resolves_actor_route_from_instance_list_not_identity_id_text(self) -> None:
         target_identity_id = "act-web-identity-route"
@@ -2123,13 +2104,14 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
     def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
         from env.domain import task_sys
 
-        shared_root = self._use_model_config_shared_root()
-        write_web_model_config_instance(
+        shared_root = self._use_capability_shared_root()
+        write_web_capability_instance(
             shared_root,
-            model_config={
+            capability_config={
                 "schema_version": 1,
-                "parent": {"model": "gpt-5.4"},
-                "side": {"effort": "medium"},
+                "catalog_version": 1,
+                "parent": {"level": "deep", "model": "gpt-5.6-sol", "effort": "xhigh"},
+                "side": {"level": "maximum", "model": "gpt-5.6-sol", "effort": "max"},
             },
         )
         self._seed_track_pages()
@@ -2188,8 +2170,9 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(console["im"]["target"]["role_id"], "pm")
         self.assertNotIn("actor_address", console["im"]["target"])
         self.assertEqual([row["id"] for row in console["tracks"]["items"]], ["track-alpha"])
-        self.assertEqual(console["model_config"]["parent"], {"model": "gpt-5.4", "effort": None})
-        self.assertEqual(console["model_config"]["side"], {"model": None, "effort": "medium"})
+        self.assertEqual(console["capabilities"]["parent"]["level"], "deep")
+        self.assertEqual(console["capabilities"]["side"]["level"], "maximum")
+        self.assertNotIn("model_config", console)
 
     def test_actor_console_api_rejects_invalid_actor_ids(self) -> None:
         service = self._service()
@@ -2249,10 +2232,10 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
 
 class WebManagementHTTPActionTests(WebManagementServerTestCase):
-    def test_model_config_put_route_accepts_http_put_method(self) -> None:
+    def test_capabilities_put_route_accepts_http_put_method(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             shared_root = Path(temp_root) / "shared-root"
-            write_web_model_config_instance(shared_root)
+            write_web_capability_instance(shared_root)
             original_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
             os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             self.addCleanup(_restore_env_value, "BUDDYSWITCH_SHARED_ROOT", original_shared_root)
@@ -2261,17 +2244,15 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             status, payload = self._request_json(
                 base_url,
                 method="PUT",
-                path="/api/actors/act-pm-demo/model-config",
-                payload={
-                    "parent": {"model": "gpt-5.4", "effort": "high"},
-                    "side": {"model": None, "effort": None},
-                },
+                path="/api/actors/act-pm-demo/capabilities",
+                payload={"parent": "deep", "side": "maximum"},
             )
 
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["actor_id"], "act-pm-demo")
-            self.assertEqual(payload["model_config"]["parent"], {"model": "gpt-5.4", "effort": "high"})
+            self.assertEqual(payload["capabilities"]["parent"]["level"], "deep")
+            self.assertEqual(payload["capabilities"]["side"]["level"], "maximum")
 
     def test_side_create_route_delegates_and_reports_side_thread_id(self) -> None:
         runner = OrderedRunner(
@@ -2308,7 +2289,7 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(payload["turn_id"], "turn-side-1")
         self.assertEqual(payload["instance"]["thread_id"], "thread-main")
 
-    def test_side_route_passes_model_and_effort_only_for_new_side_thread(self) -> None:
+    def test_side_route_passes_capability_only_for_new_side_thread(self) -> None:
         runner = OrderedRunner(
             [
                 CommandStep(
@@ -2318,10 +2299,8 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
                         "act-pm-demo",
                         "--text",
                         "Start side",
-                        "--model",
-                        "gpt-5.4",
-                        "--effort",
-                        "high",
+                        "--capability",
+                        "deep",
                         "--json",
                     ],
                     command_json(
@@ -2332,11 +2311,11 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
                             "parent_thread_id": "thread-main",
                             "side_thread_id": "thread-side-1",
                             "turn_id": "turn-side-1",
-                            "model": "gpt-5.4",
-                            "model_reasoning_effort": "high",
-                            "model_source": "override",
-                            "model_reasoning_effort_source": "override",
-                            "model_config_durability": "thread_fork_only",
+                            "model": "gpt-5.6-sol",
+                            "model_reasoning_effort": "xhigh",
+                            "capability_level": "deep",
+                            "capability_source": "override",
+                            "capability_durability": "thread_fork_only",
                         }
                     ),
                 ),
@@ -2351,14 +2330,15 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         status, payload = service.handle_api(
             "POST",
             "/api/instances/act-pm-demo/side",
-            b'{"text":"Start side","model":"gpt-5.4","effort":"high"}',
+            b'{"text":"Start side","capability":"deep"}',
         )
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["side_thread_id"], "thread-side-1")
-        self.assertEqual(payload["model"], "gpt-5.4")
-        self.assertEqual(payload["model_reasoning_effort"], "high")
-        self.assertEqual(payload["model_config_durability"], "thread_fork_only")
+        self.assertEqual(payload["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_reasoning_effort"], "xhigh")
+        self.assertEqual(payload["capability_level"], "deep")
+        self.assertEqual(payload["capability_durability"], "thread_fork_only")
 
     def test_side_send_route_delegates_existing_side(self) -> None:
         runner = OrderedRunner(
@@ -2472,7 +2452,7 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
         self.assertEqual(runner.calls, [])
 
-    def test_side_route_rejects_model_or_effort_with_existing_side_thread_id(self) -> None:
+    def test_side_route_rejects_capability_with_existing_side_thread_id(self) -> None:
         runner, base_url = self._start_server()
         status, payload = self._request_json(
             base_url,
@@ -2481,8 +2461,7 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             payload={
                 "side_thread_id": "thread-side-1",
                 "text": "Follow up",
-                "model": "gpt-5.4",
-                "effort": "high",
+                "capability": "deep",
             },
         )
         self.assertEqual(status, 400)
