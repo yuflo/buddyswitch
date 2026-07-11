@@ -3,6 +3,8 @@ test-results/
 playwright-report/
 
 # Temporary and local noise
+.codex/
+.pytest_cache/
 .worktrees/
 docs/spec/
 **/superpowers/**
