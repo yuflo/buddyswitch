@@ -1,7 +1,7 @@
 # Luma Day AI 日程管理 MVP 设计规格
 
 日期：2026-07-12
-状态：待用户评审
+状态：实现基线（持续目标无修改反馈）
 角色内路径：`projects/app/`
 权威产品源：`/Users/chen/.codex-buddyswitch/project/workspace/projects/app`
 
