@@ -59,6 +59,45 @@ function assertCssDeclarationsExclude(selector, declarations) {
   });
 }
 
+test('production javascript has one actor selection state owner and no retired side paths', () => {
+  const selectionWrites = appJs.match(/state\.selectedActorId\s*=\s*[^=]/g) || [];
+  assert.equal(selectionWrites.length, 1);
+  assertIncludes(appJs, 'function beginActorSelection(state, actorId)');
+  assertIncludes(appJs, 'async function loadActorSelection(state, elements, actorId)');
+  assertExcludes(appJs, 'suppressNextRosterAutoSelection');
+  assertExcludes(appJs, 'refreshSelectedActorConversation');
+
+  const createdStart = appJs.indexOf('function beginCreatedActorReconciliation');
+  const createdEnd = appJs.indexOf('function nextActorIdAfterRemoval', createdStart);
+  const createdSource = appJs.slice(createdStart, createdEnd);
+  assertIncludes(createdSource, 'await loadActorSelection(state, elements, actorId)');
+  assertExcludes(createdSource, 'refreshActorCard(');
+  assertExcludes(createdSource, 'refreshConversation(');
+
+  const lifecycleStart = appJs.indexOf('async function reconcileLifecycleOperation');
+  const lifecycleEnd = appJs.indexOf('async function createInstance', lifecycleStart);
+  const lifecycleSource = appJs.slice(lifecycleStart, lifecycleEnd);
+  assertIncludes(lifecycleSource, 'loadActorSelection(state, elements, restoreActorId)');
+  assertIncludes(lifecycleSource, "beginActorSelection(state, '')");
+
+  const refreshStart = appJs.indexOf('async function refreshVisibleRegionsWithFeedback');
+  const refreshEnd = appJs.indexOf('async function bootstrap', refreshStart);
+  const refreshSource = appJs.slice(refreshStart, refreshEnd);
+  assertIncludes(refreshSource, 'reconcileActorSelectionAfterRoster');
+  assertIncludes(refreshSource, 'loadActorSelection(state, elements, state.selectedActorId)');
+
+  const bootstrapStart = appJs.indexOf('async function bootstrap');
+  const bootstrapEnd = appJs.indexOf("if (typeof document !== 'undefined')", bootstrapStart);
+  const bootstrapSource = appJs.slice(bootstrapStart, bootstrapEnd);
+  assertIncludes(bootstrapSource, 'reconcileActorSelectionAfterRoster');
+  assertExcludes(bootstrapSource, 'refreshActorCard(');
+  assertExcludes(bootstrapSource, 'refreshConversation(');
+  assert.equal(
+    (bootstrapSource.match(/await Promise\.allSettled\(\[appBasicsPromise, tracksPromise\]\)/g) || []).length,
+    2
+  );
+});
+
 test('production html keeps all real control ids used by the web UI', () => {
   [
     'server-status',
@@ -521,7 +560,8 @@ test('production javascript keeps the real api surface', () => {
   assertIncludes(appJs, 'actorRuntimeForId');
   assertIncludes(appJs, 'content: content');
   assertExcludes(appJs, 'content: state.draftText');
-  assertIncludes(appJs, 'target_identity_id: target.identity_id');
+  assertIncludes(appJs, "const targetIdentityId = target && target.identity_id ? target.identity_id : ''");
+  assertIncludes(appJs, 'target_identity_id: targetIdentityId');
   assertIncludes(appJs, 'buildImConversationUrl');
   assertIncludes(appJs, 'buildImEventsUrl(15000)');
   assertIncludes(appJs, 'buildImMessageUrl');

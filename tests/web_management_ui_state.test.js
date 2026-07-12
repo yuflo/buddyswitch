@@ -251,7 +251,7 @@ test('state defaults to Team room as the primary section', () => {
   assert.equal(state.imConversationIdentityId, '');
 });
 
-test('actor payload sync chooses first actor and clears stale selection', () => {
+test('actor roster payload exposes fallback facts without changing selection intent', () => {
   const state = app.createState();
   state.selectedActorId = 'act-missing';
   state.openTuiMessage = 'Terminal opened.';
@@ -263,20 +263,35 @@ test('actor payload sync chooses first actor and clears stale selection', () => 
     content: 'stale',
   }));
 
-  app.applyActorsPayload(state, {
+  const result = app.applyActorsPayload(state, {
     actors: [
       { actor_id: 'act-pm-demo', role: 'pm', runtime: { status: 'active' } },
       { actor_id: 'act-dev-demo', role: 'dev', runtime: { status: 'inactive' } },
     ],
   });
 
-  assert.equal(state.selectedActorId, 'act-pm-demo');
-  assert.equal(state.openTuiMessage, '');
-  assert.equal(state.openTuiCommand, '');
-  assert.equal(state.imConversationIdentityId, 'act-pm-demo');
-  assert.deepEqual(state.imConversation, []);
-  assert.deepEqual(state.imSeenMessageIds, {});
+  assert.equal(state.selectedActorId, 'act-missing');
+  assert.equal(state.openTuiMessage, 'Terminal opened.');
+  assert.equal(state.openTuiCommand, 'attach command');
+  assert.equal(state.imConversationIdentityId, '');
+  assert.equal(result.selectedActorPresent, false);
+  assert.equal(result.preferredActorId, 'act-pm-demo');
   assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-pm-demo', 'act-dev-demo']);
+});
+
+test('actor console payload cannot change selection intent', () => {
+  const state = app.createState();
+  state.selectedActorId = 'act-current';
+
+  app.applyActorConsolePayload(state, {
+    console: {
+      actor: { actor_id: 'act-response', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy' },
+    },
+  });
+
+  assert.equal(state.selectedActorId, 'act-current');
+  assert.equal(state.actorConsole.actor.actor_id, 'act-response');
 });
 
 test('actor payload reconciliation retains each unconfirmed created actor independently', () => {
@@ -382,35 +397,35 @@ test('actor roster groups starting active and stopped work with accurate counts'
   assert.match(expandedHtml, /data-roster-toggle="stopped"[^>]*aria-expanded="true"/);
 });
 
-test('initial roster selection prefers active actor over stopped inventory', () => {
+test('roster fallback facts prefer active actor over stopped inventory', () => {
   const state = app.createState();
 
-  app.applyActorsPayload(state, {
+  const result = app.applyActorsPayload(state, {
     actors: [
       { actor_id: 'act-stopped-first', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
       { actor_id: 'act-active-second', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
     ],
   });
 
-  assert.equal(state.selectedActorId, 'act-active-second');
+  assert.equal(state.selectedActorId, '');
+  assert.equal(result.selectedActorPresent, false);
+  assert.equal(result.preferredActorId, 'act-active-second');
   assert.equal(state.rosterStoppedExpanded, false);
-  assert.match(app.renderActorRowsHtml(state), /data-actor-id="act-active-second"[^>]*aria-selected="true"/);
 });
 
-test('stopped-only roster expands stopped group for its automatic selection', () => {
+test('stopped-only roster exposes fallback without changing selection state', () => {
   const state = app.createState();
 
-  app.applyActorsPayload(state, {
+  const result = app.applyActorsPayload(state, {
     actors: [
       { actor_id: 'act-stopped-only', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
     ],
   });
 
-  assert.equal(state.selectedActorId, 'act-stopped-only');
-  assert.equal(state.rosterStoppedExpanded, true);
-  const html = app.renderActorRowsHtml(state);
-  assert.match(html, /data-actor-id="act-stopped-only"[^>]*aria-selected="true"/);
-  assert.match(html, /data-roster-toggle="stopped"[^>]*aria-expanded="true"/);
+  assert.equal(state.selectedActorId, '');
+  assert.equal(result.selectedActorPresent, false);
+  assert.equal(result.preferredActorId, 'act-stopped-only');
+  assert.equal(state.rosterStoppedExpanded, false);
 });
 
 test('start operation rows distinguish queued from running lifecycle work', () => {
@@ -1243,9 +1258,198 @@ test('actor selection clears stale feedback before fetch completes', async () =>
   }
 });
 
+test('stale open tui response cannot write into a newer actor selection', async () => {
+  const originalFetch = globalThis.fetch;
+  const openTuiResponse = deferred();
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-tui-a/open-tui') {
+      return openTuiResponse.promise;
+    }
+    if (requestUrl === '/api/actors/act-tui-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-tui-b', role: 'pm' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-tui-b', role_id: 'pm' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-tui-b&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-tui-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+      { actor_id: 'act-tui-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b' } },
+    ];
+    state.selectedActorId = 'act-tui-a';
+    state.actorConsole = {
+      actor: { actor_id: 'act-tui-a', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a', thread_status: 'idle' },
+    };
+
+    const opening = app.openTui(state, elements);
+    assert.equal(state.openTuiPending, true);
+
+    await app.selectActor(state, elements, 'act-tui-b');
+    assert.equal(state.openTuiPending, false);
+    assert.equal(state.openTuiCommand, '');
+
+    openTuiResponse.resolve(okResponse({ command: 'attach-act-tui-a' }));
+    await opening;
+
+    assert.equal(state.selectedActorId, 'act-tui-b');
+    assert.equal(state.openTuiPending, false);
+    assert.equal(state.openTuiCommand, '');
+    assert.equal(state.openTuiMessage, '');
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stale interrupt response cannot mutate or keep pending on a newer actor selection', async () => {
+  const originalFetch = globalThis.fetch;
+  const interruptResponse = deferred();
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-interrupt-a/interrupt') {
+      return interruptResponse.promise;
+    }
+    if (requestUrl === '/api/actors/act-interrupt-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-interrupt-b', role: 'pm' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-interrupt-b', role_id: 'pm' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-interrupt-b&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-interrupt-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-interrupt-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-interrupt-a';
+    state.actorConsole = {
+      actor: { actor_id: 'act-interrupt-a', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'in_progress' },
+    };
+
+    const interrupt = app.runInterruptAction(state, elements);
+    await waitFor(() => state.interruptPending, 'A interrupt pending');
+    await app.selectActor(state, elements, 'act-interrupt-b');
+
+    assert.equal(state.interruptPending, false);
+    interruptResponse.resolve(okResponse({ turn_id: 'turn-a' }));
+    await interrupt;
+
+    assert.equal(state.selectedActorId, 'act-interrupt-b');
+    assert.equal(state.message, '');
+    assert.equal(state.openTuiMessage, '');
+    assert.equal(state.interruptPending, false);
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stale copy completion cannot write tui feedback into a newer actor selection', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const copyResponse = deferred();
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: function () { return copyResponse.promise; } } },
+  });
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-copy-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-copy-b', role: 'pm' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-copy-b', role_id: 'pm' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-copy-b&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-copy-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-copy-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-copy-a';
+    state.openTuiCommand = 'attach-act-copy-a';
+
+    const copying = app.copyOpenTuiCommand(state, elements);
+    await app.selectActor(state, elements, 'act-copy-b');
+    copyResponse.resolve();
+    await copying;
+
+    assert.equal(state.openTuiCommand, '');
+    assert.equal(state.openTuiMessage, '');
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalNavigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+});
+
 test('create teammate keeps pending actor visible until roster reconciliation', async () => {
   const originalFetch = globalThis.fetch;
+  const originalDocument = globalThis.document;
+  const originalSetTimeout = globalThis.setTimeout;
   let actorRosterCalls = 0;
+  let actorRefreshSchedules = 0;
+  let state;
+  globalThis.document = { hidden: false };
+  globalThis.setTimeout = function (callback, delay, ...args) {
+    if (delay === 3000) {
+      actorRefreshSchedules += 1;
+    }
+    return originalSetTimeout(callback, delay, ...args);
+  };
   globalThis.fetch = async function (url, options) {
     const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
     if (requestUrl === '/api/instances') {
@@ -1303,7 +1507,7 @@ test('create teammate keeps pending actor visible until roster reconciliation', 
   };
 
   try {
-    const state = app.createState();
+    state = app.createState();
     const elements = createRenderElements();
     state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
     state.selectedRole = 'market';
@@ -1329,13 +1533,112 @@ test('create teammate keeps pending actor visible until roster reconciliation', 
     assert.match(elements.actorsList.innerHTML, /pending|initializing/i);
 
     await waitFor(() => Object.keys(state.rosterPendingActors).length === 0, 'roster confirmation');
+    await waitFor(
+      () => state.actorSelectionPendingId === '',
+      'created actor selection settlement'
+    );
 
     assert.equal(state.selectedActorId, 'act-market-new');
+    assert.equal(state.actorSelectionPendingId, '');
+    assert.equal(app.shouldRefreshSelectedActorConsole(state, { documentHidden: false }), true);
+    assert.ok(state.actorRefreshTimer);
+    assert.equal(actorRefreshSchedules, 1);
     assert.deepEqual(state.rosterPendingActors, {});
     assert.match(elements.actorsList.innerHTML, /act-market-new/);
     assert.doesNotMatch(elements.actorsList.innerHTML, /pending|initializing/i);
   } finally {
+    if (state && state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
     globalThis.fetch = originalFetch;
+    globalThis.document = originalDocument;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('created actor roster reconciliation starts while selected actor projection is still loading', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const consoleResponse = deferred();
+  let actorRosterCalls = 0;
+  let state;
+  globalThis.setTimeout = function (callback, delay, ...args) {
+    if (delay === 0) {
+      Promise.resolve().then(callback);
+      return 1;
+    }
+    return originalSetTimeout(callback, delay, ...args);
+  };
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/operations/op-start-projection-slow') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-start-projection-slow',
+          action: 'start',
+          status: 'succeeded',
+          label: 'Starting Market',
+          target: { actor_id: 'act-projection-slow', role: 'market' },
+          result: { ok: true, actor_id: 'act-projection-slow' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors/act-projection-slow/console') {
+      return consoleResponse.promise;
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-projection-slow&limit=50') {
+      return imNotFoundResponse();
+    }
+    if (requestUrl === '/api/actors') {
+      actorRosterCalls += 1;
+      return okResponse({
+        actors: [
+          { actor_id: 'act-projection-slow', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    state = app.createState();
+    const elements = createRenderElements();
+    state.lifecycleOperationPollDelaysMs = [];
+    state.rosterReconcileDelaysMs = [0];
+    state.selectedLifecycleOperationId = 'op-start-projection-slow';
+    app.recordLifecycleOperation(state, lifecycleOperation({
+      id: 'op-start-projection-slow',
+      action: 'start',
+      status: 'running',
+      label: 'Starting Market',
+      target: { actor_id: '', role: 'market' },
+    }));
+
+    const poll = app.pollLifecycleOperations(state, elements);
+    await waitFor(() => actorRosterCalls === 1, 'created actor roster confirmation while selection is loading');
+
+    assert.equal(state.selectedActorId, 'act-projection-slow');
+    assert.equal(state.actorSelectionPendingId, 'act-projection-slow');
+    assert.deepEqual(state.rosterPendingActors, {});
+
+    consoleResponse.resolve(okResponse({
+      console: {
+        actor: { actor_id: 'act-projection-slow', role: 'market' },
+        runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+        task_sys: { active_tasks: [] },
+        tracks: { items: [] },
+        im: { target: { identity_id: 'act-projection-slow', role_id: 'market' } },
+      },
+    }));
+    await poll;
+  } finally {
+    if (state && state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
   }
 });
 
@@ -1695,6 +1998,20 @@ test('failed start operation surfaces backend error and removes pending operatio
         }),
       });
     }
+    if (requestUrl === '/api/actors/act-market-old/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-market-old', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-old', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-market-old', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-market-old&limit=50') {
+      return imNotFoundResponse();
+    }
     throw new Error('unexpected fetch ' + requestUrl);
   };
 
@@ -1718,6 +2035,10 @@ test('failed start operation surfaces backend error and removes pending operatio
     await app.pollLifecycleOperations(state, elements);
 
     assert.equal(state.selectedActorId, 'act-market-old');
+    assert.equal(state.actorConsole.actor.actor_id, 'act-market-old');
+    assert.equal(state.imConversationIdentityId, 'act-market-old');
+    assert.deepEqual(state.imConversation, []);
+    assert.equal(state.actorSelectionPendingId, '');
     assert.equal(state.selectedLifecycleOperationId, '');
     assert.deepEqual(state.lifecycleOperations, {});
     assert.doesNotMatch(elements.actorsList.innerHTML, /Starting Market/);
@@ -1999,6 +2320,8 @@ test('delete lifecycle operation removes actor after terminal operation result',
 
     assert.deepEqual(state.lifecycleOperations, {});
     assert.equal(state.selectedActorId, 'act-other-demo');
+    assert.equal(state.actorConsole.actor.actor_id, 'act-other-demo');
+    assert.equal(state.imConversationIdentityId, 'act-other-demo');
     assert.deepEqual(state.actors.map((actor) => actor.actor_id), ['act-other-demo']);
     assert.match(elements.messageBanner.textContent, /Deleting act-delete-demo completed/);
     assert.doesNotMatch(elements.actorsList.innerHTML, /act-delete-demo/);
@@ -2007,6 +2330,200 @@ test('delete lifecycle operation removes actor after terminal operation result',
       clearTimeout(state.actorRefreshTimer);
       state.actorRefreshTimer = null;
     }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stale lifecycle submission cannot clear tui feedback for a newer actor selection', async () => {
+  const originalFetch = globalThis.fetch;
+  const stopResponse = deferred();
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-lifecycle-a/stop') {
+      return stopResponse.promise;
+    }
+    if (requestUrl === '/api/actors/act-lifecycle-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-lifecycle-b', role: 'pm' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-lifecycle-b', role_id: 'pm' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-lifecycle-b&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-lifecycle-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-lifecycle-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-lifecycle-a';
+    state.actorConsole = {
+      actor: { actor_id: 'act-lifecycle-a', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_status: 'idle' },
+    };
+    state.lifecycleOperationPollDelaysMs = [];
+
+    const stop = app.runLifecycleAction(state, elements, 'stop', 'act-lifecycle-a');
+    await app.selectActor(state, elements, 'act-lifecycle-b');
+    state.openTuiCommand = 'attach-act-lifecycle-b';
+    state.openTuiMessage = 'Terminal opened.';
+
+    stopResponse.resolve(okResponse({
+      operation: lifecycleOperation({
+        id: 'op-stop-lifecycle-a',
+        action: 'stop',
+        status: 'running',
+        label: 'Stopping act-lifecycle-a',
+        target: { actor_id: 'act-lifecycle-a', role: 'market' },
+      }),
+    }));
+    await stop;
+
+    assert.equal(state.selectedActorId, 'act-lifecycle-b');
+    assert.equal(state.openTuiCommand, 'attach-act-lifecycle-b');
+    assert.equal(state.openTuiMessage, 'Terminal opened.');
+    assert.ok(state.lifecycleOperations['op-stop-lifecycle-a']);
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('delete roster failure leaves selection clear and never selects from stale local roster', async () => {
+  const originalFetch = globalThis.fetch;
+  let staleActorConsoleCalls = 0;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-delete-roster-error') {
+      assert.equal(options && options.method, 'DELETE');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-roster-error',
+          action: 'delete',
+          status: 'running',
+          label: 'Deleting act-delete-roster-error',
+          target: { actor_id: 'act-delete-roster-error', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-delete-roster-error') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-roster-error',
+          action: 'delete',
+          status: 'succeeded',
+          label: 'Deleting act-delete-roster-error',
+          target: { actor_id: 'act-delete-roster-error', role: 'market' },
+          result: { ok: true, actor_id: 'act-delete-roster-error' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors') {
+      return {
+        ok: false,
+        json: async function () {
+          return { ok: false, error: { code: 'E_ROSTER', message: 'Authoritative roster unavailable' } };
+        },
+      };
+    }
+    if (requestUrl === '/api/actors/act-stale-local/console') {
+      staleActorConsoleCalls += 1;
+      return okResponse({});
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-delete-roster-error', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-stale-local', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-delete-roster-error';
+    state.actorConsole = { actor: { actor_id: 'act-delete-roster-error', role: 'market' } };
+    state.imConversationIdentityId = 'act-delete-roster-error';
+    state.lifecycleOperationPollDelaysMs = [];
+
+    await app.runLifecycleAction(state, elements, 'delete', state.selectedActorId);
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.actorConsole, null);
+    assert.equal(state.imConversationIdentityId, '');
+    assert.equal(staleActorConsoleCalls, 0);
+    assert.match(elements.messageBanner.textContent, /Authoritative roster unavailable/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('deleting final actor clears projection and invalidates prior selection generation', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-final') {
+      assert.equal(options && options.method, 'DELETE');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-final',
+          action: 'delete',
+          status: 'running',
+          label: 'Deleting act-final',
+          target: { actor_id: 'act-final', role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-delete-final') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-final',
+          action: 'delete',
+          status: 'succeeded',
+          label: 'Deleting act-final',
+          target: { actor_id: 'act-final', role: 'market' },
+          result: { ok: true, actor_id: 'act-final' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors') return okResponse({ actors: [] });
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-final', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+    ];
+    state.selectedActorId = 'act-final';
+    state.actorConsole = { actor: { actor_id: 'act-final', role: 'market' } };
+    state.imConversationIdentityId = 'act-final';
+    state.lifecycleOperationPollDelaysMs = [];
+    const requestId = state.actorSelectionRequestId;
+
+    await app.runLifecycleAction(state, elements, 'delete', state.selectedActorId);
+    await app.pollLifecycleOperations(state, elements);
+
+    assert.deepEqual(state.actors, []);
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.actorConsole, null);
+    assert.equal(state.imConversationIdentityId, '');
+    assert.equal(state.actorSelectionRequestId, requestId + 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2301,6 +2818,9 @@ test('actor card renders as soon as console resolves before conversation', async
 
     try {
       assert.equal(state.selectedActorId, 'act-new');
+      assert.equal(state.actorSelectionPendingId, 'act-new');
+      assert.equal(state.actorCardLoading, false);
+      assert.equal(state.conversationLoading, true);
       assert.match(elements.actorRuntimeDetail.innerHTML, /Status/);
       assert.match(elements.actorRuntimeDetail.innerHTML, /Health/);
       assert.match(elements.actorRuntimeDetail.innerHTML, /Task Sys/);
@@ -2313,6 +2833,9 @@ test('actor card renders as soon as console resolves before conversation', async
 
     conversation.resolve(imNotFoundResponse());
     await selection;
+    assert.equal(state.actorSelectionPendingId, '');
+    assert.equal(state.actorCardLoading, false);
+    assert.equal(state.conversationLoading, false);
     if (assertionError) {
       throw assertionError;
     }
@@ -2393,6 +2916,285 @@ test('slow conversation does not disable runtime actions after console loads', a
       clearTimeout(state.actorRefreshTimer);
       state.actorRefreshTimer = null;
     }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh explicitly selects and loads preferred actor when selection is missing', async () => {
+  const originalFetch = globalThis.fetch;
+  let missingActorRequested = false;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') {
+      return okResponse({});
+    }
+    if (requestUrl === '/api/roles') {
+      return okResponse({ roles: [{ id: 'market', label: 'Market' }] });
+    }
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-stopped', role: 'dev', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+          { actor_id: 'act-preferred', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      });
+    }
+    if (requestUrl === '/api/tracks') {
+      return okResponse({ tracks: [] });
+    }
+    if (requestUrl === '/api/actors/act-missing/console') {
+      missingActorRequested = true;
+      return okResponse({ console: { actor: { actor_id: 'act-missing', role: 'market' } } });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-missing&limit=50') {
+      return imNotFoundResponse();
+    }
+    if (requestUrl === '/api/actors/act-preferred/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-preferred', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-preferred', thread_status: 'idle' },
+          task_sys: { active_count: 0, active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-preferred', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-preferred&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.selectedActorId = 'act-missing';
+    state.actors = [
+      { actor_id: 'act-missing', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+
+    await app.refreshVisibleRegionsWithFeedback(state, elements);
+
+    assert.equal(missingActorRequested, false);
+    assert.equal(state.selectedActorId, 'act-preferred');
+    assert.equal(state.actorConsole.actor.actor_id, 'act-preferred');
+    assert.equal(state.actorSelectionPendingId, '');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh selects stopped-only fallback and expands stopped roster', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') return okResponse({});
+    if (requestUrl === '/api/roles') return okResponse({ roles: [{ id: 'pm', label: 'PM' }] });
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-stopped-only', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+        ],
+      });
+    }
+    if (requestUrl === '/api/tracks') return okResponse({ tracks: [] });
+    if (requestUrl === '/api/actors/act-stopped-only/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-stopped-only', role: 'pm' },
+          runtime: { status: 'inactive', app_server_health: 'unhealthy', thread_id: 'thread-stopped', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-stopped-only', role_id: 'pm' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-stopped-only&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+
+    await app.refreshVisibleRegionsWithFeedback(state, elements);
+
+    assert.equal(state.selectedActorId, 'act-stopped-only');
+    assert.equal(state.rosterStoppedExpanded, true);
+    assert.match(elements.actorsList.innerHTML, /data-actor-id="act-stopped-only"[^>]*aria-selected="true"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh clears actor projection when authoritative roster is empty', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') return okResponse({});
+    if (requestUrl === '/api/roles') return okResponse({ roles: [] });
+    if (requestUrl === '/api/actors') return okResponse({ actors: [] });
+    if (requestUrl === '/api/tracks') return okResponse({ tracks: [] });
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.selectedActorId = 'act-removed';
+    state.actorConsole = { actor: { actor_id: 'act-removed', role: 'market' } };
+    state.imConversationIdentityId = 'act-removed';
+    state.imConversation = [{ id: 'msg-stale', direction: 'reply', content: 'stale' }];
+    const requestId = state.actorSelectionRequestId;
+
+    await app.refreshVisibleRegionsWithFeedback(state, elements);
+
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.actorConsole, null);
+    assert.equal(state.imConversationIdentityId, '');
+    assert.deepEqual(state.imConversation, []);
+    assert.equal(state.actorSelectionRequestId, requestId + 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh restarts a pending actor selection instead of sharing its generation', async () => {
+  const originalFetch = globalThis.fetch;
+  const staleInitialConsole = deferred();
+  let actorConsoleCalls = 0;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') return okResponse({});
+    if (requestUrl === '/api/roles') return okResponse({ roles: [{ id: 'market', label: 'Market' }] });
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-pending', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      });
+    }
+    if (requestUrl === '/api/tracks') return okResponse({ tracks: [] });
+    if (requestUrl === '/api/actors/act-pending/console') {
+      actorConsoleCalls += 1;
+      if (actorConsoleCalls === 1) return staleInitialConsole.promise;
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-pending', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-fresh', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-pending', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-pending&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-pending', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+
+    const initialSelection = app.selectActor(state, elements, 'act-pending');
+    await waitFor(() => state.actorSelectionPendingId === 'act-pending', 'pending actor selection');
+    const initialRequestId = state.actorSelectionRequestId;
+
+    await app.refreshVisibleRegionsWithFeedback(state, elements);
+
+    assert.equal(actorConsoleCalls, 2);
+    assert.equal(state.actorSelectionRequestId, initialRequestId + 1);
+    assert.equal(state.actorConsole.runtime.thread_id, 'thread-fresh');
+
+    staleInitialConsole.resolve(okResponse({
+      console: {
+        actor: { actor_id: 'act-pending', role: 'market' },
+        runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-stale', thread_status: 'idle' },
+        task_sys: { active_tasks: [] },
+        tracks: { items: [] },
+        im: { target: { identity_id: 'act-pending', role_id: 'market' } },
+      },
+    }));
+    await initialSelection;
+
+    assert.equal(state.actorConsole.runtime.thread_id, 'thread-fresh');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('manual refresh wins over an older same-generation console refresh', async () => {
+  const originalFetch = globalThis.fetch;
+  const staleConsole = deferred();
+  let actorConsoleCalls = 0;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/health') return okResponse({});
+    if (requestUrl === '/api/roles') return okResponse({ roles: [{ id: 'market', label: 'Market' }] });
+    if (requestUrl === '/api/actors') {
+      return okResponse({
+        actors: [
+          { actor_id: 'act-stable', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+        ],
+      });
+    }
+    if (requestUrl === '/api/tracks') return okResponse({ tracks: [] });
+    if (requestUrl === '/api/actors/act-stable/console') {
+      actorConsoleCalls += 1;
+      if (actorConsoleCalls === 1) return staleConsole.promise;
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-stable', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-manual-fresh', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-stable', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-stable&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-stable', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-stable';
+    state.actorConsole = {
+      actor: { actor_id: 'act-stable', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-initial', thread_status: 'idle' },
+    };
+
+    const staleRefresh = app.refreshSelectedActorConsoleAndRender(state, elements);
+    await app.refreshVisibleRegionsWithFeedback(state, elements);
+    assert.equal(state.actorConsole.runtime.thread_id, 'thread-manual-fresh');
+
+    staleConsole.resolve(okResponse({
+      console: {
+        actor: { actor_id: 'act-stable', role: 'market' },
+        runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-auto-stale', thread_status: 'idle' },
+        task_sys: { active_tasks: [] },
+        tracks: { items: [] },
+        im: { target: { identity_id: 'act-stable', role_id: 'market' } },
+      },
+    }));
+    await staleRefresh;
+
+    assert.equal(state.actorConsole.runtime.thread_id, 'thread-manual-fresh');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -2731,20 +3533,26 @@ test('console failure does not clear the visible direct thread', async () => {
 
 test('rapid actor switching keeps the latest selected teammate visible', async () => {
   const originalFetch = globalThis.fetch;
+  let firstConsoleSignal;
+  let firstConversationSignal;
   let resolveFirst;
   let resolveSecond;
   const first = new Promise((resolve) => { resolveFirst = resolve; });
   const second = new Promise((resolve) => { resolveSecond = resolve; });
 
-  globalThis.fetch = function (url) {
+  globalThis.fetch = function (url, options) {
     const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
     if (requestUrl === '/api/actors/act-first/console') {
+      firstConsoleSignal = options && options.signal;
       return first;
     }
     if (requestUrl === '/api/actors/act-second/console') {
       return second;
     }
     if (requestUrl.startsWith('/api/im/conversations/direct')) {
+      if (requestUrl.indexOf('identity_id=act-first') >= 0) {
+        firstConversationSignal = options && options.signal;
+      }
       return Promise.resolve({
         ok: false,
         json: async function () {
@@ -2765,7 +3573,11 @@ test('rapid actor switching keeps the latest selected teammate visible', async (
     state.selectedActorId = 'act-old';
 
     const firstSelection = app.selectActor(state, elements, 'act-first');
+    assert.equal(firstConsoleSignal.aborted, false);
+    assert.equal(firstConversationSignal.aborted, false);
     const secondSelection = app.selectActor(state, elements, 'act-second');
+    assert.equal(firstConsoleSignal.aborted, true);
+    assert.equal(firstConversationSignal.aborted, true);
 
     resolveSecond({
       ok: true,
@@ -2803,6 +3615,9 @@ test('rapid actor switching keeps the latest selected teammate visible', async (
 
     assert.equal(state.selectedActorId, 'act-second');
     assert.equal(state.actorConsole.actor.actor_id, 'act-second');
+    assert.equal(state.actorSelectionPendingId, '');
+    assert.equal(state.actorCardLoading, false);
+    assert.equal(state.conversationLoading, false);
     if (state.actorRefreshTimer) {
       clearTimeout(state.actorRefreshTimer);
       state.actorRefreshTimer = null;
@@ -2956,8 +3771,84 @@ test('stale selected actor console refresh cannot overwrite a newer lifecycle se
   }
 });
 
+test('stale actor console refresh cannot cross an A to B to A selection generation', async () => {
+  const originalFetch = globalThis.fetch;
+  const staleAConsole = deferred();
+  let actorAConsoleCalls = 0;
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/act-a/console') {
+      actorAConsoleCalls += 1;
+      if (actorAConsoleCalls === 1) {
+        return staleAConsole.promise;
+      }
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-a', role: 'market' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a-fresh', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-a', role_id: 'market' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/actors/act-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-b', role: 'dev' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-b', role_id: 'dev' } },
+        },
+      });
+    }
+    if (requestUrl.indexOf('/api/im/conversations/direct?identity_id=') === 0) {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-a';
+    state.actorConsole = {
+      actor: { actor_id: 'act-a', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a-initial', thread_status: 'idle' },
+    };
+
+    const staleRefresh = app.refreshSelectedActorConsoleAndRender(state, elements);
+    await app.selectActor(state, elements, 'act-b');
+    await app.selectActor(state, elements, 'act-a');
+
+    assert.equal(state.actorConsole.runtime.thread_id, 'thread-a-fresh');
+
+    staleAConsole.resolve(okResponse({
+      console: {
+        actor: { actor_id: 'act-a', role: 'market' },
+        runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a-stale', thread_status: 'idle' },
+        task_sys: { active_tasks: [] },
+        tracks: { items: [] },
+        im: { target: { identity_id: 'act-a', role_id: 'market' } },
+      },
+    }));
+    await staleRefresh;
+
+    assert.equal(state.selectedActorId, 'act-a');
+    assert.equal(state.actorConsole.runtime.thread_id, 'thread-a-fresh');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('selected actor runtime drives existing lifecycle controls', () => {
   const state = app.createState();
+  state.selectedActorId = 'act-pm-demo';
   app.applyActorConsolePayload(state, {
     console: {
       actor: { actor_id: 'act-pm-demo', role: 'pm' },
@@ -3609,6 +4500,160 @@ test('failed pending send is removed and draft can be restored by caller', () =>
   assert.equal(state.imSeenMessageIds[pendingId], undefined);
 });
 
+test('send completion cannot append the prior actor message after selection changes', async () => {
+  const originalFetch = globalThis.fetch;
+  const sessionResponse = deferred();
+  const sendResponse = deferred();
+  let sentTargetIdentityId = '';
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/im/session') return sessionResponse.promise;
+    if (requestUrl === '/api/im/messages') {
+      sentTargetIdentityId = JSON.parse(options.body).target_identity_id;
+      return sendResponse.promise;
+    }
+    if (requestUrl === '/api/actors/act-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-b', role: 'dev' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-b', role_id: 'dev' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-b&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-a';
+    state.actorConsole = {
+      actor: { actor_id: 'act-a', role: 'market' },
+      im: { target: { identity_id: 'act-a', role_id: 'market' } },
+    };
+    state.imConversationIdentityId = 'act-a';
+    state.draftText = 'message for A';
+    state.imSessionReady = false;
+    state.imPolling = true;
+
+    const send = app.sendCurrentDraft(state, elements);
+    await waitFor(() => state.sendPending, 'A send pending');
+    await app.selectActor(state, elements, 'act-b');
+    assert.equal(state.sendPending, false);
+    state.draftText = 'draft for B';
+
+    sessionResponse.resolve(okResponse({}));
+    await waitFor(() => sentTargetIdentityId !== '', 'captured send target');
+
+    sendResponse.resolve(okResponse({
+      message: { id: 'msg-for-a' },
+      delivery_status: 'accepted',
+      wake_status: 'submitted',
+    }));
+    await send;
+
+    assert.equal(sentTargetIdentityId, 'act-a');
+    assert.equal(state.selectedActorId, 'act-b');
+    assert.equal(state.imConversationIdentityId, 'act-b');
+    assert.deepEqual(state.imConversation, []);
+    assert.equal(state.draftText, 'draft for B');
+    assert.equal(state.message, '');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stale send completion cannot clear a newer actor send pending state', async () => {
+  const originalFetch = globalThis.fetch;
+  const sendAResponse = deferred();
+  const sendBResponse = deferred();
+  let sendCalls = 0;
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/im/messages') {
+      sendCalls += 1;
+      const target = JSON.parse(options.body).target_identity_id;
+      assert.equal(target, sendCalls === 1 ? 'act-send-a' : 'act-send-b');
+      return sendCalls === 1 ? sendAResponse.promise : sendBResponse.promise;
+    }
+    if (requestUrl === '/api/actors/act-send-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-send-b', role: 'dev' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-send-b', role_id: 'dev' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-send-b&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-send-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-send-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = 'act-send-a';
+    state.actorConsole = {
+      actor: { actor_id: 'act-send-a', role: 'market' },
+      im: { target: { identity_id: 'act-send-a', role_id: 'market' } },
+    };
+    state.imConversationIdentityId = 'act-send-a';
+    state.imSessionReady = true;
+    state.imPolling = true;
+    state.draftText = 'message A';
+
+    const sendA = app.sendCurrentDraft(state, elements);
+    await waitFor(() => sendCalls === 1, 'A send request');
+    await app.selectActor(state, elements, 'act-send-b');
+    state.draftText = 'message B';
+    const sendB = app.sendCurrentDraft(state, elements);
+    await waitFor(() => sendCalls === 2, 'B send request');
+    assert.equal(state.sendPending, true);
+
+    sendAResponse.resolve(okResponse({
+      message: { id: 'msg-send-a' },
+      delivery_status: 'accepted',
+      wake_status: 'submitted',
+    }));
+    await sendA;
+    assert.equal(state.sendPending, true);
+
+    sendBResponse.resolve(okResponse({
+      message: { id: 'msg-send-b' },
+      delivery_status: 'accepted',
+      wake_status: 'submitted',
+    }));
+    await sendB;
+    assert.equal(state.sendPending, false);
+    assert.equal(state.selectedActorId, 'act-send-b');
+    assert.deepEqual(state.imConversation.map((entry) => entry.id), ['msg-send-b']);
+    if (state.actorRefreshTimer) {
+      clearTimeout(state.actorRefreshTimer);
+      state.actorRefreshTimer = null;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('record projected IM messages keeps sent and reply directions', () => {
   const state = app.createState();
   const sentEcho = app.recordImProjectedMessage(state, imMessage({
@@ -3697,57 +4742,6 @@ test('direct conversation payload replaces local render cache with persisted his
     ['msg-reply-1', 'reply', 'pong'],
   ]);
   assert.deepEqual(Object.keys(state.imSeenMessageIds).sort(), ['msg-reply-1', 'msg-sent-1']);
-});
-
-test('selected actor conversation treats missing direct conversation as empty history', async () => {
-  const originalFetch = global.fetch;
-  global.fetch = async function (url) {
-    assert.equal(
-      url,
-      '/api/im/conversations/direct?identity_id=act-market-empty&limit=50'
-    );
-    return {
-      ok: false,
-      json: async function () {
-        return {
-          ok: false,
-          error: {
-            code: 'E_IM_NOT_FOUND',
-            message: 'direct conversation not found',
-          },
-        };
-      },
-    };
-  };
-
-  try {
-    const state = app.createState();
-    state.selectedActorId = 'act-market-empty';
-    state.actors = [{ actor_id: 'act-market-empty', role: 'market' }];
-    state.actorConsole = {
-      im: {
-        target: {
-          identity_id: 'act-market-empty',
-          role_id: 'market',
-        },
-      },
-    };
-    app.recordImProjectedMessage(state, imMessage({
-      id: 'msg-stale',
-      sender: 'act-market-old',
-      target: 'ext-web',
-      content: 'stale',
-    }));
-
-    await app.refreshSelectedActorConversation(state);
-
-    assert.equal(state.imConversationIdentityId, 'act-market-empty');
-    assert.deepEqual(state.imConversation, []);
-    assert.deepEqual(state.imSeenMessageIds, {});
-    assert.equal(state.message, '');
-  } finally {
-    global.fetch = originalFetch;
-  }
 });
 
 test('fetched im message appends projected reply without browser cursor state', () => {
@@ -3879,6 +4873,74 @@ test('polling external-session-wide events acks off-selected actor message witho
     assert.deepEqual(state.imConversation, []);
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test('IM event processing cannot restore a prior actor conversation after selection changes', async () => {
+  const originalFetch = globalThis.fetch;
+  const messageFetchStarted = deferred();
+  const messageResponse = deferred();
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/im/events?wait_ms=15000') {
+      return okResponse({ events: [{ event_id: 'imev-a', message_id: 'msg-a' }] });
+    }
+    if (requestUrl === '/api/im/messages/msg-a') {
+      messageFetchStarted.resolve();
+      return messageResponse.promise;
+    }
+    if (requestUrl === '/api/im/events/ack') return okResponse({});
+    if (requestUrl === '/api/actors/act-b/console') {
+      return okResponse({
+        console: {
+          actor: { actor_id: 'act-b', role: 'dev' },
+          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b', thread_status: 'idle' },
+          task_sys: { active_tasks: [] },
+          tracks: { items: [] },
+          im: { target: { identity_id: 'act-b', role_id: 'dev' } },
+        },
+      });
+    }
+    if (requestUrl === '/api/im/conversations/direct?identity_id=act-b&limit=50') {
+      return imNotFoundResponse();
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.imSessionReady = true;
+    state.selectedActorId = 'act-a';
+    state.imConversationIdentityId = 'act-a';
+    state.actors = [
+      { actor_id: 'act-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.actorConsole = {
+      actor: { actor_id: 'act-a', role: 'market' },
+      im: { target: { identity_id: 'act-a', role_id: 'market' } },
+    };
+
+    const poll = app.pollImEventsOnce(state, elements);
+    await messageFetchStarted.promise;
+    await app.selectActor(state, elements, 'act-b');
+
+    messageResponse.resolve(okResponse({
+      message: imMessage({
+        id: 'msg-a',
+        sender: 'act-a',
+        target: 'ext-web',
+        content: 'late A reply',
+      }),
+    }));
+    await poll;
+
+    assert.equal(state.selectedActorId, 'act-b');
+    assert.equal(state.imConversationIdentityId, 'act-b');
+    assert.deepEqual(state.imConversation, []);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
