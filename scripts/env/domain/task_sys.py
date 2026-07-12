@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Mapping
 from uuid import uuid4
 
+from env.domain.identity import ActorIdentityProfile
 from env.repos import runtime_files
 
 TASK_STATUSES = ("in_progress", "completed", "canceled")
@@ -320,16 +321,63 @@ def list_tasks(
     return rows
 
 
-def active_tasks_for_actor(actor_target: Mapping[str, Any]) -> list[dict[str, Any]]:
-    return [record for record in list_tasks(actor_target=actor_target) if _is_active_task(record)]
+def task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the canonical actor-visible Task summary shape."""
+
+    task_id = task.get("id")
+    source_ref = task.get("source_ref")
+    task_relation = task.get("task_relation")
+    execution = task.get("execution")
+    events = task.get("events")
+    return {
+        "task_id": task_id,
+        "id": task_id,
+        "source_type": task.get("source_type"),
+        "source_ref": _payload_copy(source_ref) if isinstance(source_ref, Mapping) else {},
+        "status": task.get("status"),
+        "task_desc": task.get("task_desc"),
+        "task_relation": _payload_copy(task_relation) if isinstance(task_relation, Mapping) else None,
+        "execution": _payload_copy(execution) if isinstance(execution, Mapping) else {},
+        "updated_at": task.get("updated_at"),
+        "event_types": [
+            str(event.get("type"))
+            for event in events if isinstance(event, Mapping) and event.get("type")
+        ] if isinstance(events, list) else [],
+    }
 
 
-def recoverable_tasks_for_actor(actor_target: Mapping[str, Any]) -> list[dict[str, Any]]:
-    return [record for record in list_tasks(actor_target=actor_target) if _is_recoverable_task(record)]
+def actor_task_projection(*, actor_profile: ActorIdentityProfile) -> dict[str, object]:
+    """Read Task records once and return canonical actor-visible summaries."""
 
+    if not isinstance(actor_profile, ActorIdentityProfile):
+        raise ValueError("actor_profile must be an ActorIdentityProfile")
+    actor_target = _normalize_actor_target(
+        {"actor_id": actor_profile.identity.id, "role_id": actor_profile.role_id}
+    )
+    records: list[dict[str, Any]] = []
+    for record in list_tasks():
+        target = record.get("actor_target")
+        if not isinstance(target, Mapping):
+            continue
+        try:
+            normalized_target = _normalize_actor_target(target)
+        except ValueError:
+            continue
+        if normalized_target == actor_target:
+            records.append(record)
 
-def has_active_task_for_actor(actor_target: Mapping[str, Any]) -> bool:
-    return bool(active_tasks_for_actor(actor_target))
+    classified = [(record, task_summary(record)) for record in records]
+    tasks = [summary for _record, summary in classified]
+    active_tasks = [summary for record, summary in classified if _is_active_task(record)]
+    recoverable_tasks = [summary for record, summary in classified if _is_recoverable_task(record)]
+    return {
+        "tasks": tasks,
+        "active_tasks": active_tasks,
+        "recoverable_tasks": recoverable_tasks,
+        "task_count": len(tasks),
+        "active_count": len(active_tasks),
+        "recoverable_count": len(recoverable_tasks),
+    }
 
 
 def ingest(envelope: Mapping[str, Any]) -> dict[str, Any]:

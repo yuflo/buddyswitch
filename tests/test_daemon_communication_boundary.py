@@ -22,6 +22,16 @@ DAEMON_OWNED_FILES = [
     ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py",
     ROOT / "scripts" / "env" / "tool_runtime" / "context.py",
 ]
+DAEMON_CONTRACTS_PATH = ROOT / "tools" / "launcher" / "daemon_contracts.py"
+CONTEXT_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "context.py"
+DAEMON_CLIENT_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py"
+IM_ACTOR_DELIVERY_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "im_actor_delivery.py"
+PRODUCT_HANDLER_PATHS = (
+    ROOT / "tools" / "launcher" / "im_wake_handler.py",
+    ROOT / "tools" / "launcher" / "track_comment_added_handler.py",
+    ROOT / "tools" / "launcher" / "browser_page_expired_handler.py",
+    ROOT / "tools" / "launcher" / "browser_release_handler.py",
+)
 
 
 def _existing_sources() -> list[Path]:
@@ -67,6 +77,41 @@ def _source_without_functions(path: Path, excluded_names: set[str]) -> str:
 
 
 class DaemonCommunicationBoundaryTests(unittest.TestCase):
+    def test_explicit_capabilities_replace_daemon_service_locator(self) -> None:
+        self.assertTrue(IM_ACTOR_DELIVERY_PATH.exists(), IM_ACTOR_DELIVERY_PATH)
+        context_source = CONTEXT_PATH.read_text(encoding="utf-8")
+        context_tree = ast.parse(context_source, filename=str(CONTEXT_PATH))
+        class_names = {node.name for node in ast.walk(context_tree) if isinstance(node, ast.ClassDef)}
+        self.assertNotIn("Daemon" + "Access", class_names)
+        self.assertNotIn('"daemon"', context_source)
+        for name in (
+            "ActorDirectoryAccess",
+            "SignalDeliveryAccess",
+            "TaskSysRuntimeAccess",
+            "ImActorDeliveryAccess",
+        ):
+            self.assertIn(name, class_names)
+
+    def test_generic_daemon_client_contains_no_im_product_delivery(self) -> None:
+        source = DAEMON_CLIENT_PATH.read_text(encoding="utf-8")
+        for token in (
+            "wake_" + "im_actor",
+            "im.message.created",
+            "conversation_id",
+            "event_id",
+            "actor_handling_status",
+            "runtime_target",
+        ):
+            self.assertNotIn(token, source)
+
+    def test_product_handlers_depend_on_stable_contracts_not_core(self) -> None:
+        self.assertTrue(DAEMON_CONTRACTS_PATH.exists(), DAEMON_CONTRACTS_PATH)
+        for path in PRODUCT_HANDLER_PATHS:
+            imports = _imported_modules(path)
+            with self.subTest(path=path.name):
+                self.assertIn("daemon_contracts", imports)
+                self.assertNotIn("daemon_core", imports)
+
     def test_daemon_uses_central_client_not_daemon_presence_helper(self) -> None:
         imports_by_file = {path: _imported_modules(path) for path in _existing_sources()}
         flattened = {module for imports in imports_by_file.values() for module in imports}
@@ -96,7 +141,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
             if path.name not in {"context.py"}
         ]
         source = "\n".join(path.read_text(encoding="utf-8") for path in daemon_delivery_files)
-        source += "\n" + _class_source(ROOT / "scripts" / "env" / "tool_runtime" / "context.py", "DaemonAccess")
+        source += "\n" + _class_source(CONTEXT_PATH, "SignalDeliveryAccess")
 
         self.assertNotIn("to_role: str", source)
         self.assertNotIn("to_role=", source)
@@ -122,8 +167,6 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         for path in base_files:
             if path.name == "daemon_mailbox.py":
                 chunks.append(_source_without_functions(path, {"_validate_local_trigger_request"}))
-            elif path.name == "daemon_client.py":
-                chunks.append(_source_without_functions(path, {"wake_im_actor"}))
             else:
                 chunks.append(path.read_text(encoding="utf-8"))
         source = "\n".join(chunks)

@@ -19,25 +19,33 @@ from env.repos import identities  # noqa: E402
 from env.repos import messages as message_repo  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
+from env.tool_runtime import im_actor_delivery  # noqa: E402
 from env.tool_runtime import im_client as im_client_module  # noqa: E402
 import central_daemon_core  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
 class _IdentityContext(dict[str, Any]):
-    def __init__(self, *, identity_id: str, role_id: str, daemon: Any) -> None:
+    def __init__(self, *, identity_id: str, role_id: str, capabilities: Any) -> None:
         super().__init__(
             current_identity={"id": identity_id, "type": "actor"},
             active_role=role_id,
             manifest={"roles": [{"id": role_id}]},
         )
-        self.daemon = daemon
+        self.actor_directory = capabilities
+        self.im_actor_delivery = capabilities
 
 
-class _NoActorsDaemon:
+class _NoActorsCapabilities:
     def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
         del role_id
         return {"actors": [], "count": 0}
+
+    def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
+        return {"reachability_status": "offline", "target_identity_id": target_identity_id}
+
+    def deliver(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError(f"unexpected IM actor delivery: {payload!r}")
 
 
 class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -78,16 +86,15 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
         self.assertNotIn("from_identity_id", saved)
         self.assertNotIn("to_identity_id", saved)
 
-    def test_runtime_daemon_access_delivers_signal_with_identity_routing(self) -> None:
+    def test_runtime_signal_delivery_access_uses_identity_routing(self) -> None:
         captured: dict[str, Any] = {}
 
         original = daemon_client.deliver_signal
         daemon_client.deliver_signal = lambda *, signal: captured.setdefault("signal", signal) or {"delivery_status": "delivered"}
         try:
-            access = runtime_context.DaemonAccess(
+            access = runtime_context.SignalDeliveryAccess(
                 current_identity=runtime_context.IdentityRef(id="act-dev-signal-source", type="actor"),
                 role_id="dev",
-                instance_json=self.runtime_root / "instances" / "i" / "instance.json",
             )
             access.deliver_signal(
                 signal_type="track.comment.added",
@@ -106,7 +113,7 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
         self.assertNotIn("source_" + "actor" + "_address", signal)
         self.assertNotIn("target_" + "actor" + "_address", signal)
 
-    def test_im_wake_payload_uses_target_identity_route(self) -> None:
+    def test_im_delivery_payload_uses_target_identity_route(self) -> None:
         calls: dict[str, Any] = {}
         identities.save_actor_identity_profile(
             {
@@ -132,7 +139,7 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
             calls["mailbox"] = {"method": method, "params": params, "socket_path": socket_path}
             return {"ok": True, "result": {"handling_status": "handled"}}
 
-        result = daemon_client.wake_im_actor(
+        result = im_actor_delivery.deliver(
             {
                 "type": "im.message.created",
                 "target_identity_id": "act-dev-im-wake",
@@ -154,7 +161,11 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestMixin, unittest.Test
 
     def test_actor_active_send_to_unknown_external_identity_rejects_as_target_error(self) -> None:
         client = im_client_module.ActorImClient(
-            _IdentityContext(identity_id="act-dev-im-active-external", role_id="dev", daemon=_NoActorsDaemon())
+            _IdentityContext(
+                identity_id="act-dev-im-active-external",
+                role_id="dev",
+                capabilities=_NoActorsCapabilities(),
+            )
         )
 
         response = client.send(

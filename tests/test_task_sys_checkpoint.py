@@ -52,7 +52,10 @@ class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestMixin, unittest.TestC
     def test_actor_facing_task_sys_tool_does_not_register_checkpoint_update(self) -> None:
         tool_registry.clear_cache()
 
-        self.assertEqual(tool_registry.supported_actions("task_sys"), {"list", "get", "close", "need_parent"})
+        self.assertEqual(
+            tool_registry.supported_actions("task_sys"),
+            {"list", "get", "update_task_analysis", "close", "need_parent"},
+        )
 
 
 if __name__ == "__main__":

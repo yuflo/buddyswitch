@@ -16,9 +16,13 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+LAUNCHER = ROOT / "tools" / "launcher"
+for candidate in (SCRIPTS, LAUNCHER):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
+import daemon_contracts  # noqa: E402
+import daemon_state  # noqa: E402
 from env.repos import identities as identity_repo  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 
@@ -149,210 +153,43 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             self.assertEqual(identity_route, {"identity_id": "act-dev-daed00000001", "role_id": "dev"})
             self.assertNotIn("to_role", self.core.register_daemon_actor.__code__.co_varnames)
 
-    def test_missing_state_initializes_empty_valid_state(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
+    def test_application_command_composition_is_read_only_and_rejects_duplicates(self) -> None:
+        context = object()
+        first = lambda _params: {"source": "first"}
+        second = lambda _params: {"source": "second"}
 
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
+        commands = self.core.build_application_commands(
+            context,
+            [lambda _context: {"example.command": first}],
+        )
+
+        self.assertIs(commands["example.command"], first)
+        with self.assertRaises(TypeError):
+            commands["other.command"] = second
+        with self.assertRaisesRegex(ValueError, "duplicate application command"):
+            self.core.build_application_commands(
+                context,
+                [
+                    lambda _context: {"example.command": first},
+                    lambda _context: {"example.command": second},
+                ],
             )
 
-            self.assertEqual(state.payload["actor_id"], "act-dev-daed00000001")
-            self.assertEqual(state.payload["main_thread_id"], "thr-main")
-            self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
-            self.assertEqual(state.payload["daemon_runtime_call_ids"], [])
-            self.assertEqual(state.payload["daemon_runtime_calls"], {})
-            self.assertNotIn("daemon_" + "action_ids", state.payload)
-            self.assertNotIn("daemon_" + "actions", state.payload)
-            self.assertEqual(state.payload["handlers"], {})
-            self.assertIsNone(state.payload["ready"])
-            self.assertIsNone(state.payload["last_error"])
-
-    def test_recording_daemon_origin_turn_persists_provenance(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
+    def test_application_command_composition_rejects_invalid_factories_and_entries(self) -> None:
+        context = object()
+        with self.assertRaisesRegex(ValueError, "factories must be callable"):
+            self.core.build_application_commands(context, [object()])
+        with self.assertRaisesRegex(ValueError, "return a mapping"):
+            self.core.build_application_commands(context, [lambda _context: []])
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            self.core.build_application_commands(context, [lambda _context: {"": lambda _params: {}}])
+        with self.assertRaisesRegex(ValueError, "callable"):
+            self.core.build_application_commands(context, [lambda _context: {"example.command": object()}])
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            self.core.build_application_commands(
+                context,
+                [lambda _context: {"mailbox.deliver": lambda _params: {}}],
             )
-
-            state.record_daemon_origin_turn(
-                "turn-daemon-1",
-                handler_name="example_handler",
-                origin_turn_id="msg-1",
-            )
-
-            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
-            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "example_handler")
-            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "msg-1")
-            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["turn_id"], "turn-daemon-1")
-            self.assertRegex(saved["daemon_origin_turns"]["turn-daemon-1"]["created_at"], r"^\d{4}-\d{2}-\d{2}T")
-            self.assertEqual(state.daemon_turn_record("turn-daemon-1")["handler_name"], "example_handler")
-            self.assertTrue(state.is_daemon_origin_turn("turn-daemon-1"))
-            self.assertTrue(state.is_daemon_origin_turn_from("turn-daemon-1", "example_handler"))
-            self.assertFalse(state.is_daemon_origin_turn_from("turn-daemon-1", "task_checkout"))
-            self.assertFalse(state.is_daemon_origin_turn("turn-user-1"))
-            self.assertNotIn("last_origin_turn_id", saved)
-            self.assertNotIn("last_stop_tui_turn_id", saved)
-
-    def test_legacy_daemon_origin_without_provenance_is_only_task_checkout_filtered(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-
-            state.record_daemon_origin_turn("turn-legacy-1")
-
-            self.assertTrue(state.is_daemon_origin_turn("turn-legacy-1"))
-            self.assertIsNone(state.daemon_turn_record("turn-legacy-1"))
-            self.assertTrue(state.is_daemon_origin_turn_from("turn-legacy-1", "task_checkout"))
-            self.assertFalse(state.is_daemon_origin_turn_from("turn-legacy-1", "example_handler"))
-
-    def test_daemon_origin_turn_ids_keep_latest_50(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-
-            for index in range(55):
-                state.record_daemon_origin_turn(
-                    f"turn-daemon-{index}",
-                    handler_name="task_checkout",
-                    origin_turn_id=f"turn-user-{index}",
-                )
-
-            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(len(saved["daemon_origin_turn_ids"]), 50)
-            self.assertEqual(saved["daemon_origin_turn_ids"][0], "turn-daemon-5")
-            self.assertEqual(saved["daemon_origin_turn_ids"][-1], "turn-daemon-54")
-            self.assertEqual(len(saved["daemon_origin_turns"]), 50)
-            self.assertNotIn("turn-daemon-4", saved["daemon_origin_turns"])
-            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-54"]["handler_name"], "task_checkout")
-
-    def test_recording_error_persists_last_error(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-
-            state.record_error(origin_turn_id=None, message="socket gone")
-
-            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertIsNone(saved["last_error"]["origin_turn_id"])
-            self.assertEqual(saved["last_error"]["message"], "socket gone")
-            self.assertRegex(saved["last_error"]["at"], r"^\d{4}-\d{2}-\d{2}T")
-
-    def test_handler_state_updates_persist_under_handlers_namespace(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-
-            state.update_handler_state(
-                "task_checkout",
-                {
-                    "last_origin_turn_id": "turn-user-1",
-                    "last_runtime_turn_id": "turn-daemon-1",
-                },
-            )
-
-            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(
-                saved["handlers"]["task_checkout"],
-                {
-                    "last_origin_turn_id": "turn-user-1",
-                    "last_runtime_turn_id": "turn-daemon-1",
-                },
-            )
-            self.assertEqual(
-                state.handler_state("task_checkout"),
-                {
-                    "last_origin_turn_id": "turn-user-1",
-                    "last_runtime_turn_id": "turn-daemon-1",
-                },
-            )
-
-    def test_handler_registration_state_initializes_observability_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-
-            state.register_handlers(["task_checkout", "fake"])
-
-            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            for handler_name in ("task_checkout", "fake"):
-                handler_state = saved["handlers"][handler_name]
-                self.assertIs(handler_state["registered"], True)
-                self.assertIs(handler_state["enabled"], True)
-                self.assertIs(handler_state["active"], True)
-                self.assertIsNone(handler_state["last_result"])
-                self.assertIsNone(handler_state["last_error"])
-
-    def test_record_handler_error_persists_under_handlers_namespace(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-
-            state.record_handler_error("task_checkout", origin_turn_id="turn-user-1", message="turn/start failed")
-
-            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(saved["handlers"]["task_checkout"]["last_error"]["origin_turn_id"], "turn-user-1")
-            self.assertEqual(saved["handlers"]["task_checkout"]["last_error"]["message"], "turn/start failed")
-            self.assertRegex(saved["handlers"]["task_checkout"]["last_error"]["at"], r"^\d{4}-\d{2}-\d{2}T")
-
-    def test_recording_ready_state_persists_pid_and_main_thread_id(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-
-            state.record_ready(pid=4321, main_thread_id="thr-main")
-
-            saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(saved["ready"]["pid"], 4321)
-            self.assertEqual(saved["ready"]["main_thread_id"], "thr-main")
-            self.assertRegex(saved["ready"]["at"], r"^\d{4}-\d{2}-\d{2}T")
-
-    def test_ready_for_rejects_other_pid_or_thread(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = self._instance_root(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance_root,
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-            state.record_ready(pid=4321, main_thread_id="thr-main")
-
-            self.assertTrue(state.ready_for(4321, "thr-main"))
-            self.assertFalse(state.ready_for(9999, "thr-main"))
-            self.assertFalse(state.ready_for(4321, "thr-other"))
 
 
 class FakeBindingClient:
@@ -495,7 +332,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
 
         def fake_sleep(_seconds: float) -> None:
             if not recorded["done"]:
-                state = self.core.DaemonState.load(
+                state = daemon_state.DaemonState.load(
                     instance_root=instance_root,
                     actor_id="act-dev-daed00000001",
                     main_thread_id=main_thread_id,
@@ -568,7 +405,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertEqual(commands[0][2:], ["run", "--instance-json", str(instance["instance_json"])])
             self.assertTrue(self.core.daemon_pid_file(instance["instance_root"]).exists())
             self.assertTrue(self.core.daemon_log_file(instance["instance_root"]).exists())
-            self.assertTrue(self.core.daemon_state_file(instance["instance_root"]).exists())
+            self.assertTrue(daemon_state.daemon_state_file(instance["instance_root"]).exists())
 
     def test_start_daemon_passes_shared_state_root_to_child_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -722,7 +559,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIn("central daemon unavailable", payload["unregister_error"])
             self.assertEqual(terminated, [4321])
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
-            state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            state = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIn("central daemon unavailable", state["last_error"]["message"])
 
     def test_stop_daemon_preserves_actor_identity_profile(self) -> None:
@@ -755,7 +592,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
     def test_daemon_status_reports_paths_live_state_and_last_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            state = self.core.DaemonState.load(
+            state = daemon_state.DaemonState.load(
                 instance_root=instance["instance_root"],
                 actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
@@ -773,56 +610,29 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertTrue(payload["ready"])
             self.assertEqual(payload["ready_main_thread_id"], "thr-main")
             self.assertEqual(payload["log_path"], str(self.core.daemon_log_file(instance["instance_root"])))
-            self.assertEqual(payload["state_path"], str(self.core.daemon_state_file(instance["instance_root"])))
+            self.assertEqual(payload["state_path"], str(daemon_state.daemon_state_file(instance["instance_root"])))
             self.assertIsNone(payload["last_error"]["origin_turn_id"])
             self.assertEqual(payload["last_error"]["message"], "socket gone")
-
-    def test_daemon_status_reports_recent_runtime_call_records(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance = self._instance(temp_root)
-            state = self.core.DaemonState.load(
-                instance_root=instance["instance_root"],
-                actor_id="act-dev-daed00000001",
-                main_thread_id="thr-main",
-            )
-            record = state.record_runtime_call(
-                handler_name="example_handler",
-                origin_id="msg-1",
-                runtime_method="side_start",
-                parent_thread_id="thr-main",
-                side_thread_id="thr-side-1",
-                turn_id="turn-side-1",
-                status="succeeded",
-            )
-
-            payload = self.core.daemon_status(instance["instance_json"])
-
-            self.assertNotIn("actions", payload)
-            self.assertEqual(payload["runtime"]["ids"], [record["runtime_call_id"]])
-            self.assertEqual(payload["runtime"]["items"][record["runtime_call_id"]]["runtime_method"], "side_start")
-            self.assertEqual(payload["runtime"]["items"][record["runtime_call_id"]]["side_thread_id"], "thr-side-1")
-            self.assertEqual(payload["runtime"]["items"][record["runtime_call_id"]]["origin_id"], "msg-1")
 
     def test_daemon_status_reports_registered_handler_observability(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
 
             class FakeHandler:
-                name = "task_checkout"
+                name = "example_primary"
 
             payload = self.core.daemon_status(
                 instance["instance_json"],
                 handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "example_handler"})()],
             )
 
-            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "example_handler"])
-            item = payload["handlers"]["items"]["task_checkout"]
+            self.assertEqual(payload["handlers"]["registered"], ["example_primary", "example_handler"])
+            item = payload["handlers"]["items"]["example_primary"]
             self.assertIs(item["registered"], True)
             self.assertIs(item["enabled"], True)
             self.assertIs(item["active"], True)
             self.assertIsNone(item["last_result"])
             self.assertIsNone(item["last_error"])
-            self.assertIsNone(item["last_runtime_turn_id"])
             self.assertNotIn("last_" + "action" + "_turn_id", item)
             self.assertNotIn("mailbox_handlers", payload)
             mailbox_item = payload["handlers"]["items"]["example_handler"]
@@ -831,13 +641,12 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIs(mailbox_item["active"], True)
             self.assertIsNone(mailbox_item["last_result"])
             self.assertIsNone(mailbox_item["last_error"])
-            self.assertIsNone(mailbox_item["last_runtime_turn_id"])
             self.assertNotIn("last_" + "action" + "_turn_id", mailbox_item)
 
     def test_daemon_status_includes_persisted_unregistered_handler_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            state = self.core.DaemonState.load(
+            state = daemon_state.DaemonState.load(
                 instance_root=instance["instance_root"],
                 actor_id="act-dev-daed00000001",
                 main_thread_id="thr-main",
@@ -850,14 +659,14 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             )
 
             class FakeHandler:
-                name = "task_checkout"
+                name = "example_primary"
 
             payload = self.core.daemon_status(
                 instance["instance_json"],
                 handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "example_handler"})()],
             )
 
-            self.assertEqual(payload["handlers"]["registered"], ["task_checkout", "example_handler"])
+            self.assertEqual(payload["handlers"]["registered"], ["example_primary", "example_handler"])
             message_state = payload["handlers"]["items"]["message"]
             self.assertIs(message_state["registered"], False)
             self.assertIs(message_state["enabled"], False)
@@ -1122,7 +931,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
     def test_run_daemon_continues_after_notification_idle_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            handler = RecordingHandler(name="recording", result=self.core.HandlerResult.ignored())
+            handler = RecordingHandler(name="recording", result=daemon_contracts.HandlerResult.ignored())
             fake_client = FakeRunDaemonClient(
                 notifications=[
                     self.core.app_server.AppServerTimeoutError("idle"),
@@ -1143,7 +952,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.assertEqual(len(communication["heartbeat"]), 1)
             self.assertEqual(len(communication["unregistered"]), 1)
             self.assertEqual(len(communication["mailbox_closed"]), 1)
-            state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            state = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIsNone(state["last_error"])
 
     def test_run_daemon_sweeps_due_schedules_on_app_server_timeout(self) -> None:
@@ -1194,7 +1003,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 def handle(self, context: object, state: object, runtime: object, trigger: object) -> object:
                     del context, state, runtime, trigger
                     order.append("handler")
-                    return self_core.HandlerResult.handled()
+                    return daemon_contracts.HandlerResult.handled()
 
             self_core = self.core
             handler = OrderedHandler()
@@ -1220,7 +1029,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 self.core.run_daemon(instance["instance_json"], handlers=[handler])
 
             self.assertEqual(order, ["handler", "sweep"])
-            state_payload = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            state_payload = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIn("scheduled_triggers", state_payload)
             self.assertNotIn("browser", state_payload)
 
@@ -1236,15 +1045,15 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             result = self.core.run_daemon(instance["instance_json"], handlers=[])
 
             self.assertEqual(result, 1)
-            state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            state = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIsNone(state["last_error"]["origin_turn_id"])
             self.assertIn("socket gone", state["last_error"]["message"])
 
     def test_run_daemon_records_handler_exception_and_continues_to_later_notifications(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            exploding = ExplodingOnceHandler(result=self.core.HandlerResult.ignored())
-            recorder = RecordingHandler(name="recorder", result=self.core.HandlerResult.ignored())
+            exploding = ExplodingOnceHandler(result=daemon_contracts.HandlerResult.ignored())
+            recorder = RecordingHandler(name="recorder", result=daemon_contracts.HandlerResult.ignored())
             notification_one = self._completed(turn_id="turn-user-1")
             notification_two = self._completed(turn_id="turn-user-2")
             fake_client = FakeRunDaemonClient(
@@ -1262,7 +1071,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
 
             self.assertEqual(exploding.calls, 2)
             self.assertEqual([trigger.origin_id for trigger in recorder.triggers], ["turn-user-1", "turn-user-2"])
-            state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            state = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIsNone(state["last_error"])
             self.assertEqual(state["handlers"]["exploder"]["last_error"]["origin_turn_id"], "turn-user-1")
             self.assertEqual(state["handlers"]["exploder"]["last_error"]["message"], "handler exploded")
@@ -1272,7 +1081,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             seen: list[tuple[str, str]] = []
             notification = self._completed(turn_id="turn-user-1")
-            result = self.core.HandlerResult.ignored()
+            result = daemon_contracts.HandlerResult.ignored()
 
             class OrderedHandler:
                 def __init__(self, name: str) -> None:

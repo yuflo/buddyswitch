@@ -9,6 +9,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -16,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.repos import runtime_files  # noqa: E402
+from env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
@@ -24,6 +26,103 @@ def _task_sys() -> Any:
 
 
 class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _actor_profile(self, *, identity_id: str | None = None, role_id: str = "dev") -> ActorIdentityProfile:
+        return ActorIdentityProfile(
+            identity=IdentityRef(
+                id=identity_id or self._runtime_actor_id(role="dev", label="act-dev-task-sys"),
+                type="actor",
+            ),
+            role_id=role_id,
+        )
+
+    def _projection_record(
+        self,
+        *,
+        task_id: str,
+        actor_id: str,
+        role_id: str,
+        status: str = "in_progress",
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "id": task_id,
+            "source_type": "test.projection",
+            "source_ref": {"id": task_id},
+            "actor_target": {"actor_id": actor_id, "role_id": role_id},
+            "inbound_context": {"fixture": "projection"},
+            "status": status,
+            "task_desc": f"Summary {task_id}",
+            "task_relation": {"kind": "independent", "target_task_id": None},
+            "execution": {"processor": "side" if result is None else None, "handoff": None, "result": result},
+            "events": [{"type": "created", "at": "2026-07-12T00:00:00Z"}],
+            "created_at": "2026-07-12T00:00:00Z",
+            "updated_at": "2026-07-12T00:00:01Z",
+        }
+
+    def test_actor_task_projection_reads_once_and_builds_all_current_groups(self) -> None:
+        task_sys = _task_sys()
+        actor_id = self._runtime_actor_id(role="dev", label="act-dev-task-sys")
+        records = [
+            self._projection_record(task_id="task-projection-active", actor_id=actor_id, role_id="dev"),
+            self._projection_record(
+                task_id="task-projection-recoverable",
+                actor_id=actor_id,
+                role_id="dev",
+                result={"type": "failure", "reason": "runtime_failed", "stage": "side_input"},
+            ),
+            self._projection_record(
+                task_id="task-projection-completed",
+                actor_id=actor_id,
+                role_id="dev",
+                status="completed",
+            ),
+            self._projection_record(task_id="task-projection-other-actor", actor_id="act-dev-other", role_id="dev"),
+            self._projection_record(task_id="task-projection-other-role", actor_id=actor_id, role_id="pm"),
+        ]
+
+        with mock.patch.object(task_sys, "list_tasks", return_value=records) as read_records:
+            projection = task_sys.actor_task_projection(actor_profile=self._actor_profile())
+
+        read_records.assert_called_once_with()
+        self.assertEqual(projection["task_count"], 3)
+        self.assertEqual(projection["active_count"], 1)
+        self.assertEqual(projection["recoverable_count"], 1)
+        self.assertEqual(
+            [row["task_id"] for row in projection["tasks"]],
+            ["task-projection-active", "task-projection-recoverable", "task-projection-completed"],
+        )
+        self.assertEqual([row["task_id"] for row in projection["active_tasks"]], ["task-projection-active"])
+        self.assertEqual(
+            [row["task_id"] for row in projection["recoverable_tasks"]],
+            ["task-projection-recoverable"],
+        )
+        summary_keys = set(projection["tasks"][0])
+        for group in ("tasks", "active_tasks", "recoverable_tasks"):
+            for row in projection[group]:
+                self.assertEqual(set(row), summary_keys)
+                self.assertEqual(row["id"], row["task_id"])
+                self.assertEqual(row["event_types"], ["created"])
+                self.assertEqual(row["task_relation"], {"kind": "independent", "target_task_id": None})
+
+    def test_actor_task_projection_empty_storage_has_zero_counts(self) -> None:
+        task_sys = _task_sys()
+
+        with mock.patch.object(task_sys, "list_tasks", return_value=[]) as read_records:
+            projection = task_sys.actor_task_projection(actor_profile=self._actor_profile())
+
+        read_records.assert_called_once_with()
+        self.assertEqual(
+            projection,
+            {
+                "tasks": [],
+                "active_tasks": [],
+                "recoverable_tasks": [],
+                "task_count": 0,
+                "active_count": 0,
+                "recoverable_count": 0,
+            },
+        )
+
     def _envelope(self) -> dict[str, Any]:
         return {
             "source": {
@@ -568,9 +667,9 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             set(task_sys.RECOVERABLE_TASK_REASONS),
             {"runtime_failed", "side_no_result", "side_timed_out"},
         )
-        self.assertEqual(task_sys.active_tasks_for_actor(self._envelope()["actor_target"]), [])
-        recoverable = task_sys.recoverable_tasks_for_actor(self._envelope()["actor_target"])
-        self.assertEqual([row["id"] for row in recoverable], [task_id])
+        projection = task_sys.actor_task_projection(actor_profile=self._actor_profile())
+        self.assertEqual(projection["active_tasks"], [])
+        self.assertEqual([row["id"] for row in projection["recoverable_tasks"]], [task_id])
 
     def test_failed_side_runtime_task_cannot_be_closed_as_success(self) -> None:
         task_sys = _task_sys()

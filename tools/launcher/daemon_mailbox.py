@@ -9,7 +9,7 @@ from pathlib import Path
 import socket
 import sys
 import threading
-from typing import Any
+from typing import Any, Mapping
 
 HELPER_DIR = Path(__file__).resolve().parent
 ROOT = HELPER_DIR.parents[1]
@@ -35,6 +35,9 @@ SIGNAL_ALLOWED_KEYS = {
     "payload",
     "created_at",
 }
+CONTROL_METHODS = frozenset(
+    {"mailbox.deliver", "mailbox.local_trigger", "mailbox.schedule_trigger"}
+)
 
 
 def _actor_identity_id(value: Any, field: str) -> str:
@@ -121,7 +124,7 @@ class DaemonMailboxServer:
         context: Any | None = None,
         state: Any | None = None,
         trigger_dispatcher: Any | None = None,
-        task_sys_dispatcher: Any | None = None,
+        application_commands: Mapping[str, Any] | None = None,
         now: Any | None = None,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser().resolve(strict=False)
@@ -131,7 +134,21 @@ class DaemonMailboxServer:
         self.context = context
         self.state = state
         self.trigger_dispatcher = trigger_dispatcher
-        self.task_sys_dispatcher = task_sys_dispatcher
+        if application_commands is None:
+            application_commands = {}
+        if not isinstance(application_commands, Mapping):
+            raise ValueError("application_commands must be a mapping")
+        commands: dict[str, Any] = {}
+        for key, command in application_commands.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("application command keys must be non-empty strings")
+            normalized_key = key.strip()
+            if normalized_key in CONTROL_METHODS:
+                raise ValueError(f"application command conflicts with control method: {normalized_key}")
+            if not callable(command):
+                raise ValueError(f"application command must be callable: {normalized_key}")
+            commands[normalized_key] = command
+        self.application_commands = commands
         self.now = now
         self._stop_event = threading.Event()
         self._server: socket.socket | None = None
@@ -226,16 +243,11 @@ class DaemonMailboxServer:
             if not isinstance(params, dict):
                 return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
             return self._dispatch_schedule_trigger(request_id, params)
-        if method == "mailbox.task_sys.execute_instruction":
+        if method in self.application_commands:
             params = request.get("params")
             if not isinstance(params, dict):
                 return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
-            return self._dispatch_task_sys_execute_instruction(request_id, params)
-        if method == "mailbox.task_sys.cleanup_side_lease":
-            params = request.get("params")
-            if not isinstance(params, dict):
-                return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
-            return self._dispatch_task_sys_cleanup_side_lease(request_id, params)
+            return self._dispatch_application_command(request_id, method, params)
         if method != "mailbox.deliver":
             return self._response(request_id, code="mailbox_unknown_method", message="unsupported mailbox method")
         params = request.get("params")
@@ -249,6 +261,25 @@ class DaemonMailboxServer:
             return self._response(request_id, code="wrong_target_actor", message="signal target does not match local actor")
         trigger = daemon_triggers.normalize_cross_actor_signal(signal)
         return self._dispatch_trigger(request_id, trigger)
+
+    def _dispatch_application_command(
+        self,
+        request_id: str | None,
+        method: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        command = self.application_commands[method]
+        try:
+            result = command(dict(params))
+        except Exception as exc:
+            return self._response(request_id, code="application_command_error", message=str(exc))
+        if not isinstance(result, Mapping):
+            return self._response(
+                request_id,
+                code="application_command_error",
+                message=f"application command returned invalid result: {type(result).__name__}",
+            )
+        return self._response(request_id, dict(result))
 
     def _dispatch_trigger(self, request_id: str | None, trigger: daemon_triggers.DaemonTrigger) -> dict[str, Any]:
         if callable(self.trigger_dispatcher):
@@ -269,38 +300,6 @@ class DaemonMailboxServer:
             }
         payload.setdefault("trigger", trigger.to_payload())
         return self._response(request_id, payload)
-
-    def _dispatch_task_sys(self, request_id: str | None, action: str, params: dict[str, Any]) -> dict[str, Any]:
-        if not callable(self.task_sys_dispatcher):
-            return self._response(
-                request_id,
-                code="task_sys_unavailable",
-                message="daemon mailbox does not support Task Sys commands",
-            )
-        try:
-            result = self.task_sys_dispatcher(action, params)
-        except Exception as exc:
-            return self._response(request_id, code="task_sys_dispatch_error", message=str(exc))
-        if not isinstance(result, dict):
-            return self._response(
-                request_id,
-                code="task_sys_dispatch_error",
-                message=f"Task Sys dispatcher returned invalid result: {type(result).__name__}",
-            )
-        return self._response(request_id, dict(result))
-
-    def _dispatch_task_sys_execute_instruction(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
-        instruction = params.get("instruction")
-        if not isinstance(instruction, dict):
-            return self._response(request_id, code="invalid_task_sys_instruction", message="instruction must be an object")
-        return self._dispatch_task_sys(request_id, "execute_instruction", {"instruction": dict(instruction)})
-
-    def _dispatch_task_sys_cleanup_side_lease(self, request_id: str | None, params: dict[str, Any]) -> dict[str, Any]:
-        try:
-            task_id = runtime_files.require_id(params.get("task_id"), "task_id")
-        except Exception as exc:
-            return self._response(request_id, code="invalid_task_sys_cleanup", message=str(exc))
-        return self._dispatch_task_sys(request_id, "cleanup_side_lease", {"task_id": task_id})
 
     def _normalize_local_trigger_request(self, params: dict[str, Any]) -> daemon_triggers.DaemonTrigger:
         identity_id = _actor_identity_id(params.get("identity_id"), "identity_id")

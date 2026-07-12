@@ -19,7 +19,7 @@ import daemon_core  # noqa: E402
 import browser_inbound  # noqa: E402
 import message_inbound  # noqa: E402
 import notification_center  # noqa: E402
-import task_checkout_handler  # noqa: E402
+import task_sys_daemon_adapter  # noqa: E402
 import track_comment_inbound  # noqa: E402
 
 
@@ -34,11 +34,14 @@ def default_notify_subscriptions() -> list[str]:
     return notification_center.subscriptions_from_registrations(default_notification_registrations())
 
 
+def default_application_command_factories() -> list[object]:
+    return [task_sys_daemon_adapter.command_handlers]
+
+
 def default_daemon_handlers() -> list[object]:
     registrations = default_notification_registrations()
     browser_registrations = browser_inbound.inbound_registrations()
     return [
-        task_checkout_handler.TaskCheckoutHandler(),
         *notification_center.handlers_from_registrations(registrations),
         *notification_center.handlers_from_registrations(browser_registrations),
     ]
@@ -65,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
                 instance_json,
                 handlers=default_daemon_handlers(),
                 notify_subscriptions=default_notify_subscriptions(),
+                application_command_factories=default_application_command_factories(),
             )
         if args.command == "start":
             print(

@@ -18,7 +18,7 @@ from env.domain.identity import ExternalIdentityProfile  # noqa: E402
 from env.domain.identity import IdentityRef  # noqa: E402
 from env.domain.identity import actor_identity  # noqa: E402
 from env.domain.identity import external_identity  # noqa: E402
-from env.tool_runtime import context as runtime_context  # noqa: E402
+from env.tool_runtime import context as context_module  # noqa: E402
 from env.tool_runtime.context import ToolContext  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -84,11 +84,11 @@ class IdentityRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             _ = context["active" + "_actor"]
         self.assertFalse(hasattr(context, "actor_address"))
 
-    def test_daemon_access_derives_source_route_without_actor_address_class(self) -> None:
+    def test_signal_delivery_derives_source_route_without_actor_address_class(self) -> None:
         context = self._context(actor_id="act-dev-route", role_id="dev")
 
-        with mock.patch.object(runtime_context.daemon_client, "deliver_signal", return_value={"ok": True}) as deliver:
-            context.daemon.deliver_signal(
+        with mock.patch.object(context_module.daemon_client, "deliver_signal", return_value={"ok": True}) as deliver:
+            context.signal_delivery.deliver_signal(
                 signal_type="track.comment.added",
                 target_identity_id="act-pm-route",
                 target_role_id="pm",

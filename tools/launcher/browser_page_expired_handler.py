@@ -24,7 +24,7 @@ for candidate in (HELPER_DIR, SCRIPTS, SCRIPTS_ENV):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import daemon_core  # noqa: E402
+import daemon_contracts  # noqa: E402
 import cdp_background_page  # noqa: E402
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 
@@ -484,10 +484,10 @@ class BrowserPageExpiredHandler:
         state: Any,
         runtime: Any,
         trigger: Any,
-    ) -> daemon_core.HandlerResult:
+    ) -> daemon_contracts.HandlerResult:
         del state
         if getattr(trigger, "type", None) != BROWSER_PAGE_EXPIRED_EVENT_TYPE:
-            return daemon_core.HandlerResult.ignored()
+            return daemon_contracts.HandlerResult.ignored()
         try:
             local_route = _context_identity_route(context)
             target_route = {
@@ -499,7 +499,7 @@ class BrowserPageExpiredHandler:
             payload = _payload(trigger)
             return self._handle_expiry(context, runtime, payload, due_at=_trigger_due_at(trigger))
         except Exception as exc:
-            return daemon_core.HandlerResult.failed(str(exc))
+            return daemon_contracts.HandlerResult.failed(str(exc))
 
     def _handle_expiry(
         self,
@@ -508,7 +508,7 @@ class BrowserPageExpiredHandler:
         payload: dict[str, Any],
         *,
         due_at: str | None = None,
-    ) -> daemon_core.HandlerResult:
+    ) -> daemon_contracts.HandlerResult:
         root = _instance_root(context)
         page_id = payload["page_id"]
         if root is not None:
@@ -516,16 +516,16 @@ class BrowserPageExpiredHandler:
             selected_page_id = browser_lifecycle.selected_page_id(root)
             if page_id in {current_page_id, selected_page_id} and _parent_turn_is_running(runtime):
                 browser_lifecycle.refresh_page_idle(instance_root=root, page_id=page_id)
-                return daemon_core.HandlerResult.handled()
+                return daemon_contracts.HandlerResult.handled()
             if browser_lifecycle.page_idle_expiry_after_due_at(
                 instance_root=root,
                 page_id=page_id,
                 due_at=due_at,
             ):
-                return daemon_core.HandlerResult.handled()
+                return daemon_contracts.HandlerResult.handled()
         return self._auto_close(context, payload)
 
-    def _auto_close(self, context: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
+    def _auto_close(self, context: Any, payload: dict[str, Any]) -> daemon_contracts.HandlerResult:
         browser_endpoint = _browser_endpoint(context)
         root = _instance_root(context)
         if browser_endpoint is None:
@@ -533,13 +533,13 @@ class BrowserPageExpiredHandler:
                 state = _forget_tracked_page(root, payload["page_id"])
                 if state is not None:
                     _schedule_release_if_empty(root, state)
-            return daemon_core.HandlerResult.handled()
+            return daemon_contracts.HandlerResult.handled()
         page_id = payload["page_id"]
         if root is None:
-            return daemon_core.HandlerResult.failed("instance_root is required for browser page expiry cleanup")
+            return daemon_contracts.HandlerResult.failed("instance_root is required for browser page expiry cleanup")
         recorded_page = _recorded_page_state(root, page_id)
         if recorded_page is None:
-            return daemon_core.HandlerResult.handled()
+            return daemon_contracts.HandlerResult.handled()
         try:
             with open_mcp_session(browser_endpoint) as session:
                 mcp_pages = session.list_pages()
@@ -548,7 +548,7 @@ class BrowserPageExpiredHandler:
                     state = _forget_tracked_page(root, page_id)
                     if state is not None:
                         _schedule_release_if_empty(root, state)
-                    return daemon_core.HandlerResult.handled()
+                    return daemon_contracts.HandlerResult.handled()
                 close_page_id = _page_id_value(resolved_page)
                 if close_page_id is None:
                     raise browser_lifecycle.BrowserLifecycleError("resolved MCP page is missing pageId")
@@ -556,7 +556,7 @@ class BrowserPageExpiredHandler:
                 verified_pages = session.list_pages()
                 if _recorded_page_visible(recorded_page, verified_pages):
                     recorded_url = _page_field(recorded_page, "url", "target_url") or "<unknown>"
-                    return daemon_core.HandlerResult.failed(f"browser page still visible after MCP close: {recorded_url}")
+                    return daemon_contracts.HandlerResult.failed(f"browser page still visible after MCP close: {recorded_url}")
         except browser_lifecycle.BrowserLifecycleError as exc:
             message = str(exc)
             if _is_stale_browser_error(message):
@@ -564,13 +564,13 @@ class BrowserPageExpiredHandler:
                     state = _forget_tracked_page(root, page_id)
                     if state is not None:
                         _schedule_release_if_empty(root, state)
-                return daemon_core.HandlerResult.handled()
-            return daemon_core.HandlerResult.failed(message)
+                return daemon_contracts.HandlerResult.handled()
+            return daemon_contracts.HandlerResult.failed(message)
         if root is not None:
             state = _forget_tracked_page(root, page_id)
             if state is not None:
                 _schedule_release_if_empty(root, state)
-        return daemon_core.HandlerResult.handled()
+        return daemon_contracts.HandlerResult.handled()
 
 
 class BrowserFailedOpenPageCleanupHandler:
@@ -585,10 +585,10 @@ class BrowserFailedOpenPageCleanupHandler:
         state: Any,
         runtime: Any,
         trigger: Any,
-    ) -> daemon_core.HandlerResult:
+    ) -> daemon_contracts.HandlerResult:
         del state, runtime
         if getattr(trigger, "type", None) != BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE:
-            return daemon_core.HandlerResult.ignored()
+            return daemon_contracts.HandlerResult.ignored()
         try:
             local_route = _context_identity_route(context)
             target_route = {
@@ -600,12 +600,12 @@ class BrowserFailedOpenPageCleanupHandler:
             payload = _failed_open_cleanup_payload(trigger)
             return self._handle_failed_open_cleanup(context, payload)
         except Exception as exc:
-            return daemon_core.HandlerResult.failed(str(exc))
+            return daemon_contracts.HandlerResult.failed(str(exc))
 
-    def _handle_failed_open_cleanup(self, context: Any, payload: dict[str, Any]) -> daemon_core.HandlerResult:
+    def _handle_failed_open_cleanup(self, context: Any, payload: dict[str, Any]) -> daemon_contracts.HandlerResult:
         browser_endpoint = _browser_endpoint(context)
         if browser_endpoint is None:
-            return daemon_core.HandlerResult.handled()
+            return daemon_contracts.HandlerResult.handled()
         root = _instance_root(context)
         target_id = payload["target_id"]
         try:
@@ -613,7 +613,7 @@ class BrowserFailedOpenPageCleanupHandler:
         except browser_lifecycle.BrowserLifecycleError as exc:
             return self._reschedule_or_escalate(context, payload, reason=str(exc))
         if target is None:
-            return daemon_core.HandlerResult.handled()
+            return daemon_contracts.HandlerResult.handled()
         try:
             cdp_background_page.close_target(browser_endpoint, target_id)
         except Exception as exc:
@@ -629,7 +629,7 @@ class BrowserFailedOpenPageCleanupHandler:
                     )
             except Exception:
                 pass
-        return daemon_core.HandlerResult.handled()
+        return daemon_contracts.HandlerResult.handled()
 
     def _reschedule_or_escalate(
         self,
@@ -637,10 +637,10 @@ class BrowserFailedOpenPageCleanupHandler:
         payload: dict[str, Any],
         *,
         reason: str,
-    ) -> daemon_core.HandlerResult:
+    ) -> daemon_contracts.HandlerResult:
         root = _instance_root(context)
         if root is None:
-            return daemon_core.HandlerResult.failed(f"instance_root is required for browser failed-open cleanup: {reason}")
+            return daemon_contracts.HandlerResult.failed(f"instance_root is required for browser failed-open cleanup: {reason}")
         attempts = payload["attempts"]
         if attempts < browser_lifecycle.BROWSER_FAILED_OPEN_PAGE_CLEANUP_MAX_ATTEMPTS:
             browser_lifecycle.schedule_failed_open_page_cleanup(
@@ -650,7 +650,7 @@ class BrowserFailedOpenPageCleanupHandler:
                 attempts=attempts + 1,
                 first_seen_at=payload.get("first_seen_at"),
             )
-            return daemon_core.HandlerResult.handled()
+            return daemon_contracts.HandlerResult.handled()
         print(
             f"Browser failed-open cleanup exhausted for target {payload['target_id']}: {reason}",
             file=sys.stderr,
@@ -659,7 +659,7 @@ class BrowserFailedOpenPageCleanupHandler:
             instance_root=root,
             reason="failed_open_page_cleanup_exhausted",
         )
-        return daemon_core.HandlerResult.handled()
+        return daemon_contracts.HandlerResult.handled()
 
 
 if __name__ == "__main__":

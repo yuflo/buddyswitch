@@ -402,7 +402,7 @@ def _project_workspace_dir(context: Any) -> Path:
     return _context_path(context, "project_workspace_dir")
 
 
-def cleanup_task_sys_side_lease(context: Any, task_id: str) -> dict[str, Any]:
+def cleanup_side_lease(context: Any, task_id: str) -> dict[str, Any]:
     return side_thread_lifecycle.cleanup_task_side_lease(
         socket_path=_socket_path(context),
         instance_json=_instance_json(context),

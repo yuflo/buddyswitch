@@ -429,22 +429,6 @@ def _active_task_required_rejection(
     )
 
 
-def _has_active_task_binding(
-    *,
-    active_role: str,
-    current_identity: Mapping[str, Any],
-    instance_json: Path,
-    instance_payload: Mapping[str, object],
-) -> bool:
-    del instance_json, instance_payload
-    from env.domain import task_sys
-
-    actor_id = current_identity.get("id")
-    if not isinstance(actor_id, str) or not actor_id.strip():
-        return False
-    return task_sys.has_active_task_for_actor({"actor_id": actor_id, "role_id": active_role})
-
-
 def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]:
     module = _load_tool_module(tool)
     invoke = getattr(module, "invoke", None)
@@ -631,18 +615,17 @@ def dispatch_env_tool_request(
         manifest=dict(manifest),
         manifest_path=manifest_path,
     )
-    if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED and not _has_active_task_binding(
-        active_role=active_role,
-        current_identity=current_identity,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    ):
-        return _active_task_required_rejection(
-            tool=tool,
-            action=action,
-            current_identity=current_identity,
-            active_role=active_role,
-        )
+    if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED:
+        from env.domain import task_sys
+
+        projection = task_sys.actor_task_projection(actor_profile=runtime_actor)
+        if projection["active_count"] == 0:
+            return _active_task_required_rejection(
+                tool=tool,
+                action=action,
+                current_identity=current_identity,
+                active_role=active_role,
+            )
 
     try:
         return _invoke_tool(tool=tool, action=action, args=dict(args), context=context)

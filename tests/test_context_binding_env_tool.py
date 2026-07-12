@@ -21,6 +21,7 @@ import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
+from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -30,6 +31,25 @@ _EXPECTED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "sear
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_tool_context_exposes_only_explicit_runtime_capabilities(self) -> None:
+        profile = runtime_context.ActorIdentityProfile(
+            identity=runtime_context.IdentityRef(id="act-dev-capability", type="actor"),
+            role_id="dev",
+        )
+        context = runtime_context.ToolContext.from_identity_profile(
+            actor_identity_profile=profile,
+            instance_json=self.runtime_root / "instances" / "act-dev-capability" / "instance.json",
+            instance_payload={"actor_id": "act-dev-capability", "role": "dev"},
+            manifest={},
+        )
+
+        self.assertIsInstance(context.actor_directory, runtime_context.ActorDirectoryAccess)
+        self.assertIsInstance(context.signal_delivery, runtime_context.SignalDeliveryAccess)
+        self.assertIsInstance(context.task_sys_runtime, runtime_context.TaskSysRuntimeAccess)
+        self.assertIsInstance(context.im_actor_delivery, runtime_context.ImActorDeliveryAccess)
+        self.assertFalse(hasattr(context, "daemon"))
+        self.assertFalse(hasattr(runtime_context, "Daemon" + "Access"))
+
     def _write_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")

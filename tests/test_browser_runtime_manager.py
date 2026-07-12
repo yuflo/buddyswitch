@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.launcher import browser_runtime_manager as manager  # noqa: E402
-from tools.launcher import daemon_core  # noqa: E402
+from tools.launcher import daemon_state  # noqa: E402
 
 
 def free_port() -> int:
@@ -91,14 +91,14 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
         return instance_json
 
     def _daemon_state(self, instance_root: Path, actor_id: str = "act-dev-browser") -> Any:
-        return daemon_core.DaemonState.load(
+        return daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id=actor_id,
             main_thread_id="thr-main",
         )
 
     def _saved_daemon_state(self, instance_root: Path) -> dict[str, Any]:
-        return json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+        return json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
 
     def _write_fake_chrome(self, path: Path, argv_path: Path) -> None:
         path.write_text(
@@ -236,6 +236,7 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             release = manager.release(instance_root=instance_root, actor_id="act-dev-browser", reason="test_cleanup")
             self.assertTrue(release.get("ok"), msg=release)
             self.assertTrue(wait_until(lambda: not pid_alive(browser_pid)), "release must stop fake Chrome")
+            self.assertEqual(manager._DETACHED_BROWSER_PROCESSES, [])
 
     def test_acquire_reuses_owned_recorded_ready_endpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -382,6 +383,23 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             saved = self._saved_daemon_state(instance_root)
             self.assertEqual(saved["scheduled_triggers"][page_expired["schedule_id"]]["status"], "canceled")
             self.assertEqual(saved["scheduled_triggers"][task_schedule["schedule_id"]]["status"], "pending")
+
+    def test_stop_reports_daemon_schedule_save_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / "act-dev-browser"
+            self._write_instance(instance_root, browser_port=None)
+
+            with mock.patch.object(
+                manager.daemon_state,
+                "cancel_pending_schedules_by_source_owner",
+                side_effect=OSError("state save failed"),
+            ):
+                result = manager.stop(instance_root=instance_root, actor_id="act-dev-browser")
+
+            self.assertFalse(result.get("ok"), msg=result)
+            self.assertEqual(result["error"]["code"], "E_BROWSER_RUNTIME_MANAGER")
+            self.assertIn("state save failed", result["error"]["message"])
+            self.assertIs(result["state_changed"], False)
 
     def test_release_cleans_owned_profile_listener_when_pid_marker_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

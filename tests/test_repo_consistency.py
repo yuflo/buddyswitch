@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -30,6 +31,34 @@ _FORBIDDEN_RUNTIME_SURFACES = {
     "roadmap",
     "approval",
 }
+
+GENERIC_DAEMON_PATHS = (
+    Path("tools/launcher/daemon_contracts.py"),
+    Path("tools/launcher/daemon_state.py"),
+    Path("tools/launcher/daemon_runtime.py"),
+    Path("tools/launcher/daemon_core.py"),
+    Path("tools/launcher/daemon_mailbox.py"),
+    Path("scripts/env/tool_runtime/daemon_client.py"),
+)
+
+
+def _imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            if module_name:
+                imported.add(module_name)
+            imported.update(
+                f"{module_name}.{alias.name}" if module_name else alias.name
+                for alias in node.names
+            )
+    return imported
+
+
 class RepoConsistencyTests(unittest.TestCase):
     _OLD_FLAG_PATTERNS = (
         "search open-browser --query",
@@ -94,6 +123,163 @@ class RepoConsistencyTests(unittest.TestCase):
                     snippet = " ".join(match.group(0).split())
                     hits.append(f"{relative}:{line_no}:{snippet[:260]}")
         return hits
+
+    def test_final_daemon_architecture_docs_name_current_single_paths(self) -> None:
+        daemon_doc = (ROOT / "docs/arch/daemon-service-architecture.md").read_text(encoding="utf-8")
+        web_doc = (ROOT / "docs/arch/web-interface-call-architecture.md").read_text(encoding="utf-8")
+
+        for token in (
+            "ActorDirectoryAccess",
+            "SignalDeliveryAccess",
+            "TaskSysRuntimeAccess",
+            "ImActorDeliveryAccess",
+            "task_sys_runtime_client.py",
+            "task_sys_daemon_adapter.py",
+            "actor_task_projection",
+            "cancel_pending_schedules_by_source_owner",
+        ):
+            with self.subTest(document="daemon", token=token):
+                self.assertIn(token, daemon_doc)
+        for token in (
+            "/api/actors/{id}/console",
+            "actor_task_projection",
+            "task_sys.update_task_analysis",
+            "host-control facts only",
+            "no Task subroute",
+        ):
+            with self.subTest(document="web", token=token):
+                self.assertIn(token, web_doc)
+
+    def test_generic_daemon_modules_have_no_product_dependencies_or_tokens(self) -> None:
+        forbidden_import_fragments = (
+            "task_sys",
+            "im_actor_delivery",
+            "im_wake_handler",
+            "track_comment",
+            "browser_runtime",
+            "browser_page",
+            "browser_release",
+            "web_management",
+            "env.services.messages",
+            "env.repos.messages",
+            "env.repos.tracks",
+        )
+        forbidden_source_tokens = (
+            "task_" + "sys",
+            "Task " + "Sys",
+            "im." + "message",
+            "track." + "comment",
+            "browser." + "page",
+            "browser." + "cockpit",
+        )
+        for relative in GENERIC_DAEMON_PATHS:
+            path = ROOT / relative
+            imports = _imported_modules(path)
+            source = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(relative), boundary="imports"):
+                self.assertFalse(
+                    [name for name in imports if any(fragment in name for fragment in forbidden_import_fragments)],
+                    imports,
+                )
+            with self.subTest(path=str(relative), boundary="tokens"):
+                self.assertFalse([token for token in forbidden_source_tokens if token in source], source)
+
+    def test_daemon_forward_convergence_retired_paths_are_absent(self) -> None:
+        targets = ["tools/launcher", "scripts/env", "tests", "buddyswitch-codex", "docs/arch"]
+        forbidden_patterns = (
+            r"mailbox\." + "task_sys",
+            "_task_sys_" + "status_payload",
+            "task_sys_" + "dispatcher",
+            "execute_" + "task_sys_instruction",
+            "cleanup_" + "task_sys_side_lease",
+            "Daemon" + "Access",
+            r"\bcontext\.daemon\b",
+            "task_checkout_" + "handler",
+            "LEGACY_STATE_" + "FIELDS",
+            "daemon_origin_" + "turn",
+            "daemon_runtime_" + "call",
+            "submit_parent_" + "prompt",
+        )
+        hits = self._scan_targets("|".join(forbidden_patterns), targets)
+        self.assertEqual(hits, [], msg="\n".join(hits))
+        self.assertFalse((ROOT / "tools/launcher" / ("task_checkout_" + "handler.py")).exists())
+        self.assertFalse((ROOT / "tests" / ("test_task_checkout_" + "handler.py")).exists())
+
+    def test_task_actor_projection_is_the_only_current_read_classifier(self) -> None:
+        targets = ["tools/launcher", "scripts/env", "tests", "docs/arch"]
+        retired = (
+            "active_tasks_" + "for_actor",
+            "recoverable_tasks_" + "for_actor",
+            "has_active_task_" + "for_actor",
+        )
+        hits = self._scan_targets("|".join(retired), targets)
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+        consumer_paths = (
+            ROOT / "scripts/env/tools/task_sys/_impl.py",
+            ROOT / "scripts/env/tools/context/_impl.py",
+            ROOT / "scripts/env/tool_runtime/registry.py",
+            ROOT / "tools/launcher/web_management.py",
+        )
+        direct_list_calls: list[str] = []
+        for path in consumer_paths:
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("actor_task_projection", source, msg=path)
+            tree = ast.parse(source, filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "list_tasks":
+                    direct_list_calls.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+        self.assertEqual(direct_list_calls, [])
+
+    def test_daemon_status_and_browser_state_use_final_boundaries(self) -> None:
+        core_source = (ROOT / "tools/launcher/daemon_core.py").read_text(encoding="utf-8")
+        self.assertNotIn("task_" + "sys", core_source)
+        self.assertNotIn("task-sys", core_source)
+
+        browser_path = ROOT / "tools/launcher/browser_runtime_manager.py"
+        browser_source = browser_path.read_text(encoding="utf-8")
+        browser_imports = _imported_modules(browser_path)
+        self.assertIn("daemon_state", browser_imports)
+        self.assertNotIn("daemon_core", browser_imports)
+        self.assertIn("cancel_pending_schedules_by_source_owner", browser_source)
+        for token in (
+            "Daemon" + "State",
+            "daemon_state_" + "file",
+            "state.json",
+            "scheduled_trigger_" + "ids",
+            "scheduled_" + "triggers",
+        ):
+            self.assertNotIn(token, browser_source)
+
+    def test_handlers_use_stable_contracts_and_instance_daemon_is_sole_composition_root(self) -> None:
+        handler_paths = (
+            ROOT / "tools/launcher/im_wake_handler.py",
+            ROOT / "tools/launcher/track_comment_added_handler.py",
+            ROOT / "tools/launcher/browser_page_expired_handler.py",
+            ROOT / "tools/launcher/browser_release_handler.py",
+        )
+        for path in handler_paths:
+            imports = _imported_modules(path)
+            with self.subTest(path=path.name):
+                self.assertIn("daemon_contracts", imports)
+                self.assertNotIn("daemon_core", imports)
+
+        composition_roots: list[str] = []
+        product_adapter_fragments = (
+            "task_sys_daemon_adapter",
+            "im_wake_handler",
+            "track_comment_added_handler",
+            "browser_page_expired_handler",
+            "browser_release_handler",
+        )
+        for path in sorted((ROOT / "tools/launcher").glob("*.py")):
+            imports = _imported_modules(path)
+            if "daemon_core" in imports and any(
+                any(fragment in imported for fragment in product_adapter_fragments)
+                for imported in imports
+            ):
+                composition_roots.append(path.name)
+        self.assertEqual(composition_roots, ["instance_daemon.py"])
 
     def test_external_session_naming_has_no_live_connection_residue(self) -> None:
         surfaces = (
@@ -389,8 +575,14 @@ print(json.dumps({{
             "tools/launcher/side_thread_lifecycle.py:",
             "tools/launcher/app_server.py:",
             "tools/launcher/side_thread_registry.py:",
+            "tools/launcher/task_sys_daemon_adapter.py:",
+            "scripts/env/tool_runtime/context.py:",
+            "scripts/env/tool_runtime/task_sys_runtime_client.py:",
             "tests/test_side_thread_lifecycle.py:",
             "tests/test_side_thread_registry.py:",
+            "tests/test_task_sys_daemon_adapter.py:",
+            "tests/test_task_sys_runtime_client.py:",
+            "tests/test_task_sys_runtime_executor.py:",
         )
         direct_hits = [
             line
@@ -744,7 +936,6 @@ print(json.dumps({{
             "tests/test_runtime_broker.py",
             "tests/test_browser_page_expired_handler.py",
             "tests/test_notification_center.py",
-            "tests/test_task_checkout_handler.py",
             "tests/test_daemon_mailbox.py",
             "tests/test_track_env_tool.py",
             "tests/test_artifact_env_tool.py",
@@ -806,7 +997,7 @@ print(json.dumps({{
             (
                 r"ActorAddress|actor_address|from_actor_address|to_actor_address|processed_by_actor_address"
                 r"|source_actor_address|target_actor_address|identity_from_im_participant"
-                r"|participant\.actor_address|participant\.external_id|\bactor_profile\b",
+                r"|participant\.actor_address|participant\.external_id",
                 expanded_live_targets,
             ),
             (r"\bfrom_identity_id\b|\bto_identity_id\b|\bvisible_to_identity\b", expanded_live_targets),
@@ -973,7 +1164,7 @@ print(json.dumps({{
 
     def test_im_actor_handling_surfaces_do_not_accept_sender_supplied_role(self) -> None:
         targets = [
-            "scripts/env/tool_runtime/daemon_client.py",
+            "scripts/env/tool_runtime/im_actor_delivery.py",
             "scripts/env/tool_runtime/context.py",
             "scripts/env/tool_runtime/im_client.py",
             "tools/launcher/external_im_session.py",
@@ -987,7 +1178,7 @@ print(json.dumps({{
             "tests/test_web_management.py",
         ]
         multiline_forbidden = [
-            r"wake_im_actor\(\s*\{[\s\S]{0,500}\btarget_role_id\b",
+            r"deliver\(\s*\{[\s\S]{0,500}\btarget_role_id\b",
         ]
         forbidden = [
             r"payload\.get\([\"']target_role_id[\"']\)",
@@ -1031,7 +1222,7 @@ print(json.dumps({{
     def test_central_im_write_does_not_import_processing_or_channel(self) -> None:
         source = (ROOT / "scripts" / "env" / "services" / "messages.py").read_text(encoding="utf-8")
         forbidden = (
-            "wake_im_actor",
+            "wake_" + "im_actor",
             "mailbox.local_trigger",
             "task_sys_ingress",
             "ImMessageCreatedHandler",

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from itertools import count
@@ -13,6 +14,13 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LAUNCHER = ROOT / "tools" / "launcher"
+if str(LAUNCHER) not in sys.path:
+    sys.path.insert(0, str(LAUNCHER))
+
+import daemon_contracts  # noqa: E402
+import daemon_state  # noqa: E402
+
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
 TRIGGERS_PATH = ROOT / "tools" / "launcher" / "daemon_triggers.py"
 MODULE_COUNTER = count()
@@ -41,9 +49,7 @@ class RecordingHandler:
 
     def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
         self.handled.append(trigger)
-        import daemon_core
-
-        return daemon_core.HandlerResult.handled()
+        return daemon_contracts.HandlerResult.handled()
 
 
 class FailingHandler:
@@ -53,9 +59,7 @@ class FailingHandler:
         return trigger.type == "example.ready"
 
     def handle(self, _context: object, _state: object, _runtime: object, _trigger: Any) -> object:
-        import daemon_core
-
-        return daemon_core.HandlerResult.failed("handler failed intentionally")
+        return daemon_contracts.HandlerResult.failed("handler failed intentionally")
 
 
 class InvalidReturnHandler:
@@ -99,7 +103,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
         }
         instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
         context = self.daemon_core.load_daemon_context(instance_json)
-        state = self.daemon_core.DaemonState.load(
+        state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id="act-dev-daemon",
             main_thread_id="thr-main",
@@ -211,9 +215,8 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(result["handled_count"], 1)
             self.assertEqual(result["handling_status"], "handled")
             self.assertEqual(handler.handled, [self._trigger()])
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["handlers"]["recording"]["last_result"], "handled")
-            self.assertEqual(saved["handlers"]["recording"]["last_origin_turn_id"], "sig-readable")
 
     def test_trigger_router_reports_handler_failures_and_invalid_returns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -232,7 +235,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(result["handling_status"], "failed")
             self.assertIn("handler failed intentionally", result["handling_error"])
             self.assertIn("handler returned invalid result", result["handling_error"])
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["handlers"]["failing"]["last_result"], "failed")
             self.assertEqual(saved["handlers"]["invalid_return"]["last_result"], "failed")
 
@@ -267,7 +270,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(schedule["payload"], {"target_id": "target-idle-1"})
             self.assertEqual(schedule["source_context"], {"owner": "browser"})
 
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"], schedule)
 
@@ -300,7 +303,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(second["payload"], {"target_id": "target-1", "refreshed": True})
             self.assertEqual(second["source_context"], {"owner": "browser", "attempt": 2})
 
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1"])
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"], second)
             self.assertNotIn("browser_page_idle", saved)
@@ -332,7 +335,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
 
             self.assertEqual(delivered["schedule_id"], "schedule-1")
             self.assertEqual(pending["schedule_id"], "schedule-2")
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_trigger_ids"], ["schedule-1", "schedule-2"])
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["status"], "delivered")
             self.assertEqual(saved["scheduled_triggers"]["schedule-2"]["status"], "pending")
@@ -358,7 +361,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
 
                 def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
                     handled.append(trigger)
-                    return core.HandlerResult.handled()
+                    return daemon_contracts.HandlerResult.handled()
 
             first = self.daemon_core.sweep_due_scheduled_triggers(
                 instance["context"],
@@ -387,7 +390,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(trigger.payload, {"target_id": "target-ttl-1"})
             self.assertEqual(trigger.source_context["schedule_id"], "schedule-1")
             self.assertEqual(trigger.source_context["owner"], "browser")
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             row = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(row["status"], "delivered")
             self.assertEqual(row["delivered_at"], "2026-06-24T00:00:01Z")
@@ -424,7 +427,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                         schedule_key="browser.page.idle:target-ttl-1",
                         now="2026-06-24T00:00:01Z",
                     )
-                    return core.HandlerResult.handled()
+                    return daemon_contracts.HandlerResult.handled()
 
             first = self.daemon_core.sweep_due_scheduled_triggers(
                 instance["context"],
@@ -446,7 +449,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(first["failed_count"], 0)
             self.assertEqual(second["swept_count"], 0)
             self.assertEqual(len(handled), 1)
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             row = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(row["status"], "pending")
             self.assertEqual(row["due_at"], "2026-06-24T00:05:01Z")
@@ -481,7 +484,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(first["swept_count"], 1)
             self.assertEqual(first["failed_count"], 1)
             self.assertEqual(second["swept_count"], 0)
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             row = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(row["status"], "failed")
             self.assertEqual(row["last_error"], "scheduled trigger had no matching handler")
@@ -505,7 +508,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                     return trigger.type == "browser.page.expired"
 
                 def handle(self, *_args: object) -> object:
-                    return core.HandlerResult.failed("close failed")
+                    return daemon_contracts.HandlerResult.failed("close failed")
 
             first = self.daemon_core.sweep_due_scheduled_triggers(
                 instance["context"],
@@ -525,7 +528,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertEqual(first["swept_count"], 1)
             self.assertEqual(first["failed_count"], 1)
             self.assertEqual(second["swept_count"], 0)
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             row = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(row["status"], "failed")
             self.assertEqual(row["last_error"], "close failed")
@@ -563,7 +566,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
 
             self.assertEqual(result["swept_count"], 0)
             self.assertEqual(calls, [])
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance["context"].instance_root).read_text(encoding="utf-8"))
             row = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(row["status"], "canceled")
             self.assertEqual(row["canceled_at"], "2026-06-24T00:00:01Z")

@@ -19,7 +19,7 @@ if str(SCRIPTS) not in sys.path:
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.domain import task_sys  # noqa: E402
-from env.tool_runtime import context as runtime_context  # noqa: E402
+from env.tool_runtime import context as context_module  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
@@ -137,7 +137,7 @@ class TrackCommentEnvToolTests(unittest.TestCase):
         exc: BaseException | None = None,
     ) -> list[dict[str, Any]]:
         calls: list[dict[str, Any]] = []
-        original_deliver_signal = runtime_context.daemon_client.deliver_signal
+        original_deliver_signal = context_module.daemon_client.deliver_signal
 
         def fake_deliver_signal(*, signal: dict[str, Any]) -> dict[str, object]:
             calls.append(signal)
@@ -156,14 +156,14 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             }
 
         def restore() -> None:
-            runtime_context.daemon_client.deliver_signal = original_deliver_signal
+            context_module.daemon_client.deliver_signal = original_deliver_signal
 
-        runtime_context.daemon_client.deliver_signal = fake_deliver_signal
+        context_module.daemon_client.deliver_signal = fake_deliver_signal
         self.addCleanup(restore)
         return calls
 
     def _patch_online_actors(self, actor_rows: list[dict[str, Any]]) -> None:
-        original_list_online_actors = runtime_context.daemon_client.list_online_actors
+        original_list_online_actors = context_module.daemon_client.list_online_actors
 
         def fake_list_online_actors(*, role_id: str | None = None, socket_path: Path | None = None) -> dict[str, object]:
             del socket_path
@@ -179,9 +179,9 @@ class TrackCommentEnvToolTests(unittest.TestCase):
             return {"actors": rows, "count": len(rows)}
 
         def restore() -> None:
-            runtime_context.daemon_client.list_online_actors = original_list_online_actors
+            context_module.daemon_client.list_online_actors = original_list_online_actors
 
-        runtime_context.daemon_client.list_online_actors = fake_list_online_actors
+        context_module.daemon_client.list_online_actors = fake_list_online_actors
         self.addCleanup(restore)
 
     def _seed_track(self, track_id: str) -> dict[str, object]:

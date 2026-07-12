@@ -768,8 +768,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         message_id = seed_response["message"]["id"]
 
         with patch.object(
-            runtime_context.DaemonAccess,
-            "execute_task_sys_instruction",
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
             autospec=True,
             side_effect=AssertionError("message.mark must not execute parent handoff"),
         ):
@@ -808,8 +808,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )["task_id"]
 
         with patch.object(
-            runtime_context.DaemonAccess,
-            "cleanup_task_sys_side_lease",
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
             autospec=True,
             return_value={
                 "side_thread_id": "thr-side-response",
@@ -950,13 +950,13 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
 
         with patch.object(
-            runtime_context.DaemonAccess,
-            "execute_task_sys_instruction",
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
             autospec=True,
             return_value={"action": "submit_parent", "task_id": task_id, "turn_id": "turn-parent-response"},
         ), patch.object(
-            runtime_context.DaemonAccess,
-            "cleanup_task_sys_side_lease",
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
             autospec=True,
             return_value={
                 "side_thread_id": "thr-side-handoff",

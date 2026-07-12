@@ -14,8 +14,9 @@ for candidate in (HELPER_DIR, SCRIPTS):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import daemon_core  # noqa: E402
+import daemon_contracts  # noqa: E402
 import task_sys_ingress  # noqa: E402
+import task_sys_daemon_adapter  # noqa: E402
 from env.domain import track_comments as track_comment_rules  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as track_comment_repo  # noqa: E402
@@ -44,8 +45,9 @@ class TrackCommentAddedHandler:
     ) -> Any:
         del state
         if getattr(trigger, "type", None) != "track.comment.added":
-            return daemon_core.HandlerResult.ignored()
-        return self._handle_track_comment_added(context, runtime, trigger)
+            return daemon_contracts.HandlerResult.ignored()
+        del runtime
+        return self._handle_track_comment_added(context, trigger)
 
     def _payload(self, trigger: Any) -> dict[str, str]:
         payload = getattr(trigger, "payload", None)
@@ -102,7 +104,7 @@ class TrackCommentAddedHandler:
         if track.get("archived_at") is not None:
             raise PermissionError(f"track '{track_id}' is archived and cannot receive Track comment attention")
 
-    def _handle_track_comment_added(self, context: Any, runtime: Any, trigger: Any) -> daemon_core.HandlerResult:
+    def _handle_track_comment_added(self, context: Any, trigger: Any) -> daemon_contracts.HandlerResult:
         try:
             target_identity = self._ensure_target_identity(context, trigger)
             source_identity = self._source_identity_route(trigger)
@@ -127,13 +129,10 @@ class TrackCommentAddedHandler:
                 source_identity_id=source_identity["identity_id"],
                 source_role_id=source_identity["role_id"],
             )
-            execute = getattr(runtime, "execute_task_sys_instruction", None)
-            if not callable(execute):
-                raise RuntimeError("daemon runtime does not support Task Sys instruction execution")
-            execute(result["instruction"])
-            return daemon_core.HandlerResult.handled()
+            task_sys_daemon_adapter.execute_instruction(context, result["instruction"])
+            return daemon_contracts.HandlerResult.handled()
         except Exception as exc:
-            return daemon_core.HandlerResult.failed(str(exc))
+            return daemon_contracts.HandlerResult.failed(str(exc))
 
 
 if __name__ == "__main__":

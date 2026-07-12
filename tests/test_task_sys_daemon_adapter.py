@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Tests for the Task Sys-owned daemon application-command adapter."""
+
+from __future__ import annotations
+
+import importlib.util
+import unittest
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ADAPTER_PATH = ROOT / "tools" / "launcher" / "task_sys_daemon_adapter.py"
+PROTOCOL_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "task_sys_runtime_protocol.py"
+
+
+def _load_module(path: Path, name: str) -> Any:
+    if not path.exists():
+        raise AssertionError(f"expected module to exist: {path}")
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load module spec: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TaskSysDaemonAdapterTests(unittest.TestCase):
+    def test_adapter_and_protocol_modules_exist(self) -> None:
+        self.assertTrue(ADAPTER_PATH.exists(), ADAPTER_PATH)
+        self.assertTrue(PROTOCOL_PATH.exists(), PROTOCOL_PATH)
+
+    def test_command_handlers_use_only_current_protocol_keys(self) -> None:
+        adapter = _load_module(ADAPTER_PATH, "buddyswitch_task_sys_adapter_test")
+        protocol = _load_module(PROTOCOL_PATH, "buddyswitch_task_sys_protocol_test")
+        context = object()
+
+        handlers = adapter.command_handlers(context)
+
+        self.assertEqual(set(handlers), {protocol.EXECUTE_INSTRUCTION, protocol.CLEANUP_SIDE_LEASE})
+        self.assertTrue(all(callable(handler) for handler in handlers.values()))
+
+    def test_execute_command_validates_payload_and_delegates_to_runtime(self) -> None:
+        adapter = _load_module(ADAPTER_PATH, "buddyswitch_task_sys_adapter_execute_test")
+        protocol = _load_module(PROTOCOL_PATH, "buddyswitch_task_sys_protocol_execute_test")
+        context = object()
+        instruction = {"type": "start_parent", "task_id": "task-user-input-adapter123"}
+        calls: list[tuple[object, dict[str, object]]] = []
+        original = adapter.task_sys_runtime.execute_instruction
+        self.addCleanup(setattr, adapter.task_sys_runtime, "execute_instruction", original)
+        adapter.task_sys_runtime.execute_instruction = lambda runtime_context, value: (
+            calls.append((runtime_context, value))
+            or {"action": value["type"], "task_id": value["task_id"]}
+        )
+
+        result = adapter.command_handlers(context)[protocol.EXECUTE_INSTRUCTION]({"instruction": instruction})
+
+        self.assertEqual(result, {"action": "start_parent", "task_id": "task-user-input-adapter123"})
+        self.assertEqual(calls, [(context, instruction)])
+        with self.assertRaisesRegex(ValueError, "instruction must be an object"):
+            adapter.command_handlers(context)[protocol.EXECUTE_INSTRUCTION]({"instruction": "invalid"})
+
+    def test_cleanup_command_validates_task_id_and_delegates_to_runtime(self) -> None:
+        adapter = _load_module(ADAPTER_PATH, "buddyswitch_task_sys_adapter_cleanup_test")
+        protocol = _load_module(PROTOCOL_PATH, "buddyswitch_task_sys_protocol_cleanup_test")
+        context = object()
+        calls: list[tuple[object, str]] = []
+        original = adapter.task_sys_runtime.cleanup_side_lease
+        self.addCleanup(setattr, adapter.task_sys_runtime, "cleanup_side_lease", original)
+        adapter.task_sys_runtime.cleanup_side_lease = lambda runtime_context, task_id: (
+            calls.append((runtime_context, task_id))
+            or {"task_id": task_id, "lease_unregistered": True}
+        )
+
+        result = adapter.command_handlers(context)[protocol.CLEANUP_SIDE_LEASE](
+            {"task_id": "task-user-input-cleanup123"}
+        )
+
+        self.assertTrue(result["lease_unregistered"])
+        self.assertEqual(calls, [(context, "task-user-input-cleanup123")])
+        with self.assertRaisesRegex(ValueError, "task_id"):
+            adapter.command_handlers(context)[protocol.CLEANUP_SIDE_LEASE]({"task_id": ""})
+
+
+if __name__ == "__main__":
+    unittest.main()

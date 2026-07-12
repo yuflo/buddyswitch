@@ -15,9 +15,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+LAUNCHER = ROOT / "tools" / "launcher"
+for candidate in (SCRIPTS, LAUNCHER):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
+import daemon_state  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
@@ -61,30 +64,6 @@ class FakeDaemonRuntime:
         self.calls.append({"method": "parent_activity"})
         raise AssertionError("Track comment handler must not inspect parent activity")
 
-    def submit_parent_prompt(
-        self,
-        text: str,
-        *,
-        handler_name: str,
-        origin_id: str | None,
-        interrupt_policy: str,
-    ) -> dict[str, object]:
-        self.calls.append(
-            {
-                "method": "submit_parent_prompt",
-                "text": text,
-                "handler_name": handler_name,
-                "origin_id": origin_id,
-                "interrupt_policy": interrupt_policy,
-            }
-        )
-        raise AssertionError("Track comment handler must not submit parent prompts")
-
-    def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, object]:
-        self.calls.append({"method": "execute_task_sys_instruction", "instruction": instruction})
-        return {"action": instruction["type"], "task_id": instruction["task_id"]}
-
-
 class TrackCommentAddedHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp_dir = tempfile.TemporaryDirectory(dir=ROOT)
@@ -97,6 +76,18 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.daemon_core = load_module(DAEMON_CORE_PATH)
         self.handler_module = load_module(HANDLER_PATH)
         self.handler = self.handler_module.TrackCommentAddedHandler()
+        self.adapter_calls: list[dict[str, Any]] = []
+        original_execute = self.handler_module.task_sys_daemon_adapter.execute_instruction
+        self.addCleanup(
+            setattr,
+            self.handler_module.task_sys_daemon_adapter,
+            "execute_instruction",
+            original_execute,
+        )
+        self.handler_module.task_sys_daemon_adapter.execute_instruction = (
+            lambda _context, instruction: self.adapter_calls.append(dict(instruction))
+            or {"action": instruction["type"], "task_id": instruction["task_id"]}
+        )
 
     def tearDown(self) -> None:
         runtime_files.reset_runtime_root_override()
@@ -128,7 +119,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         }
         instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
         context = self.daemon_core.load_daemon_context(instance_json)
-        state = self.daemon_core.DaemonState.load(
+        state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id=actor_id,
             main_thread_id="thr-main-track",
@@ -240,10 +231,9 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
         self.assertEqual(record["execution"]["processor"], "side")
         self.assertEqual(record["task_relation"], {"kind": "independent", "target_task_id": None})
         self.assertNotIn("active_processor", record)
-        execute_calls = [call for call in runtime.calls if call["method"] == "execute_task_sys_instruction"]
-        self.assertEqual(len(execute_calls), 1)
-        self.assertEqual(execute_calls[0]["instruction"]["type"], "start_side")
-        self.assertEqual(execute_calls[0]["instruction"]["task_id"], record["id"])
+        self.assertEqual(len(self.adapter_calls), 1)
+        self.assertEqual(self.adapter_calls[0]["type"], "start_side")
+        self.assertEqual(self.adapter_calls[0]["task_id"], record["id"])
         return record
 
     def test_track_comment_handler_ignores_unknown_trigger_types(self) -> None:
@@ -362,6 +352,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
                 "BUDDYSWITCH_INSTANCE_JSON",
                 "BUDDYSWITCH_WORKSPACE_DIR",
                 "BUDDYSWITCH_ACTOR_ID",
+                "BUDDYSWITCH_ROLE_ID",
             )
         }
         self.addCleanup(self._restore_runtime_env, original_env)
@@ -406,7 +397,7 @@ class TrackCommentAddedHandlerTests(unittest.TestCase):
             self.assertTrue(comment_path.exists())
             self.assertFalse((shared_root / "buddyswitch" / "objects" / "track-comments").exists())
 
-            state = self.daemon_core.DaemonState.load(
+            state = daemon_state.DaemonState.load(
                 instance_root=instance_root,
                 actor_id="act-dev-track-handler",
                 main_thread_id="thr-main-track",

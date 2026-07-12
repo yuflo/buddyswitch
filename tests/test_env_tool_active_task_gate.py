@@ -160,7 +160,11 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             state_changed=False,
             durability="none",
         )
-        with patch.object(tool_registry, "_invoke_tool", return_value=handler_response) as invoke_tool:
+        with patch.object(tool_registry, "_invoke_tool", return_value=handler_response) as invoke_tool, patch.object(
+            task_sys,
+            "actor_task_projection",
+            wraps=task_sys.actor_task_projection,
+        ) as actor_projection:
             response = self._dispatch(
                 instance=instance,
                 tool="search",
@@ -169,6 +173,10 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             )
         self.assertEqual(response, handler_response)
         invoke_tool.assert_called_once()
+        actor_projection.assert_called_once()
+        projection_profile = actor_projection.call_args.kwargs["actor_profile"]
+        self.assertEqual(projection_profile.identity.id, instance["actor_id"])
+        self.assertEqual(projection_profile.role_id, instance["role"])
 
     def test_dispatch_ordering_rejects_existing_failures_before_active_task_gate(self) -> None:
         market_instance = self._instance(role="market", label="act-gate-order-market")

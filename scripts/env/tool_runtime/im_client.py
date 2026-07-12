@@ -52,7 +52,7 @@ class ActorImClient:
                 sender_identity=self._identity,
                 reply_to=reply_to.strip(),
                 content=str(args.get("content") or ""),
-                actor_reachability_checker=getattr(self._context.daemon, "check_reachability", None),
+                actor_reachability_checker=self._context.actor_directory.check_reachability,
             )
         else:
             target_response = self._send_target_identity(target_identity_id)
@@ -67,7 +67,7 @@ class ActorImClient:
         return message_service.attach_post_write_delivery_status(
             result,
             target_identity=self._result_target_identity(result, explicit_target),
-            actor_delivery_handler=getattr(self._context.daemon, "wake_im_actor", None),
+            actor_delivery_handler=self._context.im_actor_delivery.deliver,
         )
 
     def get(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -111,7 +111,7 @@ class ActorImClient:
         return message_service.resolve_im_send_target(
             sender_identity=self._identity,
             target_identity_id=value,
-            actor_reachability_checker=getattr(self._context.daemon, "check_reachability", None),
+            actor_reachability_checker=self._context.actor_directory.check_reachability,
         )
 
     def _result_target_identity(self, result: dict[str, Any], explicit_target: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -131,11 +131,8 @@ class ActorImClient:
         return message_service.identity_target_for_direct_conversation(identity_id)
 
     def _online_actor_rows(self, *, role_id: str | None) -> list[dict[str, Any]]:
-        list_online_actors = getattr(self._context.daemon, "list_online_actors", None)
-        if not callable(list_online_actors):
-            return []
         try:
-            raw = list_online_actors(role_id=role_id)
+            raw = self._context.actor_directory.list_online_actors(role_id=role_id)
         except Exception:
             return []
         return raw.get("actors") if isinstance(raw, dict) and isinstance(raw.get("actors"), list) else []

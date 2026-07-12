@@ -26,11 +26,6 @@ class _ExplodingMessageRepo:
         raise AssertionError(f"old message repo must not be used: {name}")
 
 
-class _ExplodingDaemon:
-    def __getattr__(self, name: str) -> object:
-        raise AssertionError(f"old daemon message path must not be used: {name}")
-
-
 class _Repos:
     message = _ExplodingMessageRepo()
 
@@ -77,32 +72,39 @@ class _Context(dict[str, Any]):
         )
         self.im_client = client
         self.repos = _Repos()
-        self.daemon = _ExplodingDaemon()
         self.rules = _Rules()
 
 
 class _RealImContext(dict[str, Any]):
-    def __init__(self, *, identity_id: str, role_id: str, daemon: Any) -> None:
+    def __init__(self, *, identity_id: str, role_id: str, capabilities: Any) -> None:
         super().__init__(
             current_identity={"id": identity_id, "type": "actor"},
             active_role=role_id,
             manifest={"roles": [{"id": role_id}, {"id": "pm"}]},
         )
-        self.daemon = daemon
+        self.actor_directory = capabilities
+        self.im_actor_delivery = capabilities
 
 
-class _RecordingParentDaemon:
+class _RecordingParentCapability:
     def __init__(self) -> None:
         self.parent_requests: list[dict[str, Any]] = []
 
 
-class _RecordingWakeDaemon:
+class _RecordingImDelivery:
     def __init__(self) -> None:
-        self.wake_calls: list[dict[str, Any]] = []
+        self.delivery_calls: list[dict[str, Any]] = []
 
-    def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self.wake_calls.append(dict(payload))
+    def deliver(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.delivery_calls.append(dict(payload))
         return {"actor_handling_status": "submitted", "runtime_target": "parent", "error": None}
+
+    def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
+        return {"reachability_status": "offline", "target_identity_id": target_identity_id}
+
+    def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
+        del role_id
+        return {"actors": [], "count": 0}
 
 
 class MessageToolImClientTests(unittest.TestCase):
@@ -138,7 +140,9 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_send_with_invalid_target_identity_id_returns_payload_error(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-invalid-target")
-        client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=_RecordingWakeDaemon()))
+        client = im_client_module.ActorImClient(
+            _RealImContext(identity_id=actor_id, role_id="dev", capabilities=_RecordingImDelivery())
+        )
 
         response = client.send(
             {
@@ -158,7 +162,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         captured: dict[str, Any] = {}
         handling_calls: list[dict[str, Any]] = []
 
-        class _Daemon:
+        class _Capabilities:
             def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
                 if target_identity_id != target_id:
                     raise AssertionError(f"expected {target_id}, got {target_identity_id}")
@@ -171,7 +175,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
                 raise AssertionError("message.send must not call list_online_actors")
 
-            def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
+            def deliver(self, payload: dict[str, Any]) -> dict[str, Any]:
                 handling_calls.append(dict(payload))
                 return {"actor_handling_status": "submitted", "runtime_target": "parent", "error": None}
 
@@ -188,7 +192,9 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         original = im_client_module.message_service.send_im_message
         im_client_module.message_service.send_im_message = fake_send_im_message
         try:
-            client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=_Daemon()))
+            client = im_client_module.ActorImClient(
+                _RealImContext(identity_id=actor_id, role_id="dev", capabilities=_Capabilities())
+            )
             response = client.send({"target_identity_id": target_id, "content": "hello"})
         finally:
             im_client_module.message_service.send_im_message = original
@@ -222,10 +228,10 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(auth.get("ok"), msg=auth)
         external_id = auth["identity"]["id"]
 
-        class _Daemon:
+        class _Capabilities:
             def __init__(self) -> None:
                 self.reachability_calls: list[dict[str, object]] = []
-                self.wake_calls: list[dict[str, object]] = []
+                self.delivery_calls: list[dict[str, object]] = []
 
             def check_reachability(self, *, target_identity_id: str) -> dict[str, object]:
                 self.reachability_calls.append({"target_identity_id": target_identity_id})
@@ -238,12 +244,14 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             def list_online_actors(self, *, role_id: str | None = None) -> dict[str, object]:
                 raise AssertionError("message.send must not list actors to resolve an explicit target")
 
-            def wake_im_actor(self, payload: dict[str, object]) -> dict[str, object]:
-                self.wake_calls.append(dict(payload))
+            def deliver(self, payload: dict[str, object]) -> dict[str, object]:
+                self.delivery_calls.append(dict(payload))
                 return {"actor_handling_status": "submitted"}
 
-        daemon = _Daemon()
-        client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=daemon))
+        capabilities = _Capabilities()
+        client = im_client_module.ActorImClient(
+            _RealImContext(identity_id=actor_id, role_id="dev", capabilities=capabilities)
+        )
 
         response = client.send({"target_identity_id": external_id, "content": "hello external"})
         events = message_service.read_external_session_events(
@@ -255,8 +263,8 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response["target_identity"], auth["identity"])
         self.assertEqual(response["actor_handling_status"], "not_applicable")
-        self.assertEqual(daemon.reachability_calls, [])
-        self.assertEqual(daemon.wake_calls, [])
+        self.assertEqual(capabilities.reachability_calls, [])
+        self.assertEqual(capabilities.delivery_calls, [])
         self.assertEqual([row["message_id"] for row in events["events"]], [response["message"]["id"]])
 
     def test_actor_can_reply_to_external_origin_message_with_reply_to_only(self) -> None:
@@ -270,8 +278,10 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             target_identity={"id": actor_id, "type": "actor"},
             content="ping",
         )
-        daemon = _RecordingWakeDaemon()
-        client = im_client_module.ActorImClient(_RealImContext(identity_id=actor_id, role_id="dev", daemon=daemon))
+        capabilities = _RecordingImDelivery()
+        client = im_client_module.ActorImClient(
+            _RealImContext(identity_id=actor_id, role_id="dev", capabilities=capabilities)
+        )
 
         reply = client.send({"content": "pong", "reply_to": root["message"]["id"]})
 
@@ -282,7 +292,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("wake_" + "status", reply)
         self.assertEqual(reply["original_message_id"], root["message"]["id"])
         self.assertEqual(reply["original_final_disposition"], "replied")
-        self.assertEqual(daemon.wake_calls, [])
+        self.assertEqual(capabilities.delivery_calls, [])
 
         state_path = (
             self.runtime_state_root
@@ -308,7 +318,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         reachability_calls: list[str] = []
 
-        class _Daemon(_RecordingWakeDaemon):
+        class _Capabilities(_RecordingImDelivery):
             def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
                 reachability_calls.append(target_identity_id)
                 return {
@@ -317,9 +327,9 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "record": {"identity_id": target_identity_id},
                 }
 
-        daemon = _Daemon()
+        capabilities = _Capabilities()
         client = im_client_module.ActorImClient(
-            _RealImContext(identity_id=active_actor_id, role_id="dev", daemon=daemon)
+            _RealImContext(identity_id=active_actor_id, role_id="dev", capabilities=capabilities)
         )
 
         reply = client.send({"content": "Reply from dev.", "reply_to": root["message"]["id"]})
@@ -330,7 +340,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(reply["target_identity"], {"id": source_actor_id, "type": "actor"})
         self.assertEqual(reply["actor_handling_status"], "submitted")
         self.assertEqual(
-            daemon.wake_calls,
+            capabilities.delivery_calls,
             [
                 {
                     "type": "im.message.created",
@@ -355,7 +365,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         before_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
 
-        class _Daemon(_RecordingWakeDaemon):
+        class _Capabilities(_RecordingImDelivery):
             def check_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
                 if target_identity_id != source_actor_id:
                     raise AssertionError(f"expected {source_actor_id}, got {target_identity_id}")
@@ -365,9 +375,9 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "record": {"identity_id": target_identity_id},
                 }
 
-        daemon = _Daemon()
+        capabilities = _Capabilities()
         client = im_client_module.ActorImClient(
-            _RealImContext(identity_id=active_actor_id, role_id="dev", daemon=daemon)
+            _RealImContext(identity_id=active_actor_id, role_id="dev", capabilities=capabilities)
         )
 
         reply = client.send({"content": "Reply from dev.", "reply_to": root["message"]["id"]})
@@ -385,7 +395,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         persisted = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(persisted["owner_identity_id"], active_actor_id)
         self.assertEqual(persisted["disposition"], "unseen")
-        self.assertEqual(daemon.wake_calls, [])
+        self.assertEqual(capabilities.delivery_calls, [])
 
     def test_actor_send_rejects_target_identity_and_reply_to_together_without_message_write(self) -> None:
         active_actor_id = self._runtime_actor_id(role="dev", label="act-dev-wrapper-both")
@@ -398,9 +408,9 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             content="Need a reply.",
         )
         before_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
-        daemon = _RecordingWakeDaemon()
+        capabilities = _RecordingImDelivery()
         client = im_client_module.ActorImClient(
-            _RealImContext(identity_id=active_actor_id, role_id="dev", daemon=daemon)
+            _RealImContext(identity_id=active_actor_id, role_id="dev", capabilities=capabilities)
         )
 
         response = client.send(
@@ -415,7 +425,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response["error"]["code"], "E_IM_PAYLOAD")
         after_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
         self.assertEqual(after_messages, before_messages)
-        self.assertEqual(daemon.wake_calls, [])
+        self.assertEqual(capabilities.delivery_calls, [])
 
     def test_mark_needs_parent_is_rejected_without_parent_submit(self) -> None:
         active_actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-parent-fail")
@@ -426,8 +436,10 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             content="This needs parent handling.",
         )
         message_id = incoming["message"]["id"]
-        daemon = _RecordingParentDaemon()
-        client = im_client_module.ActorImClient(_RealImContext(identity_id=active_actor_id, role_id="dev", daemon=daemon))
+        capabilities = _RecordingParentCapability()
+        client = im_client_module.ActorImClient(
+            _RealImContext(identity_id=active_actor_id, role_id="dev", capabilities=capabilities)
+        )
 
         response = client.mark(
             {
@@ -440,7 +452,7 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
         self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
-        self.assertEqual(daemon.parent_requests, [])
+        self.assertEqual(capabilities.parent_requests, [])
 
         state_path = (
             self.runtime_state_root

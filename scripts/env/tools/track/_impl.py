@@ -282,7 +282,7 @@ def _delivery_metadata(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _deliver_track_comment_added(
+def _deliver_track_comment_signal(
     *,
     comment: dict[str, Any],
     reply_to_comment: dict[str, Any] | None,
@@ -298,12 +298,15 @@ def _deliver_track_comment_added(
     results: list[dict[str, Any]] = []
     for target in targets:
         try:
-            result = context.daemon.deliver_track_comment_added(
-                track_id=payload["track_id"],
-                comment_id=payload["comment_id"],
-                thread_id=payload["thread_id"],
+            result = context.signal_delivery.deliver_signal(
+                signal_type="track.comment.added",
                 target_identity_id=target["identity_id"],
                 target_role_id=target["role_id"],
+                payload={
+                    "track_id": payload["track_id"],
+                    "comment_id": payload["comment_id"],
+                    "thread_id": payload["thread_id"],
+                },
             )
             results.append(_delivery_row_from_result(target, result))
         except Exception as exc:
@@ -430,12 +433,8 @@ def _identity_routes_for_mentions(*, context: Any, current_identity: dict[str, A
     if active_route is not None:
         routes[active_route["identity_id"]] = active_route
 
-    daemon = getattr(context, "daemon", None)
-    list_online_actors = getattr(daemon, "list_online_actors", None)
-    if not callable(list_online_actors):
-        return routes
     try:
-        raw = list_online_actors(role_id=None)
+        raw = context.actor_directory.list_online_actors(role_id=None)
     except Exception:
         return routes
     rows = raw.get("actors") if isinstance(raw, dict) and isinstance(raw.get("actors"), list) else []
@@ -836,7 +835,7 @@ def add_comment_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
             message=message,
         )
 
-    delivery_metadata = _deliver_track_comment_added(
+    delivery_metadata = _deliver_track_comment_signal(
         comment=comment,
         reply_to_comment=reply_to_comment,
         identity_routes=identity_routes,

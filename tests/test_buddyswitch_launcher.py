@@ -810,6 +810,9 @@ exec "$real_git" "$@"
             except subprocess.TimeoutExpired:
                 holder.kill()
                 holder.wait(timeout=5)
+        for stream in (holder.stdin, holder.stdout, holder.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
 
     def _write_instance_record(
         self,
@@ -1493,6 +1496,17 @@ exec "$real_git" "$@"
                 if not self._pid_is_live(pid):
                     return
                 time.sleep(0.05)
+
+    def _cleanup_popen(self, proc: subprocess.Popen[str]) -> None:
+        self._terminate_registered_process(proc.pid)
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
 
     def _cleanup_registered_test_processes(self) -> None:
         registry_path = getattr(self, "_process_registry_path", None)
@@ -2903,7 +2917,18 @@ exec "$real_git" "$@"
             self.assertTrue((daemon_dir / "daemon.log").exists())
             self.assertEqual(daemon_state["actor_id"], ctx["actor_id"])
             self.assertEqual(daemon_state["main_thread_id"], instance_payload["thread_id"])
-            self.assertEqual(daemon_state["daemon_origin_turn_ids"], [])
+            self.assertEqual(
+                set(daemon_state),
+                {
+                    "actor_id",
+                    "main_thread_id",
+                    "ready",
+                    "last_error",
+                    "handlers",
+                    "scheduled_trigger_ids",
+                    "scheduled_triggers",
+                },
+            )
             self.assertEqual(daemon_state["ready"]["pid"], daemon_pid)
             self.assertEqual(daemon_state["ready"]["main_thread_id"], instance_payload["thread_id"])
 
@@ -2922,7 +2947,6 @@ exec "$real_git" "$@"
             self.assertEqual(
                 status_payload["daemon"]["handlers"]["registered"],
                 [
-                    "task_checkout",
                     "im_message_created",
                     "track_comment_added",
                     "browser_page_expired",
@@ -2930,9 +2954,6 @@ exec "$real_git" "$@"
                     "browser_failed_open_page_cleanup",
                 ],
             )
-            task_checkout_status = status_payload["daemon"]["handlers"]["items"]["task_checkout"]
-            self.assertIs(task_checkout_status["enabled"], True)
-            self.assertIs(task_checkout_status["active"], True)
             message_status = status_payload["daemon"]["handlers"]["items"]["im_message_created"]
             self.assertIs(message_status["enabled"], True)
             self.assertIs(message_status["active"], True)
@@ -5947,7 +5968,6 @@ exec "$real_git" "$@"
             self.assertEqual(
                 payload["daemon"]["handlers"]["registered"],
                 [
-                    "task_checkout",
                     "im_message_created",
                     "track_comment_added",
                     "browser_page_expired",
@@ -5955,7 +5975,6 @@ exec "$real_git" "$@"
                     "browser_failed_open_page_cleanup",
                 ],
             )
-            self.assertTrue(payload["daemon"]["handlers"]["items"]["task_checkout"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["im_message_created"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["track_comment_added"]["active"])
             self.assertTrue(payload["daemon"]["handlers"]["items"]["browser_page_expired"]["active"])
@@ -5963,7 +5982,7 @@ exec "$real_git" "$@"
             self.assertTrue(payload["daemon"]["handlers"]["items"]["browser_failed_open_page_cleanup"]["active"])
             self.assertEqual(payload["thread"]["status"], "idle")
 
-    def test_instance_status_json_reports_task_sys_active_summary(self) -> None:
+    def test_instance_status_json_excludes_task_sys_product_projection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -6000,22 +6019,7 @@ exec "$real_git" "$@"
 
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
             payload = json.loads(status_result.stdout)
-            task_sys_status = payload["daemon"]["task_sys"]
-            self.assertEqual(task_sys_status["scope"], "task_sys_state_projection")
-            self.assertEqual(task_sys_status["active_count"], 1)
-            self.assertEqual(task_sys_status["recoverable_count"], 1)
-            self.assertEqual(task_sys_status["by_status"], {"in_progress": 1})
-            self.assertEqual(task_sys_status["recoverable_by_status"], {"runtime_failed": 1})
-            self.assertEqual(task_sys_status["active_tasks"][0]["task_id"], "task-im-message-created-status001")
-            self.assertEqual(task_sys_status["active_tasks"][0]["source_type"], "im.message.created")
-            self.assertEqual(task_sys_status["active_tasks"][0]["source_ref"], {"message_id": "msg-status-1"})
-            self.assertEqual(task_sys_status["active_tasks"][0]["task_desc"], "Need parent help")
-            self.assertEqual(task_sys_status["active_tasks"][0]["task_relation"], {"kind": "independent", "target_task_id": None})
-            self.assertEqual(task_sys_status["active_tasks"][0]["execution"]["processor"], "parent")
-            self.assertEqual(task_sys_status["recoverable_tasks"][0]["task_id"], "task-im-message-created-runtimefailed")
-            self.assertEqual(task_sys_status["recoverable_tasks"][0]["status"], "in_progress")
-            self.assertEqual(task_sys_status["recoverable_tasks"][0]["execution"]["result"]["reason"], "runtime_failed")
-            self.assertEqual(task_sys_status["recoverable_tasks"][0]["execution"]["result"]["stage"], "side_input")
+            self.assertNotIn("task_sys", payload["daemon"])
 
     def test_instance_status_json_reports_log_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -6088,9 +6092,9 @@ exec "$real_git" "$@"
 
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
             self.assertIn("Daemon health:", status_result.stdout)
-            self.assertIn("Daemon handlers: task_checkout", status_result.stdout)
+            self.assertIn("Daemon handlers: im_message_created", status_result.stdout)
 
-    def test_human_status_reports_task_sys_active_and_delivery_scope(self) -> None:
+    def test_human_status_excludes_task_sys_product_projection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -6117,8 +6121,7 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            self.assertIn("Task Sys active: 1", status_result.stdout)
-            self.assertIn("Task Sys active statuses: in_progress=1", status_result.stdout)
+            self.assertNotIn("Task Sys active", status_result.stdout)
             self.assertIn(
                 "Delivery scope: daemon handler status is trigger-dispatch only; external channel delivery is separate.",
                 status_result.stdout,
@@ -6208,51 +6211,19 @@ exec "$real_git" "$@"
             self.assertNotIn("turn/start", rpc_methods)
             self.assertNotIn("turn/steer", rpc_methods)
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
-            self.assertEqual(daemon_state["daemon_origin_turn_ids"], [])
-            self.assertEqual(daemon_state["daemon_origin_turns"], {})
-            self.assertIsNone(daemon_state["handlers"]["task_checkout"]["last_origin_turn_id"])
-            self.assertIsNone(daemon_state["handlers"]["task_checkout"]["last_runtime_turn_id"])
-            self.assertIsNone(daemon_state["handlers"]["task_checkout"]["last_result"])
-            self.assertNotIn("last_" + "action" + "_turn_id", daemon_state["handlers"]["task_checkout"])
-            self.assertNotIn("last_checkout_turn_id", daemon_state["handlers"]["task_checkout"])
-
-    def test_daemon_origin_completion_real_shape_does_not_loop(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={
-                    "thread_id": "thr-main",
-                    "next_turn_id": "turn-daemon-1",
-                    "daemon_notifications": [
-                        {
-                            "method": "turn/completed",
-                            "params": {
-                                "threadId": "thr-main",
-                                "turn": {
-                                    "id": "turn-user-1",
-                                    "items": [],
-                                    "itemsView": "summary",
-                                    "status": "completed",
-                                    "error": None,
-                                    "startedAt": 0,
-                                    "completedAt": 1,
-                                    "durationMs": 1,
-                                },
-                            },
-                        }
-                    ],
-                    "daemon_emit_completion_for_started_turn": True,
+            self.assertNotIn("task_" + "checkout", daemon_state["handlers"])
+            self.assertEqual(
+                set(daemon_state),
+                {
+                    "actor_id",
+                    "main_thread_id",
+                    "ready",
+                    "last_error",
+                    "handlers",
+                    "scheduled_trigger_ids",
+                    "scheduled_triggers",
                 },
             )
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            records = self._task_sys_records(Path(str(ctx["shared_root"])))
-            self.assertEqual(records, [])
-            rpc_methods = [row.get("rpc_method") for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
-            self.assertEqual(rpc_methods.count("turn/start"), 0)
 
     def test_daemon_ignores_other_thread_real_completion_in_fake_codex(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -10033,7 +10004,7 @@ exit 1
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                self.addCleanup(self._terminate_registered_process, proc.pid)
+                self.addCleanup(self._cleanup_popen, proc)
                 deadline = time.time() + 3.0
                 while self._tcp_port_is_available(port) and time.time() < deadline:
                     time.sleep(0.05)
@@ -10393,7 +10364,7 @@ exit 0
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            self.addCleanup(self._terminate_registered_process, foreign_proc.pid)
+            self.addCleanup(self._cleanup_popen, foreign_proc)
             (foreign_browser / "chrome.pid").write_text(f"{foreign_proc.pid}\n", encoding="utf-8")
             deadline = time.time() + 3.0
             while self._tcp_port_is_available(foreign_port) and time.time() < deadline:
@@ -10649,6 +10620,11 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={fore
                 capture_output=True,
                 check=False,
             )
+            browser_pid_file = instance_root / "browser" / "chrome.pid"
+            if browser_pid_file.exists():
+                browser_pid_text = browser_pid_file.read_text(encoding="utf-8").strip()
+                if browser_pid_text.isdigit():
+                    self.addCleanup(self._terminate_registered_process, int(browser_pid_text))
             self.assertEqual(ensure_result.returncode, 0, msg=ensure_result.stderr)
             self.assertIn("http://127.0.0.1:9444", ensure_result.stdout)
             self.assertIn(f"Profile: {explicit_profile}", ensure_result.stdout)

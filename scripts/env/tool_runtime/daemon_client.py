@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-import argparse
 import errno
 import hashlib
-import json
 import os
 from pathlib import Path
 import socket
@@ -20,18 +18,12 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from runtime_kernel import protocol  # noqa: E402
-from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 
 
 CENTRAL_DAEMON_PROTOCOL = "buddyswitch-central-daemon/v1"
 MAILBOX_PROTOCOL = "buddyswitch-daemon-mailbox/v1"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 0.75
 DEFAULT_RESPONSE_TIMEOUT_SECONDS = 5.0
-# Task Sys mailbox commands wrap app-server lifecycle RPCs. A single parent
-# handoff can include interrupt, settings update, thread read, and submit calls.
-TASK_SYS_MAILBOX_RESPONSE_TIMEOUT_SECONDS = 65.0
-
-
 class DaemonClientError(RuntimeError):
     def __init__(self, code: str, message: str, *, response: dict[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -245,111 +237,6 @@ def schedule_trigger(
     return result
 
 
-def _mailbox_success_result(envelope: dict[str, Any], *, error_code: str, protocol_code: str) -> dict[str, Any]:
-    if envelope.get("ok") is not True:
-        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
-        code = error.get("code") if isinstance(error.get("code"), str) else error_code
-        message = error.get("message") if isinstance(error.get("message"), str) else "daemon mailbox request failed"
-        raise DaemonClientError(code, message, response=envelope)
-    result = envelope.get("result")
-    if not isinstance(result, dict):
-        raise DaemonClientError(protocol_code, "daemon mailbox success missing result", response=envelope)
-    return result
-
-
-def execute_task_sys_instruction(
-    *,
-    instance_root: Path,
-    instruction: dict[str, Any],
-    socket_path: Path | None = None,
-) -> dict[str, Any]:
-    envelope = request_mailbox(
-        "mailbox.task_sys.execute_instruction",
-        {"instruction": dict(instruction)},
-        socket_path=Path(socket_path) if socket_path is not None else mailbox_socket_path_for_instance_root(instance_root),
-        response_timeout_seconds=TASK_SYS_MAILBOX_RESPONSE_TIMEOUT_SECONDS,
-    )
-    return _mailbox_success_result(
-        envelope,
-        error_code="daemon_task_sys_execute_error",
-        protocol_code="daemon_task_sys_execute_protocol_error",
-    )
-
-
-def cleanup_task_sys_side_lease(
-    *,
-    instance_root: Path,
-    task_id: str,
-    socket_path: Path | None = None,
-) -> dict[str, Any]:
-    envelope = request_mailbox(
-        "mailbox.task_sys.cleanup_side_lease",
-        {"task_id": task_id},
-        socket_path=Path(socket_path) if socket_path is not None else mailbox_socket_path_for_instance_root(instance_root),
-        response_timeout_seconds=TASK_SYS_MAILBOX_RESPONSE_TIMEOUT_SECONDS,
-    )
-    return _mailbox_success_result(
-        envelope,
-        error_code="daemon_task_sys_cleanup_error",
-        protocol_code="daemon_task_sys_cleanup_protocol_error",
-    )
-
-
-def _command_task_sys_execute(args: argparse.Namespace) -> int:
-    instruction = json.loads(args.instruction_json)
-    if not isinstance(instruction, dict):
-        raise ValueError("--instruction-json must decode to an object")
-    payload = execute_task_sys_instruction(
-        instance_root=Path(args.instance_root),
-        instruction=instruction,
-        socket_path=Path(args.socket) if args.socket else None,
-    )
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0
-
-
-def _command_task_sys_cleanup(args: argparse.Namespace) -> int:
-    payload = cleanup_task_sys_side_lease(
-        instance_root=Path(args.instance_root),
-        task_id=args.task_id,
-        socket_path=Path(args.socket) if args.socket else None,
-    )
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    execute = subparsers.add_parser("task-sys-execute")
-    execute.add_argument("--instance-root", required=True)
-    execute.add_argument("--instruction-json", required=True)
-    execute.add_argument("--socket")
-    execute.set_defaults(func=_command_task_sys_execute)
-
-    cleanup = subparsers.add_parser("task-sys-cleanup")
-    cleanup.add_argument("--instance-root", required=True)
-    cleanup.add_argument("--task-id", required=True)
-    cleanup.add_argument("--socket")
-    cleanup.set_defaults(func=_command_task_sys_cleanup)
-
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        return int(args.func(args))
-    except DaemonClientError as exc:
-        print(exc.message, file=sys.stderr)
-        return 1
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-
 def register_actor(
     *,
     identity_id: str,
@@ -395,128 +282,5 @@ def check_reachability(*, target_identity_id: str, socket_path: Path | None = No
     )
 
 
-def _non_empty_text(value: Any, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} must be a non-empty string")
-    return value.strip()
-
-
-def _actor_identity_id(value: Any, field: str) -> str:
-    if not isinstance(value, str) or ACTOR_ID_PATTERN.fullmatch(value.strip()) is None:
-        raise ValueError(f"{field} must be a valid actor identity id")
-    return value.strip()
-
-
-def _role_id(value: Any, field: str) -> str:
-    if not isinstance(value, str) or ROLE_ID_PATTERN.fullmatch(value.strip()) is None:
-        raise ValueError(f"{field} must be a valid role id")
-    return value.strip()
-
-
-def wake_im_actor(
-    payload: dict[str, Any],
-    *,
-    check_reachability_fn: Any | None = None,
-    request_mailbox_fn: Any | None = None,
-    socket_path: Path | None = None,
-) -> dict[str, Any]:
-    """Bridge durable Central IM acceptance into the target actor daemon mailbox."""
-
-    try:
-        if not isinstance(payload, dict):
-            raise ValueError("wake payload must be an object")
-        if payload.get("type") != "im.message.created":
-            return {"actor_handling_status": "not_applicable", "runtime_target": "none", "error": "unsupported IM wake type"}
-        if "target_role_id" in payload:
-            raise ValueError("target_role_id is not accepted for im.message.created actor handling")
-        target_identity_id = _actor_identity_id(payload.get("target_identity_id"), "target_identity_id")
-        message_id = _non_empty_text(payload.get("message_id"), "message_id")
-        conversation_id = _non_empty_text(payload.get("conversation_id"), "conversation_id")
-        event_id = _non_empty_text(payload.get("event_id"), "event_id")
-        wake_id = _non_empty_text(payload.get("wake_id") or f"imwake-{uuid.uuid4().hex[:12]}", "wake_id")
-    except Exception as exc:
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
-
-    from env.repos import identities as identity_repo
-
-    profile = identity_repo.get_actor_identity_profile(target_identity_id)
-    if not isinstance(profile, dict):
-        return {
-            "actor_handling_status": "handling_failed",
-            "runtime_target": "none",
-            "error": f"actor identity profile not found: {target_identity_id}",
-        }
-    try:
-        target_role_id = _role_id(profile.get("role_id"), "actor identity profile role_id")
-    except Exception as exc:
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
-
-    reachability_call = check_reachability_fn or check_reachability
-    mailbox_call = request_mailbox_fn or request_mailbox
-    try:
-        reachability = reachability_call(
-            target_identity_id=target_identity_id,
-            socket_path=socket_path,
-        )
-    except Exception as exc:
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
-    if not isinstance(reachability, dict):
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "reachability response must be an object"}
-    if reachability.get("reachability_status") != "online":
-        status = reachability.get("reachability_status")
-        return {
-            "actor_handling_status": "target_not_online",
-            "runtime_target": "none",
-            "error": f"target identity is not online: {status}",
-            "reachability_status": status,
-        }
-
-    record = reachability.get("record")
-    endpoint = record.get("endpoint") if isinstance(record, dict) else None
-    if not isinstance(endpoint, dict) or endpoint.get("kind") != "daemon_mailbox_socket":
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "target endpoint is not daemon_mailbox_socket"}
-    mailbox_socket = endpoint.get("socket_path")
-    if not isinstance(mailbox_socket, str) or not mailbox_socket.strip():
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "target mailbox socket_path is required"}
-
-    try:
-        envelope = mailbox_call(
-            "mailbox.local_trigger",
-            {
-                "identity_id": target_identity_id,
-                "role_id": target_role_id,
-                "type": "im.message.created",
-                "payload": {
-                    "message_id": message_id,
-                    "conversation_id": conversation_id,
-                    "event_id": event_id,
-                },
-                "origin_id": message_id,
-                "correlation_id": wake_id,
-                "source_context": {"source": "central_im"},
-            },
-            socket_path=Path(mailbox_socket),
-        )
-    except Exception as exc:
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
-    if not isinstance(envelope, dict):
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": "mailbox response must be an object"}
-    if envelope.get("ok") is not True:
-        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
-        message = error.get("message") if isinstance(error.get("message"), str) else "mailbox local trigger failed"
-        return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": message}
-    result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
-    return {
-        "actor_handling_status": "submitted",
-        "runtime_target": "daemon_mailbox",
-        "error": None,
-        "handling_status": result.get("handling_status") if isinstance(result.get("handling_status"), str) else None,
-    }
-
-
 def deliver_signal(*, signal: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
     return request_central_daemon("signal.deliver", {"signal": signal}, socket_path=socket_path)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

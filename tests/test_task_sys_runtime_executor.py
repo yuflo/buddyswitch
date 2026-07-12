@@ -416,7 +416,7 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["execution_result"], execution["result"])
         self.assertNotIn("failure_result", result)
 
-    def test_cleanup_task_sys_side_lease_delegates_to_lifecycle_owner(self) -> None:
+    def test_cleanup_side_lease_delegates_to_lifecycle_owner(self) -> None:
         context = self._context()
         original_cleanup = self.module.side_thread_lifecycle.cleanup_task_side_lease
         calls: list[dict[str, Any]] = []
@@ -436,7 +436,7 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.addCleanup(setattr, self.module.side_thread_lifecycle, "cleanup_task_side_lease", original_cleanup)
         self.module.side_thread_lifecycle.cleanup_task_side_lease = fake_cleanup_task_side_lease
 
-        result = self.module.cleanup_task_sys_side_lease(context, "task-user-input-cleanup123")
+        result = self.module.cleanup_side_lease(context, "task-user-input-cleanup123")
 
         self.assertEqual(result["side_thread_id"], "thr-side-cleanup")
         self.assertEqual(result["turn_interrupt_attempted"], True)

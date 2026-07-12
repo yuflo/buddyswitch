@@ -102,24 +102,6 @@ def _task_events(task: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in events if isinstance(row, Mapping)]
 
 
-def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
-    task_id = task.get("id")
-    execution = task.get("execution")
-    row = {
-        "task_id": task_id,
-        "id": task_id,
-        "source_type": task.get("source_type"),
-        "source_ref": task.get("source_ref"),
-        "status": task.get("status"),
-        "task_desc": task.get("task_desc"),
-        "task_relation": dict(task.get("task_relation")) if isinstance(task.get("task_relation"), Mapping) else None,
-        "execution": dict(execution) if isinstance(execution, Mapping) else {},
-        "updated_at": task.get("updated_at"),
-        "event_types": [str(event.get("type")) for event in _task_events(task) if event.get("type")],
-    }
-    return row
-
-
 def _read_success(action: str, context: Any, *, effect_summary: str, extra: dict[str, Any]) -> dict[str, Any]:
     return tool_results.success(
         tool="task_sys",
@@ -217,10 +199,10 @@ def _success(
 
 
 def _execute_parent_instruction(context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
-    daemon = context.get("daemon") if isinstance(context, dict) else None
-    if daemon is None:
-        daemon = getattr(context, "daemon", None)
-    execute = getattr(daemon, "execute_task_sys_instruction", None)
+    runtime_access = context.get("task_sys_runtime") if isinstance(context, dict) else None
+    if runtime_access is None:
+        runtime_access = getattr(context, "task_sys_runtime", None)
+    execute = getattr(runtime_access, "execute_instruction", None)
     if not callable(execute):
         raise RuntimeError("Task Sys parent runtime execution is unavailable")
     result = execute(instruction)
@@ -229,11 +211,11 @@ def _execute_parent_instruction(context: Any, instruction: dict[str, Any]) -> di
     return result
 
 
-def _cleanup_task_sys_side_lease(context: Any, task_id: str) -> dict[str, Any]:
-    daemon = context.get("daemon") if isinstance(context, dict) else None
-    if daemon is None:
-        daemon = getattr(context, "daemon", None)
-    cleanup = getattr(daemon, "cleanup_task_sys_side_lease", None)
+def _cleanup_side_lease(context: Any, task_id: str) -> dict[str, Any]:
+    runtime_access = context.get("task_sys_runtime") if isinstance(context, dict) else None
+    if runtime_access is None:
+        runtime_access = getattr(context, "task_sys_runtime", None)
+    cleanup = getattr(runtime_access, "cleanup_side_lease", None)
     if not callable(cleanup):
         return {
             "side_thread_id": None,
@@ -255,7 +237,7 @@ def _cleanup_task_sys_side_lease(context: Any, task_id: str) -> dict[str, Any]:
 
 
 def _record_side_cleanup(task_sys: Any, context: Any, task_id: str) -> dict[str, Any]:
-    cleanup = _cleanup_task_sys_side_lease(context, task_id)
+    cleanup = _cleanup_side_lease(context, task_id)
     side_thread_id = cleanup.get("side_thread_id")
     if not isinstance(side_thread_id, str) or not side_thread_id.strip():
         side_thread_id = "unknown-side-thread"
@@ -277,19 +259,19 @@ def _limit(args: dict[str, Any]) -> int:
 
 def list_tasks(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
-    actor_target = _actor_target(context)
     status = args.get("status") or "active"
     if status not in {"active", "recoverable", "all"}:
         raise ValueError("status must be active, recoverable, or all")
 
-    active = task_sys.active_tasks_for_actor(actor_target)
-    recoverable = task_sys.recoverable_tasks_for_actor(actor_target)
+    projection = task_sys.actor_task_projection(
+        actor_profile=context.current_actor_identity_profile,
+    )
     if status == "active":
-        rows = active
+        rows = projection["active_tasks"]
     elif status == "recoverable":
-        rows = recoverable
+        rows = projection["recoverable_tasks"]
     else:
-        rows = task_sys.list_tasks(actor_target=actor_target)
+        rows = projection["tasks"]
 
     limited = rows[: _limit(args)]
     return _read_success(
@@ -297,9 +279,9 @@ def list_tasks(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
         context,
         effect_summary="Listed actor-owned Task Sys tasks.",
         extra={
-            "tasks": [_task_summary(row) for row in limited if isinstance(row, Mapping)],
-            "active_count": len(active),
-            "recoverable_count": len(recoverable),
+            "tasks": [dict(row) for row in limited if isinstance(row, Mapping)],
+            "active_count": projection["active_count"],
+            "recoverable_count": projection["recoverable_count"],
         },
     )
 

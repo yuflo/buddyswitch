@@ -51,28 +51,9 @@ class FakeContext:
 class FakeRuntime:
     def __init__(self, *, activity_status: str = "idle") -> None:
         self.activity_status = activity_status
-        self.parent_prompts: list[dict[str, object]] = []
 
     def parent_activity(self) -> dict[str, object]:
         return {"status": self.activity_status}
-
-    def submit_parent_prompt(
-        self,
-        text: str,
-        *,
-        handler_name: str,
-        origin_id: str | None,
-        interrupt_policy: str = "none",
-    ) -> dict[str, object]:
-        self.parent_prompts.append(
-            {
-                "text": text,
-                "handler_name": handler_name,
-                "origin_id": origin_id,
-                "interrupt_policy": interrupt_policy,
-            }
-        )
-        return {"turn_id": "turn-browser-ttl"}
 
 
 class BrowserPageExpiredHandlerTests(unittest.TestCase):

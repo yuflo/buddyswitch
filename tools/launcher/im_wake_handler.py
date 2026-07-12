@@ -14,8 +14,9 @@ for candidate in (HELPER_DIR, SCRIPTS):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import daemon_core  # noqa: E402
+import daemon_contracts  # noqa: E402
 import task_sys_ingress  # noqa: E402
+import task_sys_daemon_adapter  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 
 
@@ -49,9 +50,9 @@ class ImMessageCreatedHandler:
         runtime: Any,
         trigger: Any,
     ) -> Any:
-        del state
+        del state, runtime
         if not self.handles(trigger):
-            return daemon_core.HandlerResult.ignored()
+            return daemon_contracts.HandlerResult.ignored()
         try:
             local_route = _context_identity_route(context)
             target_route = {
@@ -70,13 +71,10 @@ class ImMessageCreatedHandler:
                 conversation_id=conversation_id,
                 event_id=event_id,
             )
-            execute = getattr(runtime, "execute_task_sys_instruction", None)
-            if not callable(execute):
-                raise RuntimeError("daemon runtime does not support Task Sys instruction execution")
-            execute(result["instruction"])
-            return daemon_core.HandlerResult.handled()
+            task_sys_daemon_adapter.execute_instruction(context, result["instruction"])
+            return daemon_contracts.HandlerResult.handled()
         except Exception as exc:
-            return daemon_core.HandlerResult.failed(str(exc))
+            return daemon_contracts.HandlerResult.failed(str(exc))
 
 
 if __name__ == "__main__":

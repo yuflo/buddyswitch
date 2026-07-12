@@ -31,8 +31,10 @@ import im_http_router
 import imessage_channel
 import actor_capability
 from env.domain import task_sys, track_read
+from env.domain.identity import ActorIdentityProfile, IdentityRef
 from env.repos import runtime_files
 from env.tool_runtime import daemon_client
+from env.tool_runtime import im_actor_delivery
 import external_im_session
 
 
@@ -366,7 +368,7 @@ class WebManagementService:
         self._im_session = im_session or external_im_session.ExternalImSession(
             actor_lister=self._external_im_actor_rows,
             actor_reachability_checker=self._check_im_actor_reachability,
-            actor_delivery_handler=self._wake_im_actor,
+            actor_delivery_handler=self._deliver_im_actor,
         )
         self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider(
             im_session=self._im_session
@@ -374,7 +376,7 @@ class WebManagementService:
         self._im_router = im_http_router.ImHttpRouter(
             actor_lister=self._external_im_actor_rows,
             actor_reachability_checker=self._check_im_actor_reachability,
-            actor_delivery_handler=self._wake_im_actor,
+            actor_delivery_handler=self._deliver_im_actor,
             im_session=self._im_session,
             web_external_session_provider=self.ensure_web_im_identity,
         )
@@ -994,14 +996,17 @@ class WebManagementService:
         if not isinstance(role, str) or not role:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status payload for {actor_id}.")
         current_identity = {"id": actor_id, "type": "actor"}
-        actor_target = {"actor_id": actor_id, "role_id": role}
         instance_payload = dict(instance)
         workspace_dir = instance_payload.get("workspace_dir")
         if "instance_root" not in instance_payload and isinstance(workspace_dir, str) and workspace_dir.strip():
             instance_payload["instance_root"] = str(Path(workspace_dir).expanduser().resolve(strict=False).parent)
         del instance_payload
-        task_sys_tasks = task_sys.active_tasks_for_actor(actor_target)
-        recoverable_task_sys_tasks = task_sys.recoverable_tasks_for_actor(actor_target)
+        task_projection = task_sys.actor_task_projection(
+            actor_profile=ActorIdentityProfile(
+                identity=IdentityRef(id=actor_id, type="actor"),
+                role_id=role,
+            )
+        )
 
         def task_sys_row(row: dict[str, Any]) -> dict[str, Any]:
             task_relation = row.get("task_relation")
@@ -1020,10 +1025,10 @@ class WebManagementService:
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
             "task_sys": {
-                "active_count": len(task_sys_tasks),
-                "recoverable_count": len(recoverable_task_sys_tasks),
-                "active_tasks": [task_sys_row(row) for row in task_sys_tasks[:10]],
-                "recoverable_tasks": [task_sys_row(row) for row in recoverable_task_sys_tasks[:10]],
+                "active_count": task_projection["active_count"],
+                "recoverable_count": task_projection["recoverable_count"],
+                "active_tasks": [task_sys_row(row) for row in task_projection["active_tasks"][:10]],
+                "recoverable_tasks": [task_sys_row(row) for row in task_projection["recoverable_tasks"][:10]],
             },
             "tracks": {
                 "items": track_read.list_track_summaries(owner_identity=current_identity),
@@ -1100,8 +1105,8 @@ class WebManagementService:
             "capabilities": actor_capability.describe_actor_capabilities(config),
         }
 
-    def _wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return daemon_client.wake_im_actor(payload)
+    def _deliver_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return im_actor_delivery.deliver(payload)
 
     def _check_im_actor_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
         return daemon_client.check_reachability(target_identity_id=target_identity_id)

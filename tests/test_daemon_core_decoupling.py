@@ -7,6 +7,8 @@ import ast
 import builtins
 import importlib.util
 import json
+import os
+import sys
 import tempfile
 import unittest
 from itertools import count
@@ -16,15 +18,28 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
+DAEMON_CONTRACTS_PATH = ROOT / "tools" / "launcher" / "daemon_contracts.py"
+DAEMON_STATE_PATH = ROOT / "tools" / "launcher" / "daemon_state.py"
 INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
-TASK_CHECKOUT_HANDLER_PATH = ROOT / "tools" / "launcher" / "task_checkout_handler.py"
 CENTRAL_DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
 IM_WAKE_HANDLER_PATH = ROOT / "tools" / "launcher" / "im_wake_handler.py"
 DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
+DAEMON_RUNTIME_PATH = ROOT / "tools" / "launcher" / "daemon_runtime.py"
+BROWSER_RUNTIME_MANAGER_PATH = ROOT / "tools" / "launcher" / "browser_runtime_manager.py"
+DAEMON_CLIENT_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py"
 NOTIFICATION_CENTER_PATH = ROOT / "tools" / "launcher" / "notification_center.py"
 MODULE_COUNTER = count()
 TASK_DOMAIN_IMPORTS = {"env.domain.task_management", "env.domain.task_tui"}
 TASK_DOMAIN_SYMBOLS = {"task_management", "task_tui"}
+RUNTIME_ENV_KEYS = (
+    "BUDDYSWITCH_SHARED_ROOT",
+    "BUDDYSWITCH_STATE_ROOT",
+    "BUDDYSWITCH_INSTANCE_ROOT",
+    "BUDDYSWITCH_INSTANCE_JSON",
+    "BUDDYSWITCH_WORKSPACE_DIR",
+    "BUDDYSWITCH_ACTOR_ID",
+    "BUDDYSWITCH_ROLE_ID",
+)
 
 
 def _load_module(path: Path, *, block_task_imports: bool = False) -> Any:
@@ -112,6 +127,95 @@ class FakeRunDaemonClient:
 
 
 class DaemonCoreDecouplingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        saved_runtime_env = {key: os.environ.get(key) for key in RUNTIME_ENV_KEYS}
+        self.addCleanup(self._restore_runtime_env, saved_runtime_env)
+
+    def _restore_runtime_env(self, values: dict[str, str | None]) -> None:
+        for key, value in values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        runtime_files = sys.modules.get("env.repos.runtime_files")
+        if runtime_files is not None:
+            runtime_files.reset_runtime_root_override()
+            runtime_files.refresh_runtime_roots_from_env()
+
+    def test_generic_daemon_command_modules_have_no_task_runtime_semantics(self) -> None:
+        for path in (DAEMON_MAILBOX_PATH, DAEMON_RUNTIME_PATH, DAEMON_CLIENT_PATH):
+            source = path.read_text(encoding="utf-8")
+            imports = _imported_modules(path)
+            with self.subTest(path=path.name):
+                self.assertFalse([name for name in imports if "task_sys" in name], imports)
+                self.assertNotIn("task_sys", source)
+                self.assertNotIn("Task Sys", source)
+
+        core_source = DAEMON_CORE_PATH.read_text(encoding="utf-8")
+        for token in (
+            "task_sys_runtime",
+            "task_sys_daemon_adapter",
+            "task_sys_" + "dispatcher",
+            "execute_" + "task_sys_instruction",
+            "cleanup_" + "task_sys_side_lease",
+            "mailbox." + "task_sys",
+        ):
+            self.assertNotIn(token, core_source)
+
+    def test_instance_daemon_is_only_generic_daemon_task_adapter_composition_root(self) -> None:
+        candidates = sorted((ROOT / "tools" / "launcher").glob("*.py"))
+        combined = []
+        for path in candidates:
+            imports = _imported_modules(path)
+            if "daemon_core" in imports and "task_sys_daemon_adapter" in imports:
+                combined.append(path.name)
+        self.assertEqual(combined, ["instance_daemon.py"])
+
+    def test_current_state_is_owned_outside_daemon_core(self) -> None:
+        self.assertTrue(DAEMON_STATE_PATH.exists(), DAEMON_STATE_PATH)
+        core_tree = ast.parse(DAEMON_CORE_PATH.read_text(encoding="utf-8"), filename=str(DAEMON_CORE_PATH))
+        core_classes = {node.name for node in ast.walk(core_tree) if isinstance(node, ast.ClassDef)}
+        self.assertNotIn("DaemonState", core_classes)
+        self.assertIn("daemon_state", _imported_modules(DAEMON_CORE_PATH))
+        self.assertNotIn("daemon_core", _imported_modules(DAEMON_STATE_PATH))
+
+    def test_browser_runtime_manager_uses_only_public_daemon_state_api(self) -> None:
+        source = BROWSER_RUNTIME_MANAGER_PATH.read_text(encoding="utf-8")
+        imports = _imported_modules(BROWSER_RUNTIME_MANAGER_PATH)
+
+        self.assertIn("daemon_state", imports)
+        self.assertNotIn("daemon_core", imports)
+        for token in (
+            "DaemonState",
+            "daemon_state_file",
+            "state.json",
+            "scheduled_trigger_ids",
+            "scheduled_triggers",
+        ):
+            with self.subTest(token=token):
+                self.assertNotIn(token, source)
+
+    def test_stable_contracts_are_owned_outside_daemon_core(self) -> None:
+        self.assertTrue(DAEMON_CONTRACTS_PATH.exists(), DAEMON_CONTRACTS_PATH)
+        core_source = DAEMON_CORE_PATH.read_text(encoding="utf-8")
+        core_tree = ast.parse(core_source, filename=str(DAEMON_CORE_PATH))
+        core_classes = {node.name for node in ast.walk(core_tree) if isinstance(node, ast.ClassDef)}
+        self.assertFalse({"HandlerResult", "DaemonContext", "DaemonHandler"}.intersection(core_classes))
+
+        contract_imports = _imported_modules(DAEMON_CONTRACTS_PATH)
+        self.assertNotIn("daemon_core", contract_imports)
+        self.assertFalse(
+            {
+                "task_sys",
+                "task_sys_runtime",
+                "im_wake_handler",
+                "track_comment_added_handler",
+                "browser_page_expired_handler",
+                "browser_release_handler",
+                "web_management",
+            }.intersection(contract_imports)
+        )
+
     def _instance(self, temp_root: str) -> dict[str, Path]:
         actor_id = "act-dev-daed00000002"
         instance_root = Path(temp_root) / "instances" / actor_id
@@ -189,7 +293,6 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
     def test_daemon_side_handlers_do_not_import_taskbox_domain_modules(self) -> None:
         daemon_core_imports = _imported_modules(DAEMON_CORE_PATH)
         instance_daemon_imports = _imported_modules(INSTANCE_DAEMON_PATH)
-        task_checkout_imports = _imported_modules(TASK_CHECKOUT_HANDLER_PATH)
 
         self.assertFalse(
             TASK_DOMAIN_IMPORTS.intersection(daemon_core_imports),
@@ -199,11 +302,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             TASK_DOMAIN_IMPORTS.intersection(instance_daemon_imports),
             "instance_daemon.py must not import task domain modules directly",
         )
-        self.assertFalse(
-            TASK_DOMAIN_IMPORTS.intersection(task_checkout_imports),
-            "task_checkout_handler.py must not import taskbox domain modules",
-        )
-        for path in (DAEMON_CORE_PATH, INSTANCE_DAEMON_PATH, TASK_CHECKOUT_HANDLER_PATH):
+        for path in (DAEMON_CORE_PATH, INSTANCE_DAEMON_PATH):
             source = path.read_text(encoding="utf-8")
             with self.subTest(path=path.name):
                 self.assertNotIn("task_tui", source)
@@ -347,7 +446,9 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                 ) -> object:
                     del context, state, runtime
                     handled.append(trigger)
-                    return daemon_core.HandlerResult.ignored()
+                    import daemon_contracts
+
+                    return daemon_contracts.HandlerResult.ignored()
 
             with self.assertRaises(StopDaemonLoop):
                 daemon_core.run_daemon(instance["instance_json"], handlers=[NoopHandler()])

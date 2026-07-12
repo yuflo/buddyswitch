@@ -31,12 +31,15 @@ and persistence keep their own boundaries.
      and daemon control.
    - Does not own product concepts such as Actor console, task panels, or track
      workspace views.
+   - Daemon status contains host-control facts only. It never returns Task
+     product records, classification, projections, or browser DTOs.
 
 4. Actor runtime product API
    - Owns active actor capabilities and permission checks.
    - Runtime broker and native env MCP expose actor-bound actions such as
      `task_sys.list`, `task_sys.get`, `task_sys.close`, `task_sys.need_parent`,
-     `track.open`, `context.summarize`, and `message.send`.
+     `task_sys.update_task_analysis`, `track.open`, `context.summarize`, and
+     `message.send`.
    - This layer is not the default Web query path because it is actor-bound and
      active-instance-gated.
 
@@ -110,7 +113,9 @@ kind of fact or behavior being requested.
 Web-interface APIs should fall into one of these families:
 
 1. Product view APIs
-   - Browser-facing views such as actor console and track workspace.
+   - `/api/actors/{id}/console` is the actor-console product view and includes
+     the Web Task panel DTO. There is no Task subroute.
+   - Other browser-facing views include track workspace and track detail.
    - Compose host-control facts and domain/service read models.
    - Return Web DTOs, not raw repo rows or tool results.
 
@@ -141,8 +146,11 @@ Actor:
 Task:
 
 - Actor-driving task state belongs to Task Sys.
-- Web reads actor task state through Task Sys summary projections with resolved
-  actor context.
+- `actor_task_projection` is the only actor-visible Task read projection. It
+  reads once for the resolved actor identity profile and owns active and
+  recoverable classification.
+- Web reads that projection in `/api/actors/{id}/console` and only shapes the
+  browser DTO; it does not classify Task status or read Task storage.
 - Web should not call actor env tools for general console reads.
 
 Track:

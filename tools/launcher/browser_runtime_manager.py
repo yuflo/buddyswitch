@@ -29,7 +29,7 @@ if str(LAUNCHER_DIR) not in sys.path:
 
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 import cdp_background_page  # noqa: E402
-import daemon_core  # noqa: E402
+import daemon_state  # noqa: E402
 
 
 PORT_START = 9222
@@ -286,6 +286,13 @@ def _pid_alive(pid: int | None) -> bool:
 
 
 def _reap_child_pid(pid: int) -> bool:
+    for proc in tuple(_DETACHED_BROWSER_PROCESSES):
+        if proc.pid != pid:
+            continue
+        if proc.poll() is None:
+            return False
+        _DETACHED_BROWSER_PROCESSES.remove(proc)
+        return True
     try:
         waited_pid, _status = os.waitpid(pid, os.WNOHANG)
     except ChildProcessError:
@@ -860,19 +867,14 @@ def _clear_release_state(instance_root: Path, actor_id: str) -> bool:
 
 
 def _cancel_browser_owned_pending_schedules(instance_root: Path, actor_id: str) -> list[dict[str, Any]]:
-    state_path = daemon_core.daemon_state_file(instance_root)
-    if not state_path.exists():
-        return []
     payload = _read_instance_payload(instance_root, actor_id)
     thread_id = payload.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
-        raise BrowserRuntimeManagerError("instance record has no thread id for daemon schedule cleanup")
-    state = daemon_core.DaemonState.load(
+    return daemon_state.cancel_pending_schedules_by_source_owner(
         instance_root=instance_root,
         actor_id=actor_id,
-        main_thread_id=thread_id,
+        main_thread_id=thread_id if isinstance(thread_id, str) else None,
+        source_owner="browser",
     )
-    return state.cancel_pending_schedules_by_source_owner("browser")
 
 
 def _release_engine(

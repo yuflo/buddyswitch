@@ -30,6 +30,8 @@ from env.repos import runtime_files
 from env.repos import track_comments as _track_comment_repo
 from env.repos import tracks as _track_repo
 from env.tool_runtime import daemon_client
+from env.tool_runtime import im_actor_delivery
+from env.tool_runtime import task_sys_runtime_client
 from env.tool_runtime import role_auth as _role_auth
 import re
 
@@ -345,13 +347,8 @@ def _role_id(value: Any, field: str) -> str:
     return role_id
 
 
-class DaemonAccess:
-    """Explicit central daemon access for runtime tools."""
-
-    def __init__(self, *, current_identity: IdentityRef, role_id: str, instance_json: Path) -> None:
-        self.current_identity = current_identity
-        self._role_id = role_id
-        self._instance_json = instance_json
+class ActorDirectoryAccess:
+    """Actor directory queries over central daemon primitives."""
 
     def list_online_actors(self, *, role_id: str | None = None) -> dict[str, Any]:
         return daemon_client.list_online_actors(role_id=role_id)
@@ -360,6 +357,14 @@ class DaemonAccess:
         return daemon_client.check_reachability(
             target_identity_id=_actor_identity_id(target_identity_id, "target_identity_id"),
         )
+
+
+class SignalDeliveryAccess:
+    """Generic signal envelope creation and delivery for product tools."""
+
+    def __init__(self, *, current_identity: IdentityRef, role_id: str) -> None:
+        self.current_identity = current_identity
+        self._role_id = role_id
 
     def deliver_signal(
         self,
@@ -381,36 +386,31 @@ class DaemonAccess:
         }
         return daemon_client.deliver_signal(signal=signal)
 
-    def deliver_track_comment_added(
-        self,
-        *,
-        track_id: str,
-        comment_id: str,
-        thread_id: str,
-        target_identity_id: str,
-        target_role_id: str,
-    ) -> dict[str, Any]:
-        return self.deliver_signal(
-            signal_type="track.comment.added",
-            target_identity_id=target_identity_id,
-            target_role_id=target_role_id,
-            payload={"track_id": track_id, "comment_id": comment_id, "thread_id": thread_id},
-        )
 
-    def execute_task_sys_instruction(self, instruction: dict[str, Any]) -> dict[str, Any]:
-        return daemon_client.execute_task_sys_instruction(
-            instance_root=self._instance_json.parent,
+class ImActorDeliveryAccess:
+    """IM product delivery capability for actor-side clients."""
+
+    def deliver(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return im_actor_delivery.deliver(payload)
+
+
+class TaskSysRuntimeAccess:
+    """Task Sys-owned runtime commands available to Task tool consumers."""
+
+    def __init__(self, *, instance_json: Path) -> None:
+        self._instance_root = instance_json.parent
+
+    def execute_instruction(self, instruction: Mapping[str, object]) -> dict[str, Any]:
+        return task_sys_runtime_client.execute_instruction(
+            instance_root=self._instance_root,
             instruction=instruction,
         )
 
-    def cleanup_task_sys_side_lease(self, task_id: str) -> dict[str, Any]:
-        return daemon_client.cleanup_task_sys_side_lease(
-            instance_root=self._instance_json.parent,
+    def cleanup_side_lease(self, task_id: str) -> dict[str, Any]:
+        return task_sys_runtime_client.cleanup_side_lease(
+            instance_root=self._instance_root,
             task_id=task_id,
         )
-
-    def wake_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return daemon_client.wake_im_actor(payload)
 
 
 @dataclass(frozen=True)
@@ -476,12 +476,26 @@ class ToolContext(Mapping[str, Any]):
         )
         object.__setattr__(
             self,
-            "daemon",
-            DaemonAccess(
+            "actor_directory",
+            ActorDirectoryAccess(),
+        )
+        object.__setattr__(
+            self,
+            "signal_delivery",
+            SignalDeliveryAccess(
                 current_identity=self.current_identity,
                 role_id=self.role_id,
-                instance_json=self.instance_json,
             ),
+        )
+        object.__setattr__(
+            self,
+            "task_sys_runtime",
+            TaskSysRuntimeAccess(instance_json=self.instance_json),
+        )
+        object.__setattr__(
+            self,
+            "im_actor_delivery",
+            ImActorDeliveryAccess(),
         )
 
     @classmethod

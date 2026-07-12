@@ -514,7 +514,7 @@ class WebManagementUnitTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, msg=result.stdout)
         self.assertIn("local", result.stderr)
 
-    def test_im_wake_delegates_to_runtime_wake_bridge(self) -> None:
+    def test_im_delivery_delegates_to_im_owned_delivery(self) -> None:
         runner = OrderedRunner([])
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
         payload = {
@@ -533,14 +533,14 @@ class WebManagementUnitTests(unittest.TestCase):
                 "record": {"identity_id": kwargs["target_identity_id"]},
             },
         ), mock.patch.object(
-            WEB_MANAGEMENT.daemon_client,
-            "wake_im_actor",
+            WEB_MANAGEMENT.im_actor_delivery,
+            "deliver",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
-        ) as wake_im_actor:
-            result = service._wake_im_actor(payload)
+        ) as deliver_im_actor:
+            result = service._deliver_im_actor(payload)
 
         self.assertEqual(result["actor_handling_status"], "submitted")
-        wake_im_actor.assert_called_once_with(payload)
+        deliver_im_actor.assert_called_once_with(payload)
         self.assertEqual(runner.calls, [])
 
 
@@ -1490,10 +1490,10 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
                 "record": {"identity_id": kwargs["target_identity_id"]},
             },
         ), mock.patch.object(
-            WEB_MANAGEMENT.daemon_client,
-            "wake_im_actor",
+            WEB_MANAGEMENT.im_actor_delivery,
+            "deliver",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
-        ) as wake_im_actor:
+        ) as deliver_im_actor:
             status, sent = service.handle_api(
                 "POST",
                 "/api/im/messages",
@@ -1511,8 +1511,8 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.Tes
         self.assertEqual(sent["delivery_status"], "accepted")
         self.assertEqual(sent["actor_handling_status"], "submitted")
         self.assertNotIn("wake_" + "status", sent)
-        wake_im_actor.assert_called_once()
-        self.assertNotIn("target_" + "role_id", wake_im_actor.call_args.args[0])
+        deliver_im_actor.assert_called_once()
+        self.assertNotIn("target_" + "role_id", deliver_im_actor.call_args.args[0])
         sent_message_id = sent["message"]["id"]
 
         reply = message_service.send_im_reply(
@@ -2083,10 +2083,10 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "record": {"identity_id": target_identity_id},
             },
         ), mock.patch.object(
-            WEB_MANAGEMENT.daemon_client,
-            "wake_im_actor",
+            WEB_MANAGEMENT.im_actor_delivery,
+            "deliver",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
-        ) as wake_im_actor:
+        ) as deliver_im_actor:
             status, payload = service.handle_api(
                 "POST",
                 "/api/im/messages",
@@ -2097,9 +2097,9 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(status, 200, msg=payload)
         self.assertEqual(payload["actor_handling_status"], "submitted")
         self.assertNotIn("wake_" + "status", payload)
-        wake_im_actor.assert_called_once()
-        self.assertEqual(wake_im_actor.call_args.args[0]["target_identity_id"], target_identity_id)
-        self.assertNotIn("target_" + "role_id", wake_im_actor.call_args.args[0])
+        deliver_im_actor.assert_called_once()
+        self.assertEqual(deliver_im_actor.call_args.args[0]["target_identity_id"], target_identity_id)
+        self.assertNotIn("target_" + "role_id", deliver_im_actor.call_args.args[0])
 
     def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
         from env.domain import task_sys
@@ -2144,9 +2144,18 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             },
         )
 
-        status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
+        with mock.patch.object(
+            task_sys,
+            "actor_task_projection",
+            wraps=task_sys.actor_task_projection,
+        ) as actor_projection:
+            status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
 
         self.assertEqual(status, 200)
+        actor_projection.assert_called_once()
+        projection_profile = actor_projection.call_args.kwargs["actor_profile"]
+        self.assertEqual(projection_profile.identity.id, "act-pm-demo")
+        self.assertEqual(projection_profile.role_id, "pm")
         console = payload["console"]
         self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
         self.assertEqual(console["runtime"]["thread_status"], "idle")

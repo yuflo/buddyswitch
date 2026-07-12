@@ -17,7 +17,7 @@ for candidate in (HELPER_DIR, SCRIPTS, SCRIPTS_ENV):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import daemon_core  # noqa: E402
+import daemon_contracts  # noqa: E402
 import browser_runtime_manager  # noqa: E402
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 
@@ -98,9 +98,9 @@ def _has_real_user_page(browser_url: str) -> bool:
     return False
 
 
-def _skip(reason: str) -> daemon_core.HandlerResult:
+def _skip(reason: str) -> daemon_contracts.HandlerResult:
     print(f"Browser cockpit release skipped: {reason}", file=sys.stderr)
-    return daemon_core.HandlerResult.handled()
+    return daemon_contracts.HandlerResult.handled()
 
 
 class BrowserReleaseHandler:
@@ -115,10 +115,10 @@ class BrowserReleaseHandler:
         state: Any,
         runtime: Any,
         trigger: Any,
-    ) -> daemon_core.HandlerResult:
+    ) -> daemon_contracts.HandlerResult:
         del state
         if getattr(trigger, "type", None) != BROWSER_COCKPIT_RELEASE_EVENT_TYPE:
-            return daemon_core.HandlerResult.ignored()
+            return daemon_contracts.HandlerResult.ignored()
         try:
             local_route = _context_identity_route(context)
             target_route = {
@@ -151,10 +151,10 @@ class BrowserReleaseHandler:
                 error = result.get("error")
                 message = error.get("message") if isinstance(error, dict) else result.get("message")
                 detail = message if isinstance(message, str) and message.strip() else "browser runtime manager release failed"
-                return daemon_core.HandlerResult.failed(detail)
-            return daemon_core.HandlerResult.handled()
+                return daemon_contracts.HandlerResult.failed(detail)
+            return daemon_contracts.HandlerResult.handled()
         except Exception as exc:
-            return daemon_core.HandlerResult.failed(str(exc))
+            return daemon_contracts.HandlerResult.failed(str(exc))
 
 
 if __name__ == "__main__":

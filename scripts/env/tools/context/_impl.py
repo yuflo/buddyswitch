@@ -325,15 +325,15 @@ def _visible_tracks(*, track_filter: str | None, limit_value: int, context: Cont
 
 def _visible_tasks(
     *,
-    active_role: str,
     task_filter: str | None,
     visible_track_ids: set[str],
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
-    tasks = context.rules.task_sys.list_tasks(
-        actor_target={"actor_id": context["current_identity"]["id"], "role_id": active_role},
+    projection = context.rules.task_sys.actor_task_projection(
+        actor_profile=context.current_actor_identity_profile,
     )
+    tasks = projection["tasks"]
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
     rows: list[dict[str, Any]] = []
@@ -552,7 +552,6 @@ def _current_context_sections(
     )
     visible_track_ids = {row.get("id") for row in visible_tracks if isinstance(row.get("id"), str)}
     visible_tasks = _visible_tasks(
-        active_role=active_role,
         task_filter=task_filter if isinstance(task_filter, str) else None,
         visible_track_ids=visible_track_ids,
         limit_value=limit_value,

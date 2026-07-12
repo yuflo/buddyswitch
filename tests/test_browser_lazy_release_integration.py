@@ -25,9 +25,12 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+LAUNCHER = ROOT / "tools" / "launcher"
+for candidate in (SCRIPTS, LAUNCHER):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
+import daemon_state  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
@@ -830,7 +833,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
         daemon_core = load_module(DAEMON_CORE)
         daemon_mailbox = load_module(DAEMON_MAILBOX)
         instance_root.mkdir(parents=True, exist_ok=True)
-        state = daemon_core.DaemonState.load(
+        state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id=actor_id,
             main_thread_id="thr-main",
@@ -1130,7 +1133,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertIn("Snapshot: lazy release smoke result page", snapshot_text)
                 self.assertIn("Browser page idle refreshed", snapshot_text)
 
-                saved_daemon_state = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+                saved_daemon_state = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
                 scheduled_rows = list(saved_daemon_state["scheduled_triggers"].values())
                 self.assertTrue(
                     any(row.get("schedule_key") == "browser.cockpit.release" for row in scheduled_rows),

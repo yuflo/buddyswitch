@@ -26,9 +26,12 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+LAUNCHER = ROOT / "tools" / "launcher"
+for candidate in (SCRIPTS, LAUNCHER):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
+import daemon_state  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
 
 PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
@@ -782,7 +785,7 @@ for raw_line in sys.stdin:
         daemon_core = load_module(DAEMON_CORE_PATH)
         daemon_mailbox = load_module(DAEMON_MAILBOX_PATH)
         instance_root.mkdir(parents=True, exist_ok=True)
-        state = daemon_core.DaemonState.load(
+        state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id="act-dev-browser",
             main_thread_id="thr-main",
@@ -921,7 +924,7 @@ for raw_line in sys.stdin:
                 forwarded[0]["params"]["arguments"],
                 {"url": "https://example.com/new", "background": True},
             )
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(schedule["schedule_key"], "browser.page.idle:2")
             self.assertEqual(schedule["payload"], {"page_id": "2"})
@@ -959,7 +962,7 @@ for raw_line in sys.stdin:
             self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
             self.assertEqual(forwarded[0]["params"]["name"], "new_page")
             self.assertEqual(forwarded[0]["params"]["arguments"], {"url": search_url, "background": True})
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(schedule["schedule_key"], "browser.page.idle:2")
             self.assertEqual(schedule["payload"], {"page_id": "2"})
@@ -1075,7 +1078,7 @@ for raw_line in sys.stdin:
             self.assertIn("current: true", text)
             self.assertIn("selected: true", text)
             self.assertIn("idle_tracked: true", text)
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             release_schedules = [
                 item
                 for item in saved["scheduled_triggers"].values()
@@ -1115,8 +1118,8 @@ for raw_line in sys.stdin:
             self.assertIn("Browser cleanup", response_text)
             self.assertIn("closed it before returning", response_text)
             self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
-            if daemon_core.daemon_state_file(instance_root).exists():
-                saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            if daemon_state.daemon_state_file(instance_root).exists():
+                saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
                 page_expiry_schedules = [
                     item
                     for item in saved["scheduled_triggers"].values()
@@ -1161,7 +1164,7 @@ for raw_line in sys.stdin:
             self.assertIn("Browser cleanup warning", response_text)
             self.assertIn("scheduled short cleanup", response_text)
             self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             cleanup_schedules = [
                 item
                 for item in saved["scheduled_triggers"].values()
@@ -1389,7 +1392,7 @@ for raw_line in sys.stdin:
             self.assertEqual(len(forwarded), 1)
             self.assertEqual(forwarded[0]["params"]["name"], "list_pages")
             self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             release_schedules = [
                 item
                 for item in saved["scheduled_triggers"].values()
@@ -1543,7 +1546,7 @@ for raw_line in sys.stdin:
 
             self.assertEqual(responses[0]["id"], 1)
             self.assertEqual(forwarded[0]["params"]["arguments"]["bringToFront"], False)
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(schedule["schedule_key"], "browser.page.idle:page-3")
             self.assertEqual(schedule["payload"], {"page_id": "page-3"})
@@ -1574,7 +1577,7 @@ for raw_line in sys.stdin:
 
             self.assertEqual(responses[0]["id"], 1)
             self.assertEqual(forwarded[0]["params"]["arguments"]["bringToFront"], False)
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(schedule["schedule_key"], "browser.page.idle:page-4")
             page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
@@ -1597,7 +1600,7 @@ for raw_line in sys.stdin:
             server.close()
             thread.join(timeout=2)
 
-            self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
+            self.assertFalse(daemon_state.daemon_state_file(instance_root).exists())
             self.assertIn("lifecycle warning", json.dumps(responses, ensure_ascii=True).lower())
             self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
 
@@ -1633,7 +1636,7 @@ for raw_line in sys.stdin:
 
             self.assertEqual(responses[0]["id"], 1)
             self.assertEqual(forwarded[0]["params"]["name"], "take_snapshot")
-            saved = json.loads(daemon_core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(schedule["schedule_key"], "browser.page.idle:page-current")
             self.assertEqual(schedule["payload"], {"page_id": "page-current"})
@@ -1656,7 +1659,7 @@ for raw_line in sys.stdin:
             thread.join(timeout=2)
 
             self.assertEqual(forwarded[0]["params"]["name"], "take_snapshot")
-            self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
+            self.assertFalse(daemon_state.daemon_state_file(instance_root).exists())
             self.assertIn("lifecycle warning", json.dumps(responses, ensure_ascii=True).lower())
             self.assertIn("selected page", json.dumps(responses, ensure_ascii=True).lower())
 
@@ -1696,7 +1699,7 @@ for raw_line in sys.stdin:
 
             self.assertEqual([response["id"] for response in responses], [1, 2, 3, 4])
             self.assertEqual([item["params"]["name"] for item in forwarded if item.get("method") == "tools/call"], ["list_pages", "close_page", "take_snapshot"])
-            self.assertFalse(daemon_core.daemon_state_file(instance_root).exists())
+            self.assertFalse(daemon_state.daemon_state_file(instance_root).exists())
             self.assertFalse(thread.is_alive())
 
     def test_new_page_with_high_cdp_page_count_still_forwards_upstream(self) -> None:

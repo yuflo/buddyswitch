@@ -21,7 +21,6 @@ CENTRAL_DAEMON_PATH = ROOT / "tools" / "launcher" / "central_daemon.py"
 MODULE_COUNTER = count()
 EXPECTED_SUBSCRIPTIONS = ["im.message.created", "track.comment.added"]
 EXPECTED_HANDLER_TYPES = [
-    "TaskCheckoutHandler",
     "ImMessageCreatedHandler",
     "TrackCommentAddedHandler",
     "BrowserPageExpiredHandler",
@@ -29,7 +28,6 @@ EXPECTED_HANDLER_TYPES = [
     "BrowserFailedOpenPageCleanupHandler",
 ]
 EXPECTED_HANDLER_NAMES = [
-    "task_checkout",
     "im_message_created",
     "track_comment_added",
     "browser_page_expired",
@@ -66,6 +64,12 @@ def imported_modules(path: Path) -> set[str]:
 
 
 class InstanceDaemonEntrypointTests(unittest.TestCase):
+    def test_task_application_commands_are_registered_only_at_composition_root(self) -> None:
+        imports = imported_modules(INSTANCE_DAEMON_PATH)
+        self.assertIn("task_sys_daemon_adapter", imports)
+        factories = self.instance_daemon.default_application_command_factories()
+        self.assertEqual(factories, [self.instance_daemon.task_sys_daemon_adapter.command_handlers])
+
     def setUp(self) -> None:
         self.instance_daemon = load_instance_daemon()
 
@@ -79,6 +83,8 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("browser_page_expired_handler", imports)
+        self.assertNotIn("task_" + "checkout_handler", imports)
+        self.assertFalse((ROOT / "tools" / "launcher" / ("task_" + "checkout_handler.py")).exists())
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
         handlers = self.instance_daemon.default_daemon_handlers()
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
@@ -92,10 +98,12 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             *,
             handlers: list[object] | None = None,
             notify_subscriptions: list[str] | None = None,
+            application_command_factories: list[object] | None = None,
         ) -> int:
             recorded["instance_json"] = instance_json
             recorded["handlers"] = handlers or []
             recorded["notify_subscriptions"] = notify_subscriptions or []
+            recorded["application_command_factories"] = application_command_factories or []
             return 0
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "run_daemon", original_run)
@@ -107,12 +115,14 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
-        self.assertEqual(type(handlers[0]).__name__, "TaskCheckoutHandler")
-        self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
-        self.assertEqual(getattr(handlers[1], "name", None), "im_message_created")
-        self.assertEqual(getattr(handlers[2], "name", None), "track_comment_added")
+        self.assertEqual(getattr(handlers[0], "name", None), "im_message_created")
+        self.assertEqual(getattr(handlers[1], "name", None), "track_comment_added")
         self.assertEqual(recorded["instance_json"], Path("/tmp/inst.json"))
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
+        self.assertEqual(
+            recorded["application_command_factories"],
+            self.instance_daemon.default_application_command_factories(),
+        )
 
     def test_start_prints_json_from_daemon_core(self) -> None:
         original_start = self.instance_daemon.daemon_core.start_daemon
@@ -140,7 +150,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
         self.assertEqual([getattr(handler, "name", None) for handler in handlers], EXPECTED_HANDLER_NAMES)
-        self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
+        self.assertEqual(getattr(handlers[0], "name", None), "im_message_created")
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
 
     def test_stop_prints_json_from_daemon_core(self) -> None:
