@@ -29,6 +29,7 @@ import im_http_router
 import imessage_channel
 import host_control as host_control_module
 import actor_session
+import cli_contract
 from env.domain import task_read, track_read
 from env.domain.identity import ActorIdentityProfile, IdentityRef
 from env.repos import runtime_files
@@ -1152,7 +1153,16 @@ def main(argv: list[str] | None = None) -> int:
         print(exc.message, file=sys.stderr, flush=True)
         return 1
     server = create_server(args.host, args.port, service)
-    print(f"BuddySwitch web management listening on http://{args.host}:{server.server_port}", flush=True)
+    url = f"http://{args.host}:{server.server_port}"
+    cli_contract.emit(
+        cli_contract.success(
+            "web.ready",
+            {"url": url},
+        ),
+        sys.stdout,
+    )
+    sys.stdout.flush()
+    print(f"BuddySwitch web management listening on {url}", file=sys.stderr, flush=True)
     worker = create_imessage_channel_worker(f"http://{args.host}:{server.server_port}")
     serve_with_imessage_worker(server, worker)
     return 0

@@ -241,7 +241,7 @@ def role_skill_docs(manifest: dict[str, Any], role_id: str) -> list[dict[str, An
 
 def _cmd_print(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
-    print(json.dumps(manifest, ensure_ascii=True, indent=2))
+    print(json.dumps(manifest, ensure_ascii=True, sort_keys=True))
     return 0
 
 
@@ -255,11 +255,7 @@ def _cmd_list_roles(args: argparse.Namespace) -> int:
         }
         for role in manifest["roles"]
     ]
-    if args.json:
-        print(json.dumps({"roles": roles}, ensure_ascii=True))
-        return 0
-    for role in roles:
-        print(f"{role['id']}\t{role['label']}\t{role['scope']}")
+    print(json.dumps({"roles": roles}, ensure_ascii=True, sort_keys=True))
     return 0
 
 
@@ -269,7 +265,7 @@ def _cmd_show_role(args: argparse.Namespace) -> int:
     payload = dict(role)
     payload["authority"] = role_authority_profile(manifest, args.role_id)
     payload["resolved_skills"] = role_skill_docs(manifest, args.role_id)
-    print(json.dumps(payload, ensure_ascii=True, indent=2))
+    print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
     return 0
 
 
@@ -282,7 +278,6 @@ def build_parser() -> argparse.ArgumentParser:
     cmd_print.set_defaults(func=_cmd_print)
 
     cmd_list = subparsers.add_parser("list-roles", help="List roles")
-    cmd_list.add_argument("--json", action="store_true")
     cmd_list.set_defaults(func=_cmd_list_roles)
 
     cmd_show = subparsers.add_parser("show-role", help="Show one role profile")

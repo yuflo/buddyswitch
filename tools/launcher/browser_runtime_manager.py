@@ -970,44 +970,8 @@ def release(*, instance_root: Path | str, actor_id: str, reason: str | None = No
 
 
 def _print_result(result: dict[str, object]) -> int:
-    print(json.dumps(result, ensure_ascii=True, indent=2))
+    print(json.dumps(result, ensure_ascii=True, sort_keys=True))
     return 0 if result.get("ok") is True else 1
-
-
-def _print_human_result(command: str, result: dict[str, object]) -> int:
-    ok = result.get("ok") is True
-    ready = result.get("ready") is True
-    message = result.get("message")
-    if not ok:
-        error = result.get("error")
-        if isinstance(error, dict) and isinstance(error.get("message"), str):
-            message = error["message"]
-        elif not isinstance(message, str):
-            message = "Browser runtime manager failed"
-    if not isinstance(message, str):
-        message = ""
-
-    output_stream = sys.stdout
-    exit_code = 0
-    if not ok:
-        output_stream = sys.stderr
-        exit_code = 1
-    elif command == "status" and not ready:
-        output_stream = sys.stderr
-        exit_code = 1
-
-    if message:
-        print(message, file=output_stream)
-    profile_dir = result.get("profile_dir")
-    if isinstance(profile_dir, str) and profile_dir.strip():
-        print(f"Profile: {profile_dir}", file=output_stream)
-    return exit_code
-
-
-def _emit_result(command: str, result: dict[str, object], output: str) -> int:
-    if output == "human":
-        return _print_human_result(command, result)
-    return _print_result(result)
 
 
 def _parse_port(value: str | None) -> int | None:
@@ -1026,7 +990,6 @@ def main(argv: list[str] | None = None) -> int:
         sub = subparsers.add_parser(name)
         sub.add_argument("--instance-root", required=True)
         sub.add_argument("--actor-id", required=True)
-        sub.add_argument("--output", choices=("json", "human"), default="json")
         if name in {"acquire", "status"}:
             sub.add_argument("--port")
             sub.add_argument("--profile-dir")
@@ -1039,8 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     command = args.command
     if command == "acquire":
-        return _emit_result(
-            command,
+        return _print_result(
             acquire(
                 instance_root=Path(args.instance_root),
                 actor_id=args.actor_id,
@@ -1049,28 +1011,21 @@ def main(argv: list[str] | None = None) -> int:
                 log_file=Path(args.log_file) if args.log_file else None,
                 chrome_bin=Path(args.chrome_bin) if args.chrome_bin else None,
                 reason=args.reason,
-            ),
-            args.output,
+            )
         )
     if command == "status":
-        return _emit_result(
-            command,
+        return _print_result(
             status(
                 instance_root=Path(args.instance_root),
                 actor_id=args.actor_id,
                 requested_port=_parse_port(args.port),
                 profile_dir=Path(args.profile_dir) if args.profile_dir else None,
-            ),
-            args.output,
+            )
         )
     if command == "release":
-        return _emit_result(
-            command,
-            release(instance_root=Path(args.instance_root), actor_id=args.actor_id, reason=args.reason),
-            args.output,
-        )
+        return _print_result(release(instance_root=Path(args.instance_root), actor_id=args.actor_id, reason=args.reason))
     if command == "stop":
-        return _emit_result(command, stop(instance_root=Path(args.instance_root), actor_id=args.actor_id), args.output)
+        return _print_result(stop(instance_root=Path(args.instance_root), actor_id=args.actor_id))
     return 2
 
 

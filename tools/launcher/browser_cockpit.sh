@@ -606,21 +606,49 @@ buddyswitch_browser_is_active() {
   return 1
 }
 
+buddyswitch_browser_admin_status_json() {
+  local ready="$1"
+  local durability="$2"
+
+  "${BUDDYSWITCH_PYTHON}" - \
+    "$(buddyswitch_browser_url)" \
+    "${BUDDYSWITCH_BROWSER_PORT}" \
+    "${BUDDYSWITCH_BROWSER_PROFILE_DIR}" \
+    "${ready}" \
+    "${durability}" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "ok": True,
+    "ready": sys.argv[4] == "true",
+    "browser_url": sys.argv[1],
+    "browser_port": int(sys.argv[2]),
+    "profile_dir": sys.argv[3],
+    "state_changed": False,
+    "durability": sys.argv[5],
+}, ensure_ascii=True, sort_keys=True))
+PY
+}
+
 buddyswitch_browser_admin_status() {
   if buddyswitch_browser_check_endpoint 2>/dev/null; then
     if buddyswitch_browser_has_usable_page 2>/dev/null; then
-      echo "Browser cockpit ready: $(buddyswitch_browser_url)"
-      echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
+      buddyswitch_browser_admin_status_json \
+        "true" \
+        "runtime"
       return 0
     fi
-    echo "Browser cockpit not ready: $(buddyswitch_browser_url) (endpoint reachable but no usable page target)" >&2
-    echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
-    return 1
+    buddyswitch_browser_admin_status_json \
+      "false" \
+      "none"
+    return 0
   fi
 
-  echo "Browser cockpit not ready: $(buddyswitch_browser_url) (endpoint unreachable)" >&2
-  echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}" >&2
-  return 1
+  buddyswitch_browser_admin_status_json \
+    "false" \
+    "none"
+  return 0
 }
 
 buddyswitch_browser_manager_cli() {
@@ -842,13 +870,11 @@ buddyswitch_browser_main() {
         buddyswitch_browser_manager_cli status \
           --instance-root "${instance_root}" \
           --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
-          --output human \
           "${manager_args[@]}"
       else
         buddyswitch_browser_manager_cli status \
           --instance-root "${instance_root}" \
-          --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
-          --output human
+          --actor-id "${BUDDYSWITCH_ACTOR_ID}"
       fi
       ;;
     ensure)
@@ -861,13 +887,11 @@ buddyswitch_browser_main() {
         buddyswitch_browser_manager_cli acquire \
           --instance-root "${instance_root}" \
           --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
-          --output human \
           "${manager_acquire_args[@]}" || return $?
       else
         buddyswitch_browser_manager_cli acquire \
           --instance-root "${instance_root}" \
-          --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
-          --output human || return $?
+          --actor-id "${BUDDYSWITCH_ACTOR_ID}" || return $?
       fi
       ;;
     release)
@@ -878,8 +902,7 @@ buddyswitch_browser_main() {
       instance_root="$(buddyswitch_browser_instance_root)" || return $?
       buddyswitch_browser_manager_cli release \
         --instance-root "${instance_root}" \
-        --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
-        --output human
+        --actor-id "${BUDDYSWITCH_ACTOR_ID}"
       ;;
     help)
       buddyswitch_browser_usage

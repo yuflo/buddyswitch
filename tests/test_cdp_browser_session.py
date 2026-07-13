@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SESSION_PATH = ROOT / "scripts" / "env" / ("cdp_browser_" + "session.py")
 LIFECYCLE_PATH = ROOT / "scripts" / "env" / "cdp_browser_lifecycle.py"
 BACKGROUND_PAGE_PATH = ROOT / "scripts" / "env" / "cdp_background_page.py"
+BROWSER_RUNTIME_MANAGER_PATH = ROOT / "tools" / "launcher" / "browser_runtime_manager.py"
 MODULE_COUNTER = count()
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 LEGACY_CURRENT_TARGET_FIELD = "current_" + "target_id"
@@ -516,6 +517,60 @@ class BrowserLifecycleTests(unittest.TestCase):
         manager_source = (ROOT / "tools" / "launcher" / "browser_runtime_manager.py").read_text(encoding="utf-8")
         self.assertIn("cdp_background_page", manager_source)
         self.assertNotIn("create_background_page_" + "target", manager_source)
+
+    def test_browser_runtime_manager_cli_is_json_only_without_output_selector(self) -> None:
+        actor_id = "act-browser-json-only"
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / actor_id
+            instance_root.mkdir(parents=True)
+            (instance_root / "instance.json").write_text(
+                json.dumps({"actor_id": actor_id, "browser_port": None}, ensure_ascii=True) + "\n",
+                encoding="utf-8",
+            )
+
+            status_result = subprocess.run(
+                [
+                    PYTHON,
+                    str(BROWSER_RUNTIME_MANAGER_PATH),
+                    "status",
+                    "--instance-root",
+                    str(instance_root),
+                    "--actor-id",
+                    actor_id,
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
+            self.assertEqual(status_result.stderr, "")
+            self.assertEqual(status_result.stdout.count("\n"), 1, msg=status_result.stdout)
+            payload = json.loads(status_result.stdout)
+            self.assertEqual(payload["ok"], True)
+            self.assertEqual(payload["browser_port"], None)
+
+            for removed_args in (["--output", "human"], ["--json"]):
+                with self.subTest(removed_args=removed_args):
+                    removed = subprocess.run(
+                        [
+                            PYTHON,
+                            str(BROWSER_RUNTIME_MANAGER_PATH),
+                            "status",
+                            "--instance-root",
+                            str(instance_root),
+                            "--actor-id",
+                            actor_id,
+                            *removed_args,
+                        ],
+                        cwd=ROOT,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(removed.returncode, 2, msg=removed.stdout + removed.stderr)
+                    self.assertEqual(removed.stdout, "")
 
 
 if __name__ == "__main__":

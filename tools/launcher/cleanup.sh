@@ -7,7 +7,7 @@ BUDDYSWITCH_CLEANUP_ENV_CLEANUP="${BUDDYSWITCH_CLEANUP_REPO_ROOT}/scripts/env_cl
 BUDDYSWITCH_CLEANUP_MANIFEST="${BUDDYSWITCH_CLEANUP_REPO_ROOT}/buddyswitch/manifest.toml"
 
 buddyswitch_cleanup_usage_hint() {
-  echo "Use: buddyswitch-codex data cleanup --role <role>|--all-data [--yes] [--json]" >&2
+  echo "Use: buddyswitch-codex data cleanup --role <role>|--all-data [--yes]" >&2
 }
 
 buddyswitch_cleanup_requests_execute() {
@@ -22,13 +22,13 @@ buddyswitch_cleanup_requests_execute() {
 
 BUDDYSWITCH_CLEANUP_SCOPE=""
 BUDDYSWITCH_CLEANUP_ROLE=""
-BUDDYSWITCH_CLEANUP_COMMON_ARGS=()
+BUDDYSWITCH_CLEANUP_YES=0
 
 buddyswitch_cleanup_parse_args() {
   local target_seen=0
   BUDDYSWITCH_CLEANUP_SCOPE=""
   BUDDYSWITCH_CLEANUP_ROLE=""
-  BUDDYSWITCH_CLEANUP_COMMON_ARGS=()
+  BUDDYSWITCH_CLEANUP_YES=0
 
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -48,11 +48,6 @@ buddyswitch_cleanup_parse_args() {
           return 2
         fi
         ;;
-      --app-runtime)
-        echo "Removed data cleanup option: --app-runtime" >&2
-        buddyswitch_cleanup_usage_hint
-        return 2
-        ;;
       --all-data)
         if [[ "${target_seen}" -eq 1 ]]; then
           echo "data cleanup target must be specified exactly once" >&2
@@ -63,17 +58,8 @@ buddyswitch_cleanup_parse_args() {
         shift
         ;;
       --yes)
-        BUDDYSWITCH_CLEANUP_COMMON_ARGS+=("--yes")
+        BUDDYSWITCH_CLEANUP_YES=1
         shift
-        ;;
-      --json)
-        BUDDYSWITCH_CLEANUP_COMMON_ARGS+=("--json")
-        shift
-        ;;
-      --agent | --all-agents | --project | --all-storage | --execute | --force)
-        echo "Removed data cleanup option: $1" >&2
-        buddyswitch_cleanup_usage_hint
-        return 2
         ;;
       *)
         echo "Unknown data cleanup option: $1" >&2
@@ -94,6 +80,7 @@ buddyswitch_cleanup_run_env_cleanup() {
   local repo_root="$1"
   local scope="$2"
   local -a target_args
+  local -a execute_args=()
 
   case "${scope}" in
     role)
@@ -108,20 +95,15 @@ buddyswitch_cleanup_run_env_cleanup() {
       ;;
   esac
 
-  if [[ "${#BUDDYSWITCH_CLEANUP_COMMON_ARGS[@]}" -gt 0 ]]; then
-    "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_CLEANUP_ENV_CLEANUP}" \
-      --repo-root "${repo_root}" \
-      --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
-      --manifest "${BUDDYSWITCH_CLEANUP_MANIFEST}" \
-      "${target_args[@]}" \
-      "${BUDDYSWITCH_CLEANUP_COMMON_ARGS[@]}"
-  else
-    "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_CLEANUP_ENV_CLEANUP}" \
-      --repo-root "${repo_root}" \
-      --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
-      --manifest "${BUDDYSWITCH_CLEANUP_MANIFEST}" \
-      "${target_args[@]}"
+  if [[ "${BUDDYSWITCH_CLEANUP_YES}" -eq 1 ]]; then
+    execute_args=(--yes)
   fi
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_CLEANUP_ENV_CLEANUP}" \
+    --repo-root "${repo_root}" \
+    --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
+    --manifest "${BUDDYSWITCH_CLEANUP_MANIFEST}" \
+    "${target_args[@]}" \
+    "${execute_args[@]}"
 }
 
 buddyswitch_count_active_browsers() {

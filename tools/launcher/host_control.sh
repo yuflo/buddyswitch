@@ -1045,7 +1045,7 @@ host_control_roles() {
     echo "roles accepts no arguments" >&2
     return 2
   fi
-  "${BUDDYSWITCH_PYTHON}" "${REPO_ROOT}/scripts/env_manifest.py" list-roles --json
+  "${BUDDYSWITCH_PYTHON}" "${REPO_ROOT}/scripts/env_manifest.py" list-roles
 }
 
 host_control_start() {

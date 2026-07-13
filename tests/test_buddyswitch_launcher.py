@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import errno
+import select
 import shutil
 import signal
 import socket
@@ -1379,6 +1380,73 @@ exec "$real_git" "$@"
             if isinstance(payload, dict) and payload.get("ok") is True:
                 return json.dumps(payload.get("data"), ensure_ascii=False)
         return stdout if isinstance(stdout, str) else ""
+
+    def _read_process_line(
+        self,
+        proc: subprocess.Popen[str],
+        *,
+        stream_name: str = "stdout",
+        timeout_seconds: float = 5.0,
+    ) -> str:
+        stream = getattr(proc, stream_name)
+        self.assertIsNotNone(stream)
+        assert stream is not None
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select([stream], [], [], 0.05)
+            if readable:
+                return stream.readline()
+            if proc.poll() is not None:
+                return stream.readline()
+        stderr = ""
+        if proc.stderr is not None:
+            readable, _, _ = select.select([proc.stderr], [], [], 0)
+            if readable:
+                stderr = proc.stderr.read()
+        self.fail(
+            f"process did not emit a {stream_name} line within {timeout_seconds}s; "
+            f"returncode={proc.poll()} stderr={stderr}"
+        )
+
+    def _read_available_process_lines(self, proc: subprocess.Popen[str], *, stream_name: str) -> list[str]:
+        stream = getattr(proc, stream_name)
+        if stream is None:
+            return []
+        lines: list[str] = []
+        while True:
+            readable, _, _ = select.select([stream], [], [], 0.05)
+            if not readable:
+                return lines
+            line = stream.readline()
+            if not line:
+                return lines
+            lines.append(line)
+
+    @staticmethod
+    def _process_group_has_live_member(pgid: int) -> bool:
+        try:
+            os.killpg(pgid, 0)
+        except OSError:
+            return False
+        return True
+
+    def _registered_central_daemon_pids(self, shared_root: Path) -> list[int]:
+        if not self._process_registry_path.exists():
+            return []
+        expected_shared_root = str(shared_root.expanduser().resolve(strict=False))
+        pids: list[int] = []
+        for line in self._process_registry_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if payload.get("kind") != "central_daemon":
+                continue
+            if payload.get("shared_root") != expected_shared_root:
+                continue
+            pid = payload.get("pid")
+            if isinstance(pid, int):
+                pids.append(pid)
+        return pids
 
     @staticmethod
     def _read_json_log_events(path: Path) -> list[dict[str, object]]:
@@ -8634,6 +8702,221 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertEqual(env_data["browser_state"], "inactive")
             self.assertFalse(shared_root.exists(), "read-only public status commands must not create runtime state")
 
+    def test_env_manifest_commands_emit_one_canonical_json_line(self) -> None:
+        cases = (
+            ["print"],
+            ["list-roles"],
+            ["show-role", "pm"],
+        )
+        for argv in cases:
+            with self.subTest(argv=argv):
+                completed = subprocess.run(
+                    [PYTHON, "scripts/env_manifest.py", *argv],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+                self.assertEqual(completed.stderr, "")
+                self.assertEqual(completed.stdout.count("\n"), 1, msg=completed.stdout)
+                payload = json.loads(completed.stdout)
+                self.assertEqual(completed.stdout, json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
+                self.assertIsInstance(payload, dict)
+        role_ids = {row["id"] for row in json.loads(
+            subprocess.run(
+                [PYTHON, "scripts/env_manifest.py", "list-roles"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+        )["roles"]}
+        self.assertIn("pm", role_ids)
+        self.assertIn("dev", role_ids)
+
+    def test_env_manifest_list_roles_rejects_removed_json_flag(self) -> None:
+        removed = subprocess.run(
+            [PYTHON, "scripts/env_manifest.py", "list-roles", "--" + "json"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(removed.returncode, 2, msg=removed.stdout + removed.stderr)
+        self.assertEqual(removed.stdout, "")
+
+    def test_env_cleanup_helper_is_json_only_without_json_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            repo_root = Path(temp_root) / "state"
+            repo_root.mkdir(parents=True)
+
+            preview = subprocess.run(
+                [
+                    PYTHON,
+                    "scripts/env_cleanup.py",
+                    "--repo-root",
+                    str(repo_root),
+                    "--manifest",
+                    str(ROOT / "buddyswitch" / "manifest.toml"),
+                    "--role",
+                    "pm",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(preview.returncode, 0, msg=preview.stderr)
+            self.assertEqual(preview.stderr, "")
+            self.assertEqual(preview.stdout.count("\n"), 1, msg=preview.stdout)
+            payload = json.loads(preview.stdout)
+            self.assertEqual(payload["scope"], "role")
+            self.assertEqual(payload["role"], "pm")
+
+            removed = subprocess.run(
+                [
+                    PYTHON,
+                    "scripts/env_cleanup.py",
+                    "--repo-root",
+                    str(repo_root),
+                    "--manifest",
+                    str(ROOT / "buddyswitch" / "manifest.toml"),
+                    "--role",
+                    "pm",
+                    "--" + "json",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(removed.returncode, 2, msg=removed.stdout + removed.stderr)
+            self.assertEqual(removed.stdout, "")
+
+    def test_cleanup_helper_retired_options_are_generic_unknown_options(self) -> None:
+        retired_options = (
+            "--app-runtime",
+            "--agent",
+            "--all-agents",
+            "--project",
+            "--all-storage",
+            "--execute",
+            "--force",
+        )
+        for option in retired_options:
+            with self.subTest(option=option):
+                completed = subprocess.run(
+                    [
+                        "/bin/bash",
+                        "-c",
+                        'source tools/launcher/cleanup.sh; buddyswitch_cleanup_parse_args "$@"',
+                        "cleanup-parse-test",
+                        option,
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn(f"Unknown data cleanup option: {option}", completed.stderr)
+                self.assertNotIn("Removed data cleanup option", completed.stderr)
+                self.assertEqual(completed.stdout, "")
+
+    def test_public_data_cleanup_bridge_consumes_owner_json_without_output_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "data", "cleanup", "--all-data", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            data = self._cli_success_data(completed, kind="data.cleanup")
+            self.assertIsInstance(data, dict)
+            assert isinstance(data, dict)
+            self.assertIn("plan", data)
+            self.assertIn("result", data)
+            self.assertNotIn("stdout", data)
+            self.assertNotIn("stderr", data)
+            self.assertEqual(data["result"]["scope"], "all-data")  # type: ignore[index]
+
+    def test_web_command_sigint_keeps_stdout_single_line_and_stops_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            port = self._first_available_local_port(18865)
+            env = os.environ.copy()
+            env["HOME"] = source_home
+            env.pop("CODEX_HOME", None)
+            proc = subprocess.Popen(
+                [str(LAUNCHER), "web", "--host", "127.0.0.1", "--port", str(port)],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            pgid = os.getpgid(proc.pid)
+            try:
+                line = self._read_process_line(proc, timeout_seconds=8.0)
+                self.assertTrue(line.endswith("\n"), msg=line)
+                self.assertNotIn("listening", line.lower())
+                payload = json.loads(line)
+                self.assertEqual(payload["ok"], True)
+                self.assertEqual(payload["kind"], "web.ready")
+                self.assertEqual(
+                    payload["data"],
+                    {"url": f"http://127.0.0.1:{port}"},
+                )
+                diagnostic = self._read_process_line(proc, stream_name="stderr", timeout_seconds=8.0)
+                self.assertIn("BuddySwitch web management listening on", diagnostic)
+                self.assertIn(f"http://127.0.0.1:{port}", diagnostic)
+                central_daemon_pids = self._registered_central_daemon_pids(shared_root)
+                self.assertTrue(central_daemon_pids, "web command should start a registered central daemon")
+
+                os.killpg(pgid, signal.SIGINT)
+                proc.wait(timeout=8)
+
+                self.assertEqual(self._read_available_process_lines(proc, stream_name="stdout"), [])
+                self.assertFalse(self._process_group_has_live_member(pgid))
+                for pid in central_daemon_pids:
+                    self.assertFalse(self._pid_is_live(pid), f"central daemon pid should stop after web SIGINT: {pid}")
+            finally:
+                if proc.poll() is None:
+                    try:
+                        os.killpg(pgid, signal.SIGTERM)
+                    except OSError:
+                        proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(pgid, signal.SIGKILL)
+                        except OSError:
+                            proc.kill()
+                        proc.wait(timeout=5)
+                for pid in self._registered_central_daemon_pids(shared_root):
+                    self._terminate_registered_process(pid)
+                if proc.stdout is not None:
+                    proc.stdout.close()
+                if proc.stderr is not None:
+                    proc.stderr.close()
+
     def test_public_cli_rejects_deleted_locked_and_json_flag_surfaces_with_canonical_errors(self) -> None:
         cases = (
             (["start"], "UNKNOWN_COMMAND"),
@@ -9938,11 +10221,10 @@ exit 1
                 check=False,
             )
             self.assertEqual(status_default.returncode, 0, msg=self._output_error_text(status_default))
-            self.assertIn(
-                f"Browser cockpit ready: http://127.0.0.1:{default_port}",
-                self._output_data_text(status_default),
-            )
-            self.assertIn(f"Profile: {instance_root / 'browser' / 'profile'}", self._output_data_text(status_default))
+            status_default_data = self._cli_success_data(status_default, kind="env.browser.status")
+            self.assertEqual(status_default_data["browser_url"], f"http://127.0.0.1:{default_port}")  # type: ignore[index]
+            self.assertEqual(status_default_data["profile_dir"], str(instance_root / "browser" / "profile"))  # type: ignore[index]
+            self.assertEqual(status_default_data["message"], f"Browser cockpit ready: http://127.0.0.1:{default_port}")  # type: ignore[index]
 
             explicit_profile = temp_root_path / "browser-profile-status"
             start_fake_cdp(explicit_port, explicit_profile)
@@ -9966,14 +10248,50 @@ exit 1
                 check=False,
             )
             self.assertEqual(status_explicit.returncode, 0, msg=self._output_error_text(status_explicit))
-            self.assertIn(
-                f"Browser cockpit ready: http://127.0.0.1:{explicit_port}",
-                self._output_data_text(status_explicit),
-            )
-            self.assertIn(f"Profile: {explicit_profile}", self._output_data_text(status_explicit))
+            status_explicit_data = self._cli_success_data(status_explicit, kind="env.browser.status")
+            self.assertEqual(status_explicit_data["browser_url"], f"http://127.0.0.1:{explicit_port}")  # type: ignore[index]
+            self.assertEqual(status_explicit_data["profile_dir"], str(explicit_profile))  # type: ignore[index]
+            self.assertEqual(status_explicit_data["message"], f"Browser cockpit ready: http://127.0.0.1:{explicit_port}")  # type: ignore[index]
 
             instance_json = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(instance_json["browser_port"], default_port)
+
+    def test_env_browser_status_without_instance_reports_not_ready_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            port = self._first_available_browser_port()
+            if port is None:
+                self.skipTest("no browser cockpit port is available in range 9222..9321")
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_curl(fake_bin / "curl")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "env", "browser", "status", "--port", str(port)],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            data = self._cli_success_data(completed, kind="env.browser.status")
+            self.assertIsInstance(data, dict)
+            assert isinstance(data, dict)
+            self.assertEqual(data["ok"], True)
+            self.assertEqual(data["ready"], False)
+            self.assertEqual(data["browser_url"], f"http://127.0.0.1:{port}")
+            self.assertEqual(data["browser_port"], port)
+            self.assertEqual(data["durability"], "none")
+            self.assertEqual(data["state_changed"], False)
 
     def test_env_browser_status_rejects_invalid_port_before_endpoint_check(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -10535,9 +10853,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={fore
                 if browser_pid_text.isdigit():
                     self.addCleanup(self._terminate_registered_process, int(browser_pid_text))
             self.assertEqual(ensure_result.returncode, 0, msg=self._output_error_text(ensure_result))
-            self.assertIn("http://127.0.0.1:9444", ensure_result.stdout)
-            self.assertIn(f"Profile: {explicit_profile}", self._output_data_text(ensure_result))
-            self.assertIn(str(explicit_profile), ensure_result.stdout)
+            ensure_data = self._cli_success_data(ensure_result, kind="env.browser.ensure")
+            self.assertEqual(ensure_data["browser_url"], "http://127.0.0.1:9444")  # type: ignore[index]
+            self.assertEqual(ensure_data["profile_dir"], str(explicit_profile))  # type: ignore[index]
             self.assertFalse(
                 (instance_root / "browser" / "profile").exists(),
                 "explicit profile dir should prevent default instance profile directory creation",

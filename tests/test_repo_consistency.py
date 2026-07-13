@@ -407,6 +407,75 @@ class RepoConsistencyTests(unittest.TestCase):
         ):
             self.assertNotIn(token, browser_source)
 
+    def test_admin_browser_data_helpers_have_no_human_json_output_tracks(self) -> None:
+        expectations = {
+            "tools/launcher/browser_runtime_manager.py": (
+                "_print_" + "human_result",
+                "_emit_" + "result",
+                "--" + "output",
+                '"human"',
+            ),
+            "tools/launcher/browser_cockpit.sh": (
+                "--" + "output",
+                "Browser cockpit ready:",
+                "Profile:",
+            ),
+            "tools/launcher/cleanup.sh": (
+                "[--" + "json]",
+                "--" + "json)",
+                "BUDDYSWITCH_CLEANUP_COMMON_ARGS",
+                "Removed data cleanup option",
+                "--app-runtime",
+                "--agent | --all-agents",
+                "--project",
+                "--all-storage",
+                "--execute",
+                "--force",
+            ),
+            "scripts/env_manifest.py": (
+                "args." + "json",
+                "add_argument(\"--" + "json\"",
+            ),
+            "scripts/env_cleanup.py": (
+                "print_" + "text_plan",
+                "args." + "json",
+                "add_argument(\"--" + "json\"",
+                "Preview mode:",
+                "Cleanup completed.",
+            ),
+            "tools/launcher/cli.py": (
+                "[*cleanup_args, REMOVED_" + "JSON_FLAG]",
+                "_json_stdout_" + "or_raw",
+            ),
+            "tools/launcher/host_control.sh": (
+                "list-roles --" + "json",
+            ),
+            "tools/launcher/host_control.py": (
+                "import argparse",
+                "Sequence",
+                "_emit_" + "json",
+                "_emit_roles",
+                "_emit_instances",
+                "_emit_status",
+                "_emit_capabilities",
+                "_command_",
+                "json_output",
+                "build_parser",
+                "_prevalidate_legacy_messages",
+                "def main(",
+                "__main__",
+                "--" + "json",
+                "BuddySwitch instance:",
+                "No BuddySwitch instances found.",
+                "delete preview",
+            ),
+        }
+        for relative, forbidden_tokens in expectations.items():
+            source = (ROOT / relative).read_text(encoding="utf-8")
+            for token in forbidden_tokens:
+                with self.subTest(path=relative, token=token):
+                    self.assertNotIn(token, source)
+
     def test_handlers_use_stable_contracts_and_instance_daemon_is_sole_composition_root(self) -> None:
         handler_paths = (
             ROOT / "tools/launcher/im_wake_handler.py",

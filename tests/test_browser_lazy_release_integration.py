@@ -863,6 +863,59 @@ with calls_path.open("a", encoding="utf-8") as handle:
         result = manager.release(instance_root=instance_root, actor_id=actor_id, reason="test_cleanup")
         return dict(result) if isinstance(result, dict) else {"ok": False, "message": f"invalid manager result: {result!r}"}
 
+    def test_browser_runtime_manager_release_cli_is_json_only_without_output_selector(self) -> None:
+        actor_id = "act-dev-browser-json-only"
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instances" / actor_id
+            instance_root.mkdir(parents=True)
+            (instance_root / "instance.json").write_text(
+                json.dumps({"actor_id": actor_id, "browser_port": None}, ensure_ascii=True) + "\n",
+                encoding="utf-8",
+            )
+
+            release_result = subprocess.run(
+                [
+                    PYTHON,
+                    str(BROWSER_RUNTIME_MANAGER),
+                    "release",
+                    "--instance-root",
+                    str(instance_root),
+                    "--actor-id",
+                    actor_id,
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(release_result.returncode, 0, msg=release_result.stderr)
+            self.assertEqual(release_result.stderr, "")
+            self.assertEqual(release_result.stdout.count("\n"), 1, msg=release_result.stdout)
+            payload = json.loads(release_result.stdout)
+            self.assertEqual(payload["ok"], True)
+            self.assertEqual(payload["release_mode"], "explicit_cleanup")
+
+            removed = subprocess.run(
+                [
+                    PYTHON,
+                    str(BROWSER_RUNTIME_MANAGER),
+                    "release",
+                    "--instance-root",
+                    str(instance_root),
+                    "--actor-id",
+                    actor_id,
+                    "--output",
+                    "human",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(removed.returncode, 2, msg=removed.stdout + removed.stderr)
+            self.assertEqual(removed.stdout, "")
+
     def _cleanup_fake_chrome_pids(self, pids: list[int]) -> None:
         for pid in list(dict.fromkeys(pids)):
             if not pid_alive(pid):

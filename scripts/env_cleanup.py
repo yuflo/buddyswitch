@@ -933,38 +933,6 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def print_text_plan(plan: dict[str, Any]) -> None:
-    if plan["scope"] == "role":
-        target = f"--role {plan['role']}"
-    elif plan["scope"] == "all-data":
-        target = "--all-data"
-    else:
-        target = "--all-data"
-
-    print("BuddySwitch cleanup plan")
-    print(f"Repo root: {plan['repo_root']}")
-    print(f"Target: {target}")
-    print()
-    print("Counts by category:")
-    has_any = False
-    for key in CATEGORY_ORDER:
-        count = plan["counts_by_category"].get(key, 0)
-        if count:
-            print(f"  - {key}: {count}")
-            has_any = True
-    if not has_any:
-        print("  - no files matched")
-    print()
-    print(f"Delete candidates: {len(plan['delete_paths'])}")
-    for path in plan["delete_paths"]:
-        print(f"  - {path}")
-    if plan["warnings"]:
-        print()
-        print("Warnings:")
-        for warning in plan["warnings"]:
-            print(f"  - {warning}")
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BuddySwitch cleanup utility (manual use only)")
     parser.add_argument("--repo-root", type=Path, help="Cleanup root. Defaults to the current script checkout root.")
@@ -978,7 +946,6 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--role")
     target.add_argument("--all-data", action="store_true")
     parser.add_argument("--yes", action="store_true")
-    parser.add_argument("--json", action="store_true", help="Print cleanup plan/result as JSON.")
     return parser
 
 
@@ -1032,23 +999,13 @@ def main() -> int:
             manifest_path=manifest_path,
             shared_root=shared_root,
         )
-        if not args.json:
-            print_text_plan(plan)
 
         if not args.yes:
-            if args.json:
-                print(json.dumps(plan, ensure_ascii=True, indent=2))
-            else:
-                print()
-                print("Preview mode: no files were deleted.")
+            print(json.dumps(plan, ensure_ascii=True, sort_keys=True))
             return 0
 
         result = execute_cleanup_plan(plan)
-        if args.json:
-            print(json.dumps({"plan": plan, "result": result}, ensure_ascii=True, indent=2))
-        else:
-            print()
-            print(f"Cleanup completed. Deleted {result['deleted_count']} file(s).")
+        print(json.dumps({"plan": plan, "result": result}, ensure_ascii=True, sort_keys=True))
         return 0
     except (OSError, ValueError, ManifestError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

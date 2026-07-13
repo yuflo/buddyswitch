@@ -285,7 +285,7 @@ class CleanupSystemTests(unittest.TestCase):
         self.assertTrue(self._path("buddyswitch/objects/track-comments/track-clean-comment/comment-design-keep.json").exists())
         self.assertEqual(json.loads(track_path.read_text(encoding="utf-8")), track_payload)
 
-    def test_cleanup_cli_json_reports_active_categories(self) -> None:
+    def test_cleanup_cli_reports_active_categories_as_default_json(self) -> None:
         completed = subprocess.run(
             [
                 PYTHON,
@@ -296,7 +296,6 @@ class CleanupSystemTests(unittest.TestCase):
                 str(self.manifest_path),
                 "--role",
                 "pm",
-                "--json",
             ],
             cwd=ROOT,
             text=True,
@@ -304,7 +303,10 @@ class CleanupSystemTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(completed.stdout.count("\n"), 1, msg=completed.stdout)
         payload = json.loads(completed.stdout)
+        self.assertEqual(completed.stdout, json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
         self.assertNotIn("handoff_object_ids", payload)
         self.assertNotIn("handoff_records", payload)
 

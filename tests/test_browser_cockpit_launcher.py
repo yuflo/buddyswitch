@@ -72,6 +72,19 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
         record_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         return instance_root
 
+    def _env_browser_status_data(self, completed: subprocess.CompletedProcess[str]) -> dict[str, object]:
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(completed.stdout.count("\n"), 1, msg=completed.stdout)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload.get("ok"), True, msg=payload)
+        self.assertEqual(payload.get("kind"), "env.browser.status", msg=payload)
+        data = payload.get("data")
+        self.assertIsInstance(data, dict, msg=payload)
+        assert isinstance(data, dict)
+        self.assertEqual(data.get("ok"), True, msg=payload)
+        return data
+
     def _start_fake_cdp_server(self, state: dict[str, object]) -> int:
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args: object) -> None:
@@ -708,8 +721,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(status.returncode, 1)
-            self.assertIn("not ready", status.stderr.lower())
+            data = self._env_browser_status_data(status)
+            self.assertEqual(data["ready"], False)
+            self.assertEqual(data["browser_url"], f"http://127.0.0.1:{port}")
+            self.assertEqual(data["browser_port"], port)
+            self.assertEqual(data["durability"], "none")
+            self.assertEqual(data["state_changed"], False)
 
     def test_browser_status_filters_special_chrome_pages_as_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -748,8 +765,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                         capture_output=True,
                         check=False,
                     )
-                    self.assertEqual(status.returncode, 1)
-                    self.assertIn("not ready", status.stderr.lower())
+                    data = self._env_browser_status_data(status)
+                    self.assertEqual(data["ready"], False)
+                    self.assertEqual(data["browser_url"], f"http://127.0.0.1:{port}")
+                    self.assertEqual(data["browser_port"], port)
+                    self.assertEqual(data["durability"], "none")
+                    self.assertEqual(data["state_changed"], False)
 
     def test_browser_status_accepts_http_and_https_pages_as_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -784,8 +805,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                         capture_output=True,
                         check=False,
                     )
-                    self.assertEqual(status.returncode, 0, msg=status.stderr)
-                    self.assertIn("Browser cockpit ready:", status.stdout)
+                    data = self._env_browser_status_data(status)
+                    self.assertEqual(data["ready"], True)
+                    self.assertEqual(data["browser_url"], f"http://127.0.0.1:{port}")
+                    self.assertEqual(data["browser_port"], port)
+                    self.assertEqual(data["durability"], "runtime")
+                    self.assertEqual(data["state_changed"], False)
 
     def test_browser_ensure_rejects_endpoint_only_when_background_ready_page_creation_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

@@ -411,6 +411,34 @@ class HostControlTests(unittest.TestCase):
                 self.assertNotIn(needle, source)
         self.assertNotRegex(source, r"\b--json\)")
 
+    def test_host_control_module_has_no_temporary_cli_entrypoint_residue(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "host_control.py").read_text(encoding="utf-8")
+        forbidden = [
+            "import argparse",
+            "Sequence",
+            "_emit_json",
+            "_emit_roles",
+            "_emit_instances",
+            "_emit_status",
+            "_emit_capabilities",
+            "_command_",
+            "json_output",
+            "build_parser",
+            "_prevalidate_legacy_messages",
+            "def main(",
+            "__main__",
+            "--json",
+            "BuddySwitch instance:",
+            "No BuddySwitch instances found.",
+            "delete preview",
+        ]
+        for needle in forbidden:
+            with self.subTest(needle=needle):
+                self.assertNotIn(needle, source)
+        for name in ("build_parser", "main", "_emit_json", "_prevalidate_legacy_messages"):
+            with self.subTest(attribute=name):
+                self.assertFalse(hasattr(HOST_CONTROL, name))
+
     def test_host_control_script_start_uses_positional_private_role(self) -> None:
         completed = subprocess.run(
             [str(ROOT / "tools" / "launcher" / "host_control.sh"), "start", "--bad"],

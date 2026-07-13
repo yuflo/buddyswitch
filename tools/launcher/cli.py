@@ -113,7 +113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except WebProcessExited as exc:
         return exc.status
-    except BaseException as exc:
+    except Exception as exc:
         error = _map_exception(exc)
         cli_contract.emit(cli_contract.failure(error), sys.stdout)
         return cli_contract.exit_code(error)
@@ -284,8 +284,8 @@ def _dispatch_data(args: list[str]) -> CommandResult:
     if command != "cleanup":
         raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown data command: {command}")
     cleanup_args = _parse_cleanup_args(rest)
-    completed = _run_locked_shell_owner(_cleanup_locked_script(), [*cleanup_args, REMOVED_JSON_FLAG])
-    data = _json_stdout_or_raw(completed)
+    completed = _run_locked_shell_owner(_cleanup_locked_script(), cleanup_args)
+    data = _owner_json_data(completed)
     return CommandResult("data.cleanup", data)
 
 
@@ -343,7 +343,7 @@ def _dispatch_env_browser(args: list[str]) -> CommandResult:
         if actor_id is not None:
             _require_known_actor(actor_id)
         completed = _run_shell_owner(_browser_script(actor_id), shell_args)
-    return CommandResult(f"env.browser.{command}", _owner_output_data(completed))
+    return CommandResult(f"env.browser.{command}", _owner_json_data(completed))
 
 
 def _run_web(args: list[str]) -> int:
@@ -604,7 +604,15 @@ def _run_locked_shell_owner(script: str, args: list[str]) -> subprocess.Complete
 
 
 def _owner_error(completed: subprocess.CompletedProcess[str]) -> cli_contract.CliError:
-    message = _first_nonempty_line(completed.stderr) or _first_nonempty_line(completed.stdout) or "Command failed"
+    payload = _maybe_json_object(completed.stdout)
+    payload_error = payload.get("error") if payload is not None else None
+    payload_message = payload_error.get("message") if isinstance(payload_error, dict) else None
+    message = (
+        _first_nonempty_line(completed.stderr)
+        or (payload_message if isinstance(payload_message, str) and payload_message.strip() else None)
+        or _first_nonempty_line(completed.stdout)
+        or "Command failed"
+    )
     if completed.returncode == 2:
         return cli_contract.CliError("INVALID_ARGUMENT", message)
     if completed.returncode in {3, 4}:
@@ -643,21 +651,24 @@ exit 1
     return completed.returncode == 0
 
 
-def _json_stdout_or_raw(completed: subprocess.CompletedProcess[str]) -> object:
+def _maybe_json_object(text: str | None) -> dict[str, object] | None:
+    if not text or not text.strip():
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _owner_json_data(completed: subprocess.CompletedProcess[str]) -> dict[str, object]:
     text = completed.stdout.strip()
     if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return _owner_output_data(completed)
-
-
-def _owner_output_data(completed: subprocess.CompletedProcess[str]) -> dict[str, object]:
-    return {
-        "stdout": [line for line in completed.stdout.splitlines() if line.strip()],
-        "stderr": [line for line in completed.stderr.splitlines() if line.strip()],
-    }
+        raise cli_contract.CliError("EXECUTION_FAILED", "Owner command emitted no JSON output")
+    payload = _maybe_json_object(text)
+    if payload is None:
+        raise cli_contract.CliError("EXECUTION_FAILED", "Owner command emitted invalid JSON output")
+    return payload
 
 
 def _first_nonempty_line(text: str | None) -> str | None:
