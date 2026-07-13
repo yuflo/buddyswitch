@@ -6,7 +6,7 @@ import io
 import json
 import unittest
 
-from tools.launcher import cli_contract
+from tools.launcher import actor_session, cli, cli_contract, host_control
 
 
 class CliContractTests(unittest.TestCase):
@@ -109,6 +109,50 @@ class CliContractTests(unittest.TestCase):
         self.assertEqual(cli_contract.failure(normalized), payload)
         self.assertEqual(1, cli_contract.exit_code(error))
         self.assertNotIn("INTERAL_ERROR", json.dumps(payload, ensure_ascii=False))
+
+    def test_cli_maps_host_control_errors_to_canonical_public_codes(self) -> None:
+        cases = (
+            (host_control.HostControlError("INVALID_REQUEST", "bad", returncode=2), "INVALID_ARGUMENT"),
+            (host_control.HostControlError("NOT_FOUND", "missing", returncode=1), "NOT_FOUND"),
+            (host_control.HostControlError("LIFECYCLE_BLOCKED", "active", returncode=3), "CONFLICT"),
+            (host_control.HostControlError("LOCK_BUSY", "busy", returncode=4), "CONFLICT"),
+            (host_control.HostControlError("COMMAND_TIMEOUT", "slow", timed_out=True), "TIMEOUT"),
+            (host_control.HostControlError("CAPABILITY_CONFIG_INVALID", "bad capability", returncode=3), "PRECONDITION_FAILED"),
+            (host_control.HostControlError("COMMAND_FAILED", "bad payload", returncode=1), "EXECUTION_FAILED"),
+            (host_control.HostControlError("CAPABILITY_CONFIG_WRITE_FAILED", "write failed", returncode=2), "EXECUTION_FAILED"),
+            (host_control.HostControlError("NEW_LOWER_LAYER_CODE", "typed but unknown", returncode=1), "INTERNAL_ERROR"),
+        )
+
+        for error, expected_code in cases:
+            with self.subTest(code=error.code):
+                mapped = cli._map_host_control_error(error)
+                payload = cli_contract.failure(mapped)
+
+                self.assertEqual(expected_code, mapped.code)
+                self.assertEqual(expected_code, payload["error"]["code"])
+
+    def test_cli_maps_actor_session_errors_without_hiding_known_runtime_failures(self) -> None:
+        cases = (
+            (actor_session.ActorSessionError("invalid actor id"), "INVALID_ARGUMENT"),
+            (actor_session.ActorSessionError("input text is required"), "INVALID_ARGUMENT"),
+            (actor_session.ActorSessionError("actor not found: act-missing"), "NOT_FOUND"),
+            (actor_session.ActorSessionError("actor app server unhealthy for act-pm-demo: socket missing"), "RUNTIME_UNAVAILABLE"),
+            (actor_session.ActorSessionError("actor has no thread id; stop/delete and recreate the instance"), "RUNTIME_UNAVAILABLE"),
+            (actor_session.ActorSessionError("parent capability invalid: unsupported parent level"), "PRECONDITION_FAILED"),
+            (actor_session.ActorSessionError("parent settings update failed: denied"), "EXECUTION_FAILED"),
+            (actor_session.ActorSessionError("input turn failed: thread not loaded"), "EXECUTION_FAILED"),
+            (actor_session.ActorSessionError("thread/resume failed for thr-main: denied"), "EXECUTION_FAILED"),
+            (actor_session.ActorSessionError("thread/resume returned unexpected thread id: thr-other"), "EXECUTION_FAILED"),
+            (actor_session.ActorSessionError("actor record mismatch: act-pm-demo"), "INTERNAL_ERROR"),
+        )
+
+        for error, expected_code in cases:
+            with self.subTest(message=str(error)):
+                mapped = cli._map_actor_session_error(error)
+                payload = cli_contract.failure(mapped)
+
+                self.assertEqual(expected_code, mapped.code)
+                self.assertEqual(expected_code, payload["error"]["code"])
 
 
 if __name__ == "__main__":

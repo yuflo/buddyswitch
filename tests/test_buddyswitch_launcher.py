@@ -347,6 +347,58 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             helper_source = helper_source.split("\n", 1)[1]
         self._write_exec(path, executable_python_source(helper_source))
 
+    def _minimal_launcher_path_without_python(self, bin_dir: Path) -> str:
+        for tool in ("bash", "dirname"):
+            resolved = shutil.which(tool)
+            self.assertIsNotNone(resolved, f"{tool} must be available for launcher bootstrap test")
+            (bin_dir / tool).symlink_to(str(resolved))
+        return str(bin_dir)
+
+    def test_public_launcher_bootstrap_python_resolution_failure_emits_contract_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            bin_dir = Path(temp_root) / "bin"
+            bin_dir.mkdir()
+            env = {
+                "HOME": source_home,
+                "PATH": self._minimal_launcher_path_without_python(bin_dir),
+            }
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "roles"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 5)
+            self.assertEqual(completed.stderr, "")
+            error = self._cli_error(completed, code="RUNTIME_UNAVAILABLE")
+            self.assertIn("BUDDYSWITCH_PYTHON", str(error["message"]))
+
+    def test_public_launcher_missing_env_helper_emits_contract_json_without_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            launcher = Path(temp_root) / "buddyswitch-codex"
+            launcher.write_text(LAUNCHER.read_text(encoding="utf-8"), encoding="utf-8")
+            launcher.chmod(LAUNCHER.stat().st_mode | stat.S_IXUSR)
+            bin_dir = Path(temp_root) / "bin"
+            bin_dir.mkdir()
+
+            completed = subprocess.run(
+                [str(launcher), "instance", "roles"],
+                cwd=ROOT,
+                env={"HOME": temp_root, "PATH": self._minimal_launcher_path_without_python(bin_dir)},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 5)
+            self.assertEqual(completed.stderr, "")
+            error = self._cli_error(completed, code="RUNTIME_UNAVAILABLE")
+            self.assertIn("Launcher env helper is missing", str(error["message"]))
+
     def test_python_resolver_uses_only_path_python_and_overwrites_inherited_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             bin_dir = Path(temp_root) / "bin"
@@ -369,7 +421,7 @@ printf '%s\n' "$BUDDYSWITCH_PYTHON"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self.assertEqual(completed.stdout.strip(), str(bin_dir / "python"))
 
     def test_python_resolver_fails_when_path_has_no_python(self) -> None:
@@ -389,7 +441,7 @@ buddyswitch_resolve_python
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("requires an executable 'python' on PATH", completed.stderr)
+            self.assertIn("requires an executable 'python' on PATH", self._output_error_text(completed))
 
     def test_python_resolver_rejects_unusable_path_python(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -414,7 +466,7 @@ buddyswitch_resolve_python
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("could not execute PATH python", completed.stderr)
+            self.assertIn("could not execute PATH python", self._output_error_text(completed))
 
     def test_python_resolver_rejects_path_python_without_standard_toml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -445,7 +497,7 @@ buddyswitch_resolve_python
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("could not execute PATH python", completed.stderr)
+            self.assertIn("could not execute PATH python", self._output_error_text(completed))
 
     def test_env_mcp_reconciles_stale_interpreter_path_with_resolved_python(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -500,7 +552,7 @@ buddyswitch_env_mcp_ensure
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}")
             call_entries = [
                 json.loads(line)
                 for line in calls_path.read_text(encoding="utf-8").splitlines()
@@ -572,7 +624,7 @@ buddyswitch_browser_ensure_cockpit_mcp
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}")
             call_entries = [
                 json.loads(line)
                 for line in calls_path.read_text(encoding="utf-8").splitlines()
@@ -647,7 +699,7 @@ writable_roots = ["/old"]
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+                self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             config_text = config_path.read_text(encoding="utf-8")
             features_section = config_text.split("[features]", 1)[1].split("\n[", 1)[0]
@@ -704,7 +756,7 @@ writable_roots = ["/old"]
                 )
 
                 self.assertEqual(completed.returncode, 2)
-                self.assertIn("refusing writable root", completed.stderr)
+                self.assertIn("refusing writable root", self._output_error_text(completed))
                 self.assertFalse(config_path.exists())
 
     def test_codex_config_patch_skips_unsafe_temp_roots(self) -> None:
@@ -744,7 +796,7 @@ writable_roots = ["/old"]
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             config_text = config_path.read_text(encoding="utf-8")
             self._assert_codex_automation_config(config_text, shared_root=shared_root)
             self.assertNotIn(str(ROOT.resolve(strict=False)), config_text.replace(str(self._repo_git_common_dir()), ""))
@@ -1161,7 +1213,7 @@ exec "$real_git" "$@"
             capture_output=True,
             check=False,
         )
-        self.assertEqual(add.returncode, 0, msg=add.stderr)
+        self.assertEqual(add.returncode, 0, msg=self._output_error_text(add))
         self.addCleanup(
             subprocess.run,
             ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(workspace_dir)],
@@ -1279,6 +1331,55 @@ exec "$real_git" "$@"
             if line.strip()
         ]
 
+    def _cli_envelope(self, completed: subprocess.CompletedProcess[str]) -> dict[str, object]:
+        self.assertEqual(completed.stdout.count("\n"), 1, msg=completed.stdout)
+        self.assertFalse(getattr(completed, "stderr", "").strip(), msg=getattr(completed, "stderr", ""))
+        payload = json.loads(completed.stdout)
+        self.assertIsInstance(payload, dict)
+        return payload
+
+    def _cli_success_data(self, completed: subprocess.CompletedProcess[str], *, kind: str | None = None) -> object:
+        payload = self._cli_envelope(completed)
+        self.assertEqual(payload.get("ok"), True, msg=payload)
+        if kind is not None:
+            self.assertEqual(payload.get("kind"), kind, msg=payload)
+        self.assertIn("data", payload)
+        return payload["data"]
+
+    def _cli_error(self, completed: subprocess.CompletedProcess[str], *, code: str) -> dict[str, object]:
+        payload = self._cli_envelope(completed)
+        self.assertEqual(payload.get("ok"), False, msg=payload)
+        error = payload.get("error")
+        self.assertIsInstance(error, dict, msg=payload)
+        assert isinstance(error, dict)
+        self.assertEqual(error.get("code"), code, msg=payload)
+        return error
+
+    def _output_error_text(self, completed: subprocess.CompletedProcess[str]) -> str:
+        stdout = getattr(completed, "stdout", "")
+        if isinstance(stdout, str) and stdout.count("\n") == 1:
+            try:
+                payload = json.loads(stdout)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("ok") is False:
+                error = payload.get("error")
+                if isinstance(error, dict):
+                    return json.dumps(error, ensure_ascii=False)
+        stderr = getattr(completed, "stderr", "")
+        return stderr if isinstance(stderr, str) else ""
+
+    def _output_data_text(self, completed: subprocess.CompletedProcess[str]) -> str:
+        stdout = getattr(completed, "stdout", "")
+        if isinstance(stdout, str) and stdout.count("\n") == 1:
+            try:
+                payload = json.loads(stdout)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("ok") is True:
+                return json.dumps(payload.get("data"), ensure_ascii=False)
+        return stdout if isinstance(stdout, str) else ""
+
     @staticmethod
     def _read_json_log_events(path: Path) -> list[dict[str, object]]:
         events: list[dict[str, object]] = []
@@ -1374,7 +1475,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_root = Path(str(ctx["instance_root"]))
             capability_config = instance_root / "capability-config.json"
@@ -1402,7 +1503,7 @@ exec "$real_git" "$@"
             env = self._capability_cli_env(temp_root_path, shared_root)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get", "--json"],
+                [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1410,8 +1511,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            payload = json.loads(completed.stdout)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            payload = self._cli_success_data(completed)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["actor_id"], "act-pm-demo")
             self.assertEqual(payload["capabilities"]["parent"]["level"], "balanced")
@@ -1435,7 +1536,6 @@ exec "$real_git" "$@"
                     "deep",
                     "--side",
                     "maximum",
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -1444,7 +1544,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             get_result = subprocess.run(
-                [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get", "--json"],
+                [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1452,10 +1552,10 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(set_result.returncode, 0, msg=set_result.stderr)
-            self.assertEqual(get_result.returncode, 0, msg=get_result.stderr)
-            set_payload = json.loads(set_result.stdout)
-            get_payload = json.loads(get_result.stdout)
+            self.assertEqual(set_result.returncode, 0, msg=self._output_error_text(set_result))
+            self.assertEqual(get_result.returncode, 0, msg=self._output_error_text(get_result))
+            set_payload = self._cli_success_data(set_result)
+            get_payload = self._cli_success_data(get_result)
             self.assertEqual(set_payload["actor_id"], "act-pm-demo")
             self.assertEqual(set_payload["capabilities"], get_payload["capabilities"])
             self.assertEqual(
@@ -1488,7 +1588,6 @@ exec "$real_git" "$@"
                     "custom",
                     "--side",
                     "fast",
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -1498,7 +1597,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("parent_level", completed.stderr)
+            self.assertIn("parent_level", self._output_error_text(completed))
             self.assertEqual(path.read_text(encoding="utf-8"), before)
 
     def test_instance_capabilities_unknown_option_exits_two(self) -> None:
@@ -1518,7 +1617,8 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Unknown instance capabilities get option: --bogus", completed.stderr)
+            self._cli_error(completed, code="INVALID_ARGUMENT")
+            self.assertIn("instance capabilities get does not accept: --bogus", self._output_error_text(completed))
 
     def _write_task_sys_record(
         self,
@@ -2019,8 +2119,8 @@ exec "$real_git" "$@"
             )
             after_home = self._snapshot_tree(source_home_path)
 
-            self.assertEqual(completed.returncode, 2, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
-            self.assertIn(hint, completed.stderr)
+            self.assertEqual(completed.returncode, 2, msg=f"stdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}")
+            self.assertIn(hint, self._output_error_text(completed))
             self.assertEqual(before_home, after_home, "removed top-level commands must not mutate HOME state")
             self.assertFalse(capture_path.exists(), "removed top-level commands must not invoke codex")
             self.assertFalse((source_home_path / ".codex-buddyswitch").exists())
@@ -2072,9 +2172,9 @@ exec "$real_git" "$@"
             )
             after_home = self._snapshot_tree(source_home_path)
 
-            self.assertEqual(completed.returncode, 2, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
-            self.assertIn(f"Unknown top-level command: {unknown_name}", completed.stderr)
-            self.assertIn("Run: buddyswitch-codex help", completed.stderr)
+            self.assertEqual(completed.returncode, 2, msg=f"stdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}")
+            self._cli_error(completed, code="UNKNOWN_COMMAND")
+            self.assertIn(f"Unknown top-level command: {unknown_name}", self._output_error_text(completed))
             self.assertEqual(after_home, before_home, "unknown commands must not mutate HOME state")
             self.assertFalse(capture_path.exists(), "unknown top-level commands must not invoke codex")
             self.assertFalse((source_home_path / ".codex-buddyswitch").exists())
@@ -2099,8 +2199,9 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-        self.assertEqual(completed.returncode, 2, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
-        self.assertIn("Unknown top-level command: imessage", completed.stderr)
+        self.assertEqual(completed.returncode, 2, msg=f"stdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}")
+        self._cli_error(completed, code="UNKNOWN_COMMAND")
+        self.assertIn("Unknown top-level command: imessage", self._output_error_text(completed))
 
     def test_start_execution_worktree_uses_runtime_workspace_agents_header(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2153,7 +2254,7 @@ exec "$real_git" "$@"
             self.assertEqual(
                 completed.returncode,
                 0,
-                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}",
             )
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
@@ -2218,7 +2319,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -2302,7 +2403,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -2361,7 +2462,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             workspace_dir = Path(payload["cwd"])
@@ -2417,7 +2518,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             status_probe = payload["broker_status_probe"]
@@ -2445,7 +2546,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(broker_ps.returncode, 0, msg=broker_ps.stderr)
+            self.assertEqual(broker_ps.returncode, 0, msg=self._output_error_text(broker_ps))
             self.assertIn("--repo-root", broker_ps.stdout)
             self.assertIn(str(ROOT.resolve(strict=False)), broker_ps.stdout)
 
@@ -2495,7 +2596,7 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["argv"], ["--search"])
             self.assertIsNone(payload["active_role"])
@@ -2537,18 +2638,18 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 2, msg=completed.stderr)
-            self.assertIn("Native Codex web_search is disabled in BuddySwitch product sessions.", completed.stderr)
-            self.assertIn("Use chrome-devtools-cockpit.search_page for browser-native search page opening.", completed.stderr)
-            self.assertIn("Use search__request only for non-opening URL planning.", completed.stderr)
-            self.assertIn("search__status", completed.stderr)
-            self.assertNotIn("search__open_browser", completed.stderr)
-            self.assertNotIn("search.open_browser", completed.stderr)
-            self.assertIn('"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status', completed.stderr)
-            self.assertNotIn("Use native BuddySwitch env MCP tool: search__open_browser", completed.stderr)
-            self.assertNotIn("${BUDDYSWITCH_PYTHON} scripts/env/client.py", completed.stderr)
-            self.assertNotIn("search open-browser --query", completed.stderr)
-            self.assertNotIn("search open-browser --payload", completed.stderr)
+            self.assertEqual(completed.returncode, 2, msg=self._output_error_text(completed))
+            self.assertIn("Native Codex web_search is disabled in BuddySwitch product sessions.", self._output_error_text(completed))
+            self.assertIn("Use chrome-devtools-cockpit.search_page for browser-native search page opening.", self._output_error_text(completed))
+            self.assertIn("Use search__request only for non-opening URL planning.", self._output_error_text(completed))
+            self.assertIn("search__status", self._output_error_text(completed))
+            self.assertNotIn("search__open_browser", self._output_error_text(completed))
+            self.assertNotIn("search.open_browser", self._output_error_text(completed))
+            self.assertIn('"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status', self._output_error_text(completed))
+            self.assertNotIn("Use native BuddySwitch env MCP tool: search__open_browser", self._output_error_text(completed))
+            self.assertNotIn("${BUDDYSWITCH_PYTHON} scripts/env/client.py", self._output_error_text(completed))
+            self.assertNotIn("search open-browser --query", self._output_error_text(completed))
+            self.assertNotIn("search open-browser --payload", self._output_error_text(completed))
             self.assertFalse(capture_path.exists(), "rejected native search must not invoke codex")
 
     def test_start_execution_worktree_uses_design_role_prompt_contract(self) -> None:
@@ -2602,7 +2703,7 @@ exec "$real_git" "$@"
             self.assertEqual(
                 completed.returncode,
                 0,
-                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}",
             )
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
@@ -2701,7 +2802,7 @@ exec "$real_git" "$@"
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(completed.returncode, 0, msg=f"{role_id}\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+                self.assertEqual(completed.returncode, 0, msg=f"{role_id}\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}")
                 payload = json.loads(capture_path.read_text(encoding="utf-8"))
                 runtime_skills = Path(payload["cwd"]) / ".agents" / "skills"
                 installed_skill_ids = sorted(path.name for path in runtime_skills.iterdir() if path.is_dir())
@@ -2785,23 +2886,17 @@ exec "$real_git" "$@"
             self.assertEqual(
                 completed.returncode,
                 0,
-                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}",
             )
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
             instance_snapshot = payload["instance_json_payload"]
 
-            self.assertIn("BuddySwitch instance:", completed.stdout)
-            self.assertIn(payload["actor_id"], completed.stdout)
-            self.assertIn("Input:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance input {payload['actor_id']} --text", completed.stdout)
-            self.assertIn("Attach:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance attach {payload['actor_id']}", completed.stdout)
-            self.assertIn("Stop:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance stop {payload['actor_id']}", completed.stdout)
-            self.assertIn("Delete instance:", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance delete {payload['actor_id']} --yes", completed.stdout)
+            start_data = self._cli_success_data(completed, kind="instance.start")
+            self.assertIsInstance(start_data, dict)
+            assert isinstance(start_data, dict)
+            self.assertEqual(start_data["actor_id"], payload["actor_id"])
 
             self.assertGreaterEqual(len(payload["argv"]), 3, msg=payload["argv"])
             self.assertEqual(payload["argv"][:2], ["app-server", "--listen"])
@@ -3048,7 +3143,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--role", "pm", "--json"],
+                [str(LAUNCHER), "instance", "start", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -3058,10 +3153,10 @@ exec "$real_git" "$@"
             self.assertEqual(
                 completed.returncode,
                 0,
-                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}",
             )
 
-            payload = json.loads(completed.stdout)
+            payload = self._cli_success_data(completed)
             capture_payload = json.loads(capture_path.read_text(encoding="utf-8"))
             stored_instance = json.loads(Path(capture_payload["instance_json"]).read_text(encoding="utf-8"))
 
@@ -3122,7 +3217,7 @@ exec "$real_git" "$@"
             self.assertEqual(
                 completed.returncode,
                 0,
-                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}",
             )
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
@@ -3132,10 +3227,12 @@ exec "$real_git" "$@"
             instance_json_path = instance_root / "instance.json"
             instance_payload = json.loads(instance_json_path.read_text(encoding="utf-8"))
 
-            self.assertIn(f"./buddyswitch-codex instance input {actor_id} --text", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance attach {actor_id}", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance stop {actor_id}", completed.stdout)
-            self.assertIn(f"./buddyswitch-codex instance delete {actor_id} --yes", completed.stdout)
+            start_data = self._cli_success_data(completed, kind="instance.start")
+            self.assertIsInstance(start_data, dict)
+            assert isinstance(start_data, dict)
+            self.assertEqual(start_data["actor_id"], actor_id)
+            self.assertEqual(start_data["role"], "pm")
+            self.assertEqual(start_data["instance_record"], str(instance_json_path))
             self.assertGreaterEqual(len(payload["argv"]), 3, msg=payload["argv"])
             self.assertEqual(payload["argv"][:2], ["app-server", "--listen"])
             self.assertTrue(payload["argv"][2].startswith("unix://"))
@@ -3164,7 +3261,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
@@ -3192,15 +3289,15 @@ exec "$real_git" "$@"
             self.assertEqual(daemon_state["ready"]["main_thread_id"], instance_payload["thread_id"])
 
             status_result = subprocess.run(
-                [str(LAUNCHER), "instance", "status", str(ctx["actor_id"]), "--json"],
+                [str(LAUNCHER), "instance", "status", str(ctx["actor_id"])],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            status_payload = json.loads(status_result.stdout)
+            self.assertEqual(status_result.returncode, 0, msg=self._output_error_text(status_result))
+            status_payload = self._cli_success_data(status_result)
             self.assertTrue(status_payload["daemon"]["ready"])
             self.assertEqual(status_payload["daemon"]["ready_main_thread_id"], instance_payload["thread_id"])
             self.assertEqual(
@@ -3244,7 +3341,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_root = Path(str(ctx["instance_root"]))
             daemon_events = self._read_json_log_events(instance_root / "runtime" / "daemon" / "daemon.log")
@@ -3290,7 +3387,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
             main_thread = state_payload["threads"][ctx["instance_payload"]["thread_id"]]
@@ -3302,7 +3399,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
             thread_id = ctx["instance_payload"]["thread_id"]
@@ -3314,7 +3411,7 @@ exec "$real_git" "$@"
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", ctx["actor_id"], "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", ctx["actor_id"], "--text", "materialize"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -3322,8 +3419,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            payload = json.loads(input_result.stdout)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
+            payload = self._cli_success_data(input_result)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], thread_id)
             self.assertEqual(payload["action"], "start")
@@ -3349,7 +3446,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             calls = self._read_json_lines(Path(str(ctx["calls_path"])))
             rpc_rows = [row for row in calls if row.get("argv", [])[:1] == ["json-rpc"]]
@@ -3377,7 +3474,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             bootstrap = next(row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items")
@@ -3413,7 +3510,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             bootstrap = next(row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items")
@@ -3452,7 +3549,7 @@ exec "$real_git" "$@"
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("thread/inject_items failed", completed.stderr)
+            self.assertIn("thread/inject_items failed", self._output_error_text(completed))
 
             instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(instance_payload["status"], "inactive")
@@ -3486,7 +3583,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
@@ -3530,7 +3627,7 @@ exec "$real_git" "$@"
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("timed out waiting for thread/inject_items", completed.stderr)
+            self.assertIn("timed out waiting for thread/inject_items", self._output_error_text(completed))
 
             instance_root = Path(str(ctx["instance_root"]))
             instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
@@ -3600,8 +3697,9 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 2, msg=completed.stderr)
-            self.assertIn("start no longer accepts Codex args", completed.stderr)
+            self.assertEqual(completed.returncode, 2, msg=self._output_error_text(completed))
+            self._cli_error(completed, code="INVALID_ARGUMENT")
+            self.assertIn("instance start does not accept: --", self._output_error_text(completed))
             self.assertFalse((source_home_path / ".codex-buddyswitch" / "instances").exists())
 
     def test_start_with_role_does_not_allocate_browser_port_when_default_is_busy(self) -> None:
@@ -3673,7 +3771,7 @@ exec "$real_git" "$@"
             self.assertEqual(
                 completed.returncode,
                 0,
-                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}",
             )
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             instance_json = json.loads(Path(payload["instance_json"]).read_text(encoding="utf-8"))
@@ -3702,7 +3800,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -3720,7 +3818,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             methods = [
                 row["rpc_method"]
@@ -3739,14 +3837,18 @@ exec "$real_git" "$@"
             turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
             self.assertEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(turn_start["params"]["input"][0]["text"], "Draft brief")
-            self.assertIn("Turn started:", input_result.stdout)
+            input_payload = self._cli_success_data(input_result, kind="instance.input")
+            self.assertIsInstance(input_payload, dict)
+            assert isinstance(input_payload, dict)
+            self.assertEqual(input_payload["action"], "start")
+            self.assertTrue(input_payload["turn_id"])
 
     def test_input_json_sends_direct_parent_turn_when_thread_idle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -3757,7 +3859,6 @@ exec "$real_git" "$@"
                     ctx["actor_id"],
                     "--text",
                     "Draft brief",
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -3765,8 +3866,8 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            payload = json.loads(input_result.stdout)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
+            payload = self._cli_success_data(input_result)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["action"], "start")
@@ -3813,7 +3914,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -3831,7 +3932,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             methods = [
                 row["rpc_method"]
@@ -3847,14 +3948,18 @@ exec "$real_git" "$@"
             self.assertEqual(steer["params"]["threadId"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(steer["params"]["expectedTurnId"], "turn-123")
             self.assertEqual(steer["params"]["input"][0]["text"], "Steer current turn")
-            self.assertIn("Turn steered:", input_result.stdout)
+            input_payload = self._cli_success_data(input_result, kind="instance.input")
+            self.assertIsInstance(input_payload, dict)
+            assert isinstance(input_payload, dict)
+            self.assertEqual(input_payload["action"], "steer")
+            self.assertEqual(input_payload["turn_id"], "turn-123")
 
     def test_input_rejects_unknown_option_without_rpc_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -3875,8 +3980,92 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(input_result.returncode, 2)
-            self.assertIn("Unknown instance input option: --bogus-input-option", input_result.stderr)
+            self._cli_error(input_result, code="INVALID_ARGUMENT")
+            self.assertIn("instance input does not accept: --bogus-input-option", self._output_error_text(input_result))
             self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
+
+    def test_input_accepts_text_value_that_starts_with_dash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            input_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "input",
+                    ctx["actor_id"],
+                    "--text",
+                    "--draft starts with dash",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
+            payload = self._cli_success_data(input_result, kind="instance.input")
+            self.assertEqual(payload["action"], "start")
+            turn_start = next(row for row in self._read_rpc_rows(Path(str(ctx["calls_path"]))) if row["rpc_method"] == "turn/start")
+            self.assertEqual(turn_start["params"]["input"][0]["text"], "--draft starts with dash")
+
+    def test_input_treats_removed_json_flag_as_text_value_only_at_text_position(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+
+            calls_path = Path(str(ctx["calls_path"]))
+            calls_path.write_text("", encoding="utf-8")
+            input_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "input",
+                    ctx["actor_id"],
+                    "--text",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
+            payload = self._cli_success_data(input_result, kind="instance.input")
+            self.assertEqual(payload["action"], "start")
+            turn_start = next(row for row in self._read_rpc_rows(calls_path) if row["rpc_method"] == "turn/start")
+            self.assertEqual(turn_start["params"]["input"][0]["text"], "--json")
+
+            calls_path.write_text("", encoding="utf-8")
+            rejected_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "input",
+                    ctx["actor_id"],
+                    "--text",
+                    "hello",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(rejected_result.returncode, 2)
+            self._cli_error(rejected_result, code="INVALID_ARGUMENT")
+            self.assertEqual(calls_path.read_text(encoding="utf-8"), "")
 
     def test_input_json_sends_direct_parent_steer_when_thread_active(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3901,7 +4090,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -3912,7 +4101,6 @@ exec "$real_git" "$@"
                     ctx["actor_id"],
                     "--text",
                     "Steer current turn",
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -3920,8 +4108,8 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            payload = json.loads(input_result.stdout)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
+            payload = self._cli_success_data(input_result)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["action"], "steer")
@@ -3946,7 +4134,7 @@ exec "$real_git" "$@"
             self.assertEqual(steer["params"]["input"][0]["text"], "Steer current turn")
 
     def test_public_instance_side_and_goal_commands_are_removed(self) -> None:
-        source = LAUNCHER.read_text(encoding="utf-8")
+        source = (ROOT / "tools" / "launcher" / "cli.py").read_text(encoding="utf-8")
         help_result = subprocess.run(
             [str(LAUNCHER), "instance", "help"],
             cwd=ROOT,
@@ -3969,24 +4157,26 @@ exec "$real_git" "$@"
             check=False,
         )
 
-        self.assertEqual(help_result.returncode, 0, msg=help_result.stderr)
+        self.assertEqual(help_result.returncode, 0, msg=self._output_error_text(help_result))
         self.assertNotIn("instance side", help_result.stdout)
         self.assertNotIn("instance goal", help_result.stdout)
         self.assertNotIn("instance_side()", source)
         self.assertNotIn("instance_goal()", source)
         self.assertNotIn("SUBMIT_TURN_HELPER", source)
-        self.assertIn("tools.launcher.actor_session", source)
+        self.assertIn("from tools.launcher import actor_session", source)
         self.assertNotEqual(side_result.returncode, 0)
-        self.assertIn("Unknown instance command: side", side_result.stderr)
+        self._cli_error(side_result, code="UNKNOWN_COMMAND")
+        self.assertIn("Unknown instance command: side", self._output_error_text(side_result))
         self.assertNotEqual(goal_result.returncode, 0)
-        self.assertIn("Unknown instance command: goal", goal_result.stderr)
+        self._cli_error(goal_result, code="UNKNOWN_COMMAND")
+        self.assertIn("Unknown instance command: goal", self._output_error_text(goal_result))
 
     def test_compact_json_calls_thread_compact_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             compact_result = subprocess.run(
@@ -3995,7 +4185,6 @@ exec "$real_git" "$@"
                     "instance",
                     "compact",
                     ctx["actor_id"],
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -4003,8 +4192,8 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(compact_result.returncode, 0, msg=compact_result.stderr)
-            payload = json.loads(compact_result.stdout)
+            self.assertEqual(compact_result.returncode, 0, msg=self._output_error_text(compact_result))
+            payload = self._cli_success_data(compact_result)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             calls = [
@@ -4024,7 +4213,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             clear_result = subprocess.run(
@@ -4033,7 +4222,6 @@ exec "$real_git" "$@"
                     "instance",
                     "clear",
                     ctx["actor_id"],
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -4041,8 +4229,8 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
-            payload = json.loads(clear_result.stdout)
+            self.assertEqual(clear_result.returncode, 0, msg=self._output_error_text(clear_result))
+            payload = self._cli_success_data(clear_result)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["previous_thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["thread_id"], "thread-cleared")
@@ -4066,13 +4254,13 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             old_daemon_pid = int(
                 (Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").read_text(encoding="utf-8").strip()
             )
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4080,7 +4268,7 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
+            self.assertEqual(clear_result.returncode, 0, msg=self._output_error_text(clear_result))
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(daemon_state["main_thread_id"], "thread-cleared")
             self.assertTrue((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
@@ -4100,18 +4288,18 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
+            self.assertEqual(clear_result.returncode, 0, msg=self._output_error_text(clear_result))
 
             calls = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             start = next(row for row in calls if row.get("rpc_method") == "thread/start")
@@ -4134,7 +4322,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
             state_payload["errors"] = {
                 "thread/inject_items": {
@@ -4148,7 +4336,7 @@ exec "$real_git" "$@"
             )
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4157,7 +4345,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(clear_result.returncode, 0)
-            self.assertIn("thread/inject_items failed", clear_result.stderr)
+            self.assertIn("thread/inject_items failed", self._output_error_text(clear_result))
             instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(instance_payload["thread_id"], "thread-cleared")
             self.assertEqual(instance_payload["status"], "inactive")
@@ -4178,10 +4366,10 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4199,15 +4387,15 @@ exec "$real_git" "$@"
             )
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "resume", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
-            self.assertEqual(json.loads(resume_result.stdout)["thread_id"], "thread-cleared")
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
+            self.assertEqual(self._cli_success_data(resume_result)["thread_id"], "thread-cleared")
 
     def test_clear_daemon_start_failure_preserves_new_thread_and_stops_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -4221,10 +4409,10 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4241,15 +4429,15 @@ exec "$real_git" "$@"
             self.assertIsNone(instance_payload["app_server_log"])
 
             status_result = subprocess.run(
-                [str(LAUNCHER), "instance", "status", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "status", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            status_payload = json.loads(status_result.stdout)
+            self.assertEqual(status_result.returncode, 0, msg=self._output_error_text(status_result))
+            status_payload = self._cli_success_data(status_result)
             self.assertEqual(status_payload["status"], "inactive")
             self.assertFalse(status_payload["app_server"]["healthy"])
             self.assertFalse(status_payload["daemon"]["live"])
@@ -4266,10 +4454,10 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4284,7 +4472,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "resume", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4292,8 +4480,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
-            payload = json.loads(resume_result.stdout)
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
+            payload = self._cli_success_data(resume_result)
             self.assertEqual(payload["thread_id"], "thread-cleared")
             calls = self._read_json_lines(Path(str(ctx["calls_path"])))
             resume_calls = [row for row in calls if row.get("rpc_method") == "thread/resume"]
@@ -4309,18 +4497,18 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             clear_result = subprocess.run(
-                [str(LAUNCHER), "instance", "clear", ctx["actor_id"], "--json"],
+                [str(LAUNCHER), "instance", "clear", ctx["actor_id"]],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
-            self.assertEqual(json.loads(clear_result.stdout)["thread_id"], "thread-cleared")
+            self.assertEqual(clear_result.returncode, 0, msg=self._output_error_text(clear_result))
+            self.assertEqual(self._cli_success_data(clear_result)["thread_id"], "thread-cleared")
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             attach_result = subprocess.run(
@@ -4331,7 +4519,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(attach_result.returncode, 0, msg=attach_result.stderr)
+            self.assertEqual(attach_result.returncode, 0, msg=self._output_error_text(attach_result))
 
             payload = json.loads(Path(str(ctx["capture_path"])).read_text(encoding="utf-8"))
             self.assertEqual(payload["argv"][-1], "thread-cleared")
@@ -4372,7 +4560,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -4391,7 +4579,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertNotEqual(input_result.returncode, 0)
-            self.assertIn("turn not steerable", input_result.stderr)
+            self.assertIn("turn not steerable", self._output_error_text(input_result))
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             methods = [
                 row["rpc_method"]
@@ -4442,7 +4630,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertNotEqual(input_result.returncode, 0)
-            self.assertIn("unhealthy", input_result.stderr.lower())
+            self.assertIn("unhealthy", self._output_error_text(input_result).lower())
             calls_path = instance_root / "calls.jsonl"
             self.assertFalse(calls_path.exists())
 
@@ -4451,7 +4639,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -4468,7 +4656,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(input_result.returncode, 2)
-            self.assertIn("--text", input_result.stderr)
+            self.assertIn("--text", self._output_error_text(input_result))
             self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
 
     def test_instance_resume_json_restarts_stopped_instance_with_original_thread(self) -> None:
@@ -4476,34 +4664,34 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4511,8 +4699,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
-            payload = json.loads(resume_result.stdout)
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
+            payload = self._cli_success_data(resume_result)
             self.assertEqual(payload["actor_id"], actor_id)
             self.assertEqual(payload["thread_id"], thread_id)
             self.assertEqual(payload["status"], "active")
@@ -4531,24 +4719,24 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4556,7 +4744,7 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
             daemon_dir = Path(str(ctx["instance_root"])) / "runtime" / "daemon"
             daemon_state = json.loads((daemon_dir / "state.json").read_text(encoding="utf-8"))
             daemon_pid = int((daemon_dir / "daemon.pid").read_text(encoding="utf-8").strip())
@@ -4570,35 +4758,35 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4606,7 +4794,7 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
             calls = [
                 json.loads(line)
                 for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
@@ -4622,23 +4810,23 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             thread_id = str(ctx["instance_payload"]["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4646,7 +4834,7 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             resume_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/resume"]
             inject_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items"]
@@ -4659,19 +4847,19 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             thread_id = str(ctx["instance_payload"]["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
             state_payload["threads"][thread_id]["rollout_materialized"] = False
@@ -4682,7 +4870,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4691,7 +4879,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(resume_result.returncode, 0)
-            self.assertIn("no rollout found", resume_result.stderr)
+            self.assertIn("no rollout found", self._output_error_text(resume_result))
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
             self.assertEqual([row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items"], [])
 
@@ -4700,31 +4888,31 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             input_result = subprocess.run(
-                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize", "--json"],
+                [str(LAUNCHER), "instance", "input", actor_id, "--text", "materialize"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            self.assertEqual(input_result.returncode, 0, msg=self._output_error_text(input_result))
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             resume_result = subprocess.run(
                 [str(LAUNCHER), "instance", "resume", actor_id],
@@ -4735,16 +4923,19 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
-            self.assertIn(f"Instance resumed: {actor_id}", resume_result.stdout)
-            self.assertIn(f"Thread: {thread_id}", resume_result.stdout)
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
+            payload = self._cli_success_data(resume_result, kind="instance.resume")
+            self.assertIsInstance(payload, dict)
+            assert isinstance(payload, dict)
+            self.assertEqual(payload["actor_id"], actor_id)
+            self.assertEqual(payload["thread_id"], thread_id)
 
     def test_instance_resume_active_instance_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             record_path = Path(str(ctx["instance_root"])) / "instance.json"
             before = json.loads(record_path.read_text(encoding="utf-8"))
@@ -4752,7 +4943,7 @@ exec "$real_git" "$@"
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4760,8 +4951,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
-            payload = json.loads(resume_result.stdout)
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
+            payload = self._cli_success_data(resume_result)
             self.assertEqual(payload["actor_id"], actor_id)
             self.assertEqual(payload["thread_id"], thread_id)
             self.assertEqual(payload["status"], "active")
@@ -4794,7 +4985,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4802,29 +4993,30 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(resume_result.returncode, 3)
-            self.assertIn("has no thread id", resume_result.stderr)
+            self.assertEqual(resume_result.returncode, 4)
+            self._cli_error(resume_result, code="CONFLICT")
+            self.assertIn("has no thread id", self._output_error_text(resume_result))
 
     def test_instance_resume_keeps_inactive_when_thread_resume_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             actor_id = str(ctx["actor_id"])
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
             thread_id = str(instance_payload["thread_id"])
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "stop", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             Path(str(ctx["state_file"])).write_text(
                 json.dumps(
@@ -4845,7 +5037,7 @@ exec "$real_git" "$@"
             )
 
             resume_result = subprocess.run(
-                [str(LAUNCHER), "instance", "resume", actor_id, "--json"],
+                [str(LAUNCHER), "instance", "resume", actor_id],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -4854,7 +5046,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(resume_result.returncode, 0)
-            self.assertIn("thread/resume failed", resume_result.stderr)
+            self.assertIn("thread/resume failed", self._output_error_text(resume_result))
             record = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(record["status"], "inactive")
             self.assertIsNone(record.get("app_server_pid"))
@@ -4865,7 +5057,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             attach_result = subprocess.run(
                 [
@@ -4880,7 +5072,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(attach_result.returncode, 0, msg=attach_result.stderr)
+            self.assertEqual(attach_result.returncode, 0, msg=self._output_error_text(attach_result))
             payload = json.loads(Path(str(ctx["capture_path"])).read_text(encoding="utf-8"))
             instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
             calls = [
@@ -4936,7 +5128,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             attach_result = subprocess.run(
@@ -4947,7 +5139,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(attach_result.returncode, 0, msg=attach_result.stderr)
+            self.assertEqual(attach_result.returncode, 0, msg=self._output_error_text(attach_result))
 
             instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
             payload = json.loads(Path(str(ctx["capture_path"])).read_text(encoding="utf-8"))
@@ -4966,7 +5158,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_json_path = Path(str(ctx["instance_root"])) / "instance.json"
             instance_payload = json.loads(instance_json_path.read_text(encoding="utf-8"))
@@ -4987,7 +5179,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertNotEqual(attach_result.returncode, 0)
-            self.assertIn("stop/delete", attach_result.stderr.lower())
+            self.assertIn("stop/delete", self._output_error_text(attach_result).lower())
 
     def test_attach_rejects_unhealthy_app_server(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -5022,14 +5214,14 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertNotEqual(attach_result.returncode, 0)
-            self.assertIn("unhealthy", attach_result.stderr.lower())
+            self.assertIn("unhealthy", self._output_error_text(attach_result).lower())
 
     def test_attach_blocks_when_thread_resume_returns_different_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
             state_payload["thread_resume_response_thread_id"] = "thread-other"
@@ -5044,7 +5236,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertNotEqual(attach_result.returncode, 0)
-            self.assertIn("thread/resume returned unexpected thread id", attach_result.stderr)
+            self.assertIn("thread/resume returned unexpected thread id", self._output_error_text(attach_result))
             self.assertFalse(Path(str(ctx["capture_path"])).exists(), "TUI must not launch after mismatched preflight")
 
     def test_attach_blocks_when_thread_resume_preflight_fails(self) -> None:
@@ -5052,7 +5244,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
             state_payload["errors"] = {
@@ -5073,7 +5265,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertNotEqual(attach_result.returncode, 0)
-            self.assertIn("thread/resume failed", attach_result.stderr)
+            self.assertIn("thread/resume failed", self._output_error_text(attach_result))
             self.assertFalse(Path(str(ctx["capture_path"])).exists(), "TUI must not launch after failed preflight")
 
     def test_stop_active_instance_stops_service_broker_browser_and_marks_inactive(self) -> None:
@@ -5081,7 +5273,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
@@ -5106,7 +5298,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
 
             stored = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(stored["status"], "inactive")
@@ -5131,7 +5323,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_root = Path(str(ctx["instance_root"]))
             instance_json = instance_root / "instance.json"
@@ -5158,7 +5350,7 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
             upstream_proc.wait(timeout=2)
             self.assertFalse((runtime_browser_dir / "cockpit-upstream.pid").exists())
             self.assertFalse((runtime_browser_dir / "cockpit-upstream.pgid").exists())
@@ -5172,7 +5364,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_root = Path(str(ctx["instance_root"]))
             daemon_state_path = instance_root / "runtime" / "daemon" / "state.json"
@@ -5225,7 +5417,7 @@ exec "$real_git" "$@"
             daemon_state_path.write_text(json.dumps(daemon_state, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
             stop_result = subprocess.run(
-                [str(LAUNCHER), "instance", "stop", str(ctx["actor_id"]), "--json"],
+                [str(LAUNCHER), "instance", "stop", str(ctx["actor_id"])],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -5233,8 +5425,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
-            self.assertEqual(json.loads(stop_result.stdout), {"actor_id": ctx["actor_id"], "status": "inactive"})
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
+            self.assertEqual(self._cli_success_data(stop_result), {"actor_id": ctx["actor_id"], "status": "inactive"})
             saved = json.loads(daemon_state_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["status"], "canceled")
             self.assertEqual(saved["scheduled_triggers"]["schedule-2"]["status"], "canceled")
@@ -5252,7 +5444,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             instance_payload = ctx["instance_payload"]
             assert isinstance(instance_payload, dict)
@@ -5270,7 +5462,6 @@ exec "$real_git" "$@"
                     "instance",
                     "stop",
                     ctx["actor_id"],
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5278,9 +5469,9 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
             self.assertEqual(
-                json.loads(stop_result.stdout),
+                self._cli_success_data(stop_result),
                 {"actor_id": ctx["actor_id"], "status": "inactive"},
             )
 
@@ -5339,7 +5530,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
             stored = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(stored["status"], "inactive")
             self.assertFalse((runtime_dir / "app-server.pid").exists())
@@ -5360,7 +5551,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             status_result = subprocess.run(
                 [
@@ -5368,7 +5559,6 @@ exec "$real_git" "$@"
                     "instance",
                     "status",
                     ctx["actor_id"],
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5376,8 +5566,8 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            payload = json.loads(status_result.stdout)
+            self.assertEqual(status_result.returncode, 0, msg=self._output_error_text(status_result))
+            payload = self._cli_success_data(status_result)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["role"], "pm")
             self.assertEqual(payload["status"], "active")
@@ -5408,7 +5598,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self._write_task_sys_record(
                 Path(str(ctx["shared_root"])),
                 actor_id=str(ctx["actor_id"]),
@@ -5429,7 +5619,6 @@ exec "$real_git" "$@"
                     "instance",
                     "status",
                     str(ctx["actor_id"]),
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5438,8 +5627,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            payload = json.loads(status_result.stdout)
+            self.assertEqual(status_result.returncode, 0, msg=self._output_error_text(status_result))
+            payload = self._cli_success_data(status_result)
             self.assertNotIn("task_sys", payload["daemon"])
 
     def test_instance_status_json_reports_log_metadata(self) -> None:
@@ -5447,7 +5636,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             status_result = subprocess.run(
                 [
@@ -5455,7 +5644,6 @@ exec "$real_git" "$@"
                     "instance",
                     "status",
                     str(ctx["actor_id"]),
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5464,8 +5652,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            payload = json.loads(status_result.stdout)
+            self.assertEqual(status_result.returncode, 0, msg=self._output_error_text(status_result))
+            payload = self._cli_success_data(status_result)
             checks = (
                 (payload["daemon"]["log"], "daemon", "daemon_ready"),
                 (payload["app_server"]["log"], "app_server", "app_server_ready"),
@@ -5495,7 +5683,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             status_result = subprocess.run(
                 [
@@ -5511,16 +5699,20 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            self.assertIn("Daemon health:", status_result.stdout)
-            self.assertIn("Daemon handlers: im_message_created", status_result.stdout)
+            self.assertEqual(status_result.returncode, 0, msg=self._output_error_text(status_result))
+            payload = self._cli_success_data(status_result, kind="instance.status")
+            self.assertIsInstance(payload, dict)
+            assert isinstance(payload, dict)
+            self.assertEqual(payload["app_server"]["healthy"], True)
+            self.assertEqual(payload["daemon"]["live"], True)
+            self.assertIn("im_message_created", payload["daemon"]["handlers"]["registered"])
 
     def test_human_status_excludes_task_sys_product_projection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self._write_task_sys_record(
                 Path(str(ctx["shared_root"])),
                 actor_id=str(ctx["actor_id"]),
@@ -5541,12 +5733,9 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
-            self.assertNotIn("Task Sys active", status_result.stdout)
-            self.assertIn(
-                "Delivery scope: daemon handler status is trigger-dispatch only; external channel delivery is separate.",
-                status_result.stdout,
-            )
+            self.assertEqual(status_result.returncode, 0, msg=self._output_error_text(status_result))
+            status_payload = self._cli_success_data(status_result, kind="instance.status")
+            self.assertNotIn("Task Sys active", json.dumps(status_payload, ensure_ascii=False))
 
     def test_fake_codex_requires_daemon_thread_resume_before_notifications(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -5577,7 +5766,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             rows = self._read_json_lines(Path(str(ctx["calls_path"])))
             daemon_rows = [
@@ -5623,7 +5812,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             records = self._task_sys_records(Path(str(ctx["shared_root"])))
             self.assertEqual(records, [])
@@ -5692,7 +5881,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             records = self._task_sys_records(Path(str(ctx["shared_root"])))
             self.assertEqual(records, [])
@@ -5705,7 +5894,7 @@ exec "$real_git" "$@"
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             list_result = subprocess.run(
                 [
@@ -5719,12 +5908,15 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(list_result.returncode, 0, msg=list_result.stderr)
-            self.assertIn("actor_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir", list_result.stdout)
-            self.assertIn(
-                f"{ctx['actor_id']}\tpm\tactive\thealthy\t{ctx['instance_payload']['thread_id']}\t",
-                list_result.stdout,
-            )
+            self.assertEqual(list_result.returncode, 0, msg=self._output_error_text(list_result))
+            list_payload = self._cli_success_data(list_result, kind="instance.list")
+            self.assertIsInstance(list_payload, dict)
+            assert isinstance(list_payload, dict)
+            self.assertEqual(list_payload["instances"][0]["actor_id"], ctx["actor_id"])
+            self.assertEqual(list_payload["instances"][0]["role"], "pm")
+            self.assertEqual(list_payload["instances"][0]["status"], "active")
+            self.assertEqual(list_payload["instances"][0]["app_server_health"], "healthy")
+            self.assertEqual(list_payload["instances"][0]["thread_id"], ctx["instance_payload"]["thread_id"])
 
     def test_interrupt_interrupts_active_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -5749,7 +5941,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             interrupt_result = subprocess.run(
@@ -5765,8 +5957,9 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(interrupt_result.returncode, 0, msg=interrupt_result.stderr)
-            self.assertIn("turn-123", interrupt_result.stdout)
+            self.assertEqual(interrupt_result.returncode, 0, msg=self._output_error_text(interrupt_result))
+            interrupt_payload = self._cli_success_data(interrupt_result, kind="instance.interrupt")
+            self.assertIn("turn-123", json.dumps(interrupt_payload, ensure_ascii=False))
             calls = [
                 json.loads(line)
                 for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
@@ -5803,7 +5996,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             interrupt_result = subprocess.run(
@@ -5812,7 +6005,6 @@ exec "$real_git" "$@"
                     "instance",
                     "interrupt",
                     ctx["actor_id"],
-                    "--json",
                 ],
                 cwd=ROOT,
                 env=ctx["env"],
@@ -5820,8 +6012,8 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(interrupt_result.returncode, 0, msg=interrupt_result.stderr)
-            payload = json.loads(interrupt_result.stdout)
+            self.assertEqual(interrupt_result.returncode, 0, msg=self._output_error_text(interrupt_result))
+            payload = self._cli_success_data(interrupt_result)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["turn_id"], "turn-123")
@@ -5839,7 +6031,7 @@ exec "$real_git" "$@"
             )
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             interrupt_result = subprocess.run(
@@ -5856,7 +6048,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertNotEqual(interrupt_result.returncode, 0)
-            self.assertIn("no active in-progress turn", interrupt_result.stderr.lower())
+            self.assertIn("no active in-progress turn", self._output_error_text(interrupt_result).lower())
             calls = [
                 json.loads(line)
                 for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
@@ -5891,7 +6083,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(result.returncode, 2)
-            self.assertIn("Unknown instance command: open", result.stderr)
+            self.assertIn("Unknown instance command: open", self._output_error_text(result))
             self.assertFalse(capture_path.exists(), "removed command must not invoke codex")
 
     def test_locked_old_open_entrypoint_removed(self) -> None:
@@ -5919,7 +6111,7 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(result.returncode, 2)
-            self.assertIn("Unknown top-level command", result.stderr)
+            self.assertIn("Unknown top-level command", self._output_error_text(result))
             self.assertFalse(capture_path.exists(), "removed locked open entrypoint must not invoke codex")
 
     def test_start_with_role_creates_shared_project_workspace(self) -> None:
@@ -5970,7 +6162,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -6104,7 +6296,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             self.assertFalse((project_workspace_dir / "tools").exists())
             self.assertFalse((project_workspace_dir / "buddyswitch").exists())
@@ -6188,7 +6380,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("local changes outside projects/app", completed.stderr)
+            self.assertIn("local changes outside projects/app", self._output_error_text(completed))
             self.assertTrue(dirty_file.exists())
             self.assertTrue((project_workspace_dir / "tools").exists())
             self.assertFalse(capture_path.exists())
@@ -6243,7 +6435,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(first_start.returncode, 0, msg=first_start.stderr)
+            self.assertEqual(first_start.returncode, 0, msg=self._output_error_text(first_start))
             self.assertTrue(first_capture_path.exists())
 
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -6269,7 +6461,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(second_start.returncode, 0)
-            self.assertIn("local changes outside projects/app", second_start.stderr)
+            self.assertIn("local changes outside projects/app", self._output_error_text(second_start))
             self.assertTrue(root_stray.exists())
             self.assertFalse(second_capture_path.exists())
             sparse_list_after_failure = subprocess.check_output(
@@ -6328,7 +6520,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -6407,7 +6599,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(pm_start.returncode, 0, msg=pm_start.stderr)
+            self.assertEqual(pm_start.returncode, 0, msg=self._output_error_text(pm_start))
 
             dev_env = base_env.copy()
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
@@ -6420,7 +6612,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(dev_start.returncode, 0, msg=dev_start.stderr)
+            self.assertEqual(dev_start.returncode, 0, msg=self._output_error_text(dev_start))
 
             pm_payload = json.loads(pm_capture_path.read_text(encoding="utf-8"))
             dev_payload = json.loads(dev_capture_path.read_text(encoding="utf-8"))
@@ -6502,7 +6694,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             project_workspace_dir = shared_root / "project" / "workspace"
             self.assertFalse(
                 (project_workspace_dir / "projects" / "app" / ".runtime" / "legacy.json").exists(),
@@ -6560,7 +6752,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(pm_start.returncode, 0, msg=pm_start.stderr)
+            self.assertEqual(pm_start.returncode, 0, msg=self._output_error_text(pm_start))
 
             dev_env = base_env.copy()
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
@@ -6573,7 +6765,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(dev_start.returncode, 0, msg=dev_start.stderr)
+            self.assertEqual(dev_start.returncode, 0, msg=self._output_error_text(dev_start))
 
             pm_payload = json.loads(pm_capture_path.read_text(encoding="utf-8"))
             dev_payload = json.loads(dev_capture_path.read_text(encoding="utf-8"))
@@ -6663,8 +6855,8 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(completed.returncode, 0)
-            self.assertIn("Chrome binary not found", completed.stderr)
-            self.assertIn("continuing without browser cockpit mcp", completed.stderr.lower())
+            self.assertIn("Chrome binary not found", self._output_data_text(completed))
+            self.assertIn("continuing without browser cockpit mcp", self._output_data_text(completed).lower())
             statuses = [
                 json.loads(path.read_text(encoding="utf-8")).get("status")
                 for path in (source_home_path / ".codex-buddyswitch" / "instances").glob("*/instance.json")
@@ -6728,10 +6920,10 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self.assertTrue(capture_path.exists(), "optional-browser role should still launch Codex")
-            self.assertNotIn("continuing without cockpit endpoint", completed.stderr.lower())
-            self.assertNotIn("Browser cockpit ready:", completed.stdout + completed.stderr)
+            self.assertNotIn("continuing without cockpit endpoint", self._output_error_text(completed).lower())
+            self.assertNotIn("Browser cockpit ready:", completed.stdout + self._output_error_text(completed))
             call_entries = [
                 json.loads(line)
                 for line in calls_path.read_text(encoding="utf-8").splitlines()
@@ -6794,7 +6986,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("Chrome binary not found", completed.stderr)
+            self.assertIn("Chrome binary not found", self._output_error_text(completed))
             instance_json_paths = sorted((shared_root / "instances").glob("*/instance.json"))
             self.assertEqual(len(instance_json_paths), 1)
             instance_root = instance_json_paths[0].parent
@@ -6861,7 +7053,7 @@ exec "$real_git" "$@"
                 check=False,
                 timeout=30,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self.assertTrue(capture_path.exists(), "Codex should launch when a usable page already exists")
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["active_role"], "market")
@@ -6872,7 +7064,7 @@ exec "$real_git" "$@"
             instance_root = Path(str(instance_payload["instance_root"]))
             self.assertFalse((instance_root / "browser" / "chrome.pid").exists())
             self.assertFalse((instance_root / "browser" / "profile").exists())
-            self.assertNotIn("Browser cockpit ready:", completed.stdout + completed.stderr)
+            self.assertNotIn("Browser cockpit ready:", completed.stdout + self._output_error_text(completed))
             call_entries = [
                 json.loads(line)
                 for line in calls_path.read_text(encoding="utf-8").splitlines()
@@ -6946,7 +7138,7 @@ exec "$real_git" "$@"
                 timeout=30,
             )
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("simulated mcp add failure: chrome-devtools-cockpit", completed.stderr)
+            self.assertIn("simulated mcp add failure: chrome-devtools-cockpit", self._output_error_text(completed))
             self.assertFalse(capture_path.exists(), "Codex must not launch when required cockpit MCP setup fails")
             call_entries = [
                 json.loads(line)
@@ -7012,7 +7204,7 @@ exec "$real_git" "$@"
                 timeout=30,
             )
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("simulated mcp add failure: buddyswitch-env", completed.stderr)
+            self.assertIn("simulated mcp add failure: buddyswitch-env", self._output_error_text(completed))
             self.assertFalse(capture_path.exists(), "Codex must not launch when required env MCP setup fails")
             call_entries = [
                 json.loads(line)
@@ -7084,7 +7276,7 @@ exec "$real_git" "$@"
                 check=False,
                 timeout=30,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self.assertTrue(capture_path.exists(), "Codex should launch without probing browser endpoint readiness")
             timeline = [
                 json.loads(line)
@@ -7172,7 +7364,7 @@ exec "$real_git" "$@"
                 check=False,
                 timeout=30,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self.assertTrue(capture_path.exists(), "Codex should launch without probing browser endpoint readiness")
             calls = [
                 json.loads(line)
@@ -7218,7 +7410,7 @@ exec "$real_git" "$@"
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("Unknown role 'unknown'", completed.stderr)
+            self.assertIn("Unknown role 'unknown'", self._output_error_text(completed))
             self.assertFalse(capture_path.exists(), "codex should not launch when role validation fails")
             self.assertFalse(shared_root.exists(), "invalid role must fail before shared root mutation")
 
@@ -7239,10 +7431,14 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self.assertIn("pm", completed.stdout)
-            self.assertIn("dev", completed.stdout)
-            self.assertIn("market", completed.stdout)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            payload = self._cli_success_data(completed, kind="instance.roles")
+            self.assertIsInstance(payload, dict)
+            assert isinstance(payload, dict)
+            role_ids = {row["id"] for row in payload["roles"]}
+            self.assertIn("pm", role_ids)
+            self.assertIn("dev", role_ids)
+            self.assertIn("market", role_ids)
             self.assertFalse(shared_root.exists(), "instance roles must not create runtime state")
 
     def test_instance_buddies_json_is_structured_and_read_only(self) -> None:
@@ -7254,7 +7450,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "roles", "--json"],
+                [str(LAUNCHER), "instance", "roles"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7262,8 +7458,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            payload = json.loads(completed.stdout)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            payload = self._cli_success_data(completed)
             role_ids = {row["id"] for row in payload["roles"]}
             self.assertIn("pm", role_ids)
             self.assertIn("dev", role_ids)
@@ -7290,8 +7486,7 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(completed.returncode, 0)
-            self.assertIn("No BuddySwitch instances found.", completed.stdout)
-            self.assertIn("./buddyswitch-codex instance start --role <role>", completed.stdout)
+            self.assertEqual(self._cli_success_data(completed, kind="instance.list"), {"instances": []})
 
     def test_instance_list_json_empty_returns_empty_array(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -7300,7 +7495,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "list", "--json"],
+                [str(LAUNCHER), "instance", "list"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7308,8 +7503,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self.assertEqual(json.loads(completed.stdout), {"instances": []})
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            self.assertEqual(self._cli_success_data(completed), {"instances": []})
             self.assertNotIn("No BuddySwitch instances found.", completed.stdout)
 
     def test_instance_list_prints_stored_instances_and_filters_by_role(self) -> None:
@@ -7353,10 +7548,12 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self.assertIn("act-pm-a", completed.stdout)
-            self.assertIn("pm", completed.stdout)
-            self.assertNotIn("act-dev-b", completed.stdout)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            payload = self._cli_success_data(completed, kind="instance.list")
+            self.assertIsInstance(payload, dict)
+            assert isinstance(payload, dict)
+            self.assertEqual([row["actor_id"] for row in payload["instances"]], ["act-pm-a"])
+            self.assertEqual(payload["instances"][0]["role"], "pm")
 
     def test_instance_list_json_filters_by_role(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -7391,7 +7588,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "list", "--json", "--role", "pm"],
+                [str(LAUNCHER), "instance", "list", "--role", "pm"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7399,8 +7596,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            payload = json.loads(completed.stdout)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            payload = self._cli_success_data(completed)
             self.assertEqual(len(payload["instances"]), 1)
             row = payload["instances"][0]
             self.assertEqual(row["actor_id"], "act-pm-a")
@@ -7448,8 +7645,11 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
-            self.assertIn("Instance deleted: act-pm-delete", delete_result.stdout)
+            self.assertEqual(delete_result.returncode, 0, msg=self._output_error_text(delete_result))
+            self.assertEqual(
+                self._cli_success_data(delete_result, kind="instance.delete"),
+                {"actor_id": "act-pm-delete", "deleted": True},
+            )
             self.assertFalse(target_root.exists())
             self.assertTrue(other_root.exists())
             self.assertTrue(state_task.exists())
@@ -7479,7 +7679,7 @@ exec "$real_git" "$@"
             env.pop("CODEX_HOME", None)
 
             delete_result = subprocess.run(
-                [str(LAUNCHER), "instance", "delete", "act-pm-delete", "--yes", "--json"],
+                [str(LAUNCHER), "instance", "delete", "act-pm-delete", "--yes"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -7487,9 +7687,9 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
+            self.assertEqual(delete_result.returncode, 0, msg=self._output_error_text(delete_result))
             self.assertEqual(
-                json.loads(delete_result.stdout),
+                self._cli_success_data(delete_result),
                 {"actor_id": "act-pm-delete", "deleted": True},
             )
             self.assertFalse(target_root.exists())
@@ -7522,10 +7722,8 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 0)
-            self.assertIn("BuddySwitch instance delete preview", delete_result.stdout)
-            self.assertIn("Instance root:", delete_result.stdout)
-            self.assertIn("Shared state kept:", delete_result.stdout)
+            self.assertEqual(delete_result.returncode, 4)
+            self._cli_error(delete_result, code="CONFIRMATION_REQUIRED")
             self.assertTrue(target_root.exists())
 
     def test_instance_delete_keeps_shared_project_workspace(self) -> None:
@@ -7576,7 +7774,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(start_result.returncode, 0, msg=start_result.stderr)
+            self.assertEqual(start_result.returncode, 0, msg=self._output_error_text(start_result))
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
             project_workspace_dir = shared_root / "project" / "workspace"
@@ -7603,7 +7801,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
             ready_file.unlink(missing_ok=True)
 
             delete_result = subprocess.run(
@@ -7614,7 +7812,7 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
+            self.assertEqual(delete_result.returncode, 0, msg=self._output_error_text(delete_result))
             self.assertFalse(instance_root.exists())
             self.assertTrue(project_workspace_dir.exists())
             self.assertTrue(sentinel_path.exists())
@@ -7646,7 +7844,7 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(delete_result.returncode, 2)
-            self.assertIn("Invalid actor id", delete_result.stderr)
+            self.assertIn("Invalid actor id", self._output_error_text(delete_result))
             self.assertFalse(outside_path.exists())
 
     def test_instance_delete_rejects_missing_target(self) -> None:
@@ -7665,14 +7863,14 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(delete_result.returncode, 2)
-            self.assertIn("Instance record missing", delete_result.stderr)
+            self.assertIn("Instance record missing", self._output_error_text(delete_result))
 
     def test_instance_delete_blocks_active_app_server(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             Path(str(ctx["env"]["BUDDYSWITCH_TEST_BROWSER_READY_FILE"])).unlink(missing_ok=True)
             (Path(str(ctx["instance_root"])) / "browser" / "chrome.pid").unlink(missing_ok=True)
 
@@ -7685,8 +7883,9 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 3)
-            self.assertIn(f"Instance delete blocked: {ctx['actor_id']} is active.", delete_result.stderr)
+            self.assertEqual(delete_result.returncode, 4)
+            self._cli_error(delete_result, code="CONFLICT")
+            self.assertIn(f"Instance delete blocked: {ctx['actor_id']} is active.", self._output_error_text(delete_result))
             self.assertTrue(Path(str(ctx["instance_root"])).exists())
 
     def test_instance_delete_blocks_active_target_browser_pid(self) -> None:
@@ -7710,8 +7909,9 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 3)
-            self.assertIn("active browser cockpit", delete_result.stderr)
+            self.assertEqual(delete_result.returncode, 4)
+            self._cli_error(delete_result, code="CONFLICT")
+            self.assertIn("active browser cockpit", self._output_error_text(delete_result))
             self.assertTrue(target_root.exists())
 
     def test_instance_delete_blocks_live_target_browser_endpoint(self) -> None:
@@ -7759,8 +7959,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={targ
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 3)
-            self.assertIn("active browser cockpit", delete_result.stderr)
+            self.assertEqual(delete_result.returncode, 4)
+            self._cli_error(delete_result, code="CONFLICT")
+            self.assertIn("active browser cockpit", self._output_error_text(delete_result))
             self.assertTrue(target_root.exists())
 
     def test_instance_delete_ignores_foreign_browser_endpoint_on_stale_port(self) -> None:
@@ -7812,8 +8013,11 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
-            self.assertIn("Instance deleted: act-pm-stale-port", delete_result.stdout)
+            self.assertEqual(delete_result.returncode, 0, msg=self._output_error_text(delete_result))
+            self.assertEqual(
+                self._cli_success_data(delete_result, kind="instance.delete"),
+                {"actor_id": "act-pm-stale-port", "deleted": True},
+            )
             self.assertFalse(target_root.exists())
             self.assertTrue(market_root.exists())
             self.assertTrue((market_browser / "chrome.pid").exists())
@@ -7839,8 +8043,11 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
-            self.assertIn("Instance deleted: act-pm-stale-legacy-delete", delete_result.stdout)
+            self.assertEqual(delete_result.returncode, 0, msg=self._output_error_text(delete_result))
+            self.assertEqual(
+                self._cli_success_data(delete_result, kind="instance.delete"),
+                {"actor_id": "act-pm-stale-legacy-delete", "deleted": True},
+            )
             self.assertFalse(target_root.exists())
 
     def test_instance_delete_blocks_worktree_deregistration_failure(self) -> None:
@@ -7869,7 +8076,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertNotEqual(delete_result.returncode, 0)
-            self.assertIn("simulated worktree remove failure", delete_result.stderr)
+            self.assertIn("simulated worktree remove failure", self._output_error_text(delete_result))
             self.assertTrue(target_root.exists())
 
     def test_instance_delete_rejects_symlinked_instance_root_without_touching_external_worktree(self) -> None:
@@ -7918,8 +8125,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 3)
-            self.assertIn("unsafe instance root", delete_result.stderr)
+            self.assertEqual(delete_result.returncode, 4)
+            self._cli_error(delete_result, code="CONFLICT")
+            self.assertIn("unsafe instance root", self._output_error_text(delete_result))
             self.assertTrue((instances_root / "act-pm-symlink").is_symlink())
             self.assertTrue(sentinel.exists())
             worktree_list = subprocess.run(
@@ -7959,8 +8167,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 3)
-            self.assertIn("unsafe shared root", delete_result.stderr)
+            self.assertEqual(delete_result.returncode, 4)
+            self._cli_error(delete_result, code="CONFLICT")
+            self.assertIn("unsafe shared root", self._output_error_text(delete_result))
             self.assertTrue(shared_root_link.is_symlink())
             self.assertTrue(instance_root.exists())
             self.assertTrue(sentinel.exists())
@@ -8039,8 +8248,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 check=False,
             )
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Top-level command removed: start", completed.stderr)
-            self.assertIn("instance start --role <role>", completed.stderr)
+            self._cli_error(completed, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: start", self._output_error_text(completed))
             self.assertFalse(capture_path.exists(), "removed start command must not invoke codex")
             self.assertFalse((source_home_path / ".codex-buddyswitch").exists())
 
@@ -8071,7 +8280,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Missing value for --role", completed.stderr)
+            self._cli_error(completed, code="INVALID_ARGUMENT")
+            self.assertIn("instance start requires --role <value>", self._output_error_text(completed))
             self.assertFalse(capture_path.exists(), "codex should not launch when --role is malformed")
             self.assertFalse(shared_root.exists(), "malformed --role must fail before shared root mutation")
 
@@ -8349,9 +8559,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertIn("Usage:", help_result.stdout)
             self.assertIn("buddyswitch-codex instance roles", help_result.stdout)
             self.assertIn("buddyswitch-codex instance start --role <role>", help_result.stdout)
-            self.assertIn("buddyswitch-codex data cleanup --role <role>", help_result.stdout)
+            self.assertIn("buddyswitch-codex data cleanup (--role <role>|--all-data) --yes", help_result.stdout)
             self.assertIn("buddyswitch-codex env status", help_result.stdout)
-            self.assertIn("buddyswitch-codex env reset [--yes]", help_result.stdout)
+            self.assertIn("buddyswitch-codex env reset --yes", help_result.stdout)
             self.assertIn("buddyswitch-codex help", help_result.stdout)
             self.assertIn("buddyswitch-codex web", help_result.stdout)
             self.assertIn("  instance", help_result.stdout)
@@ -8371,7 +8581,251 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertNotIn("allow" + "-sender", help_result.stdout)
             self.assertNotIn("  imessage", help_result.stdout)
 
-    def test_legacy_public_commands_fail_closed_with_hints(self) -> None:
+    def test_public_cli_successes_emit_single_cli_contract_json_line(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            roles_result = subprocess.run(
+                [str(LAUNCHER), "instance", "roles"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            list_result = subprocess.run(
+                [str(LAUNCHER), "instance", "list"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            env_status_result = subprocess.run(
+                [str(LAUNCHER), "env", "status"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(roles_result.returncode, 0)
+            roles_data = self._cli_success_data(roles_result, kind="instance.roles")
+            self.assertIsInstance(roles_data, dict)
+            assert isinstance(roles_data, dict)
+            role_ids = {row["id"] for row in roles_data["roles"] if isinstance(row, dict)}
+            self.assertIn("pm", role_ids)
+            self.assertIn("dev", role_ids)
+
+            self.assertEqual(list_result.returncode, 0)
+            self.assertEqual(self._cli_success_data(list_result, kind="instance.list"), {"instances": []})
+
+            self.assertEqual(env_status_result.returncode, 0)
+            env_data = self._cli_success_data(env_status_result, kind="env.status")
+            self.assertIsInstance(env_data, dict)
+            assert isinstance(env_data, dict)
+            self.assertEqual(env_data["shared_root"], str(shared_root))
+            self.assertEqual(env_data["instance_count"], 0)
+            self.assertEqual(env_data["browser_state"], "inactive")
+            self.assertFalse(shared_root.exists(), "read-only public status commands must not create runtime state")
+
+    def test_public_cli_rejects_deleted_locked_and_json_flag_surfaces_with_canonical_errors(self) -> None:
+        cases = (
+            (["start"], "UNKNOWN_COMMAND"),
+            (["workspace"], "UNKNOWN_COMMAND"),
+            (["__locked-reset"], "UNKNOWN_COMMAND"),
+            (["__locked-browser-ensure"], "UNKNOWN_COMMAND"),
+            (["instance", "side", "act-pm-demo", "--text", "Explore"], "UNKNOWN_COMMAND"),
+            (["instance", "goal", "act-pm-demo", "get"], "UNKNOWN_COMMAND"),
+            (["instance", "roles", "--" + "json"], "INVALID_ARGUMENT"),
+            (["instance", "list", "--output", "text"], "INVALID_ARGUMENT"),
+        )
+        for argv, code in cases:
+            with self.subTest(argv=argv):
+                completed = subprocess.run(
+                    [str(LAUNCHER), *argv],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                error = self._cli_error(completed, code=code)
+                self.assertNotIn("migrat", json.dumps(error, ensure_ascii=False).lower())
+                self.assertNotIn("replacement", json.dumps(error, ensure_ascii=False).lower())
+                self.assertNotIn("Top-level command removed", completed.stdout)
+
+    def test_public_cli_destructive_commands_require_yes_with_confirmation_error(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, _ = self._write_instance_record(shared_root, "act-pm-keep")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            cases = (
+                ["instance", "delete", "act-pm-keep"],
+                ["env", "reset"],
+                ["data", "cleanup", "--all-data"],
+            )
+            for argv in cases:
+                with self.subTest(argv=argv):
+                    completed = subprocess.run(
+                        [str(LAUNCHER), *argv],
+                        cwd=ROOT,
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+
+                    self.assertEqual(completed.returncode, 4)
+                    error = self._cli_error(completed, code="CONFIRMATION_REQUIRED")
+                    self.assertIn("--yes", str(error.get("message")))
+                    self.assertTrue(target_root.exists())
+
+    def test_public_cli_task_and_track_commands_read_external_projections(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            state_root = shared_root / "state"
+            task_dir = state_root / "buddyswitch" / "objects" / "task-sys" / "tasks"
+            track_dir = state_root / "buddyswitch" / "objects" / "tracks"
+            task_dir.mkdir(parents=True, exist_ok=True)
+            track_dir.mkdir(parents=True, exist_ok=True)
+            (task_dir / "task-alpha.json").write_text(
+                json.dumps(
+                    {
+                        "id": "task-alpha",
+                        "source_type": "message",
+                        "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
+                        "status": "in_progress",
+                        "task_desc": "Draft scope",
+                        "task_relation": {"kind": "independent", "target_task_id": None},
+                        "execution": {"processor": "side", "handoff": None, "result": None},
+                        "updated_at": "2026-07-13T00:00:00Z",
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (track_dir / "track-alpha.json").write_text(
+                json.dumps(
+                    {
+                        "id": "track-alpha",
+                        "title": "Launch web control",
+                        "outcome": "External control works",
+                        "owner_identity_id": "act-pm-demo",
+                        "state": "active",
+                        "now": {"next": "Validate CLI", "blocker": None},
+                        "acceptance_criteria": ["CLI emits envelopes"],
+                        "non_goals": [],
+                        "artifact_relations": [],
+                        "updates": [],
+                        "created_at": "2026-07-13T00:00:00Z",
+                        "updated_at": "2026-07-13T00:00:01Z",
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_STATE_ROOT"] = str(state_root)
+            env.pop("CODEX_HOME", None)
+
+            task_list = subprocess.run(
+                [str(LAUNCHER), "task", "list", "--actor", "act-pm-demo"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            task_get = subprocess.run(
+                [str(LAUNCHER), "task", "get", "task-alpha"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            track_list = subprocess.run(
+                [str(LAUNCHER), "track", "list", "--owner", "act-pm-demo"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            track_get = subprocess.run(
+                [str(LAUNCHER), "track", "get", "track-alpha"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(task_list.returncode, 0)
+            task_list_data = self._cli_success_data(task_list, kind="task.list")
+            self.assertEqual(task_list_data["tasks"][0]["task_id"], "task-alpha")
+            self.assertEqual(task_list_data["tasks"][0]["actor"]["actor_id"], "act-pm-demo")
+
+            self.assertEqual(task_get.returncode, 0)
+            self.assertEqual(self._cli_success_data(task_get, kind="task.get")["task"]["task_id"], "task-alpha")
+
+            self.assertEqual(track_list.returncode, 0)
+            self.assertEqual(self._cli_success_data(track_list, kind="track.list")["tracks"][0]["id"], "track-alpha")
+
+            self.assertEqual(track_get.returncode, 0)
+            self.assertEqual(self._cli_success_data(track_get, kind="track.get")["track"]["id"], "track-alpha")
+
+    def test_public_cli_task_and_track_malformed_arguments_emit_canonical_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            state_root = shared_root / "state"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_STATE_ROOT"] = str(state_root)
+            env.pop("CODEX_HOME", None)
+
+            cases = (
+                ["track", "get", "../bad"],
+                ["task", "list", "--actor", "act-PM-demo"],
+            )
+            for argv in cases:
+                with self.subTest(argv=argv):
+                    completed = subprocess.run(
+                        [str(LAUNCHER), *argv],
+                        cwd=ROOT,
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+
+                    self.assertEqual(completed.returncode, 2)
+                    self._cli_error(completed, code="INVALID_ARGUMENT")
+                    self.assertNotIn("Traceback", completed.stdout + completed.stderr)
+                    self.assertNotIn("INTERNAL_ERROR", completed.stdout)
+
+    def test_legacy_public_commands_fail_closed_as_unknown_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -8410,15 +8864,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
-            command_hints = (
-                ("start", "instance start --role <role>"),
-                ("role", "instance roles"),
-                ("cleanup", "data cleanup"),
-                ("reset", "env reset --yes"),
-                ("browser", "env browser status"),
-                ("workspace", "No public replacement"),
-            )
-            for command, hint in command_hints:
+            commands = ("start", "role", "cleanup", "reset", "browser", "workspace")
+            for command in commands:
                 with self.subTest(command=command):
                     capture_path.unlink(missing_ok=True)
                     result = subprocess.run(
@@ -8432,9 +8879,12 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                     self.assertEqual(
                         result.returncode,
                         2,
-                        msg=f"legacy command should fail closed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+                        msg=f"legacy command should fail closed\nstdout:\n{result.stdout}\nstderr:\n{self._output_error_text(result)}",
                     )
-                    self.assertIn(hint, result.stderr)
+                    self._cli_error(result, code="UNKNOWN_COMMAND")
+                    self.assertIn(f"Unknown top-level command: {command}", self._output_error_text(result))
+                    self.assertNotIn("replacement", self._output_error_text(result).lower())
+                    self.assertNotIn("migrat", self._output_error_text(result).lower())
                     self.assertFalse(capture_path.exists(), "legacy command must not invoke codex")
 
     def test_unknown_top_level_command_fails_closed_without_invoking_codex(self) -> None:
@@ -8488,9 +8938,10 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertEqual(
                 debug_result.returncode,
                 2,
-                msg=f"unknown top-level command should fail closed\nstdout:\n{debug_result.stdout}\nstderr:\n{debug_result.stderr}",
+                msg=f"unknown top-level command should fail closed\nstdout:\n{debug_result.stdout}\nstderr:\n{self._output_error_text(debug_result)}",
             )
-            self.assertIn("Unknown top-level command: debug", debug_result.stderr)
+            self._cli_error(debug_result, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: debug", self._output_error_text(debug_result))
             self.assertFalse(capture_path.exists(), "unknown top-level command must not invoke codex")
 
     def test_locked_workspace_sync_command_is_not_supported_even_under_runtime_lock(self) -> None:
@@ -8524,7 +8975,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("Unknown top-level command: __locked-workspace-sync", completed.stderr)
+            self._cli_error(completed, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: __locked-workspace-sync", self._output_error_text(completed))
             self.assertFalse(workspace_dir.exists(), "retired locked sync command must not create workspace")
 
     def test_removed_cleanup_command_fails_closed_without_launching_codex(self) -> None:
@@ -8546,7 +8998,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             cleanup_result = subprocess.run(
-                [str(LAUNCHER), "cleanup", "--all-agents", "--json"],
+                [str(LAUNCHER), "cleanup", "--all-agents"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -8555,8 +9007,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(cleanup_result.returncode, 2)
-            self.assertIn("Top-level command removed: cleanup", cleanup_result.stderr)
-            self.assertIn("data cleanup", cleanup_result.stderr)
+            self._cli_error(cleanup_result, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: cleanup", self._output_error_text(cleanup_result))
             self.assertFalse(capture_path.exists(), "removed cleanup command must not start Codex")
             self.assertFalse(shared_root.exists(), "removed cleanup command must not create shared state")
 
@@ -8565,12 +9017,12 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             Path(str(ctx["env"]["BUDDYSWITCH_TEST_BROWSER_READY_FILE"])).unlink(missing_ok=True)
             (Path(str(ctx["instance_root"])) / "browser" / "chrome.pid").unlink(missing_ok=True)
 
             cleanup_result = subprocess.run(
-                [str(LAUNCHER), "data", "cleanup", "--all-data", "--yes", "--json"],
+                [str(LAUNCHER), "data", "cleanup", "--all-data", "--yes"],
                 cwd=ROOT,
                 env=ctx["env"],
                 text=True,
@@ -8578,8 +9030,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 check=False,
             )
 
-            self.assertEqual(cleanup_result.returncode, 3)
-            self.assertIn("active buddyswitch-codex instance", cleanup_result.stderr)
+            self.assertEqual(cleanup_result.returncode, 4)
+            self._cli_error(cleanup_result, code="CONFLICT")
+            self.assertIn("active buddyswitch-codex instance", self._output_error_text(cleanup_result))
             self.assertTrue(Path(str(ctx["shared_root"])).exists())
 
     def test_reset_is_blocked_when_active_app_server_exists(self) -> None:
@@ -8587,7 +9040,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             Path(str(ctx["env"]["BUDDYSWITCH_TEST_BROWSER_READY_FILE"])).unlink(missing_ok=True)
             (Path(str(ctx["instance_root"])) / "browser" / "chrome.pid").unlink(missing_ok=True)
 
@@ -8599,8 +9052,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(blocked_reset.returncode, 3)
-            self.assertIn("active buddyswitch-codex instance", blocked_reset.stderr)
+            self.assertEqual(blocked_reset.returncode, 4)
+            self._cli_error(blocked_reset, code="CONFLICT")
+            self.assertIn("active buddyswitch-codex instance", self._output_error_text(blocked_reset))
             self.assertTrue(Path(str(ctx["shared_root"])).exists(), "active app-server should block reset")
 
     def test_reset_ignores_stale_legacy_pid_file_without_active_service(self) -> None:
@@ -8623,7 +9077,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(reset_result.returncode, 0, msg=reset_result.stderr)
+            self.assertEqual(reset_result.returncode, 0, msg=self._output_error_text(reset_result))
             self.assertFalse(shared_root.exists(), "stale legacy pid file should not block reset")
 
     def test_reset_is_blocked_when_active_browser_marker_exists(self) -> None:
@@ -8646,7 +9100,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(blocked_reset.returncode, 3)
+            self.assertEqual(blocked_reset.returncode, 4)
+            self._cli_error(blocked_reset, code="CONFLICT")
             self.assertTrue(shared_root.exists(), "active browser marker should block reset")
 
     def test_reset_is_blocked_when_active_instance_browser_marker_exists(self) -> None:
@@ -8687,7 +9142,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(blocked_reset.returncode, 3)
+            self.assertEqual(blocked_reset.returncode, 4)
+            self._cli_error(blocked_reset, code="CONFLICT")
             self.assertTrue(shared_root.exists(), "active instance browser marker should block reset")
             self.assertTrue(browser_profile_dir.exists(), "blocked reset must not delete active instance profile")
 
@@ -8743,8 +9199,9 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(blocked_reset.returncode, 3)
-            self.assertIn("active browser cockpit", blocked_reset.stderr)
+            self.assertEqual(blocked_reset.returncode, 4)
+            self._cli_error(blocked_reset, code="CONFLICT")
+            self.assertIn("active browser cockpit", self._output_error_text(blocked_reset))
             self.assertTrue(shared_root.exists())
 
     def test_reset_is_blocked_when_runtime_lock_is_held(self) -> None:
@@ -8774,8 +9231,9 @@ exit 1
             finally:
                 self._stop_lock_holder(holder)
 
-            self.assertEqual(blocked_reset.returncode, RUNTIME_LOCK_BUSY_EXIT_CODE)
-            self.assertIn("runtime state busy", blocked_reset.stderr)
+            self.assertEqual(blocked_reset.returncode, 4)
+            self._cli_error(blocked_reset, code="CONFLICT")
+            self.assertIn("runtime state busy", self._output_error_text(blocked_reset))
             self.assertTrue(shared_root.exists(), "reset must not remove shared root while lock is held")
             self.assertTrue(sentinel.exists(), "reset must not mutate locked shared root")
 
@@ -8801,7 +9259,8 @@ exit 1
             )
 
             self.assertEqual(direct_reset.returncode, 2)
-            self.assertIn("runtime lock required", direct_reset.stderr)
+            self._cli_error(direct_reset, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: __locked-reset", self._output_error_text(direct_reset))
             self.assertTrue(shared_root.exists(), "direct locked entrypoint must not remove shared root")
             self.assertTrue(sentinel.exists(), "direct locked entrypoint must not mutate shared root")
 
@@ -8833,8 +9292,9 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(direct_reset.returncode, 1)
-            self.assertIn("Reset requires explicit confirmation", direct_reset.stderr)
+            self.assertEqual(direct_reset.returncode, 2)
+            self._cli_error(direct_reset, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: __locked-reset", self._output_error_text(direct_reset))
             self.assertTrue(sentinel.exists(), "helper-wrapped locked reset must not bypass --yes")
 
     def test_lock_helper_wrapped_reset_still_validates_reset_root(self) -> None:
@@ -8867,7 +9327,8 @@ exit 1
             )
 
             self.assertEqual(direct_reset.returncode, 2)
-            self.assertIn("Reset blocked", direct_reset.stderr)
+            self._cli_error(direct_reset, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: __locked-reset", self._output_error_text(direct_reset))
             self.assertTrue(sentinel.exists(), "helper-wrapped locked reset must not bypass root validation")
 
     def test_runtime_lock_helper_writes_locks_under_shared_root_run_locks(self) -> None:
@@ -8911,7 +9372,7 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             self.assertTrue(lock_capture_path.exists(), "locked child must capture lock metadata")
 
             lock_path = self._legacy_runtime_lock_path(shared_root)
@@ -8950,7 +9411,7 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
     def test_runtime_lock_assert_held_rejects_without_owner_lock_when_runtime_lock_is_busy(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -8979,8 +9440,8 @@ exit 1
                 self._stop_lock_holder(holder)
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("runtime lock required", completed.stderr)
-            self.assertNotIn("Traceback", completed.stderr)
+            self.assertIn("runtime lock required", self._output_error_text(completed))
+            self.assertNotIn("Traceback", self._output_error_text(completed))
 
     def test_runtime_lock_assert_held_rejects_non_descendant_when_runtime_lock_is_held(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
@@ -9020,7 +9481,7 @@ exit 1
                     "env = os.environ.copy()\n"
                     "completed = subprocess.run([os.environ['BUDDYSWITCH_PYTHON'], sys.argv[1], '--assert-held'], env=env, text=True, capture_output=True)\n"
                     "print(completed.returncode)\n"
-                    "print(completed.stderr, end='')\n"
+                    "print(completed.stderr or completed.stdout, end='')\n"
                 )
                 completed = subprocess.run(
                     [
@@ -9040,7 +9501,7 @@ exit 1
                     holder.terminate()
                     holder.wait(timeout=5)
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             output_lines = completed.stdout.splitlines()
             self.assertTrue(output_lines, msg=completed.stdout)
             self.assertEqual(output_lines[0], "2", msg=completed.stdout)
@@ -9069,8 +9530,8 @@ exit 1
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("runtime lock required", completed.stderr)
-            self.assertNotIn("Traceback", completed.stderr)
+            self.assertIn("runtime lock required", self._output_error_text(completed))
+            self.assertNotIn("Traceback", self._output_error_text(completed))
             self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
 
     def test_runtime_lock_assert_held_reports_controlled_failure_when_lock_dir_is_blocked(self) -> None:
@@ -9097,8 +9558,8 @@ exit 1
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("runtime lock required", completed.stderr)
-            self.assertNotIn("Traceback", completed.stderr)
+            self.assertIn("runtime lock required", self._output_error_text(completed))
+            self.assertNotIn("Traceback", self._output_error_text(completed))
             self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
 
     def test_runtime_lock_is_not_inherited_by_background_children(self) -> None:
@@ -9128,7 +9589,7 @@ exit 1
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(first.returncode, 0, msg=first.stderr)
+            self.assertEqual(first.returncode, 0, msg=self._output_error_text(first))
             self.assertTrue(child_pid_path.exists(), "precondition: locked command started a background child")
 
             try:
@@ -9151,7 +9612,7 @@ exit 1
                 child_pid = child_pid_path.read_text(encoding="utf-8").strip()
                 subprocess.run(["kill", child_pid], text=True, capture_output=True, check=False)
 
-            self.assertEqual(second.returncode, 0, msg=second.stderr)
+            self.assertEqual(second.returncode, 0, msg=self._output_error_text(second))
             self.assertIn("lock reacquired", second.stdout)
 
     def test_runtime_lock_terminates_child_before_releasing_lock_on_signal(self) -> None:
@@ -9237,7 +9698,7 @@ exit 1
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("timeout must be finite", completed.stderr)
+            self.assertIn("timeout must be finite", self._output_error_text(completed))
             self.assertNotIn("should not run", completed.stdout)
 
     def test_workspace_sync_is_blocked_when_active_launcher_marker_exists(self) -> None:
@@ -9261,8 +9722,8 @@ exit 1
                 check=False,
             )
             self.assertEqual(blocked_sync.returncode, 2)
-            self.assertIn("Top-level command removed: workspace", blocked_sync.stderr)
-            self.assertIn("No public replacement", blocked_sync.stderr)
+            self._cli_error(blocked_sync, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: workspace", self._output_error_text(blocked_sync))
             self.assertFalse((shared_root / "workspace").exists(), "blocked sync must not create the workspace")
 
     def test_workspace_sync_is_blocked_when_runtime_lock_is_held(self) -> None:
@@ -9305,7 +9766,8 @@ exit 1
                 )
 
             self.assertEqual(blocked_sync.returncode, 2)
-            self.assertIn("Top-level command removed: workspace", blocked_sync.stderr)
+            self._cli_error(blocked_sync, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: workspace", self._output_error_text(blocked_sync))
             self.assertFalse(workspace_dir.exists(), "blocked sync must not mutate workspace")
 
     def test_workspace_sync_fails_closed_when_instances_tree_exists(self) -> None:
@@ -9330,7 +9792,8 @@ exit 1
             )
 
             self.assertEqual(blocked_sync.returncode, 2)
-            self.assertIn("Top-level command removed: workspace", blocked_sync.stderr)
+            self._cli_error(blocked_sync, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: workspace", self._output_error_text(blocked_sync))
             self.assertFalse((shared_root / "workspace").exists(), "blocked sync must not create legacy workspace")
 
     def test_start_with_role_does_not_migrate_legacy_durable_state_to_shared_state(self) -> None:
@@ -9396,7 +9859,7 @@ exit 1
             self.assertEqual(
                 completed.returncode,
                 0,
-                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{self._output_error_text(completed)}",
             )
             self.assertFalse(
                 (shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-demo.json").exists(),
@@ -9474,9 +9937,12 @@ exit 1
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(status_default.returncode, 0, msg=status_default.stderr)
-            self.assertIn(f"Browser cockpit ready: http://127.0.0.1:{default_port}", status_default.stdout)
-            self.assertIn(f"Profile: {instance_root / 'browser' / 'profile'}", status_default.stdout)
+            self.assertEqual(status_default.returncode, 0, msg=self._output_error_text(status_default))
+            self.assertIn(
+                f"Browser cockpit ready: http://127.0.0.1:{default_port}",
+                self._output_data_text(status_default),
+            )
+            self.assertIn(f"Profile: {instance_root / 'browser' / 'profile'}", self._output_data_text(status_default))
 
             explicit_profile = temp_root_path / "browser-profile-status"
             start_fake_cdp(explicit_port, explicit_profile)
@@ -9499,9 +9965,12 @@ exit 1
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(status_explicit.returncode, 0, msg=status_explicit.stderr)
-            self.assertIn(f"Browser cockpit ready: http://127.0.0.1:{explicit_port}", status_explicit.stdout)
-            self.assertIn(f"Profile: {explicit_profile}", status_explicit.stdout)
+            self.assertEqual(status_explicit.returncode, 0, msg=self._output_error_text(status_explicit))
+            self.assertIn(
+                f"Browser cockpit ready: http://127.0.0.1:{explicit_port}",
+                self._output_data_text(status_explicit),
+            )
+            self.assertIn(f"Profile: {explicit_profile}", self._output_data_text(status_explicit))
 
             instance_json = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(instance_json["browser_port"], default_port)
@@ -9540,7 +10009,7 @@ exit 0
                 check=False,
             )
             self.assertEqual(status_invalid_port.returncode, 2)
-            self.assertIn("Invalid value for --port: abc", status_invalid_port.stderr)
+            self.assertIn("Invalid value for --port: abc", self._output_error_text(status_invalid_port))
             self.assertFalse(curl_called_path.exists(), "invalid --port must fail before endpoint checks")
             self.assertFalse(shared_root.exists(), "invalid status args should stay read-only")
 
@@ -9604,7 +10073,7 @@ exit 0
                 check=False,
             )
             self.assertEqual(ensure_invalid_port.returncode, 2)
-            self.assertIn("Invalid value for --port: 70000", ensure_invalid_port.stderr)
+            self.assertIn("Invalid value for --port: 70000", self._output_error_text(ensure_invalid_port))
             self.assertFalse(curl_called_path.exists(), "invalid --port must fail before endpoint checks")
             self.assertFalse(calls_path.exists(), "invalid --port must fail before MCP updates")
             self.assertFalse(
@@ -9657,8 +10126,8 @@ exit 0
                 self._stop_lock_holder(holder)
 
             self.assertEqual(ensure_invalid_port.returncode, 2)
-            self.assertIn("Invalid value for --port: 70000", ensure_invalid_port.stderr)
-            self.assertNotIn("runtime state busy", ensure_invalid_port.stderr)
+            self.assertIn("Invalid value for --port: 70000", self._output_error_text(ensure_invalid_port))
+            self.assertNotIn("runtime state busy", self._output_error_text(ensure_invalid_port))
             self.assertFalse(curl_called_path.exists(), "invalid --port must fail before endpoint checks")
             self.assertFalse(
                 (instance_root / "browser").exists(),
@@ -9735,7 +10204,7 @@ exit 0
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(ensure_result.returncode, 0, msg=ensure_result.stderr)
+            self.assertEqual(ensure_result.returncode, 0, msg=self._output_error_text(ensure_result))
             marker_pid = int((instance_root / "browser" / "chrome.pid").read_text(encoding="utf-8").strip())
             self.addCleanup(self._terminate_registered_process, marker_pid)
 
@@ -9834,7 +10303,7 @@ exit 0
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(ensure_result.returncode, 0, msg=ensure_result.stderr)
+            self.assertEqual(ensure_result.returncode, 0, msg=self._output_error_text(ensure_result))
             marker_pid = int((instance_root / "browser" / "chrome.pid").read_text(encoding="utf-8").strip())
             self.addCleanup(self._terminate_registered_process, marker_pid)
 
@@ -9917,7 +10386,7 @@ exit 22
                 check=False,
             )
 
-            self.assertEqual(release_result.returncode, 0, msg=release_result.stderr)
+            self.assertEqual(release_result.returncode, 0, msg=self._output_error_text(release_result))
             upstream_proc.wait(timeout=2)
             chrome_proc.wait(timeout=2)
             self.assertFalse((runtime_browser_dir / "cockpit-upstream.pid").exists())
@@ -9986,7 +10455,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={fore
                 check=False,
             )
 
-            self.assertEqual(release_result.returncode, 0, msg=release_result.stderr)
+            self.assertEqual(release_result.returncode, 0, msg=self._output_error_text(release_result))
             self.assertTrue(self._pid_is_live(foreign_proc.pid))
             self.assertTrue((foreign_browser / "chrome.pid").exists())
             actor_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
@@ -10065,9 +10534,9 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={fore
                 browser_pid_text = browser_pid_file.read_text(encoding="utf-8").strip()
                 if browser_pid_text.isdigit():
                     self.addCleanup(self._terminate_registered_process, int(browser_pid_text))
-            self.assertEqual(ensure_result.returncode, 0, msg=ensure_result.stderr)
+            self.assertEqual(ensure_result.returncode, 0, msg=self._output_error_text(ensure_result))
             self.assertIn("http://127.0.0.1:9444", ensure_result.stdout)
-            self.assertIn(f"Profile: {explicit_profile}", ensure_result.stdout)
+            self.assertIn(f"Profile: {explicit_profile}", self._output_data_text(ensure_result))
             self.assertIn(str(explicit_profile), ensure_result.stdout)
             self.assertFalse(
                 (instance_root / "browser" / "profile").exists(),
@@ -10157,7 +10626,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(ensure_result.returncode, 0, msg=ensure_result.stderr)
+            self.assertEqual(ensure_result.returncode, 0, msg=self._output_error_text(ensure_result))
 
             instance_json = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(instance_json["browser_port"], 9444)
@@ -10257,7 +10726,7 @@ args = {json.dumps(existing_args)}
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(ensure_result.returncode, 0, msg=ensure_result.stderr)
+                self.assertEqual(ensure_result.returncode, 0, msg=self._output_error_text(ensure_result))
 
                 call_entries = [
                     json.loads(line)
@@ -10297,8 +10766,9 @@ args = {json.dumps(existing_args)}
             finally:
                 self._stop_lock_holder(holder)
 
-            self.assertEqual(blocked_ensure.returncode, RUNTIME_LOCK_BUSY_EXIT_CODE)
-            self.assertIn("runtime state busy", blocked_ensure.stderr)
+            self.assertEqual(blocked_ensure.returncode, 4)
+            self._cli_error(blocked_ensure, code="CONFLICT")
+            self.assertIn("runtime state busy", self._output_error_text(blocked_ensure))
             self.assertFalse(
                 (shared_root / "instances" / "act-pm-browser-lock" / "browser").exists(),
                 "blocked browser ensure must not create browser runtime state",
@@ -10323,7 +10793,8 @@ args = {json.dumps(existing_args)}
             )
 
             self.assertEqual(direct_ensure.returncode, 2)
-            self.assertIn("runtime lock required", direct_ensure.stderr)
+            self._cli_error(direct_ensure, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: __locked-browser-ensure", self._output_error_text(direct_ensure))
             self.assertFalse(shared_root.exists(), "direct locked browser ensure must not mutate shared root")
 
     def test_env_browser_ensure_rejects_invalid_env_port_before_lock_and_side_effects(self) -> None:
@@ -10350,7 +10821,7 @@ args = {json.dumps(existing_args)}
             after_instance_tree = self._snapshot_tree(instance_root)
 
             self.assertEqual(ensure_result.returncode, 2)
-            self.assertIn("Invalid value for BUDDYSWITCH_BROWSER_PORT: abc", ensure_result.stderr)
+            self.assertIn("Invalid value for BUDDYSWITCH_BROWSER_PORT: abc", self._output_error_text(ensure_result))
             self.assertEqual(
                 before_instance_tree,
                 after_instance_tree,
@@ -10362,6 +10833,37 @@ args = {json.dumps(existing_args)}
             self.assertFalse((instance_root / "xdg-config").exists())
             self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
             self.assertFalse(self._runtime_lock_path(shared_root).exists())
+
+    def test_env_browser_missing_instance_emits_not_found_without_helper_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            cases = (
+                ["status", "--instance", "act-pm-missing-browser"],
+                ["ensure", "--instance", "act-pm-missing-browser"],
+                ["release", "--instance", "act-pm-missing-browser"],
+            )
+            for argv in cases:
+                with self.subTest(argv=argv):
+                    completed = subprocess.run(
+                        [str(LAUNCHER), "env", "browser", *argv],
+                        cwd=ROOT,
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+
+                    self.assertEqual(completed.returncode, 3)
+                    error = self._cli_error(completed, code="NOT_FOUND")
+                    self.assertIn("act-pm-missing-browser", str(error.get("message")))
+                    self.assertNotIn("Traceback", completed.stdout + completed.stderr)
+                    self.assertNotIn("EXECUTION_FAILED", completed.stdout)
+                    self.assertFalse(shared_root.exists(), "missing actor validation should not create runtime state")
 
     def test_locked_workspace_sync_entrypoint_fails_closed_as_unknown_command(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -10383,7 +10885,7 @@ args = {json.dumps(existing_args)}
             )
 
             self.assertEqual(direct_sync.returncode, 2)
-            self.assertIn("Unknown top-level command: __locked-workspace-sync", direct_sync.stderr)
+            self.assertIn("Unknown top-level command: __locked-workspace-sync", self._output_error_text(direct_sync))
             self.assertFalse(workspace_dir.exists(), "direct locked entrypoint must not mutate workspace")
 
     def test_workspace_command_requires_explicit_subcommand(self) -> None:
@@ -10405,8 +10907,8 @@ args = {json.dumps(existing_args)}
                 check=False,
             )
             self.assertEqual(missing_subcommand.returncode, 2)
-            self.assertIn("Top-level command removed: workspace", missing_subcommand.stderr)
-            self.assertIn("No public replacement", missing_subcommand.stderr)
+            self._cli_error(missing_subcommand, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: workspace", self._output_error_text(missing_subcommand))
             self.assertFalse(workspace_dir.exists(), "workspace command without subcommand must not run sync")
 
     def test_workspace_sync_rebuilds_valid_stale_worktree_to_repo_head(self) -> None:
@@ -10427,7 +10929,7 @@ args = {json.dumps(existing_args)}
             capture_output=True,
             check=False,
         )
-        self.assertEqual(repo_head.returncode, 0, msg=repo_head.stderr)
+        self.assertEqual(repo_head.returncode, 0, msg=self._output_error_text(repo_head))
         current_head = repo_head.stdout.strip()
         self.assertNotEqual(stale_head, current_head)
 
@@ -10444,7 +10946,7 @@ args = {json.dumps(existing_args)}
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(add_worktree.returncode, 0, msg=add_worktree.stderr)
+            self.assertEqual(add_worktree.returncode, 0, msg=self._output_error_text(add_worktree))
 
             try:
                 before_sync = subprocess.run(
@@ -10454,7 +10956,7 @@ args = {json.dumps(existing_args)}
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(before_sync.returncode, 0, msg=before_sync.stderr)
+                self.assertEqual(before_sync.returncode, 0, msg=self._output_error_text(before_sync))
                 self.assertEqual(before_sync.stdout.strip(), stale_head)
 
                 env = os.environ.copy()
@@ -10470,7 +10972,8 @@ args = {json.dumps(existing_args)}
                     check=False,
                 )
                 self.assertEqual(sync_result.returncode, 2)
-                self.assertIn("Top-level command removed: workspace", sync_result.stderr)
+                self._cli_error(sync_result, code="UNKNOWN_COMMAND")
+                self.assertIn("Unknown top-level command: workspace", self._output_error_text(sync_result))
 
                 after_sync = subprocess.run(
                     ["git", "-C", str(workspace_dir), "rev-parse", "HEAD"],
@@ -10479,7 +10982,7 @@ args = {json.dumps(existing_args)}
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(after_sync.returncode, 0, msg=after_sync.stderr)
+                self.assertEqual(after_sync.returncode, 0, msg=self._output_error_text(after_sync))
                 self.assertEqual(after_sync.stdout.strip(), stale_head)
             finally:
                 subprocess.run(
@@ -10547,7 +11050,7 @@ args = {json.dumps(existing_args)}
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(add_worktree.returncode, 0, msg=add_worktree.stderr)
+            self.assertEqual(add_worktree.returncode, 0, msg=self._output_error_text(add_worktree))
 
             try:
                 before_start = subprocess.run(
@@ -10557,7 +11060,7 @@ args = {json.dumps(existing_args)}
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(before_start.returncode, 0, msg=before_start.stderr)
+                self.assertEqual(before_start.returncode, 0, msg=self._output_error_text(before_start))
                 self.assertEqual(before_start.stdout.strip(), stale_head)
 
                 env = os.environ.copy()
@@ -10577,7 +11080,8 @@ args = {json.dumps(existing_args)}
                     check=False,
                 )
                 self.assertEqual(launch_result.returncode, 2)
-                self.assertIn("Top-level command removed: start", launch_result.stderr)
+                self._cli_error(launch_result, code="UNKNOWN_COMMAND")
+                self.assertIn("Unknown top-level command: start", self._output_error_text(launch_result))
 
                 after_start = subprocess.run(
                     ["git", "-C", str(workspace_dir), "rev-parse", "HEAD"],
@@ -10586,7 +11090,7 @@ args = {json.dumps(existing_args)}
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(after_start.returncode, 0, msg=after_start.stderr)
+                self.assertEqual(after_start.returncode, 0, msg=self._output_error_text(after_start))
                 self.assertEqual(after_start.stdout.strip(), stale_head)
             finally:
                 subprocess.run(
@@ -10635,7 +11139,7 @@ args = {json.dumps(existing_args)}
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(add_worktree.returncode, 0, msg=add_worktree.stderr)
+            self.assertEqual(add_worktree.returncode, 0, msg=self._output_error_text(add_worktree))
 
             try:
                 shell = f"""
@@ -10656,7 +11160,7 @@ echo "after=$(git -C "{workspace_dir}" rev-parse HEAD)"
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+                self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
                 rows = {}
                 for line in completed.stdout.splitlines():
                     if "=" not in line:
@@ -10715,7 +11219,8 @@ echo "after=$(git -C "{workspace_dir}" rev-parse HEAD)"
                 check=False,
             )
             self.assertEqual(sync_result.returncode, 2)
-            self.assertIn("Top-level command removed: workspace", sync_result.stderr)
+            self._cli_error(sync_result, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: workspace", self._output_error_text(sync_result))
             self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), "# Wrong Header\n")
             self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
             self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
@@ -10749,8 +11254,8 @@ cat "${tmp_root}/stderr.txt"
             capture_output=True,
             check=False,
         )
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        self.assertIn("BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE is required", completed.stdout + completed.stderr)
+        self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+        self.assertIn("BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE is required", completed.stdout + self._output_error_text(completed))
 
     def test_workspace_install_runtime_agents_copies_existing_template_without_content_validation(self) -> None:
         command = r'''
@@ -10774,7 +11279,7 @@ cmp "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}" "${BUDDYSWITCH_WORKSPACE_DIR}/AGENT
             capture_output=True,
             check=False,
         )
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
     def test_role_agents_template_requirement_checks_presence_only(self) -> None:
         command = r'''
@@ -10795,7 +11300,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             capture_output=True,
             check=False,
         )
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
         self.assertTrue(completed.stdout.strip().endswith("/tools/launcher/assets/roles/pm/AGENTS.md"))
 
     def test_workspace_sync_restores_runtime_outputs_when_worktree_rebuild_fails(self) -> None:
@@ -10838,7 +11343,8 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                 check=False,
             )
             self.assertNotEqual(sync_result.returncode, 0)
-            self.assertIn("Top-level command removed: workspace", sync_result.stderr)
+            self._cli_error(sync_result, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: workspace", self._output_error_text(sync_result))
             self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
             self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
             self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')
@@ -10972,7 +11478,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -10988,7 +11494,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
             ready_file.unlink(missing_ok=True)
 
             try:
@@ -11000,7 +11506,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(reset_with_yes.returncode, 0, msg=reset_with_yes.stderr)
+                self.assertEqual(reset_with_yes.returncode, 0, msg=self._output_error_text(reset_with_yes))
                 worktrees = subprocess.run(
                     ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
                     text=True,
@@ -11070,7 +11576,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(start_result.returncode, 0, msg=start_result.stderr)
+            self.assertEqual(start_result.returncode, 0, msg=self._output_error_text(start_result))
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -11094,7 +11600,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(stop_result.returncode, 0, msg=self._output_error_text(stop_result))
             ready_file.unlink(missing_ok=True)
 
             try:
@@ -11106,7 +11612,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(reset_result.returncode, 0, msg=reset_result.stderr)
+                self.assertEqual(reset_result.returncode, 0, msg=self._output_error_text(reset_result))
                 worktrees_after = subprocess.run(
                     ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
                     text=True,
@@ -11122,7 +11628,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                 )
                 self.assertNotIn(
                     str(project_workspace_dir),
-                    prune_dry_run.stdout + prune_dry_run.stderr,
+                    prune_dry_run.stdout + self._output_error_text(prune_dry_run),
                 )
             finally:
                 subprocess.run(
@@ -11199,7 +11705,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                 )
 
                 self.assertNotEqual(completed.returncode, 0)
-                self.assertIn("project workspace dir must be under BUDDYSWITCH_SHARED_ROOT", completed.stderr)
+                self.assertIn("project workspace dir must be under BUDDYSWITCH_SHARED_ROOT", self._output_error_text(completed))
                 self.assertTrue(sentinel.exists(), "external project workspace sentinel must be preserved")
             finally:
                 subprocess.run(
@@ -11268,7 +11774,7 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("project workspace exists and is not a valid git worktree", completed.stderr)
+            self.assertIn("project workspace exists and is not a valid git worktree", self._output_error_text(completed))
             self.assertTrue(sentinel.exists(), "invalid project workspace sentinel must be preserved")
             self.assertFalse((project_workspace / ".git").exists(), "invalid project workspace must not be replaced")
 
@@ -11324,7 +11830,8 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Top-level command removed: start", completed.stderr)
+            self._cli_error(completed, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: start", self._output_error_text(completed))
             self.assertTrue(sentinel.exists(), "external workspace sentinel must be preserved")
 
     def test_start_rejects_workspace_dir_with_parent_traversal_outside_shared_root(self) -> None:
@@ -11381,7 +11888,8 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Top-level command removed: start", completed.stderr)
+            self._cli_error(completed, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: start", self._output_error_text(completed))
             self.assertTrue(sentinel.exists(), "traversal workspace sentinel must be preserved")
 
     def test_start_rejects_workspace_dir_equal_to_shared_root(self) -> None:
@@ -11433,7 +11941,8 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Top-level command removed: start", completed.stderr)
+            self._cli_error(completed, code="UNKNOWN_COMMAND")
+            self.assertIn("Unknown top-level command: start", self._output_error_text(completed))
             self.assertFalse((shared_root / "workspace").exists(), "shared root itself must not become the workspace")
 
     def test_start_rejects_workspace_dir_inside_reserved_launcher_state(self) -> None:
@@ -11500,7 +12009,8 @@ printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
                     )
 
                     self.assertEqual(completed.returncode, 2)
-                    self.assertIn("Top-level command removed: start", completed.stderr)
+                    self._cli_error(completed, code="UNKNOWN_COMMAND")
+                    self.assertIn("Unknown top-level command: start", self._output_error_text(completed))
                     self.assertTrue(sentinel.exists(), f"reserved workspace sentinel must be preserved for {relative}")
                     self.assertFalse((reserved_workspace / ".git").exists(), f"reserved workspace must not become a worktree for {relative}")
 

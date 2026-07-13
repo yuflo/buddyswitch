@@ -198,6 +198,73 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertEqual(sorted(resolver_owners), ["tools/launcher/env.sh"])
         self.assertEqual(executable_python, [])
 
+    def test_public_launcher_is_minimal_bootstrap_to_python_cli_adapter(self) -> None:
+        launcher = ROOT / "buddyswitch-codex"
+        cli_adapter = ROOT / "tools" / "launcher" / "cli.py"
+        launcher_text = launcher.read_text(encoding="utf-8")
+        self.assertTrue(cli_adapter.exists())
+        cli_text = cli_adapter.read_text(encoding="utf-8")
+        self.assertIn("source \"${ENV_HELPER}\"", launcher_text)
+        self.assertIn("buddyswitch_env_init", launcher_text)
+        self.assertIn('exec "${BUDDYSWITCH_PYTHON}" "${REPO_ROOT}/tools/launcher/cli.py" "$@"', launcher_text)
+        for forbidden in (
+            "legacy_" + "command_hint",
+            "fail_removed_" + "public_command",
+            "__" + "locked-reset",
+            "__" + "locked-browser-ensure",
+            "__" + "locked-browser-release",
+            "__" + "locked-cleanup",
+            "instance_" + "side",
+            "instance_" + "goal",
+            "imessage",
+        ):
+            self.assertNotIn(forbidden, launcher_text)
+
+        for forbidden in (
+            "--" + "json",
+            "--" + "output",
+            "legacy_" + "command_hint",
+            "fail_removed_" + "public_command",
+            "__" + "locked-",
+            "Side " + "thread",
+            "Goal",
+            "IM ",
+        ):
+            self.assertNotIn(forbidden, cli_text)
+
+    def test_public_cli_adapter_delegates_to_concrete_owners_without_repository_writes(self) -> None:
+        cli_adapter = ROOT / "tools" / "launcher" / "cli.py"
+        self.assertTrue(cli_adapter.exists())
+        tree = ast.parse(cli_adapter.read_text(encoding="utf-8"), filename=str(cli_adapter))
+        imported = _imported_modules(cli_adapter)
+        self.assertIn("tools.launcher.host_control", imported)
+        self.assertIn("tools.launcher.actor_session", imported)
+        self.assertIn("env.domain.task_read", imported)
+        self.assertIn("env.domain.track_read", imported)
+
+        forbidden_calls = {
+            "save_track",
+            "create_track",
+            "update_track",
+            "write_json_object",
+            "save_actor_identity_profile",
+            "save_external_profile",
+            "ingest",
+            "record_task_close",
+            "record_side_need_parent",
+            "record_task_analysis_update",
+            "record_side_runtime_failure",
+        }
+        calls: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    calls.append(func.id)
+                elif isinstance(func, ast.Attribute):
+                    calls.append(func.attr)
+        self.assertEqual(sorted(forbidden_calls.intersection(calls)), [])
+
     def test_final_daemon_architecture_docs_name_current_single_paths(self) -> None:
         daemon_doc = (ROOT / "docs/arch/daemon-service-architecture.md").read_text(encoding="utf-8")
         web_doc = (ROOT / "docs/arch/web-interface-call-architecture.md").read_text(encoding="utf-8")
@@ -532,6 +599,8 @@ print(json.dumps({{
             "tests",
         ]
         allowed_files = {
+            "tools/launcher/cli.py",
+            "tests/test_repo_consistency.py",
             "tests/test_buddyswitch_launcher.py",
             "tests/test_browser_cockpit_launcher.py",
             "tests/test_imessage_channel.py",

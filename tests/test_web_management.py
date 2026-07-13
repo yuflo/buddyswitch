@@ -511,17 +511,20 @@ class WebManagementUnitTests(unittest.TestCase):
         self.assertIn("instance attach <actor-id>", result.stdout)
 
     def test_web_launcher_ensures_central_daemon_for_web_user_actor(self) -> None:
-        source = LAUNCHER.read_text(encoding="utf-8")
-        start = source.index("web_main() {")
-        end = source.index("\n}\n\nmain() {", start)
+        source = (ROOT / "tools" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        start = source.index("def _run_web(")
+        end = source.index("\ndef _actor_session(", start)
         block = source[start:end]
 
-        ensure_index = block.index("buddyswitch_central_daemon_ensure || return $?")
-        run_index = block.index('"${BUDDYSWITCH_PYTHON}" "${WEB_MANAGEMENT_HELPER}" "$@"')
-        stop_index = block.index("buddyswitch_central_daemon_stop_if_idle")
+        ensure_index = block.index("central_daemon.start_central_daemon")
+        run_index = block.index("subprocess.run")
+        helper_index = block.index("web_management.py")
+        stop_index = block.index("central_daemon.stop_if_idle")
         self.assertLess(ensure_index, run_index)
+        self.assertLess(helper_index, run_index)
         self.assertLess(run_index, stop_index)
-        self.assertIn('return "${status}"', block)
+        self.assertIn("BUDDYSWITCH_CENTRAL_DAEMON_SOCKET", block)
+        self.assertIn("return int(completed.returncode)", block)
 
     def test_serve_with_imessage_worker_starts_stops_and_closes_server(self) -> None:
         class StopServer(Exception):
@@ -2177,7 +2180,6 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "deep",
                 "--side",
                 "maximum",
-                "--json",
             ],
             cwd=ROOT,
             env=env,
@@ -2189,6 +2191,11 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/capabilities", b"")
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        cli_payload = json.loads(completed.stdout)
+        self.assertTrue(cli_payload["ok"])
+        self.assertEqual(cli_payload["kind"], "instance.capabilities.set")
+        self.assertEqual(cli_payload["data"]["capabilities"]["parent"]["level"], "deep")
+        self.assertEqual(cli_payload["data"]["capabilities"]["side"]["level"], "maximum")
         self.assertEqual(status, 200)
         self.assertEqual(payload["capabilities"]["parent"]["level"], "deep")
         self.assertEqual(payload["capabilities"]["side"]["level"], "maximum")
@@ -2205,7 +2212,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             b'{"parent":"deep","side":"maximum"}',
         )
         completed = subprocess.run(
-            [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get", "--json"],
+            [str(LAUNCHER), "instance", "capabilities", "act-pm-demo", "get"],
             cwd=ROOT,
             env=env,
             text=True,
@@ -2215,7 +2222,10 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         self.assertEqual(status, 200)
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        cli_payload = json.loads(completed.stdout)
+        cli_envelope = json.loads(completed.stdout)
+        self.assertTrue(cli_envelope["ok"])
+        self.assertEqual(cli_envelope["kind"], "instance.capabilities.get")
+        cli_payload = cli_envelope["data"]
         self.assertEqual(cli_payload["actor_id"], "act-pm-demo")
         self.assertEqual(cli_payload["capabilities"], payload["capabilities"])
 
