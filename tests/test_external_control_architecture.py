@@ -43,6 +43,50 @@ def _contains_mapping_key(value: Any, key: str) -> bool:
     return False
 
 
+def _fold_static_string(node: ast.AST, names: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return names.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold_static_string(node.left, names)
+        right = _fold_static_string(node.right, names)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+def _retired_public_literal_hits(source: str) -> tuple[str, ...]:
+    tree = ast.parse(source)
+    names: dict[str, str] = {}
+    pending = [node for node in tree.body if isinstance(node, ast.Assign)]
+    while pending:
+        unresolved: list[ast.Assign] = []
+        changed = False
+        for assignment in pending:
+            value = _fold_static_string(assignment.value, names)
+            targets = [target.id for target in assignment.targets if isinstance(target, ast.Name)]
+            if value is None or not targets:
+                unresolved.append(assignment)
+                continue
+            for target in targets:
+                names[target] = value
+            changed = True
+        if not changed:
+            break
+        pending = unresolved
+
+    retired = ("--" + "json", "--" + "output", "__" + "locked-")
+    hits = {
+        token
+        for node in ast.walk(tree)
+        if (value := _fold_static_string(node, names)) is not None
+        for token in retired
+        if token in value
+    }
+    return tuple(sorted(hits))
+
+
 CANONICAL_LAUNCHER_STATEMENTS = (
     "#!/usr/bin/env bash",
     "set -euo pipefail",
@@ -135,16 +179,65 @@ class ExternalControlArchitectureTests(unittest.TestCase):
 
     def test_public_cli_and_help_have_no_retired_command_families_or_output_tracks(self) -> None:
         source = _source("tools/launcher/cli.py")
+        tree = ast.parse(source)
         help_text = _constant_assignment(source, "HELP_TEXT")
         forbidden_source = (
             "legacy_" + "command_hint",
             "fail_removed_" + "public_command",
             "_print_" + "human_result",
             "__" + "locked-",
+            "REMOVED_" + "JSON_FLAG",
+            "REMOVED_" + "OUTPUT_FLAG",
+            "_reject_removed_" + "public_flags",
+            "_is_instance_" + "input_text_value",
         )
         for token in forbidden_source:
             with self.subTest(surface="source", token=token):
                 self.assertNotIn(token, source)
+        self.assertEqual(_retired_public_literal_hits(source), ())
+        dispatch = next(
+            node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_dispatch"
+        )
+        command_prefix_checks = [
+            node
+            for node in ast.walk(dispatch)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "startswith"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "command"
+        ]
+        self.assertEqual(command_prefix_checks, [])
+        mutations = (
+            source.replace(
+                "    command, rest = args[0], args[1:]\n",
+                "    command, rest = args[0], args[1:]\n"
+                "    if command == \"__\" + \"locked-reset\":\n"
+                "        raise RuntimeError(command)\n",
+                1,
+            ),
+            source.replace(
+                "        result = _dispatch(args)\n",
+                "        if any(arg == \"--\" + \"json\" for arg in args):\n"
+                "            raise RuntimeError(args)\n"
+                "        result = _dispatch(args)\n",
+                1,
+            ),
+            source.replace(
+                'YES_FLAG = DASH + "yes"\n',
+                'RETIRED_PREFIX = "--"\nRETIRED_NAME = "output"\nYES_FLAG = DASH + "yes"\n',
+                1,
+            ).replace(
+                "        result = _dispatch(args)\n",
+                "        if any(arg == RETIRED_PREFIX + RETIRED_NAME for arg in args):\n"
+                "            raise RuntimeError(args)\n"
+                "        result = _dispatch(args)\n",
+                1,
+            ),
+        )
+        expected_hits = ("__" + "locked-", "--" + "json", "--" + "output")
+        for mutation, expected_hit in zip(mutations, expected_hits, strict=True):
+            self.assertIn(expected_hit, _retired_public_literal_hits(mutation))
         forbidden_help = (
             "instance " + "side",
             "instance " + "goal",

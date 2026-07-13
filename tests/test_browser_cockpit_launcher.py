@@ -85,6 +85,24 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
         self.assertEqual(data.get("ok"), True, msg=payload)
         return data
 
+    def _cli_error(
+        self,
+        completed: subprocess.CompletedProcess[str],
+        *,
+        code: str,
+        exit_code: int,
+    ) -> dict[str, object]:
+        self.assertEqual(completed.returncode, exit_code)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(completed.stdout.count("\n"), 1, msg=completed.stdout)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload.get("ok"), False, msg=payload)
+        error = payload.get("error")
+        self.assertIsInstance(error, dict, msg=payload)
+        assert isinstance(error, dict)
+        self.assertEqual(error.get("code"), code, msg=payload)
+        return error
+
     def _start_fake_cdp_server(self, state: dict[str, object]) -> int:
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args: object) -> None:
@@ -858,7 +876,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 check=False,
             )
             self.assertNotEqual(ensure.returncode, 0)
-            self.assertIn("not ready", ensure.stderr.lower())
+            error = self._cli_error(ensure, code="EXECUTION_FAILED", exit_code=1)
+            self.assertIn("not ready", str(error.get("message", "")).lower())
             self.assertFalse(capture_path.exists(), "MCP setup should not run when ready page cannot be created")
             calls = [
                 json.loads(line)
@@ -1172,7 +1191,8 @@ sleep 60
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("env browser ensure requires --instance <actor-id>", completed.stderr)
+            error = self._cli_error(completed, code="INVALID_ARGUMENT", exit_code=2)
+            self.assertEqual(error.get("message"), "env browser ensure requires --instance <actor-id>")
             self.assertFalse(shared_root.exists(), "ensure without --instance must fail before creating shared state")
 
     def test_browser_ensure_does_not_repair_raw_cockpit_mcp(self) -> None:
@@ -1272,7 +1292,9 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 1)
+            data = self._env_browser_status_data(completed)
+            self.assertEqual(data.get("ready"), False)
+            self.assertEqual(data.get("browser_port"), 65530)
             self.assertFalse(
                 shared_root.exists(),
                 "browser status should be read-only and must not create shared launcher directories",
@@ -1297,7 +1319,8 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Missing value for --port", completed.stderr)
+            error = self._cli_error(completed, code="INVALID_ARGUMENT", exit_code=2)
+            self.assertEqual(error.get("message"), "env browser status requires --port <value>")
             self.assertFalse(shared_root.exists(), "invalid browser status args should stay read-only")
 
 

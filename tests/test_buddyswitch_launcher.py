@@ -7930,8 +7930,10 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertEqual(delete_result.returncode, 2)
-            self.assertIn("Instance record missing", self._output_error_text(delete_result))
+            self.assertEqual(delete_result.returncode, 3)
+            error = self._cli_error(delete_result, code="NOT_FOUND")
+            self.assertEqual(error.get("message"), "Instance not found: act-pm-missing")
+            self.assertNotIn(str(Path(source_home)), delete_result.stdout)
 
     def test_instance_delete_blocks_active_app_server(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -8917,18 +8919,34 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 if proc.stderr is not None:
                     proc.stderr.close()
 
-    def test_public_cli_rejects_deleted_locked_and_json_flag_surfaces_with_canonical_errors(self) -> None:
+    def test_public_cli_rejects_unknown_commands_and_arguments_without_historical_hints(self) -> None:
         cases = (
-            (["start"], "UNKNOWN_COMMAND"),
-            (["workspace"], "UNKNOWN_COMMAND"),
-            (["__" + "locked-reset"], "UNKNOWN_COMMAND"),
-            (["__" + "locked-browser-ensure"], "UNKNOWN_COMMAND"),
-            (["instance", "side", "act-pm-demo", "--text", "Explore"], "UNKNOWN_COMMAND"),
-            (["instance", "goal", "act-pm-demo", "get"], "UNKNOWN_COMMAND"),
-            (["instance", "roles", "--" + "json"], "INVALID_ARGUMENT"),
-            (["instance", "list", "--output", "text"], "INVALID_ARGUMENT"),
+            (["start"], "UNKNOWN_COMMAND", "Unknown top-level command: start"),
+            (["workspace"], "UNKNOWN_COMMAND", "Unknown top-level command: workspace"),
+            (["__" + "locked-reset"], "UNKNOWN_COMMAND", "Unknown top-level command: __" + "locked-reset"),
+            (
+                ["__" + "locked-browser-ensure"],
+                "UNKNOWN_COMMAND",
+                "Unknown top-level command: __" + "locked-browser-ensure",
+            ),
+            (
+                ["instance", "side", "act-pm-demo", "--text", "Explore"],
+                "UNKNOWN_COMMAND",
+                "Unknown instance command: side",
+            ),
+            (
+                ["instance", "goal", "act-pm-demo", "get"],
+                "UNKNOWN_COMMAND",
+                "Unknown instance command: goal",
+            ),
+            (["instance", "roles", "--" + "json"], "INVALID_ARGUMENT", "instance roles does not accept: --json"),
+            (
+                ["instance", "list", "--output", "text"],
+                "INVALID_ARGUMENT",
+                "instance list does not accept: --output",
+            ),
         )
-        for argv, code in cases:
+        for argv, code, message in cases:
             with self.subTest(argv=argv):
                 completed = subprocess.run(
                     [str(LAUNCHER), *argv],
@@ -8940,9 +8958,10 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
                 self.assertEqual(completed.returncode, 2)
                 error = self._cli_error(completed, code=code)
-                self.assertNotIn("migrat", json.dumps(error, ensure_ascii=False).lower())
-                self.assertNotIn("replacement", json.dumps(error, ensure_ascii=False).lower())
-                self.assertNotIn("Top-level command removed", completed.stdout)
+                self.assertEqual(error.get("message"), message)
+                error_text = json.dumps(error, ensure_ascii=False).lower()
+                for forbidden_hint in ("migrat", "replacement", "not supported", "command removed"):
+                    self.assertNotIn(forbidden_hint, error_text)
 
     def test_public_cli_destructive_commands_require_yes_with_confirmation_error(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

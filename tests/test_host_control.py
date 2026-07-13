@@ -413,6 +413,68 @@ class HostControlTests(unittest.TestCase):
         self.assertEqual(raised.exception.message, "Instance delete blocked.")
         self.assertEqual(raised.exception.returncode, 3)
 
+    def test_private_host_control_classifies_missing_instance_as_not_found(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            env = {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("BUDDYSWITCH_") or key == "BUDDYSWITCH_PYTHON"
+            }
+            env["HOME"] = source_home
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(ROOT / "tools" / "launcher" / "host_control.sh"), "delete", "act-pm-missing"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 6)
+        self.assertEqual(completed.stderr, "")
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["error"]["code"], "NOT_FOUND")
+        self.assertEqual(payload["error"]["message"], "Instance not found: act-pm-missing")
+        self.assertNotIn(source_home, completed.stdout)
+
+    def test_unrelated_status_six_remains_command_failed(self) -> None:
+        error = HOST_CONTROL._error_from_payload({}, returncode=6, fallback_message="dependency failed")
+        self.assertEqual(error.code, "COMMAND_FAILED")
+
+        script = """
+source "$1"
+host_control_emit_error_for_output "$2" "$3"
+"""
+        cases = (
+            (1, "Instance not found: act-pm-forged"),
+            (6, "Instance not found: act-pm-forged"),
+            (6, "dependency failed"),
+        )
+        for status, message in cases:
+            with self.subTest(status=status, message=message):
+                completed = subprocess.run(
+                    [
+                        "/bin/bash",
+                        "-c",
+                        script,
+                        "host-control-status-test",
+                        str(ROOT / "tools" / "launcher" / "host_control.sh"),
+                        str(status),
+                        message,
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(completed.returncode, 0)
+                self.assertEqual(completed.stderr, "")
+                payload = json.loads(completed.stdout)
+                self.assertEqual(payload["error"], {"code": "COMMAND_FAILED", "message": message})
+
     def test_host_control_script_is_private_json_only_no_public_parser_residue(self) -> None:
         source = (ROOT / "tools" / "launcher" / "host_control.sh").read_text(encoding="utf-8")
         forbidden = [

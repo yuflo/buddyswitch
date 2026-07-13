@@ -214,8 +214,8 @@ buddyswitch_instance_record_json() {
   buddyswitch_validate_actor_id "${actor_id}" || return $?
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
   if [[ ! -f "${instance_json}" ]]; then
-    echo "Instance record missing: ${instance_json}" >&2
-    return 2
+    host_control_emit_error_json "NOT_FOUND" "Instance not found: ${actor_id}" >&2
+    return 6
   fi
   printf '%s\n' "${instance_json}"
 }

@@ -37,8 +37,6 @@ from tools.launcher import actor_session, central_daemon, central_daemon_core, c
 
 
 DASH = "--"
-REMOVED_JSON_FLAG = DASH + "json"
-REMOVED_OUTPUT_FLAG = DASH + "output"
 YES_FLAG = DASH + "yes"
 
 
@@ -106,7 +104,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if _is_help(args):
             raise HelpRequested(HELP_TEXT)
-        _reject_removed_public_flags(args)
         result = _dispatch(args)
     except HelpRequested as exc:
         sys.stdout.write(exc.text)
@@ -126,33 +123,10 @@ def _is_help(args: list[str]) -> bool:
     return args in (["help"], [DASH + "help"], ["-h"]) or DASH + "help" in args or "-h" in args
 
 
-def _reject_removed_public_flags(args: list[str]) -> None:
-    for index, arg in enumerate(args):
-        if _is_instance_input_text_value(args, index):
-            continue
-        if arg == REMOVED_JSON_FLAG:
-            raise cli_contract.CliError("INVALID_ARGUMENT", f"{REMOVED_JSON_FLAG} is not supported")
-        if arg == REMOVED_OUTPUT_FLAG or arg.startswith(REMOVED_OUTPUT_FLAG + "="):
-            raise cli_contract.CliError("INVALID_ARGUMENT", f"{REMOVED_OUTPUT_FLAG} is not supported")
-
-
-def _is_instance_input_text_value(args: list[str], index: int) -> bool:
-    return (
-        len(args) >= 5
-        and args[0] == "instance"
-        and args[1] == "input"
-        and not args[2].startswith("-")
-        and args[3] == DASH + "text"
-        and index == 4
-    )
-
-
 def _dispatch(args: list[str]) -> CommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "BuddySwitch command is required")
     command, rest = args[0], args[1:]
-    if command.startswith("__" + "locked-"):
-        raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown top-level command: {command}")
     if command == "instance":
         return _dispatch_instance(rest)
     if command == "task":
