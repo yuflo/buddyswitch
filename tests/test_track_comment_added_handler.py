@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for daemon-side Track comment trigger handling."""
 
 from __future__ import annotations

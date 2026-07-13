@@ -19,7 +19,7 @@ description: Use when PM must define verifiable pass/fail criteria for scoped pr
 
 ## Inputs
 - Requirements, scope, known risks, affected flows, proof expectations, current track state, and artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Map each critical behavior to concrete pass/fail checks and blocked conditions.

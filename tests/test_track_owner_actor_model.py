@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Owner-actor Track collaboration model tests."""
 
 from __future__ import annotations

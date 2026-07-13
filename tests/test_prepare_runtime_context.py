@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless replacement tests for retired prepare runtime context flow."""
 
 from __future__ import annotations

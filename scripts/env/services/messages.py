@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Public message send service."""
 
 from __future__ import annotations

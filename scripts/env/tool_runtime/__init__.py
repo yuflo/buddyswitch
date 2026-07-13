@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Black-box env.tool runtime package."""
 
 from .definition import ActionDefinition

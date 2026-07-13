@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for launcher-owned browser runtime manager."""
 
 from __future__ import annotations

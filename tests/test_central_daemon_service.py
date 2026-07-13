@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the shared-root central daemon service."""
 
 from __future__ import annotations

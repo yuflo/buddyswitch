@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime broker lifecycle, health checks, and ensure/stop helpers."""
 
 from __future__ import annotations

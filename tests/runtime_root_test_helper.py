@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Helpers for routing BuddySwitch write tests into a temporary runtime workspace."""
 
 from __future__ import annotations

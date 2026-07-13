@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the Task Sys-owned daemon mailbox client and CLI."""
 
 from __future__ import annotations

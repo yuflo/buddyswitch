@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Clean runtime environment host-visible regression tests."""
 
 from __future__ import annotations

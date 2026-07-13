@@ -18,7 +18,7 @@ description: Use when implementation depends on track, task, artifact, PRD, desi
 ## Inputs
 - Request text, task ids, track id.
 - Artifact ids and artifact body content from `artifact.get`.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Collect explicit ids from the request and context summary.

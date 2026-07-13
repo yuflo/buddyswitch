@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Current-only, product-neutral state for the actor instance daemon."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Daemon trigger handler for Track comment attention."""
 
 from __future__ import annotations

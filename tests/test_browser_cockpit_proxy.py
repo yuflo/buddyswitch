@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the BuddySwitch Chrome DevTools MCP focus-control proxy."""
 
 from __future__ import annotations

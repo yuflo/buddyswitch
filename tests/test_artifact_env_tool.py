@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Artifact env.tool integration tests for the single publication path."""
 
 from __future__ import annotations

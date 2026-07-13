@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Create a Chrome CDP page target without foreground activation."""
 
 from __future__ import annotations

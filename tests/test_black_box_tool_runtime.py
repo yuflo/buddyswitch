@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Architecture tests for black-box env.tool runtime."""
 
 from __future__ import annotations

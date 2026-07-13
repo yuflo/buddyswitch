@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for runtime broker request routing and identity checks."""
 
 from __future__ import annotations

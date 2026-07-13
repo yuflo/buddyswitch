@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Identity profile repository backed by runtime object files."""
 
 from __future__ import annotations

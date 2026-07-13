@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Semantic contract coverage for env.tool registry projection."""
 
 from __future__ import annotations

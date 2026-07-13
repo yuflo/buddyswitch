@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for broker-routed search env tool behavior."""
 
 from __future__ import annotations

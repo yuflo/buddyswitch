@@ -19,7 +19,7 @@ description: Use when PM must record a durable product decision, tradeoff, rejec
 
 ## Inputs
 - Competing options, evidence, constraints, owner feedback, track state, prior decisions, and artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. State decision, evidence, tradeoff, rejected alternatives, residual risk, and next owner/action.

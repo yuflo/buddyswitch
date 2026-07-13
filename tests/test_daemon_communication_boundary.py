@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Boundary tests for the new daemon communication path."""
 
 from __future__ import annotations

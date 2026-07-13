@@ -19,7 +19,7 @@ description: Use when PM must turn product goals and scope into observable requi
 
 ## Inputs
 - Product direction, scope, decisions, design constraints, technical constraints, user flows, current track state, and artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Convert goals into observable user or system behavior.

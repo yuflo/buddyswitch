@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Storage-aware BuddySwitch cleanup backend."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Identity global convergence tests."""
 
 from __future__ import annotations

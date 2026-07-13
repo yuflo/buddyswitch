@@ -32,10 +32,12 @@ Product mode:
 
 No `prepare/persist` lifecycle is required.
 
-Runtime env tool operations use:
+Direct local runtime diagnostics use:
 
 ```bash
-python3 scripts/env/client.py <resource> <operation> ...
+source tools/launcher/env.sh
+buddyswitch_env_init
+"$BUDDYSWITCH_PYTHON" scripts/env/client.py context summarize
 ```
 
 ## Workspace Layout

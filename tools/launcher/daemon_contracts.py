@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Stable, product-neutral contracts for the actor instance daemon."""
 
 from pathlib import Path

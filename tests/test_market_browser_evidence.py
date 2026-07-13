@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless Market evidence tests and shared CDP helper fixtures."""
 
 from __future__ import annotations

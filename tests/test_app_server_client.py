@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the BuddySwitch Codex app-server client."""
 
 from __future__ import annotations

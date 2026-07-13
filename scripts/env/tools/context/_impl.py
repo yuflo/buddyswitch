@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless read-only context discovery services."""
 
 from __future__ import annotations

@@ -18,7 +18,7 @@ description: Use when processing Task Sys side frames, parent-thread decisions, 
 - Use `message.send(reply_to=...)` when replying to a processable inbound IM message; the runtime resolves the original sender through the normal target-identity path.
 - Use `message.mark(..., disposition=absorbed)` only when no reply is needed.
 - Exact payload schemas, effects, rejection meanings, and recovery guidance come from native tool schemas and `context.get.tool_catalog['task_sys']`.
-- Diagnostic fallback: `python3 scripts/turn_runtime.py status`.
+- Diagnostic fallback: `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 - Broker method remains `env.tool`; do not edit runtime task objects or private runtime files directly.
 
 ## Judge The Frame

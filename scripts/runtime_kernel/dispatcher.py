@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime broker request dispatcher for runless env.tool flows."""
 
 from __future__ import annotations

@@ -19,7 +19,7 @@ description: Use when PM must cut product work to the smallest valuable iteratio
 
 ## Inputs
 - Product direction, constraints, risks, design/dev/test signals, appetite, current track state, and artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Choose the smallest valuable outcome that still solves the current user problem.

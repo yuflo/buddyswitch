@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the BuddySwitch local web management API."""
 
 from __future__ import annotations

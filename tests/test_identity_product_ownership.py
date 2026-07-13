@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Product ownership identity persistence tests."""
 
 from __future__ import annotations

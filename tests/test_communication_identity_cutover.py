@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Communication identity cutover contract tests."""
 
 from __future__ import annotations

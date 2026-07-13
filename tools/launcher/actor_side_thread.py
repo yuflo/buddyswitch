@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Actor-aware side-thread creation boundary."""
 
 from __future__ import annotations

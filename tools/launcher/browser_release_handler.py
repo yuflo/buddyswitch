@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Browser-owned daemon handler for browser cockpit release schedules."""
 
 from __future__ import annotations

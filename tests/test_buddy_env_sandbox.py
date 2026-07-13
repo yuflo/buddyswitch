@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for profile-derived sandbox roots in launcher codex config patching."""
 
 from __future__ import annotations

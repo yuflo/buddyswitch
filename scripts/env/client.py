@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Skill-facing CLI for broker-routed runless env tool operations."""
 
 from __future__ import annotations
@@ -99,7 +98,7 @@ def _product_mode_env_cli_disabled_payload() -> dict[str, Any]:
             "retry_guidance": "Use native BuddySwitch env MCP tools, or inspect runtime diagnostics before retrying native tools.",
             "allowed_next_actions": [
                 "Use native BuddySwitch env MCP tools such as context__summarize, context__get, and the relevant <tool>__<action>.",
-                "Use python3 scripts/turn_runtime.py status for runtime diagnostics.",
+                'Use "$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status for runtime diagnostics.',
                 "Set BUDDYSWITCH_ALLOW_ENV_ADMIN_CLI=1 only for explicit human/admin debug sessions.",
             ],
             "allowed_next_action_options": [

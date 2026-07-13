@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for IM-owned actor delivery over generic daemon primitives."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for Codex-native MCP projection of BuddySwitch env tools."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Repository helpers for actor private files."""
 
 from __future__ import annotations

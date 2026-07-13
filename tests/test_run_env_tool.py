@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless replacement tests for retired run env.tool surface."""
 
 from __future__ import annotations

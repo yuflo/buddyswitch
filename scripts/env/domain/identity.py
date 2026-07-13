@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Shared identity core for product-level "who" references."""
 
 from __future__ import annotations

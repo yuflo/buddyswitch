@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Central role-action authorization policy for env.tool dispatch."""
 
 from __future__ import annotations

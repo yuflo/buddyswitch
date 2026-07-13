@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Task-domain validation and active-role ownership helpers."""
 
 from __future__ import annotations

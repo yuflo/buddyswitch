@@ -16,7 +16,7 @@ description: Use when Dev has implemented and verified a change and must present
 
 ## Inputs
 - Repo state, branch or worktree state, changed files, fresh verification evidence, risks, and durable report status.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Re-run fresh verification before presenting completion options.

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the minimal task sys substrate."""
 
 from __future__ import annotations

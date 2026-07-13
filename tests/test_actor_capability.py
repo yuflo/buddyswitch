@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for actor-local capability selection and resolution."""
 
 from __future__ import annotations

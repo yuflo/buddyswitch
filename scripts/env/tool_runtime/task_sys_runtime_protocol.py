@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Current Task Sys application-command protocol shared by client and adapter."""
 
 EXECUTE_INSTRUCTION = "task_sys.execute_instruction"

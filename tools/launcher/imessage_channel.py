@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Local iMessage channel product logic for the External IM HTTP API."""
 
 from __future__ import annotations

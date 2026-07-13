@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the current-only generic daemon state owner."""
 
 from __future__ import annotations

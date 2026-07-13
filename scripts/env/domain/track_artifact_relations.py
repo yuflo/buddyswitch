@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Track-owned Artifact relation mutations."""
 
 from __future__ import annotations

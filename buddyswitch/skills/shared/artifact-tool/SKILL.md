@@ -11,7 +11,7 @@ description: Use when you need artifact summaries, full artifact reads by id, ar
 ## Runtime Route
 - Primary: use native BuddySwitch env MCP tools such as `artifact__list`, `artifact__get`, `artifact__create_revision`, `artifact__update_metadata`, `artifact__attach_file`, `artifact__list_attachments`, and `artifact__get_attachment`.
 - Exact payload schemas, allowed fields, effects, and response meanings come from native tool schemas and `context.get.tool_catalog['artifact']`.
-- Diagnostic fallback: `python3 scripts/turn_runtime.py status`.
+- Diagnostic fallback: `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 - Broker method remains `env.tool`; do not edit runtime state files directly.
 
 ## Workflow Notes
@@ -20,7 +20,7 @@ description: Use when you need artifact summaries, full artifact reads by id, ar
 - Use `artifact__create_revision` for active actor private draft or revision content.
 - Shared track visibility starts only after `track__add_material` or `track__add_proof` creates a Track-owned artifact relation. Historical CLI wording was track.add-material / track.add-proof, but the product path is the native track tool.
 - Use `artifact__attach_file`, `artifact__list_attachments`, and `artifact__get_attachment` for explicit attachments; use `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` for private local files that should not become product-readable.
-- For action details and recovery guidance, inspect `context.get.tool_catalog['artifact']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative.
+- For action details and recovery guidance, inspect `context.get.tool_catalog['artifact']` or `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`; runtime response fields are authoritative.
 
 ## Verification
 - Confirm `ok=true`, returned ids, and `state_changes` for mutating actions.

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Instance daemon mailbox socket and signal validation."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless decision-surface coverage for product mode host flows."""
 
 from __future__ import annotations

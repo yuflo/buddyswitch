@@ -16,7 +16,7 @@ description: Use when the task is a bug, failing check, or regression that needs
 
 ## Inputs
 - Reproduction steps, failing output, and relevant code paths.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Reproduce the failure first, or document exactly why reproduction is blocked.

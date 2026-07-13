@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless BuddySwitch runtime primitives.
 
 This module no longer owns prepare/persist run lifecycle. Runtime broker entrypoints

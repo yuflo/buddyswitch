@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the instance daemon CLI entrypoint wiring."""
 
 from __future__ import annotations

@@ -20,7 +20,7 @@ description: Use when PM work depends on track, task, artifact, message, comment
 ## Inputs
 - User request, track id, task id, artifact ids, comment ids, message ids, proof ids, and visible thread context.
 - Full artifact bodies when artifact ids are available.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Collect explicit ids and name any missing ids that would change the decision.

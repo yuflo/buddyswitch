@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for capability-aware parent thread submission."""
 
 from __future__ import annotations

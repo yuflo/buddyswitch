@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for browser.page.expired daemon handler."""
 
 from __future__ import annotations

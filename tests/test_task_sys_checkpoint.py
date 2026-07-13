@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Retired checkpoint-task contract guards for Task Sys."""
 
 from __future__ import annotations

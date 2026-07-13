@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless turn runtime command contract tests."""
 
 from __future__ import annotations

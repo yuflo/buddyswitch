@@ -19,7 +19,7 @@ description: Use when Dev has approved scope and must change source behavior und
 ## Inputs
 - Locked source root and approved implementation brief.
 - Local project patterns, commands, and changed behavior expectation.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Map requested behavior to concrete files under the locked source root.

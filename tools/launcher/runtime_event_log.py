@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Small append-only JSONL runtime breadcrumb helper."""
 
 from __future__ import annotations

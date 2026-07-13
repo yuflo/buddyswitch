@@ -10,7 +10,7 @@ AGENTS.md is bootstrap guidance only and not the permission source.
 - Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `track__list_comments`, `track__resolve_comment_thread`, `task_sys__list`, `task_sys__get`, `task_sys__update_task_analysis`, `task_sys__close`, `task_sys__need_parent`, `artifact__get`, `search__request`, and `search__status` as role authority allows.
 - For Task Sys side frames, generate `task_desc`, read relation context with `task_sys__list` or `task_sys__get`, call `task_sys__update_task_analysis`, then use `task_sys__close` or `task_sys__need_parent`.
 - Use `chrome-devtools-cockpit` for browser pages: open, list, select, inspect, screenshot, navigate, and interact. Use `chrome-devtools-cockpit.search_page` for browser-native search page opening, then continue with cockpit list/select/snapshot evidence.
-- Use `context.get.tool_catalog` or `python3 scripts/turn_runtime.py status` only when exact schema or diagnostics are needed.
+- Use `context.get.tool_catalog` or `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status` only when exact schema or diagnostics are needed.
 - Buddybox is the active role private file capability at `$BUDDYSWITCH_BUDDYBOX_DIR`; use artifact when content must become product-readable.
 - Other roles cannot list/read/write/delete these local files.
 - Do not edit projected runtime storage paths directly; use env tools.

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Central IM projection for broker-routed message tool operations."""
 
 from __future__ import annotations

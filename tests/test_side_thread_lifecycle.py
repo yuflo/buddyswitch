@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Contract tests for the side-thread lifecycle owner."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """HTTP projection for the BuddySwitch Central IM contract."""
 
 from __future__ import annotations

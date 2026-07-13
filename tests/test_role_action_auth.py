@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Central role-action authorization contract tests."""
 
 from __future__ import annotations

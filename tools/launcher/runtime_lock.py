@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Run a command while holding the BuddySwitch runtime lock."""
 
 from __future__ import annotations

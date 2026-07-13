@@ -849,7 +849,7 @@ buddyswitch_print_native_search_rejection() {
   echo "Use chrome-devtools-cockpit.search_page for browser-native search page opening." >&2
   echo "Use search__request only for non-opening URL planning." >&2
   echo "Use search__status for search capability status." >&2
-  echo "Diagnostic: \${BUDDYSWITCH_PYTHON} scripts/turn_runtime.py status" >&2
+  echo 'Diagnostic: "$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status' >&2
 }
 
 buddyswitch_reject_native_search_args() {

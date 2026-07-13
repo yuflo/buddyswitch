@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Browser-owned daemon handler for expired browser page TTL schedules."""
 
 from __future__ import annotations

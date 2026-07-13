@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless runtime command guardrail coverage."""
 
 from __future__ import annotations

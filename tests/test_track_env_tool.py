@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Track env.tool integration tests for artifact-id publication path."""
 
 from __future__ import annotations

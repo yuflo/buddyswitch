@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Payload field contract alignment for env.tool actions."""
 
 from __future__ import annotations

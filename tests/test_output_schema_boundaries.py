@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Boundary checks for BuddySwitch output schema validation."""
 
 from __future__ import annotations

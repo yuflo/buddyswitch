@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """BuddySwitch daemon entrypoint."""
 
 from __future__ import annotations

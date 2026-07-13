@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Canonical env.tool response helpers and structured next-action options."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Allowed env.tool runtime SDK facade for runtime broker requests."""
 
 from __future__ import annotations

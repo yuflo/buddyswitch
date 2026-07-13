@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Track-native comment env.tool integration tests."""
 
 from __future__ import annotations

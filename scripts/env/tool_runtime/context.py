@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Host-owned runtime context passed into tool black-box entrypoints."""
 
 from __future__ import annotations

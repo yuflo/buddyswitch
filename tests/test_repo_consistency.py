@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Repository consistency checks for active track-page collaboration runtime."""
 
 from __future__ import annotations
@@ -124,6 +123,80 @@ class RepoConsistencyTests(unittest.TestCase):
                     snippet = " ".join(match.group(0).split())
                     hits.append(f"{relative}:{line_no}:{snippet[:260]}")
         return hits
+
+    def test_python_runtime_has_one_non_docs_entrypoint(self) -> None:
+        old_command = "python" + "3"
+        running_interpreter = "sys." + "executable"
+        version_api = "sys." + "version_info"
+        platform_version_api = "platform." + "python_version"
+        compatibility_package = "tom" + "li"
+        version_pattern = re.compile(r"\b[Pp]ython(?:\s*|[-_.]?)[0-9]+\.[0-9]+\b")
+        compatibility_package_pattern = re.compile(r"\b" + re.escape(compatibility_package) + r"\b")
+        shebang_pattern = re.compile(r"^#!.*\b[Pp]ython(?:[0-9]+(?:\.[0-9]+)*)?\b")
+        python_env_name = "BUDDYSWITCH_" + "PYTHON"
+        python_default_token = python_env_name + ":-"
+        assignment_owner_token = "export " + python_env_name + "="
+        resolver_owner_pattern = re.compile(r"\btype\s+-P\s+python\b")
+
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            text=False,
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8").split("\0")
+        tracked_paths = [Path(row) for row in tracked if row]
+
+        residue: list[str] = []
+        assignment_owners: set[str] = set()
+        resolver_owners: set[str] = set()
+        for relative in tracked_paths:
+            if relative.parts and relative.parts[0] == "docs":
+                continue
+            path = ROOT / relative
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            first_line = text.splitlines()[0] if text.splitlines() else ""
+            if shebang_pattern.search(first_line):
+                residue.append(f"{relative}: first-line Python shebang")
+            for label, token in (
+                ("old command", old_command),
+                ("running interpreter API", running_interpreter),
+                ("version API", version_api),
+                ("platform version API", platform_version_api),
+            ):
+                if token in text:
+                    residue.append(f"{relative}: {label} token {token!r}")
+            if compatibility_package_pattern.search(text):
+                residue.append(f"{relative}: compatibility package token {compatibility_package!r}")
+            for match in version_pattern.finditer(text):
+                residue.append(f"{relative}: version literal {match.group(0)!r}")
+            if python_default_token in text:
+                residue.append(f"{relative}: BUDDYSWITCH_PYTHON default")
+            if assignment_owner_token in text:
+                assignment_owners.add(str(relative))
+            if resolver_owner_pattern.search(text):
+                resolver_owners.add(str(relative))
+
+        staged_python = subprocess.run(
+            ["git", "ls-files", "--stage", "*.py"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+        executable_python = [
+            row.rsplit("\t", 1)[-1]
+            for row in staged_python
+            if row.split(maxsplit=1)[0] == "100755"
+        ]
+
+        self.assertEqual(residue, [], msg="\n".join(residue))
+        self.assertEqual(sorted(assignment_owners), ["tools/launcher/env.sh"])
+        self.assertEqual(sorted(resolver_owners), ["tools/launcher/env.sh"])
+        self.assertEqual(executable_python, [])
 
     def test_final_daemon_architecture_docs_name_current_single_paths(self) -> None:
         daemon_doc = (ROOT / "docs/arch/daemon-service-architecture.md").read_text(encoding="utf-8")
@@ -1388,7 +1461,7 @@ print(json.dumps({{
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(role=role):
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("turn_runtime.py status", text)
+                self.assertIn('"$buddyswitch_python" scripts/turn_runtime.py status', text)
                 self.assertNotIn("scripts/env/client.py", text)
                 self.assertNotIn("context summarize --payload", text)
                 self.assertNotIn("search open-browser --payload", text)
@@ -1486,7 +1559,7 @@ print(json.dumps({{
             "native buddyswitch env context summary tool when runtime context is needed",
             "native buddyswitch env mcp tools for durable runtime state",
             "context.get.tool_catalog",
-            "turn_runtime.py status",
+            '"$buddyswitch_python" scripts/turn_runtime.py status',
             "buddybox is the active role private file capability",
             "use artifact when content must become product-readable",
             "other roles cannot list/read/write/delete these local files.",
@@ -1952,7 +2025,7 @@ print(json.dumps({{
             with self.subTest(contract=name):
                 self.assertIn("native buddyswitch env mcp tools", text)
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("turn_runtime.py status", text)
+                self.assertIn('"$buddyswitch_python" scripts/turn_runtime.py status', text)
                 self.assertNotIn("scripts/env/client.py", text)
 
     def test_instance_private_writable_surface_has_no_legacy_actor_private_roots(self) -> None:

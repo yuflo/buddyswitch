@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Minimal task sys substrate for actor-driving inbound."""
 
 from __future__ import annotations

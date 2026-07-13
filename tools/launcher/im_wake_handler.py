@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Daemon trigger handler for Central IM runtime wake."""
 
 from __future__ import annotations

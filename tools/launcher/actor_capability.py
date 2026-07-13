@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Actor-local capability catalog, persistence, and runtime resolution."""
 
 from __future__ import annotations

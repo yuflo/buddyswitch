@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Actor message tool projection tests for Central IM."""
 
 from __future__ import annotations

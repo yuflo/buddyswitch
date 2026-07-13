@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime skill contract tests."""
 
 from __future__ import annotations
@@ -244,7 +243,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("native buddyswitch env mcp tools", lowered)
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("turn_runtime.py status", text)
+                self.assertIn('"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status', text)
                 self.assertNotIn("scripts/env/client.py", text)
                 self.assertNotIn("CLI Payload Rule", text)
                 self.assertNotIn("--payload", text)
@@ -389,7 +388,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("native buddyswitch env mcp tools", text)
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("turn_runtime.py status", text)
+                self.assertIn('"$buddyswitch_python" scripts/turn_runtime.py status', text)
 
     def test_role_agents_do_not_present_authoritative_hardcoded_tool_lists(self) -> None:
         for path in self.ROLE_AGENT_FILES:
@@ -397,7 +396,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("turn_runtime.py status", text)
+                self.assertIn('"$buddyswitch_python" scripts/turn_runtime.py status', lowered)
                 self.assertNotIn("scripts/env/client.py", text)
                 self.assertNotIn("context summarize --payload", lowered)
                 self.assertNotIn("search open-browser --payload", lowered)
@@ -435,12 +434,12 @@ class RuntimeSkillsTests(unittest.TestCase):
     def test_shared_tool_skills_name_only_runtime_discovery_surfaces_for_exact_contracts(self) -> None:
         required_refs = (
             "context.get.tool_catalog",
-            "turn_runtime.py status",
+            '"$buddyswitch_python" scripts/turn_runtime.py status',
         )
         accepted_contract_refs = (
             "context.get.tool_catalog",
             "context.summarize.tool_affordances",
-            "turn_runtime.py status",
+            '"$buddyswitch_python" scripts/turn_runtime.py status',
             "runtime response fields",
         )
         forbidden_refs = (
@@ -459,9 +458,9 @@ class RuntimeSkillsTests(unittest.TestCase):
             lowered = text.lower()
             with self.subTest(tool=tool):
                 for required in required_refs:
-                    self.assertIn(required, text)
+                    self.assertIn(required, lowered)
                 self.assertTrue(
-                    any(ref in text for ref in accepted_contract_refs),
+                    any(ref in lowered for ref in accepted_contract_refs),
                     msg=f"{path.relative_to(ROOT)} does not route exact contract knowledge to runtime discovery",
                 )
                 for forbidden in forbidden_refs:
@@ -570,7 +569,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         )
         required_refs = (
             "context.get.tool_catalog",
-            "turn_runtime.py status",
+            '"$buddyswitch_python" scripts/turn_runtime.py status',
             "runtime response fields",
         )
         for skill_id in self.PM_PRODUCT_SKILLS:
@@ -688,7 +687,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 for token in forbidden:
                     self.assertNotIn(token, lowered)
                 self.assertIn("context.get.tool_catalog", lowered)
-                self.assertIn("turn_runtime.py status", lowered)
+                self.assertIn('"$buddyswitch_python" scripts/turn_runtime.py status', lowered)
 
     def test_dev_skills_use_runtime_source_facts_and_not_literal_path_authority(self) -> None:
         for skill_id in self.DEV_PRODUCT_SKILLS:
@@ -734,7 +733,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("write-prd", combined)
         self.assertIn("native buddyswitch env mcp tools", contract)
         self.assertIn("context.get.tool_catalog", contract)
-        self.assertIn("turn_runtime.py status", contract)
+        self.assertIn('"$buddyswitch_python" scripts/turn_runtime.py status', contract)
         self.assertNotIn("scripts/env/client.py", combined)
 
     def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
@@ -746,7 +745,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotRegex(text, r"(?m)^- operations:")
                 self.assertNotRegex(text, rf"env\.tool\s*[→>\-]+\s*{tool}\.")
                 self.assertIn(f"context.get.tool_catalog['{tool}']", text)
-                self.assertIn("turn_runtime.py status", text)
+                self.assertIn('"$buddyswitch_python" scripts/turn_runtime.py status', text)
 
     def test_runtime_contract_not_shared_skill_owns_inactive_actions(self) -> None:
         from env.tool_runtime import registry as catalog

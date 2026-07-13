@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Shared source_refs normalization helpers for runless durable objects.
 
 source_refs are provenance-only metadata. They must never become the required

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """End-to-end smoke for lazy browser runtime release and restart."""
 
 from __future__ import annotations

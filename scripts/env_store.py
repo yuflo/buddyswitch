@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime-root compatibility bindings for BuddySwitch env runtime.
 
 `env_store` no longer exposes object CRUD/publication helpers. Runtime and tests

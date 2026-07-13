@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Scoped live-surface residue checks for the IM boundary replacement."""
 
 from __future__ import annotations

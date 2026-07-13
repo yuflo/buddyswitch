@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless end-to-end env layer coverage for track/artifact relation path."""
 
 from __future__ import annotations

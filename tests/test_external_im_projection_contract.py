@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Projection-contract tests for External IM HTTP/Web surfaces."""
 
 from __future__ import annotations

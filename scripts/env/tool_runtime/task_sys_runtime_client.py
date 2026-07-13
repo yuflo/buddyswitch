@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Task Sys-owned client and CLI for actor daemon runtime commands."""
 
 from __future__ import annotations

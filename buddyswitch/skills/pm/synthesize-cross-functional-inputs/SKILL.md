@@ -19,7 +19,7 @@ description: Use when PM must combine market, design, dev, test, or stakeholder 
 
 ## Inputs
 - Market evidence, design artifacts, dev reports, test proof, stakeholder constraints, current track state, and relevant artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Classify each signal by source, owner, evidence strength, and whether it is fact, assumption, or opinion.

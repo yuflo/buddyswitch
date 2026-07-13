@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Active task pre-dispatch gate tests for env.tool runtime."""
 
 from __future__ import annotations

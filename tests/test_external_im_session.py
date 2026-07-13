@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """External IM Session application-boundary tests."""
 
 from __future__ import annotations

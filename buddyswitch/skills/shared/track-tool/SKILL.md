@@ -14,7 +14,7 @@ description: Use when you need shared track-page context, Track-scoped comments,
 ## Runtime Route
 - Primary: use native BuddySwitch env MCP tools such as `track__list`, `track__open`, `track__add_comment`, `track__list_comments`, `track__resolve_comment_thread`, `track__create`, `track__update_now`, `track__add_material`, `track__add_update`, `track__add_proof`, and `track__archive`.
 - Exact payload schemas, allowed fields, effects, and response meanings come from native tool schemas and `context.get.tool_catalog['track']`.
-- Diagnostic fallback: `python3 scripts/turn_runtime.py status`.
+- Diagnostic fallback: `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 - Broker method remains `env.tool`; do not edit runtime state files directly.
 
 ## Workflow Notes
@@ -27,7 +27,7 @@ description: Use when you need shared track-page context, Track-scoped comments,
 - `track__open` returns refs and summaries; use `artifact__get` for full markdown bodies.
 - `track__open` includes compact comment cues; use `track__list_comments` for full comment rows.
 - Tasks are private hints and never required for shared material reads.
-- For action details and recovery guidance, inspect `context.get.tool_catalog['track']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative.
+- For action details and recovery guidance, inspect `context.get.tool_catalog['track']` or `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`; runtime response fields are authoritative.
 
 ## Verification
 - Confirm `ok=true`, returned ids, and `state_changes` for relation/lifecycle mutations.

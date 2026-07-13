@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Issue broker-backed target-scoped browser evidence tokens."""
 
 from __future__ import annotations

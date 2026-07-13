@@ -16,7 +16,7 @@ description: Use when Dev needs a scoped code review after significant implement
 
 ## Inputs
 - Requirements, acceptance checks, changed files or diff range, verification evidence, and known risks.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. State whether the ask is spec compliance review, code quality review, or both.

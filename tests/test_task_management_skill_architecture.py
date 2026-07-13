@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Task-management architecture contract tests."""
 
 from __future__ import annotations

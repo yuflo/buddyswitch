@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """IM-owned actor delivery over generic daemon communication primitives."""
 
 from __future__ import annotations

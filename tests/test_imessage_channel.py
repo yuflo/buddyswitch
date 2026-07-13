@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """iMessage channel product-logic tests."""
 
 from __future__ import annotations

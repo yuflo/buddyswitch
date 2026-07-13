@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Actor-aware parent thread submit boundary."""
 
 from __future__ import annotations

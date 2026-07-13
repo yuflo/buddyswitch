@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Local web management UI and API for BuddySwitch instances."""
 
 from __future__ import annotations

@@ -16,7 +16,7 @@ description: Use when Dev has two or more independent work slices that may be ex
 
 ## Inputs
 - Candidate work slices, expected outputs, write sets, dependencies, and verification paths.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Confirm there is no shared state, no overlapping write set, and no sequential dependency between slices.

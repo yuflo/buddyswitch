@@ -19,7 +19,7 @@ description: Use when PM must define audience, problem, value, evidence, constra
 
 ## Inputs
 - User goal, market evidence, current product constraints, previous decisions, risks, track state, and artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. State audience and usage context, problem, value, evidence strength, constraints, non-goals, and open product questions.

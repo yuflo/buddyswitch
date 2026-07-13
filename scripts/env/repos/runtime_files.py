@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Concrete runtime file helpers for env repositories."""
 
 from __future__ import annotations

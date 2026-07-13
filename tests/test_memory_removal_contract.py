@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Regression contract proving memory and handoff runtime surfaces are removed."""
 
 from __future__ import annotations

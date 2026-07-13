@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless structured feedback tests for env.tool rejections and recoveries."""
 
 from __future__ import annotations

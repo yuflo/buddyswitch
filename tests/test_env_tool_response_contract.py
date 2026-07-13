@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Response contract tests for broker-routed env.tool actions."""
 
 from __future__ import annotations

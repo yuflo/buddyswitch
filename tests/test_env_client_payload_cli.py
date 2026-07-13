@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """CLI payload parsing contract tests for scripts/env/client.py."""
 
 from __future__ import annotations

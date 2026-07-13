@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """BuddySwitch Codex app-server lifecycle and JSON-RPC helper."""
 
 from __future__ import annotations

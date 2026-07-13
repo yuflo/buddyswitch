@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for shared Chrome DevTools browser lifecycle helpers."""
 
 from __future__ import annotations

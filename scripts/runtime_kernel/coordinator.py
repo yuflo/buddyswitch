@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime broker coordination policy and runtime lock integration."""
 
 from __future__ import annotations

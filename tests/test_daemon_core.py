@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for daemon core state, lifecycle, and run loop."""
 
 from __future__ import annotations

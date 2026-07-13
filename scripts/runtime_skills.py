@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Materialize active role skills into runtime `.agents/skills` directories."""
 
 from __future__ import annotations

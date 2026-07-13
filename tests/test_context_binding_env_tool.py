@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Context env.tool integration tests."""
 
 from __future__ import annotations

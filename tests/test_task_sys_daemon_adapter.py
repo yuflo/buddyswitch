@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the Task Sys-owned daemon application-command adapter."""
 
 from __future__ import annotations

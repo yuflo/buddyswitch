@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Product-neutral host runtime facts exposed to daemon handlers."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Shared actor actor_private descriptor helpers."""
 
 from __future__ import annotations

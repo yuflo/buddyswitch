@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runless manifest contract checks."""
 
 from __future__ import annotations

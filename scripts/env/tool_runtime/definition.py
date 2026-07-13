@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime tool protocol definitions and validation."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """BuddySwitch runless env object store for durable collaboration objects."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Schema contract coverage for env.tool action definitions."""
 
 from __future__ import annotations

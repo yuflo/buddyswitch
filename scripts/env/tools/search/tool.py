@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Black-box protocol entrypoint for env.tools.search."""
 
 from __future__ import annotations

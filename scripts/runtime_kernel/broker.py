@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime broker CLI and v2 request dispatcher."""
 
 from __future__ import annotations

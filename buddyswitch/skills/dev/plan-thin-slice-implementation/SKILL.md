@@ -17,7 +17,7 @@ description: Use when Dev needs to turn non-trivial approved scope into the smal
 ## Inputs
 - Approved scope, acceptance criteria, non-goals, and locked source root.
 - Existing source clues, failing behavior, and local verification commands.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Restate the target as the smallest verifiable slice that materially advances the approved outcome.

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Execute Task Sys runtime instructions with generic launcher actuators."""
 
 from __future__ import annotations

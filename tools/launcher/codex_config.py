@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Patch CODEX_HOME/config.toml with BuddySwitch-managed automation permissions."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Deterministic artifact selection for Track-related Artifact inputs."""
 
 from __future__ import annotations

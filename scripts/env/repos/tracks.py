@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Track repository helpers backed by runtime object files."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Message-owned daemon inbound registration."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """CLI projection for the actor capability product."""
 
 from __future__ import annotations

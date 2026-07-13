@@ -18,7 +18,7 @@ description: Use when Dev needs to choose focused local proof for changed source
 ## Inputs
 - Changed files and behavior intent.
 - Local project scripts/configs (tests/lint/typecheck/build).
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Inspect project hints (`package.json`, test configs, makefiles, CI scripts).

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for browser cockpit subcommands on the BuddySwitch launcher."""
 
 from __future__ import annotations

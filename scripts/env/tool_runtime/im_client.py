@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Actor-side projection client for the Central IM product service."""
 
 from __future__ import annotations

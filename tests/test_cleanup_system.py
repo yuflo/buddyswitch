@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Cleanup backend tests for active collaboration surfaces."""
 
 from __future__ import annotations

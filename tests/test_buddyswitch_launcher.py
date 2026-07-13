@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Regression tests for the BuddySwitch root launcher."""
 
 from __future__ import annotations
@@ -357,7 +356,8 @@ class BuddySwitchLauncherTests(unittest.TestCase):
 set -euo pipefail
 source tools/launcher/env.sh
 PATH="$1"
-export BUDDYSWITCH_PYTHON="/ignored/inherited/interpreter"
+python_env_name="BUDDYSWITCH_PYTHON"
+export "${python_env_name}=/ignored/inherited/interpreter"
 buddyswitch_resolve_python
 printf '%s\n' "$BUDDYSWITCH_PYTHON"
 '''
@@ -2565,7 +2565,7 @@ exec "$real_git" "$@"
             self.assertIn("search__status", completed.stderr)
             self.assertNotIn("search__open_browser", completed.stderr)
             self.assertNotIn("search.open_browser", completed.stderr)
-            self.assertIn("${BUDDYSWITCH_PYTHON} scripts/turn_runtime.py status", completed.stderr)
+            self.assertIn('"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status', completed.stderr)
             self.assertNotIn("Use native BuddySwitch env MCP tool: search__open_browser", completed.stderr)
             self.assertNotIn("${BUDDYSWITCH_PYTHON} scripts/env/client.py", completed.stderr)
             self.assertNotIn("search open-browser --query", completed.stderr)

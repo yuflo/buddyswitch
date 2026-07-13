@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """External-user Central IM reply loop acceptance tests."""
 
 from __future__ import annotations

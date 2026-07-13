@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """BuddySwitch env.tool stdio MCP server."""
 
 from __future__ import annotations

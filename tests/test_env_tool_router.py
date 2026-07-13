@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Contract tests for registry-based env.tool dispatch."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Live-surface residue checks for the Task Sys rebuild."""
 
 from __future__ import annotations

@@ -19,7 +19,7 @@ description: Use when Dev must publish a durable product-readable implementation
 - Changed files under locked source root.
 - Verification outputs (or blocked verification details).
 - Relevant acceptance/design references.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Summarize task and implemented behavior.

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Artifact services aligned to draft-first publication model."""
 
 from __future__ import annotations

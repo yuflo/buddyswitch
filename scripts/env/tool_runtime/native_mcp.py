@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Native MCP projection for BuddySwitch env.tool actions."""
 
 from __future__ import annotations

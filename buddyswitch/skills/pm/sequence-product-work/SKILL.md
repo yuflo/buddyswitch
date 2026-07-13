@@ -19,7 +19,7 @@ description: Use when PM must order product, market, design, dev, and test work 
 
 ## Inputs
 - Scope, requirements, known dependencies, owner constraints, risks, proof needs, current track state, and artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Identify the blocking dependency and the smallest sequence that can move the track forward.

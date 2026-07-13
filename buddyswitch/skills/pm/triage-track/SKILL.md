@@ -19,7 +19,7 @@ description: Use when a PM-owned track is stale, cluttered, blocked, missing pro
 
 ## Inputs
 - Track state, shared materials, close proof, updates, tasks, comments, current owner, and artifact bodies.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Use `track.open` to identify current shared state, materials, proof, tasks, and updates.

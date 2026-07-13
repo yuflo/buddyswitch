@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Identity-owned env.tool runtime context tests."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Read-only artifact visibility decisions backed by repo reads."""
 
 from __future__ import annotations

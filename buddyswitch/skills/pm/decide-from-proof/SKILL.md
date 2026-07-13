@@ -19,7 +19,7 @@ description: Use when PM must decide continue, revise, send back, stop, or block
 
 ## Inputs
 - Test proof, validation evidence, acceptance criteria, dev report, current track state, artifact bodies, and known risks.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`, and runtime response fields.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`, and runtime response fields.
 
 ## Steps
 1. Read proof body with `artifact.get` and current shared state with `track.open`.

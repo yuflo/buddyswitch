@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Fake codex executable for BuddySwitch launcher tests."""
 
 from __future__ import annotations

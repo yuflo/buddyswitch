@@ -24,7 +24,7 @@ Validate behavior, report pass/fail/blocked outcomes, and persist test evidence 
 ## Runtime Discovery
 
 - Start with the native BuddySwitch env context summary tool when runtime context is needed.
-- For exact action payload keys and response fields, use native tool schemas, `context.get.tool_catalog`, or `python3 scripts/turn_runtime.py status`; the runtime tool catalog is authoritative.
+- For exact action payload keys and response fields, use native tool schemas, `context.get.tool_catalog`, or `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`; the runtime tool catalog is authoritative.
 
 ## Durable Output Targets
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for capability-aware side-thread creation."""
 
 from __future__ import annotations

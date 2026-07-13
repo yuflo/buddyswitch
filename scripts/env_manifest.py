@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Load and validate the BuddySwitch env manifest.
 
 Manifest skill entries define role membership and package paths.

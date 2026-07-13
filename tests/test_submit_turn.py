@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the launcher-owned shared submit-turn helper."""
 
 from __future__ import annotations

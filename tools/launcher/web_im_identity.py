@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Stable server-owned IM identity for the Web Management interface."""
 
 from __future__ import annotations

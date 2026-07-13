@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Regression contract for runless BuddySwitch runtime architecture."""
 
 from __future__ import annotations

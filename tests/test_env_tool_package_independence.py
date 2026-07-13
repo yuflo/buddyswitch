@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Architecture tests for black-box env.tool package independence."""
 
 from __future__ import annotations

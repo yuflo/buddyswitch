@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Launcher-owned browser runtime lifecycle manager."""
 
 from __future__ import annotations

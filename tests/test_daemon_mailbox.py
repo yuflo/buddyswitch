@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for instance daemon signal mailbox delivery."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the daemon service handler contract and runtime."""
 
 from __future__ import annotations

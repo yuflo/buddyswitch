@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Daemon trigger normalization helpers."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Env store V1 contract tests for artifact collaboration page model."""
 
 from __future__ import annotations

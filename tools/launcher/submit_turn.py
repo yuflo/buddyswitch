@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Launcher-owned shared submit-turn helper."""
 
 from __future__ import annotations

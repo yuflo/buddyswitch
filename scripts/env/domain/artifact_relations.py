@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Derived artifact relation/backlink helpers built from existing runtime objects."""
 
 from __future__ import annotations

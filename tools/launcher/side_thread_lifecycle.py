@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Concrete owner for BuddySwitch side-thread lifecycle operations."""
 
 from __future__ import annotations

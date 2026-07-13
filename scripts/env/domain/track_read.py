@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Read-only Track projections shared by Web and runtime tools."""
 
 from __future__ import annotations

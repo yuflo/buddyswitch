@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Integration tests for PM/product artifact relation route."""
 
 from __future__ import annotations

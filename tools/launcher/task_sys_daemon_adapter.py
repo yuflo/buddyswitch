@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Task Sys-owned adapter between generic daemon commands and Task runtime."""
 
 from __future__ import annotations

@@ -16,7 +16,7 @@ description: Use when Dev must evaluate and address technical review feedback on
 
 ## Inputs
 - Review feedback, requirements, changed files, and current verification evidence.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Read the feedback fully before touching code.

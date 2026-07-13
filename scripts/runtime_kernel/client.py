@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime broker v2 client for product-mode env.tool and health methods."""
 
 from __future__ import annotations

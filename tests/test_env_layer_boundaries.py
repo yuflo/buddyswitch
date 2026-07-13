@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Phase 8 boundary tests for env layer workspace and state access."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Client helpers for central daemon and instance mailbox sockets."""
 
 from __future__ import annotations

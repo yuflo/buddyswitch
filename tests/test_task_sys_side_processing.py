@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for Task Sys side-processing state transitions and tool surface."""
 
 from __future__ import annotations

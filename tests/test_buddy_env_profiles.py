@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for role env profile contract and profile matrix."""
 
 from __future__ import annotations

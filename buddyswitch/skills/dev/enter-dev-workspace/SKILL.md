@@ -18,7 +18,7 @@ description: Use when Dev starts source exploration, implementation, bug fixing,
 ## Inputs
 - `context.summarize` first, then `context.get` if `source_workspace` is missing.
 - `source_workspace.path`, `source_workspace.access`, `source_workspace.can_write_source`, `source_workspace.state`.
-- Runtime contract references: `context.get.tool_catalog` and `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog` and `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Use native `context__summarize` to read current runtime context.

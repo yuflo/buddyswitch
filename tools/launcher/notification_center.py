@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Source-native inbound registration for daemon notify infrastructure."""
 
 from __future__ import annotations

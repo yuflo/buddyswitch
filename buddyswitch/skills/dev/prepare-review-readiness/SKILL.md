@@ -19,7 +19,7 @@ description: Use when Dev hands completed work to Test/review and needs a focuse
 - Implementation report or equivalent changed-file summary.
 - Verification evidence.
 - Known risks and open questions.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. State the main path under review.

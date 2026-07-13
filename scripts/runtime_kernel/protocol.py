@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime broker v2 framing and envelope utilities."""
 
 from __future__ import annotations

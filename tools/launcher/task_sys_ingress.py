@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Launcher-side ingress helpers for Task Sys."""
 
 from __future__ import annotations

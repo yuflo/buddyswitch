@@ -17,7 +17,7 @@ description: Use when the locked runtime source root state is missing, empty, or
 ## Inputs
 - Locked source root path and `source_workspace.state`.
 - User request plus PM/PRD/approved artifact scope.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Evaluate state exactly:

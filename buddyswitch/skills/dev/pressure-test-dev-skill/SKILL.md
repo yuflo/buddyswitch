@@ -16,7 +16,7 @@ description: Use when Dev creates or changes a dev skill and needs proof that th
 
 ## Inputs
 - Skill goal, changed guidance, target behaviors, and available checks or scenarios.
-- Runtime contract references: `context.get.tool_catalog`, `python3 scripts/turn_runtime.py status`.
+- Runtime contract references: `context.get.tool_catalog`, `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## Steps
 1. Define one or more pressure scenario prompts that expose the behavior the skill should change.

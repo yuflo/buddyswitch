@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Architecture and boundary tests for daemon core decoupling."""
 
 from __future__ import annotations

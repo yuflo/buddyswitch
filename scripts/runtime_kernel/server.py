@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runtime broker v2 Unix socket server with bounded request isolation."""
 
 from __future__ import annotations

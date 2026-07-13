@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Registry, discovery, projection, and dispatch for black-box env.tool runtime."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Load and validate BuddySwitch role environment profiles."""
 
 from __future__ import annotations

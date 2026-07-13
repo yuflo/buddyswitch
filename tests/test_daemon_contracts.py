@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Behavior and source-boundary tests for stable daemon contracts."""
 
 from __future__ import annotations

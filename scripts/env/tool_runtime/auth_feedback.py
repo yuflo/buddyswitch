@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Standard auth-denied feedback for env.tool pre-dispatch role auth."""
 
 from __future__ import annotations

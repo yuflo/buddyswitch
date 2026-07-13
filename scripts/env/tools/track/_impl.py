@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Track-page services for broker-routed env.tool operations."""
 
 from __future__ import annotations

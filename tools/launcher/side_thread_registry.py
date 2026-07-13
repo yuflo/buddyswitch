@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Side-thread registry helper for BuddySwitch instances."""
 
 from __future__ import annotations

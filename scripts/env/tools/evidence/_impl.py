@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Target-scoped evidence services for runless runtime."""
 
 from __future__ import annotations

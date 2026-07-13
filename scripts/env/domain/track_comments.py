@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Track comment attention and prompt rules."""
 
 from __future__ import annotations
