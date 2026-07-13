@@ -12,6 +12,7 @@ import unittest
 from itertools import count
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -390,8 +391,9 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self._patch_pid_live({4321})
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4321)
 
-            first = self.core.start_daemon(instance["instance_json"])
-            second = self.core.start_daemon(instance["instance_json"])
+            with patch.dict(os.environ, {"BUDDYSWITCH_PYTHON": "/configured/runtime/python"}, clear=False):
+                first = self.core.start_daemon(instance["instance_json"])
+                second = self.core.start_daemon(instance["instance_json"])
 
             self.assertTrue(first["started"])
             self.assertFalse(second["started"])
@@ -400,7 +402,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertTrue(first["ready"])
             self.assertTrue(second["ready"])
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][0], self.core.sys.executable)
+            self.assertEqual(commands[0][0], "/configured/runtime/python")
             self.assertEqual(Path(commands[0][1]).resolve(), INSTANCE_DAEMON_PATH.resolve())
             self.assertEqual(commands[0][2:], ["run", "--instance-json", str(instance["instance_json"])])
             self.assertTrue(self.core.daemon_pid_file(instance["instance_root"]).exists())

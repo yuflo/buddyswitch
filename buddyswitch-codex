@@ -181,7 +181,7 @@ start_codex() {
   fi
 
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${actor_id}" "${role}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" "${instance_json}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${role}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" "${instance_json}" <<'PY'
 import json
 import sys
 
@@ -284,7 +284,7 @@ start_locked_bootstrap() {
   buddyswitch_workspace_repair_runtime_projects_app_projection
   buddyswitch_instance_ensure_private_writable_surface
   buddyswitch_instance_activate "${requested_actor_id}" "${requested_role}" "inactive" >/dev/null
-  python3 "${ACTOR_CAPABILITY_CLI_HELPER}" seed --instance-json "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null
+  "${BUDDYSWITCH_PYTHON}" "${ACTOR_CAPABILITY_CLI_HELPER}" seed --instance-json "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null
   buddyswitch_runtime_broker_ensure
   buddyswitch_patch_codex_config
   if ! buddyswitch_env_mcp_ensure; then
@@ -314,7 +314,7 @@ start_locked_bootstrap() {
     return 1
   }
   thread_id="$(
-    python3 - "${thread_json}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${thread_json}" <<'PY'
 import json
 import sys
 
@@ -439,7 +439,7 @@ instance_input() {
 
   output="$(
     BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state" \
-    python3 "${TASK_SYS_INGRESS_HELPER}" user-input \
+    "${BUDDYSWITCH_PYTHON}" "${TASK_SYS_INGRESS_HELPER}" user-input \
       --actor-id "${actor_id}" \
       --role-id "${role_id}" \
       --thread-id "${thread_id}" \
@@ -452,7 +452,7 @@ instance_input() {
     return 1
   }
   instruction_json="$(
-    python3 - "${output}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
 import json
 import sys
 
@@ -464,7 +464,7 @@ print(json.dumps(instruction, ensure_ascii=True))
 PY
   )" || return 1
   runtime_output="$(
-    python3 "${TASK_SYS_RUNTIME_CLIENT_HELPER}" execute \
+    "${BUDDYSWITCH_PYTHON}" "${TASK_SYS_RUNTIME_CLIENT_HELPER}" execute \
       --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}" \
       --instruction-json "${instruction_json}" 2>&1
   )" || {
@@ -473,7 +473,7 @@ PY
   }
 
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${output}" "${runtime_output}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" "${runtime_output}" <<'PY'
 import json
 import sys
 
@@ -484,7 +484,7 @@ PY
     return 0
   fi
   task_id="$(
-    python3 - "${output}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
 import json
 import sys
 
@@ -500,7 +500,7 @@ PY
 instance_side_print_start_result() {
   local output="$1" actor_id="$2" parent_thread_id="$3" side_thread_id="$4" json="$5"
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
 import json
 import sys
 
@@ -536,7 +536,7 @@ PY
 instance_side_print_send_result() {
   local output="$1" actor_id="$2" parent_thread_id="$3" side_thread_id="$4" json="$5"
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
 import json
 import sys
 
@@ -636,7 +636,7 @@ instance_side() {
     return 1
   }
   side_thread_id="$(
-    python3 - "${output}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
 import json
 import sys
 
@@ -717,7 +717,7 @@ instance_side_cleanup() {
   }
 
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
 import json
 import sys
 
@@ -752,7 +752,7 @@ instance_goal_print_json() {
   local thread_id="$3"
   local action="$4"
 
-  python3 - "${output}" "${actor_id}" "${thread_id}" "${action}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${thread_id}" "${action}" <<'PY'
 import json
 import sys
 
@@ -874,7 +874,7 @@ instance_goal() {
     return 0
   fi
 
-  python3 - "${output}" "${action}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${output}" "${action}" <<'PY'
 import json
 import sys
 
@@ -918,7 +918,7 @@ instance_compact() {
     return 1
   }
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${output}" "${actor_id}" "${thread_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${thread_id}" <<'PY'
 import json
 import sys
 
@@ -961,7 +961,7 @@ instance_clear() {
     return 1
   }
   new_thread_id="$(
-    python3 - "${output}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
 import json
 import sys
 
@@ -996,7 +996,7 @@ PY
     return 1
   fi
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${actor_id}" "${previous_thread_id}" "${new_thread_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${previous_thread_id}" "${new_thread_id}" <<'PY'
 import json
 import sys
 
@@ -1048,7 +1048,7 @@ instance_attach() {
     return 1
   }
   resumed_thread_id="$(
-    python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${output}"
+    "${BUDDYSWITCH_PYTHON}" -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${output}"
   )" || {
     echo "thread/resume returned invalid JSON for ${thread_id}" >&2
     return 1
@@ -1105,7 +1105,7 @@ instance_resume() {
     return 0
   fi
 
-  python3 - "${payload}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${payload}" <<'PY'
 import json
 import sys
 
@@ -1139,7 +1139,7 @@ instance_resume_locked() {
       echo "Daemon start failed for ${actor_id}." >&2
       return 1
     fi
-    python3 - "${actor_id}" "${thread_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${thread_id}" <<'PY'
 import json
 import sys
 
@@ -1185,7 +1185,7 @@ PY
   }
 
   resumed_thread_id="$(
-    python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${resume_json}"
+    "${BUDDYSWITCH_PYTHON}" -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${resume_json}"
   )" || {
     echo "thread/resume returned invalid JSON for ${thread_id}" >&2
     buddyswitch_app_server_stop || true
@@ -1220,7 +1220,7 @@ PY
     return 1
   fi
 
-  python3 - "${actor_id}" "${thread_id}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${thread_id}" <<'PY'
 import json
 import sys
 
@@ -1260,7 +1260,7 @@ instance_stop() {
     "__locked-instance-set-inactive" \
     "${actor_id}"
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${actor_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" <<'PY'
 import json
 import sys
 
@@ -1290,7 +1290,7 @@ instance_status_json() {
     runtime_broker_status_json='{"healthy": false, "pid": null, "pid_live": false, "socket_path": "", "log_file": "", "log": {"path": "", "exists": false, "size_bytes": 0, "mtime": null, "last_event": null}}'
   fi
   if [[ -n "${thread_id}" ]]; then
-    if python3 - "${app_status_json}" <<'PY'
+    if "${BUDDYSWITCH_PYTHON}" - "${app_status_json}" <<'PY'
 import json
 import sys
 
@@ -1301,7 +1301,7 @@ PY
       thread_json="$(buddyswitch_app_server_thread_read "${thread_id}" 2>/dev/null || true)"
     fi
   fi
-  python3 - "${BUDDYSWITCH_INSTANCE_JSON}" "${app_status_json}" "${daemon_status_json}" "${runtime_broker_status_json}" "${thread_json}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_INSTANCE_JSON}" "${app_status_json}" "${daemon_status_json}" "${runtime_broker_status_json}" "${thread_json}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1370,7 +1370,7 @@ instance_status() {
     return 0
   fi
 
-  python3 - "${payload}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${payload}" <<'PY'
 import json
 import sys
 
@@ -1437,7 +1437,7 @@ instance_interrupt() {
   }
 
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${output}" "${actor_id}" "${thread_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${thread_id}" <<'PY'
 import json
 import sys
 
@@ -1452,7 +1452,7 @@ PY
     return 0
   fi
 
-  python3 - "${output}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
 import json
 import sys
 
@@ -1505,7 +1505,7 @@ instance_delete() {
       fi
       return 1
     fi
-    python3 - "${actor_id}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" <<'PY'
 import json
 import sys
 
@@ -1684,7 +1684,7 @@ env_status() {
   fi
 
   if [[ "${json}" -eq 1 ]]; then
-    python3 - "${BUDDYSWITCH_SHARED_ROOT}" "${instance_count}" "${browser_state}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_SHARED_ROOT}" "${instance_count}" "${browser_state}" <<'PY'
 import json
 import sys
 
@@ -1951,7 +1951,7 @@ fail_unknown_top_level_command() {
 web_main() {
   buddyswitch_central_daemon_ensure || return $?
   local status
-  if python3 "${WEB_MANAGEMENT_HELPER}" "$@"; then
+  if "${BUDDYSWITCH_PYTHON}" "${WEB_MANAGEMENT_HELPER}" "$@"; then
     status=0
   else
     status=$?

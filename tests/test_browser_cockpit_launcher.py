@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import stat
 import subprocess
@@ -22,8 +23,26 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 class BrowserCockpitLauncherTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._isolate_parent_buddyswitch_environment()
         self._kill_temp_buddyswitch_browser_processes()
         self.addCleanup(self._kill_temp_buddyswitch_browser_processes)
+
+    def _isolate_parent_buddyswitch_environment(self) -> None:
+        saved = {
+            key: value
+            for key, value in os.environ.items()
+            if key.startswith("BUDDYSWITCH_") and key != "BUDDYSWITCH_PYTHON"
+        }
+        for key in saved:
+            os.environ.pop(key, None)
+
+        def restore() -> None:
+            for key in list(os.environ):
+                if key.startswith("BUDDYSWITCH_") and key != "BUDDYSWITCH_PYTHON":
+                    os.environ.pop(key, None)
+            os.environ.update(saved)
+
+        self.addCleanup(restore)
 
     def _write_exec(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
@@ -141,7 +160,7 @@ while [[ ${index} -lt ${#args[@]} ]]; do
 done
 
 if [[ -n "${BUDDYSWITCH_TEST_CDP_STATE_FILE:-}" && -f "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" ]]; then
-  python3 - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" "${method}" "${url}" "${connect_timeout}" "${max_time}" "${BUDDYSWITCH_TEST_CDP_CALLS_FILE:-}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" "${method}" "${url}" "${connect_timeout}" "${max_time}" "${BUDDYSWITCH_TEST_CDP_CALLS_FILE:-}" <<'PY'
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -241,7 +260,7 @@ exit 22
 set -euo pipefail
 
 if [[ -n "${BUDDYSWITCH_TEST_CHROME_ARGV_FILE:-}" ]]; then
-  python3 - "${BUDDYSWITCH_TEST_CHROME_ARGV_FILE}" "$@" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_TEST_CHROME_ARGV_FILE}" "$@" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -255,7 +274,7 @@ PY
 fi
 
 if [[ -n "${BUDDYSWITCH_TEST_CDP_STATE_FILE:-}" && -f "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" ]]; then
-  python3 - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -271,7 +290,7 @@ if [[ -n "${BUDDYSWITCH_TEST_BROWSER_READY_FILE:-}" ]]; then
   touch "${BUDDYSWITCH_TEST_BROWSER_READY_FILE}"
 fi
 if [[ "${BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP:-0}" == "1" ]]; then
-  python3 - "$@" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "$@" <<'PY'
 import base64
 import hashlib
 import json
@@ -495,11 +514,17 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
 """,
         )
 
-    def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path) -> None:
+    def _expected_python_for_env(self, env: dict[str, str]) -> str:
+        expected_python = shutil.which("python", path=env["PATH"])
+        self.assertIsNotNone(expected_python)
+        assert expected_python is not None
+        return expected_python
+
+    def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path, *, expected_python: str) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
         self.assertIn("--", argv)
         separator_index = argv.index("--")
-        self.assertEqual(argv[separator_index + 1], "python3")
+        self.assertEqual(argv[separator_index + 1], expected_python)
         self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
         self.assertIn("--upstream-command", argv)
         upstream_index = argv.index("--upstream-command")
@@ -1160,12 +1185,11 @@ sleep 60
             (instance_codex_home / "config.toml").write_text(
                 """
 [mcp_servers.chrome-devtools-cockpit]
-command = "npx"
+command = "/stale/runtime/python"
 args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
 """.lstrip(),
                 encoding="utf-8",
             )
-
             completed = subprocess.run(
                 [str(LAUNCHER), "env", "browser", "ensure", "--instance", actor_id],
                 cwd=ROOT,

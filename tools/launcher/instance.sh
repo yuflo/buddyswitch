@@ -67,10 +67,10 @@ buddyswitch_instance_buddies() {
   done
 
   if [[ "${json}" -eq 1 ]]; then
-    python3 "${REPO_ROOT}/scripts/env_manifest.py" list-roles --json
+    "${BUDDYSWITCH_PYTHON}" "${REPO_ROOT}/scripts/env_manifest.py" list-roles --json
     return 0
   fi
-  python3 "${REPO_ROOT}/scripts/env_manifest.py" list-roles
+  "${BUDDYSWITCH_PYTHON}" "${REPO_ROOT}/scripts/env_manifest.py" list-roles
 }
 
 buddyswitch_instance_start() {
@@ -137,7 +137,7 @@ buddyswitch_instance_list() {
 
   while IFS= read -r instance_json; do
     meta="$(
-      python3 - "${instance_json}" "${role_filter}" <<'PY'
+      "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${role_filter}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -165,7 +165,7 @@ PY
       actor_id="${meta#*$'\t'}"
       if [[ "${json}" -eq 1 ]]; then
         row_json="$(
-          python3 - "${actor_id%%$'\t'*}" "${actor_id#*$'\t'}" <<'PY'
+          "${BUDDYSWITCH_PYTHON}" - "${actor_id%%$'\t'*}" "${actor_id#*$'\t'}" <<'PY'
 import json
 import sys
 
@@ -193,7 +193,7 @@ PY
     status_json="$(instance_status_json "${actor_id}")" || return $?
     if [[ "${json}" -eq 1 ]]; then
       row_json="$(
-        python3 - "${status_json}" <<'PY'
+        "${BUDDYSWITCH_PYTHON}" - "${status_json}" <<'PY'
 import json
 import sys
 
@@ -223,7 +223,7 @@ PY
         printf 'actor_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir\n'
         printed_header=1
       fi
-      python3 - "${status_json}" <<'PY'
+      "${BUDDYSWITCH_PYTHON}" - "${status_json}" <<'PY'
 import json
 import sys
 
@@ -254,7 +254,7 @@ PY
       printf '%s\n' '{"instances":[]}'
       return 0
     fi
-    python3 - "${instance_rows[@]}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${instance_rows[@]}" <<'PY'
 import json
 import sys
 
@@ -289,7 +289,7 @@ buddyswitch_instance_record_field() {
   local instance_json
 
   instance_json="$(buddyswitch_instance_record_json "${actor_id}")" || return $?
-  python3 - "${instance_json}" "${actor_id}" "${field_name}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${field_name}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -313,7 +313,7 @@ buddyswitch_instance_validate_record() {
   local instance_json
 
   instance_json="$(buddyswitch_instance_record_json "${actor_id}")" || return $?
-  python3 - "${instance_json}" "${actor_id}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -366,7 +366,7 @@ buddyswitch_instance_require_safe_delete_root() {
 
 buddyswitch_instance_capabilities_emit() {
   local actor_id="$1" output="$2" json="$3"
-  python3 - "${actor_id}" "${output}" "${json}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${output}" "${json}" <<'PY'
 import json
 import sys
 
@@ -469,9 +469,9 @@ buddyswitch_instance_capabilities() {
   buddyswitch_env_bind_instance "${actor_id}" || return $?
 
   if [[ "${action}" == "get" ]]; then
-    output="$(python3 "${ACTOR_CAPABILITY_CLI_HELPER}" get --instance-json "${instance_json}")" || return $?
+    output="$("${BUDDYSWITCH_PYTHON}" "${ACTOR_CAPABILITY_CLI_HELPER}" get --instance-json "${instance_json}")" || return $?
   else
-    output="$(python3 "${ACTOR_CAPABILITY_CLI_HELPER}" replace --instance-json "${instance_json}" --parent "${parent_level}" --side "${side_level}")" || return $?
+    output="$("${BUDDYSWITCH_PYTHON}" "${ACTOR_CAPABILITY_CLI_HELPER}" replace --instance-json "${instance_json}" --parent "${parent_level}" --side "${side_level}")" || return $?
   fi
   buddyswitch_instance_capabilities_emit "${actor_id}" "${output}" "${json}"
 }

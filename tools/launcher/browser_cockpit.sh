@@ -145,7 +145,7 @@ buddyswitch_browser_pid_marker() {
 
 buddyswitch_browser_port_is_available() {
   local port="$1"
-  python3 - "${port}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${port}" <<'PY'
 import socket
 import sys
 
@@ -218,7 +218,7 @@ buddyswitch_browser_has_usable_page() {
   local page_targets
 
   page_targets="$(buddyswitch_browser_cdp_curl "$(buddyswitch_browser_url)/json/list")" || return 1
-  python3 - "${page_targets}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${page_targets}" <<'PY'
 import json
 import sys
 
@@ -256,7 +256,7 @@ PY
 }
 
 buddyswitch_browser_create_blank_page() {
-  python3 "${BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL}" \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL}" \
     --browser-url "$(buddyswitch_browser_url)" \
     --url about:blank >/dev/null
 }
@@ -323,25 +323,13 @@ buddyswitch_browser_disable_cockpit_mcp() {
   return 0
 }
 
-buddyswitch_browser_mcp_browser_url() {
-  buddyswitch_browser_mcp_arg_value "$1" "--browser-url"
-}
-
-buddyswitch_browser_mcp_instance_root() {
-  buddyswitch_browser_mcp_arg_value "$1" "--instance-root"
-}
-
-buddyswitch_browser_mcp_upstream_command() {
-  buddyswitch_browser_mcp_arg_value "$1" "--upstream-command"
-}
-
-buddyswitch_browser_mcp_broker_socket() {
-  buddyswitch_browser_mcp_arg_value "$1" "--broker-socket"
-}
-
-buddyswitch_browser_mcp_arg_value() {
+buddyswitch_browser_mcp_matches_cockpit_desired_state() {
   local server_name="$1"
-  local flag="$2"
+  local expected_python="$2"
+  local proxy_path="$3"
+  local upstream_command="$4"
+  local expected_broker_socket="$5"
+  local expected_instance_root="$6"
   local config_path
 
   config_path="$(buddyswitch_codex_config_path)"
@@ -349,14 +337,18 @@ buddyswitch_browser_mcp_arg_value() {
     return 1
   fi
 
-  python3 - "${config_path}" "${server_name}" "${flag}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${config_path}" "${server_name}" "${expected_python}" "${proxy_path}" "${upstream_command}" "${expected_broker_socket}" "${expected_instance_root}" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
 server_name = sys.argv[2]
-flag = sys.argv[3]
+expected_python = sys.argv[3]
+proxy_path = sys.argv[4]
+upstream_command = sys.argv[5]
+expected_broker_socket = sys.argv[6]
+expected_instance_root = sys.argv[7]
 
 try:
     payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -370,43 +362,24 @@ server = servers.get(server_name)
 if not isinstance(server, dict):
     raise SystemExit(1)
 args = server.get("args")
-if not isinstance(args, list):
+if server.get("command") != expected_python or not isinstance(args, list):
     raise SystemExit(1)
 
-for index, arg in enumerate(args):
-    if not isinstance(arg, str):
-        continue
-    if arg == flag and index + 1 < len(args) and isinstance(args[index + 1], str):
-        print(args[index + 1])
-        raise SystemExit(0)
-    prefix = f"{flag}="
-    if arg.startswith(prefix):
-        print(arg[len(prefix):])
-        raise SystemExit(0)
-raise SystemExit(1)
+expected_args = [
+    proxy_path,
+    "--upstream-command",
+    upstream_command,
+    "--broker-socket",
+    expected_broker_socket,
+    f"--instance-root={expected_instance_root}",
+]
+if args != expected_args:
+    raise SystemExit(1)
 PY
 }
 
-buddyswitch_browser_mcp_uses_cockpit_proxy() {
-  local server_name="$1"
-  local config_path section
-
-  config_path="$(buddyswitch_codex_config_path)"
-  if [[ ! -f "${config_path}" ]]; then
-    return 1
-  fi
-
-  section="[mcp_servers.${server_name}]"
-  awk -v section="${section}" '
-    $0 == section { in_section = 1; next }
-    /^\[/ && in_section { exit }
-    in_section && /chrome_devtools_cockpit_proxy\.py/ { found = 1 }
-    END { exit found ? 0 : 1 }
-  ' "${config_path}"
-}
-
 buddyswitch_browser_ensure_cockpit_mcp() {
-  local server_name expected_broker_socket expected_instance_root recorded_browser_url recorded_broker_socket recorded_instance_root recorded_upstream_command upstream_command
+  local server_name expected_broker_socket expected_instance_root upstream_command
 
   server_name="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"
   expected_instance_root="$(buddyswitch_browser_instance_root)"
@@ -418,15 +391,13 @@ buddyswitch_browser_ensure_cockpit_mcp() {
   fi
 
   if buddyswitch_browser_has_mcp_server "${server_name}"; then
-    recorded_browser_url="$(buddyswitch_browser_mcp_browser_url "${server_name}" || true)"
-    recorded_broker_socket="$(buddyswitch_browser_mcp_broker_socket "${server_name}" || true)"
-    recorded_instance_root="$(buddyswitch_browser_mcp_instance_root "${server_name}" || true)"
-    recorded_upstream_command="$(buddyswitch_browser_mcp_upstream_command "${server_name}" || true)"
-    if [[ -z "${recorded_browser_url}" ]] \
-      && [[ "${recorded_broker_socket}" == "${expected_broker_socket}" ]] \
-      && [[ "${recorded_instance_root}" == "${expected_instance_root}" ]] \
-      && [[ "${recorded_upstream_command}" == "${upstream_command}" ]] \
-      && buddyswitch_browser_mcp_uses_cockpit_proxy "${server_name}"; then
+    if buddyswitch_browser_mcp_matches_cockpit_desired_state \
+      "${server_name}" \
+      "${BUDDYSWITCH_PYTHON}" \
+      "${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" \
+      "${upstream_command}" \
+      "${expected_broker_socket}" \
+      "${expected_instance_root}"; then
       return 0
     fi
     buddyswitch_browser_remove_mcp_server "${server_name}"
@@ -434,7 +405,7 @@ buddyswitch_browser_ensure_cockpit_mcp() {
 
   buddyswitch_browser_add_mcp_server \
     "${server_name}" \
-    python3 \
+    "${BUDDYSWITCH_PYTHON}" \
     "${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" \
     --upstream-command "${upstream_command}" \
     --broker-socket "${expected_broker_socket}" \
@@ -485,7 +456,7 @@ buddyswitch_browser_instance_endpoint_is_active() {
   local browser_port
 
   browser_port="$(
-    python3 - "${instance_json}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${instance_json}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -507,7 +478,7 @@ _buddyswitch_browser_instance_recorded_port() {
   local actor_id="$1"
   local instance_json="${BUDDYSWITCH_SHARED_ROOT}/instances/${actor_id}/instance.json"
 
-  python3 - "${instance_json}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -588,7 +559,7 @@ buddyswitch_browser_any_recorded_instance_endpoint_is_active() {
       continue
     fi
     browser_port="$(
-      python3 - "${instance_json}" <<'PY'
+      "${BUDDYSWITCH_PYTHON}" - "${instance_json}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -653,7 +624,7 @@ buddyswitch_browser_admin_status() {
 }
 
 buddyswitch_browser_manager_cli() {
-  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/browser_runtime_manager.py" "$@"
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/browser_runtime_manager.py" "$@"
 }
 
 buddyswitch_browser_manager_stop_instance() {
@@ -681,7 +652,7 @@ buddyswitch_browser_active_role() {
     return 0
   fi
   if [[ -n "${BUDDYSWITCH_INSTANCE_JSON:-}" && -f "${BUDDYSWITCH_INSTANCE_JSON}" ]]; then
-    python3 - "${BUDDYSWITCH_INSTANCE_JSON}" <<'PY'
+    "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_INSTANCE_JSON}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -701,7 +672,7 @@ buddyswitch_browser_profile_capability() {
   if [[ -z "${role_id}" ]]; then
     return 1
   fi
-  python3 - "${BUDDYSWITCH_REPO_ROOT}" "${role_id}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_REPO_ROOT}" "${role_id}" <<'PY'
 import sys
 from pathlib import Path
 

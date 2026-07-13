@@ -794,7 +794,7 @@ def start_daemon(
     state.save()
 
     command = [
-        sys.executable,
+        os.environ["BUDDYSWITCH_PYTHON"],
         str(INSTANCE_DAEMON_ENTRYPOINT.resolve()),
         "run",
         "--instance-json",

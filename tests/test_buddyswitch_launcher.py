@@ -108,6 +108,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        self._isolate_parent_buddyswitch_environment()
         self._cleanup_temp_buddyswitch_browser_processes()
         self._process_registry_tmp = tempfile.TemporaryDirectory(prefix="buddyswitch-launcher-procs-")
         self._process_registry_path = Path(self._process_registry_tmp.name) / "processes.jsonl"
@@ -129,6 +130,23 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         self.addCleanup(self._cleanup_temp_buddyswitch_browser_processes)
         self._cleanup_repo_relative_sentinels()
         self.addCleanup(self._cleanup_repo_relative_sentinels)
+
+    def _isolate_parent_buddyswitch_environment(self) -> None:
+        saved = {
+            key: value
+            for key, value in os.environ.items()
+            if key.startswith("BUDDYSWITCH_") and key != "BUDDYSWITCH_PYTHON"
+        }
+        for key in saved:
+            os.environ.pop(key, None)
+
+        def restore() -> None:
+            for key in list(os.environ):
+                if key.startswith("BUDDYSWITCH_") and key != "BUDDYSWITCH_PYTHON":
+                    os.environ.pop(key, None)
+            os.environ.update(saved)
+
+        self.addCleanup(restore)
 
     @classmethod
     def _cleanup_repo_relative_sentinels(cls) -> None:
@@ -244,6 +262,10 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             shared_root_resolved,
             str(repo_git_common_dir),
         ]
+        expected_python = os.environ.get("BUDDYSWITCH_PYTHON")
+        if expected_python:
+            allowed_paths.append(expected_python)
+            allowed_paths.append(str(Path(expected_python).resolve(strict=False)))
         if not profile_mode:
             allowed_paths.extend(
                 [
@@ -269,11 +291,24 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         else:
             self.assertNotIn(repo_root_resolved, config_text.replace(str(repo_git_common_dir), ""))
 
-    def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path, *, broker_socket: str) -> None:
+    def _expected_python_for_env(self, env: dict[str, str]) -> str:
+        expected_python = shutil.which("python", path=env["PATH"])
+        self.assertIsNotNone(expected_python)
+        assert expected_python is not None
+        return expected_python
+
+    def _assert_cockpit_proxy_registration(
+        self,
+        argv: list[object],
+        instance_root: Path,
+        *,
+        expected_python: str,
+        broker_socket: str,
+    ) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
         self.assertIn("--", argv)
         separator_index = argv.index("--")
-        self.assertEqual(argv[separator_index + 1], "python3")
+        self.assertEqual(argv[separator_index + 1], expected_python)
         self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
         self.assertIn("--upstream-command", argv)
         upstream_index = argv.index("--upstream-command")
@@ -289,6 +324,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         self,
         argv: list[object],
         *,
+        expected_python: str,
         actor_id: str,
         role: str,
         broker_socket: str,
@@ -296,7 +332,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         self.assertEqual(argv[:3], ["mcp", "add", "buddyswitch-env"])
         self.assertIn("--", argv)
         separator_index = argv.index("--")
-        self.assertEqual(argv[separator_index + 1], "python3")
+        self.assertEqual(argv[separator_index + 1], expected_python)
         self.assertIn("tools/launcher/env_tool_mcp_server.py", str(argv[separator_index + 2]))
         self.assertIn("--repo-root", argv)
         self.assertIn(str(ROOT), argv)
@@ -386,6 +422,149 @@ buddyswitch_resolve_python
 
             self.assertNotEqual(completed.returncode, 0)
             self.assertIn("could not execute PATH python", completed.stderr)
+
+    def test_env_mcp_reconciles_stale_interpreter_path_with_resolved_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+
+            codex_home = temp_root_path / "codex-home"
+            calls_path = temp_root_path / "calls.jsonl"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+            expected_python = self._expected_python_for_env(env)
+
+            command = r'''
+set -euo pipefail
+temp_root="$1"
+source_home="$2"
+codex_home="$3"
+source tools/launcher/env.sh
+export BUDDYSWITCH_SOURCE_HOME="${source_home}"
+export BUDDYSWITCH_CODEX_HOME="${codex_home}"
+export BUDDYSWITCH_HOME="${temp_root}/home"
+export BUDDYSWITCH_XDG_CONFIG_HOME="${temp_root}/xdg-config"
+buddyswitch_env_init
+export BUDDYSWITCH_ACTOR_ID="act-pm-env-stale-python"
+export BUDDYSWITCH_ROLE_ID="pm"
+export BUDDYSWITCH_INSTANCE_ROOT="${temp_root}/instance"
+export BUDDYSWITCH_WORKSPACE_DIR="${BUDDYSWITCH_INSTANCE_ROOT}/workspace"
+export BUDDYSWITCH_PROJECT_WORKSPACE_DIR="${PWD}"
+export BUDDYSWITCH_INSTANCE_TMP="${BUDDYSWITCH_INSTANCE_ROOT}/tmp"
+export BUDDYSWITCH_ACTOR_PRIVATE_DIR="${BUDDYSWITCH_WORKSPACE_DIR}/private"
+export BUDDYSWITCH_RUNTIME_BROKER_SOCKET="${BUDDYSWITCH_INSTANCE_ROOT}/runtime/runtime-broker.sock"
+mkdir -p "${BUDDYSWITCH_CODEX_HOME}" "${BUDDYSWITCH_HOME}" "${BUDDYSWITCH_XDG_CONFIG_HOME}" "${BUDDYSWITCH_INSTANCE_TMP}" "${BUDDYSWITCH_WORKSPACE_DIR}"
+cat > "${BUDDYSWITCH_CODEX_HOME}/config.toml" <<EOF
+[mcp_servers.buddyswitch-env]
+command = "/stale/runtime/python"
+args = ["${BUDDYSWITCH_ENV_MCP_SERVER}", "--repo-root", "${BUDDYSWITCH_REPO_ROOT}", "--actor-id", "${BUDDYSWITCH_ACTOR_ID}", "--role", "${BUDDYSWITCH_ROLE_ID}", "--broker-socket", "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}"]
+EOF
+buddyswitch_env_mcp_ensure
+'''
+            completed = subprocess.run(
+                ["/bin/bash", "-c", command, "env-mcp-stale", str(temp_root_path), str(source_home_path), str(codex_home)],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+            call_entries = [
+                json.loads(line)
+                for line in calls_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(any(entry["argv"][:3] == ["mcp", "remove", "buddyswitch-env"] for entry in call_entries))
+            env_mcp_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "buddyswitch-env"])
+            self._assert_env_mcp_registration(
+                env_mcp_add["argv"],
+                expected_python=expected_python,
+                actor_id="act-pm-env-stale-python",
+                role="pm",
+                broker_socket=f"{temp_root_path}/instance/runtime/runtime-broker.sock",
+            )
+
+    def test_browser_mcp_reconciles_stale_interpreter_path_with_resolved_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+
+            codex_home = temp_root_path / "codex-home"
+            calls_path = temp_root_path / "calls.jsonl"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+            expected_python = self._expected_python_for_env(env)
+            broker_socket = f"{temp_root_path}/instance/runtime/runtime-broker.sock"
+
+            command = r'''
+set -euo pipefail
+temp_root="$1"
+source_home="$2"
+codex_home="$3"
+source tools/launcher/env.sh
+source tools/launcher/browser_cockpit.sh
+export BUDDYSWITCH_SOURCE_HOME="${source_home}"
+export BUDDYSWITCH_CODEX_HOME="${codex_home}"
+export BUDDYSWITCH_HOME="${temp_root}/home"
+export BUDDYSWITCH_XDG_CONFIG_HOME="${temp_root}/xdg-config"
+buddyswitch_env_init
+export BUDDYSWITCH_ACTOR_ID="act-pm-browser-stale-python"
+export BUDDYSWITCH_ROLE_ID="pm"
+export BUDDYSWITCH_INSTANCE_ROOT="${temp_root}/instance"
+export BUDDYSWITCH_WORKSPACE_DIR="${BUDDYSWITCH_INSTANCE_ROOT}/workspace"
+export BUDDYSWITCH_PROJECT_WORKSPACE_DIR="${PWD}"
+export BUDDYSWITCH_INSTANCE_TMP="${BUDDYSWITCH_INSTANCE_ROOT}/tmp"
+export BUDDYSWITCH_ACTOR_PRIVATE_DIR="${BUDDYSWITCH_WORKSPACE_DIR}/private"
+export BUDDYSWITCH_RUNTIME_BROKER_SOCKET="${BUDDYSWITCH_INSTANCE_ROOT}/runtime/runtime-broker.sock"
+mkdir -p "${BUDDYSWITCH_CODEX_HOME}" "${BUDDYSWITCH_HOME}" "${BUDDYSWITCH_XDG_CONFIG_HOME}" "${BUDDYSWITCH_INSTANCE_TMP}" "${BUDDYSWITCH_WORKSPACE_DIR}"
+buddyswitch_browser_init_defaults
+cat > "${BUDDYSWITCH_CODEX_HOME}/config.toml" <<EOF
+[mcp_servers.chrome-devtools-cockpit]
+command = "/stale/runtime/python"
+args = ["${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}", "--upstream-command", "npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}", "--broker-socket", "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}", "--instance-root=${BUDDYSWITCH_INSTANCE_ROOT}"]
+EOF
+buddyswitch_browser_ensure_cockpit_mcp
+'''
+            completed = subprocess.run(
+                ["/bin/bash", "-c", command, "browser-mcp-stale", str(temp_root_path), str(source_home_path), str(codex_home)],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+            call_entries = [
+                json.loads(line)
+                for line in calls_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(any(entry["argv"][:3] == ["mcp", "remove", "chrome-devtools-cockpit"] for entry in call_entries))
+            cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
+            self._assert_cockpit_proxy_registration(
+                cockpit_add["argv"],
+                temp_root_path / "instance",
+                expected_python=expected_python,
+                broker_socket=broker_socket,
+            )
+            config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
+            self.assertIn(f'command = "{expected_python}"', config_text)
+            self.assertNotIn("/stale/runtime/python", config_text)
 
     def test_codex_config_patch_removes_prior_misnested_managed_settings_idempotently(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -589,7 +768,7 @@ while [[ ${index} -lt ${#args[@]} ]]; do
 done
 
 if [[ -n "${BUDDYSWITCH_TEST_CDP_STATE_FILE:-}" && -f "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" ]]; then
-  python3 - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" "${method}" "${url}" "${connect_timeout}" "${max_time}" "${BUDDYSWITCH_TEST_CDP_CALLS_FILE:-}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" "${method}" "${url}" "${connect_timeout}" "${max_time}" "${BUDDYSWITCH_TEST_CDP_CALLS_FILE:-}" <<'PY'
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -689,7 +868,7 @@ exit 22
 set -euo pipefail
 
 if [[ -n "${BUDDYSWITCH_TEST_CHROME_ARGV_FILE:-}" ]]; then
-  python3 - "${BUDDYSWITCH_TEST_CHROME_ARGV_FILE}" "$@" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_TEST_CHROME_ARGV_FILE}" "$@" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -703,7 +882,7 @@ PY
 fi
 
 if [[ -n "${BUDDYSWITCH_TEST_CDP_STATE_FILE:-}" && -f "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" ]]; then
-  python3 - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_TEST_CDP_STATE_FILE}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -719,7 +898,7 @@ if [[ -n "${BUDDYSWITCH_TEST_BROWSER_READY_FILE:-}" ]]; then
   touch "${BUDDYSWITCH_TEST_BROWSER_READY_FILE}"
 fi
 if [[ "${BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP:-0}" == "1" ]]; then
-  python3 - "$@" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "$@" <<'PY'
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -2360,7 +2539,7 @@ exec "$real_git" "$@"
             self.assertIn("search__status", completed.stderr)
             self.assertNotIn("search__open_browser", completed.stderr)
             self.assertNotIn("search.open_browser", completed.stderr)
-            self.assertIn("python3 scripts/turn_runtime.py status", completed.stderr)
+            self.assertIn("${BUDDYSWITCH_PYTHON} scripts/turn_runtime.py status", completed.stderr)
             self.assertNotIn("Use native BuddySwitch env MCP tool: search__open_browser", completed.stderr)
             self.assertNotIn("python3 scripts/env/client.py", completed.stderr)
             self.assertNotIn("search open-browser --query", completed.stderr)
@@ -2784,9 +2963,11 @@ exec "$real_git" "$@"
             self.assertIn("buddyswitch-env", mcp_add_names)
             self.assertIn("chrome-devtools-cockpit", mcp_add_names)
             self.assertNotIn("chrome-devtools", mcp_add_names)
+            expected_python = self._expected_python_for_env(env)
             env_mcp_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "buddyswitch-env")
             self._assert_env_mcp_registration(
                 env_mcp_add["argv"],
+                expected_python=expected_python,
                 actor_id=payload["actor_id"],
                 role="pm",
                 broker_socket=str(payload["runtime_broker_socket"]),
@@ -2795,6 +2976,7 @@ exec "$real_git" "$@"
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                expected_python=expected_python,
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
 
@@ -3484,10 +3666,12 @@ exec "$real_git" "$@"
                 for line in calls_path.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ] if calls_path.exists() else []
+            expected_python = self._expected_python_for_env(env)
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                expected_python=expected_python,
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
 
@@ -7390,9 +7574,11 @@ exec "$real_git" "$@"
             ]
             cockpit_add = next(entry for entry in call_entries if entry.get("argv", [])[:3] == ["mcp", "add", "chrome-devtools-cockpit"])
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            expected_python = self._expected_python_for_env(env)
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                expected_python=expected_python,
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", payload["config_toml"])
@@ -7528,9 +7714,11 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
+            expected_python = self._expected_python_for_env(env)
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 instance_root,
+                expected_python=expected_python,
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", payload["config_toml"])
@@ -7744,9 +7932,11 @@ exec "$real_git" "$@"
                 if entry.get("argv", [])[:3] == ["mcp", "add", "chrome-devtools-cockpit"]
             )
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            expected_python = self._expected_python_for_env(env)
             self._assert_cockpit_proxy_registration(
                 timeline[cockpit_mcp_index]["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                expected_python=expected_python,
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertFalse(any(entry.get("path") == "Target.createTarget" for entry in timeline))
@@ -7826,9 +8016,11 @@ exec "$real_git" "$@"
             ]
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             cockpit_add = next(entry for entry in calls if entry.get("argv", [])[:3] == ["mcp", "add", "chrome-devtools-cockpit"])
+            expected_python = self._expected_python_for_env(env)
             self._assert_cockpit_proxy_registration(
                 cockpit_add["argv"],
                 Path(str(payload["instance_json_payload"]["instance_root"])),
+                expected_python=expected_python,
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
             self.assertFalse(any(call.get("path") == "Target.createTarget" for call in calls))
@@ -10755,7 +10947,7 @@ enabled = false
 plugins = false
 
 [mcp_servers.chrome-devtools-cockpit]
-command = "npx"
+command = "/stale/runtime/python"
 args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
 """,
                 encoding="utf-8",
@@ -10857,7 +11049,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
                 instance_codex_home.mkdir(parents=True, exist_ok=True)
                 (instance_codex_home / "config.toml").write_text(
                     f"""[mcp_servers.chrome-devtools-cockpit]
-command = "python3"
+command = "/stale/runtime/python"
 args = {json.dumps(existing_args)}
 """,
                     encoding="utf-8",

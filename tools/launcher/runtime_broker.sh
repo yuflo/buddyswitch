@@ -67,7 +67,7 @@ _buddyswitch_runtime_broker_effective_socket() {
     printf '%s\n' "${default_socket}"
     return 0
   fi
-  fallback_socket="$(python3 - "${BUDDYSWITCH_ACTOR_ID}" <<'PY'
+  fallback_socket="$("${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_ACTOR_ID}" <<'PY'
 import hashlib
 import sys
 actor_id = sys.argv[1]
@@ -91,7 +91,7 @@ _buddyswitch_runtime_broker_lifecycle_json() {
   (
     cd "${BUDDYSWITCH_WORKSPACE_DIR}"
     export BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state"
-    python3 "${broker_script}" "${command}" \
+    "${BUDDYSWITCH_PYTHON}" "${broker_script}" "${command}" \
       --socket "${socket_path}" \
       --pid-file "${pid_file}" \
       --marker-file "${marker_file}" \
@@ -148,7 +148,7 @@ buddyswitch_runtime_broker_status_json() {
     printf '%s\n' "${output}"
     return 0
   fi
-  python3 - "${socket_path}" "${pid_file}" "${marker_path}" "${log_file}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${socket_path}" "${pid_file}" "${marker_path}" "${log_file}" <<'PY'
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -212,7 +212,7 @@ buddyswitch_runtime_broker_ensure() {
     fi
     return 1
   }
-  ensured_socket="$(python3 - "${output}" <<'PY'
+  ensured_socket="$("${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
 import json
 import sys
 try:

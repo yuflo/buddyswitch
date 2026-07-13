@@ -30,7 +30,7 @@ buddyswitch_workspace_init_defaults() {
 }
 
 buddyswitch_workspace_canonical_path() {
-  python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve(strict=False))' "$1"
+  "${BUDDYSWITCH_PYTHON}" -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve(strict=False))' "$1"
 }
 
 buddyswitch_workspace_force_remove_path() {
@@ -747,7 +747,7 @@ buddyswitch_workspace_install_runtime_skills() {
   fi
 
   repo_root="$(buddyswitch_workspace_repo_root)"
-  python3 "${repo_root}/scripts/runtime_skills.py" install \
+  "${BUDDYSWITCH_PYTHON}" "${repo_root}/scripts/runtime_skills.py" install \
     --role "${role_id}" \
     --workspace "${BUDDYSWITCH_WORKSPACE_DIR}"
 }

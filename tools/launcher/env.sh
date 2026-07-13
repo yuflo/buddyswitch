@@ -68,7 +68,7 @@ buddyswitch_with_runtime_lock() {
     echo "Runtime lock helper missing: ${BUDDYSWITCH_RUNTIME_LOCK_HELPER}" >&2
     return 1
   fi
-  python3 "${BUDDYSWITCH_RUNTIME_LOCK_HELPER}" -- "$@"
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_RUNTIME_LOCK_HELPER}" -- "$@"
 }
 
 buddyswitch_require_runtime_lock() {
@@ -76,7 +76,7 @@ buddyswitch_require_runtime_lock() {
     echo "Runtime lock helper missing: ${BUDDYSWITCH_RUNTIME_LOCK_HELPER}" >&2
     return 1
   fi
-  python3 "${BUDDYSWITCH_RUNTIME_LOCK_HELPER}" --assert-held
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_RUNTIME_LOCK_HELPER}" --assert-held
 }
 
 buddyswitch_patch_codex_config() {
@@ -118,7 +118,7 @@ buddyswitch_patch_codex_config() {
     fi
   fi
 
-  python3 "${BUDDYSWITCH_CODEX_CONFIG_HELPER}" \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_CODEX_CONFIG_HELPER}" \
     "${patch_args[@]}" \
     "${temp_root_args[@]}"
 }
@@ -194,22 +194,19 @@ buddyswitch_env_mcp_matches_instance() {
     return 1
   fi
 
-  python3 - "${config_path}" "${server_name}" "${BUDDYSWITCH_ENV_MCP_SERVER}" "${BUDDYSWITCH_REPO_ROOT}" "${BUDDYSWITCH_ACTOR_ID}" "${active_role}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${config_path}" "${server_name}" "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_ENV_MCP_SERVER}" "${BUDDYSWITCH_REPO_ROOT}" "${BUDDYSWITCH_ACTOR_ID}" "${active_role}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" <<'PY'
 import sys
+import tomllib
 from pathlib import Path
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
 
 config_path = Path(sys.argv[1])
 server_name = sys.argv[2]
-server_path = sys.argv[3]
-repo_root = sys.argv[4]
-actor_id = sys.argv[5]
-role = sys.argv[6]
-broker_socket = sys.argv[7]
+expected_python = sys.argv[3]
+server_path = sys.argv[4]
+repo_root = sys.argv[5]
+actor_id = sys.argv[6]
+role = sys.argv[7]
+broker_socket = sys.argv[8]
 
 try:
     payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -220,10 +217,10 @@ server = payload.get("mcp_servers", {}).get(server_name)
 if not isinstance(server, dict):
     raise SystemExit(1)
 args = server.get("args")
-if server.get("command") != "python3" or not isinstance(args, list):
+if server.get("command") != expected_python or not isinstance(args, list):
     raise SystemExit(1)
 
-required = [
+expected_args = [
     server_path,
     "--repo-root",
     repo_root,
@@ -234,9 +231,8 @@ required = [
     "--broker-socket",
     broker_socket,
 ]
-for value in required:
-    if value not in args:
-        raise SystemExit(1)
+if args != expected_args:
+    raise SystemExit(1)
 PY
 }
 
@@ -264,7 +260,7 @@ buddyswitch_env_mcp_add_server() {
   fi
 
   buddyswitch_run_codex mcp add "${server_name}" -- \
-    python3 \
+    "${BUDDYSWITCH_PYTHON}" \
     "${BUDDYSWITCH_ENV_MCP_SERVER}" \
     --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
     --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
@@ -307,7 +303,7 @@ buddyswitch_validate_role_id() {
     return 1
   fi
 
-  python3 "${manifest_helper}" --manifest "${manifest_path}" show-role "${role_id}" >/dev/null
+  "${BUDDYSWITCH_PYTHON}" "${manifest_helper}" --manifest "${manifest_path}" show-role "${role_id}" >/dev/null
 }
 
 buddyswitch_require_env_profile() {
@@ -321,7 +317,7 @@ buddyswitch_require_env_profile() {
     echo "Env profile helper missing: ${helper}" >&2
     return 1
   fi
-  python3 "${helper}" --manifest "${manifest_path}" validate --role "${role_id}" >/dev/null
+  "${BUDDYSWITCH_PYTHON}" "${helper}" --manifest "${manifest_path}" validate --role "${role_id}" >/dev/null
 }
 
 buddyswitch_role_agents_template_path() {
@@ -392,7 +388,7 @@ buddyswitch_instance_ensure_private_writable_surface() {
 
 buddyswitch_generate_actor_id() {
   local role="$1"
-  python3 -c 'import sys, uuid; print(f"act-{sys.argv[1]}-{uuid.uuid4().hex[:12]}")' "${role}"
+  "${BUDDYSWITCH_PYTHON}" -c 'import sys, uuid; print(f"act-{sys.argv[1]}-{uuid.uuid4().hex[:12]}")' "${role}"
 }
 
 buddyswitch_instance_activate() {
@@ -405,7 +401,7 @@ buddyswitch_instance_activate() {
   instance_dir="$(dirname "${instance_json}")"
   mkdir -p "${instance_dir}"
 
-  python3 - "${instance_json}" "${actor_id}" "${role}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_INSTANCE_ROOT}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${role}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_INSTANCE_ROOT}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -442,7 +438,7 @@ buddyswitch_instance_set_status() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${actor_id}" "${status}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${status}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -471,7 +467,7 @@ buddyswitch_instance_set_browser_port() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${actor_id}" "${browser_port}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${browser_port}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -509,7 +505,7 @@ buddyswitch_instance_set_app_server() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${actor_id}" "${thread_id}" "${app_server_pid}" "${app_server_socket}" "${app_server_log}" "${status}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${thread_id}" "${app_server_pid}" "${app_server_socket}" "${app_server_log}" "${status}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -555,7 +551,7 @@ buddyswitch_instance_set_thread_id() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${actor_id}" "${thread_id}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${thread_id}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -607,7 +603,7 @@ buddyswitch_actor_side_thread_start() {
   if [[ -n "${capability}" ]]; then
     args+=(--capability "${capability}")
   fi
-  python3 "${args[@]}"
+  "${BUDDYSWITCH_PYTHON}" "${args[@]}"
 }
 
 buddyswitch_side_thread_lifecycle_send() {
@@ -618,7 +614,7 @@ buddyswitch_side_thread_lifecycle_send() {
   local instance_json
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
-  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py" send \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py" send \
     --socket "$(buddyswitch_app_server_socket)" \
     --instance-json "${instance_json}" \
     --actor-id "${actor_id}" \
@@ -635,7 +631,7 @@ buddyswitch_side_thread_lifecycle_cleanup() {
   local instance_json
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
-  python3 "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py" cleanup \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/side_thread_lifecycle.py" cleanup \
     --socket "$(buddyswitch_app_server_socket)" \
     --instance-json "${instance_json}" \
     --actor-id "${actor_id}" \
@@ -650,7 +646,7 @@ buddyswitch_instance_clear_app_server() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${actor_id}" "${status}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${status}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -685,7 +681,7 @@ buddyswitch_instance_clear_browser_port() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${actor_id}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -720,7 +716,7 @@ buddyswitch_instance_record_failure() {
 
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
-  python3 - "${instance_json}" "${actor_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -787,7 +783,7 @@ _buddyswitch_list_actor_ids_for_role() {
   for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
     [[ -f "${instance_json}" ]] || continue
     actor_id="$(
-      python3 - "${instance_json}" "${target_role}" <<'PY'
+      "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${target_role}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -853,7 +849,7 @@ buddyswitch_print_native_search_rejection() {
   echo "Use chrome-devtools-cockpit.search_page for browser-native search page opening." >&2
   echo "Use search__request only for non-opening URL planning." >&2
   echo "Use search__status for search capability status." >&2
-  echo "Diagnostic: python3 scripts/turn_runtime.py status" >&2
+  echo "Diagnostic: \${BUDDYSWITCH_PYTHON} scripts/turn_runtime.py status" >&2
 }
 
 buddyswitch_reject_native_search_args() {

@@ -35,7 +35,7 @@ _buddyswitch_app_server_effective_socket() {
     printf '%s\n' "${default_socket}"
     return 0
   fi
-  fallback_socket="$(python3 - "${BUDDYSWITCH_ACTOR_ID}" <<'PY'
+  fallback_socket="$("${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_ACTOR_ID}" <<'PY'
 import hashlib
 import os
 import sys
@@ -56,7 +56,7 @@ buddyswitch_app_server_socket() {
 _buddyswitch_app_server_json_field() {
   local payload="$1"
   local field_name="$2"
-  python3 - "${payload}" "${field_name}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${payload}" "${field_name}" <<'PY'
 import json
 import sys
 
@@ -78,7 +78,7 @@ _buddyswitch_app_server_status_json() {
   pid_file="$(buddyswitch_app_server_pid_file)"
   marker_file="$(buddyswitch_app_server_socket_marker_file)"
   log_file="$(buddyswitch_app_server_log_file)"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" status \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" status \
     --socket "${socket_path}" \
     --pid-file "${pid_file}" \
     --marker-file "${marker_file}" \
@@ -116,7 +116,7 @@ buddyswitch_app_server_ensure() {
     BUDDYSWITCH_INSTANCE_TMP="${BUDDYSWITCH_INSTANCE_TMP:-}" \
     BUDDYSWITCH_PROJECT_WORKSPACE_DIR="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
     BUDDYSWITCH_RUNTIME_BROKER_SOCKET="${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" \
-    python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" ensure \
+    "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" ensure \
       --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
       --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}"
   )" || {
@@ -147,7 +147,7 @@ buddyswitch_app_server_stop() {
   pid_file="$(buddyswitch_app_server_pid_file)"
   marker_file="$(buddyswitch_app_server_socket_marker_file)"
   log_file="$(buddyswitch_app_server_log_file)"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" stop \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" stop \
     --socket "${socket_path}" \
     --pid-file "${pid_file}" \
     --marker-file "${marker_file}" \
@@ -158,7 +158,7 @@ buddyswitch_app_server_stop() {
 }
 
 buddyswitch_app_server_thread_start() {
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-start \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-start \
     --socket "$(buddyswitch_app_server_socket)" \
     --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}" \
     --shared-project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
@@ -166,7 +166,7 @@ buddyswitch_app_server_thread_start() {
 }
 
 buddyswitch_app_server_thread_clear() {
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-start \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-start \
     --socket "$(buddyswitch_app_server_socket)" \
     --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}" \
     --shared-project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
@@ -176,7 +176,7 @@ buddyswitch_app_server_thread_clear() {
 
 buddyswitch_app_server_thread_resume() {
   local thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-resume \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-resume \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}" \
     --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}" \
@@ -186,7 +186,7 @@ buddyswitch_app_server_thread_resume() {
 
 buddyswitch_app_server_thread_bootstrap() {
   local thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-bootstrap \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-bootstrap \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}" \
     --timeout-seconds "${BUDDYSWITCH_THREAD_BOOTSTRAP_TIMEOUT_SECONDS:-30}"
@@ -194,7 +194,7 @@ buddyswitch_app_server_thread_bootstrap() {
 
 buddyswitch_app_server_thread_read() {
   local thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-read \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-read \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}"
 }
@@ -202,7 +202,7 @@ buddyswitch_app_server_thread_read() {
 buddyswitch_app_server_input() {
   local thread_id="$1"
   local text="$2"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" input \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" input \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}" \
     --text "${text}" \
@@ -211,14 +211,14 @@ buddyswitch_app_server_input() {
 
 buddyswitch_app_server_interrupt() {
   local thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" interrupt \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" interrupt \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}"
 }
 
 buddyswitch_app_server_goal_get() {
   local thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-get \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-get \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}"
 }
@@ -229,7 +229,7 @@ buddyswitch_app_server_goal_set() {
   local status="${3:-}"
   local token_budget="${4:-}"
   local -a command=(
-    python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-set
+    "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-set
     --socket "$(buddyswitch_app_server_socket)"
     --thread-id "${thread_id}"
   )
@@ -247,14 +247,14 @@ buddyswitch_app_server_goal_set() {
 
 buddyswitch_app_server_goal_clear() {
   local thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-clear \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-clear \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}"
 }
 
 buddyswitch_app_server_compact() {
   local thread_id="$1"
-  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" compact \
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" compact \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}"
 }

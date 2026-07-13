@@ -128,7 +128,7 @@ def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[
     paths.run_dir.mkdir(parents=True, exist_ok=True)
     paths.log_file.parent.mkdir(parents=True, exist_ok=True)
     command = [
-        sys.executable,
+        os.environ["BUDDYSWITCH_PYTHON"],
         str(Path(__file__).resolve()),
         "serve",
         "--shared-root",

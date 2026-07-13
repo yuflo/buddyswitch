@@ -1433,6 +1433,39 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             log_file=root / "runtime-broker.log",
         )
 
+    def test_start_broker_process_uses_configured_runtime_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            paths = self._paths(root)
+            commands: list[list[str]] = []
+            popen_kwargs: list[dict[str, object]] = []
+
+            class FakeProcess:
+                pid = 5432
+
+            def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+                commands.append(command)
+                popen_kwargs.append(kwargs)
+                return FakeProcess()
+
+            with patch.object(self.lifecycle.subprocess, "Popen", side_effect=fake_popen), patch.dict(
+                os.environ,
+                {"BUDDYSWITCH_PYTHON": "/configured/runtime/python"},
+                clear=False,
+            ):
+                result = self.lifecycle.start_broker_process(
+                    paths,
+                    instance_json_path=root / "instance.json",
+                    manifest_path=MANIFEST,
+                )
+
+            self.assertEqual(result["pid"], 5432)
+            self.assertEqual(len(commands), 1)
+            self.assertEqual(commands[0][0], "/configured/runtime/python")
+            self.assertEqual(Path(commands[0][1]).resolve(), (SCRIPTS / "runtime_kernel" / "broker.py").resolve())
+            self.assertEqual(commands[0][2], "serve")
+            self.assertEqual(len(popen_kwargs), 1)
+
     @staticmethod
     def _sync_runtime_surface(workspace_dir: Path) -> None:
         runtime_surface = (
@@ -1491,7 +1524,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
         broker_script = workspace_dir / "scripts" / "runtime_kernel" / "broker.py"
         broker_command = [
-            "python3",
+            os.environ["BUDDYSWITCH_PYTHON"],
             str(broker_script),
             command,
             "--socket",

@@ -470,7 +470,7 @@ def start_broker_process(
 ) -> dict[str, Any]:
     broker_script = Path(__file__).resolve().parent / "broker.py"
     command = [
-        "python3",
+        os.environ["BUDDYSWITCH_PYTHON"],
         str(broker_script),
         "serve",
         "--socket",

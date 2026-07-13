@@ -109,14 +109,14 @@ buddyswitch_cleanup_run_env_cleanup() {
   esac
 
   if [[ "${#BUDDYSWITCH_CLEANUP_COMMON_ARGS[@]}" -gt 0 ]]; then
-    python3 "${BUDDYSWITCH_CLEANUP_ENV_CLEANUP}" \
+    "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_CLEANUP_ENV_CLEANUP}" \
       --repo-root "${repo_root}" \
       --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
       --manifest "${BUDDYSWITCH_CLEANUP_MANIFEST}" \
       "${target_args[@]}" \
       "${BUDDYSWITCH_CLEANUP_COMMON_ARGS[@]}"
   else
-    python3 "${BUDDYSWITCH_CLEANUP_ENV_CLEANUP}" \
+    "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_CLEANUP_ENV_CLEANUP}" \
       --repo-root "${repo_root}" \
       --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
       --manifest "${BUDDYSWITCH_CLEANUP_MANIFEST}" \
@@ -160,7 +160,7 @@ buddyswitch_count_active_browsers_for_role() {
   for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
     [[ -f "${instance_json}" ]] || continue
     instance_role="$(
-      python3 - "${instance_json}" <<'PY'
+      "${BUDDYSWITCH_PYTHON}" - "${instance_json}" <<'PY'
 import json
 import sys
 from pathlib import Path

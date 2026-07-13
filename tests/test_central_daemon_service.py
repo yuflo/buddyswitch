@@ -12,6 +12,7 @@ import unittest
 from itertools import count
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 CENTRAL_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
@@ -94,12 +95,14 @@ class CentralDaemonServiceTests(unittest.TestCase):
             cli.subprocess.Popen = fake_popen
             cli.ping_central_daemon = fake_ping
 
-            payload = cli.start_central_daemon(paths)
+            with patch.dict(os.environ, {"BUDDYSWITCH_PYTHON": "/configured/runtime/python"}, clear=False):
+                payload = cli.start_central_daemon(paths)
 
             self.assertTrue(payload["started"])
             self.assertEqual(payload["pid"], 4321)
             self.assertEqual(payload["socket_path"], str(paths.socket_path))
             self.assertEqual(len(commands), 1)
+            self.assertEqual(commands[0][0], "/configured/runtime/python")
             self.assertEqual(Path(commands[0][1]).resolve(), CENTRAL_CLI_PATH.resolve())
             self.assertEqual(commands[0][2:], ["serve", "--shared-root", str(paths.shared_root)])
 
