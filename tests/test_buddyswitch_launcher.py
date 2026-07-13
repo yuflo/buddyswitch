@@ -421,6 +421,37 @@ buddyswitch_resolve_python
             self.assertNotEqual(completed.returncode, 0)
             self.assertIn("could not execute PATH python", completed.stderr)
 
+    def test_python_resolver_rejects_path_python_without_standard_toml(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            bin_dir = Path(temp_root) / "bin"
+            bin_dir.mkdir()
+            fake_python = bin_dir / "python"
+            self._write_exec(
+                fake_python,
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"-c\" ] && [ \"$2\" = \"import sys\" ]; then\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 64\n",
+            )
+
+            command = r'''
+set -euo pipefail
+source tools/launcher/env.sh
+PATH="$1"
+buddyswitch_resolve_python
+'''
+            completed = subprocess.run(
+                ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("could not execute PATH python", completed.stderr)
+
     def test_env_mcp_reconciles_stale_interpreter_path_with_resolved_python(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)

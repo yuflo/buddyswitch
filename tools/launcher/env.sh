@@ -30,7 +30,7 @@ buddyswitch_resolve_python() {
     esac
   fi
 
-  if ! "${python_path}" -c 'import sys' >/dev/null 2>&1; then
+  if ! "${python_path}" -c 'import tomllib' >/dev/null 2>&1; then
     echo "BuddySwitch could not execute PATH python: ${python_path}" >&2
     return 1
   fi
