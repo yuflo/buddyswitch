@@ -19,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "buddyswitch-codex"
+HOST_CONTROL = ROOT / "tools" / "launcher" / "host_control.sh"
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
@@ -8833,7 +8834,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_DELETE_ACTOR_ID"] = "act-pm-direct"
 
             completed = subprocess.run(
-                [str(LAUNCHER), "__locked-instance-delete"],
+                [str(HOST_CONTROL), "instance-delete-locked"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -8842,7 +8843,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("runtime lock required", completed.stderr)
+            error = json.loads(completed.stdout)["error"]
+            self.assertIn("host control internal operation is not public", error["message"])
 
     def test_start_without_role_does_not_set_instance_env_vars(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -9003,14 +9005,15 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             env["BUDDYSWITCH_START_ROLE"] = "unknown"
             env["BUDDYSWITCH_START_ACTOR_ID"] = "act-unknown-demo"
+            env["BUDDYSWITCH_HOST_CONTROL_INTERNAL"] = "1"
 
             direct_start = subprocess.run(
                 [
                     PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
-                    str(LAUNCHER),
-                    "__locked-start-bootstrap",
+                    str(HOST_CONTROL),
+                    "start-bootstrap-locked",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -9020,7 +9023,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertNotEqual(direct_start.returncode, 0)
-            self.assertIn("Unknown role 'unknown'", direct_start.stderr)
+            error = json.loads(direct_start.stdout)["error"]
+            self.assertIn("Unknown role 'unknown'", error["message"])
             self.assertFalse((shared_root / "instances").exists(), "invalid locked role must not create instances")
 
     def test_locked_instance_inactive_rejects_traversal_actor_id(self) -> None:
@@ -9033,14 +9037,15 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_HOST_CONTROL_INTERNAL"] = "1"
 
             direct_inactive = subprocess.run(
                 [
                     PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
-                    str(LAUNCHER),
-                    "__locked-instance-set-inactive",
+                    str(HOST_CONTROL),
+                    "instance-set-inactive-locked",
                     "../outside",
                 ],
                 cwd=ROOT,
@@ -9051,7 +9056,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(direct_inactive.returncode, 2)
-            self.assertIn("Invalid actor id", direct_inactive.stderr)
+            error = json.loads(direct_inactive.stdout)["error"]
+            self.assertIn("Invalid actor id", error["message"])
             self.assertFalse(outside_path.exists(), "traversal actor id must not write outside instances root")
 
     def test_locked_start_bootstrap_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
@@ -9062,9 +9068,10 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
+            env["BUDDYSWITCH_HOST_CONTROL_INTERNAL"] = "1"
 
             direct_start = subprocess.run(
-                [str(LAUNCHER), "__locked-start-bootstrap"],
+                [str(HOST_CONTROL), "start-bootstrap-locked"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -9073,7 +9080,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(direct_start.returncode, 2)
-            self.assertIn("runtime lock required", direct_start.stderr)
+            error = json.loads(direct_start.stdout)["error"]
+            self.assertIn("runtime lock required", error["message"])
             self.assertFalse(shared_root.exists(), "direct locked start bootstrap must not mutate shared root")
 
     def test_locked_start_bootstrap_requires_role_env_before_workspace_setup(self) -> None:
@@ -9088,6 +9096,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             env.pop("BUDDYSWITCH_START_ROLE", None)
             env.pop("BUDDYSWITCH_START_ACTOR_ID", None)
+            env["BUDDYSWITCH_HOST_CONTROL_INTERNAL"] = "1"
 
             completed = subprocess.run(
                 [
@@ -9096,8 +9105,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                     "--shared-root",
                     str(shared_root),
                     "--",
-                    str(LAUNCHER),
-                    "__locked-start-bootstrap",
+                    str(HOST_CONTROL),
+                    "start-bootstrap-locked",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -9107,7 +9116,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("BUDDYSWITCH_START_ROLE is required", completed.stderr)
+            error = json.loads(completed.stdout)["error"]
+            self.assertIn("BUDDYSWITCH_START_ROLE is required", error["message"])
             self.assertFalse((shared_root / "workspace").exists(), "missing role env must fail before workspace prep")
 
     def test_locked_start_bootstrap_requires_actor_id_env(self) -> None:
@@ -9122,6 +9132,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             env["BUDDYSWITCH_START_ROLE"] = "pm"
             env.pop("BUDDYSWITCH_START_ACTOR_ID", None)
+            env["BUDDYSWITCH_HOST_CONTROL_INTERNAL"] = "1"
 
             completed = subprocess.run(
                 [
@@ -9130,8 +9141,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                     "--shared-root",
                     str(shared_root),
                     "--",
-                    str(LAUNCHER),
-                    "__locked-start-bootstrap",
+                    str(HOST_CONTROL),
+                    "start-bootstrap-locked",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -9141,7 +9152,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
 
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("BUDDYSWITCH_START_ACTOR_ID is required", completed.stderr)
+            error = json.loads(completed.stdout)["error"]
+            self.assertIn("BUDDYSWITCH_START_ACTOR_ID is required", error["message"])
             self.assertFalse((shared_root / "workspace").exists(), "missing actor id must fail before workspace prep")
 
     def test_launcher_help_and_reset_flow(self) -> None:

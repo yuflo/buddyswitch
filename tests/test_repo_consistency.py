@@ -771,21 +771,25 @@ print(json.dumps({{
     def test_actor_capability_public_side_surfaces_do_not_accept_raw_overrides(self) -> None:
         public_side_targets = [
             "buddyswitch-codex",
-            "tools/launcher/instance.sh",
+            "tools/launcher/host_control.py",
+            "tools/launcher/host_control.sh",
             "tools/launcher/env.sh",
             "tools/launcher/actor_side_thread.py",
             "tools/launcher/web_management.py",
         ]
+        self.assertFalse((ROOT / "tools/launcher/instance.sh").exists())
         hits = self._scan_targets("\\-\\-" + "model|\\-\\-" + "effort", public_side_targets)
         self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_actor_capability_adapters_do_not_duplicate_catalog(self) -> None:
         adapter_targets = [
             "tools/launcher/web_management.py",
-            "tools/launcher/instance.sh",
+            "tools/launcher/host_control.py",
+            "tools/launcher/host_control.sh",
             "buddyswitch-codex",
             "tools/launcher/assets/web-management",
         ]
+        self.assertFalse((ROOT / "tools/launcher/actor_capability_cli.py").exists())
         hits = self._scan_targets("gpt-5\\.6-(luna|terra|sol)", adapter_targets)
         self.assertEqual(hits, [], msg="\n".join(hits))
 

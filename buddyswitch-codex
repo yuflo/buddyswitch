@@ -8,17 +8,16 @@ WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
 SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"
-ACTOR_CAPABILITY_CLI_HELPER="${REPO_ROOT}/tools/launcher/actor_capability_cli.py"
 ACTOR_SIDE_THREAD_HELPER="${REPO_ROOT}/tools/launcher/actor_side_thread.py"
 TASK_SYS_INGRESS_HELPER="${REPO_ROOT}/tools/launcher/task_sys_ingress.py"
 TASK_SYS_RUNTIME_CLIENT_HELPER="${REPO_ROOT}/scripts/env/tool_runtime/task_sys_runtime_client.py"
 DAEMON_HELPER="${REPO_ROOT}/tools/launcher/daemon.sh"
-INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
+HOST_CONTROL_HELPER="${REPO_ROOT}/tools/launcher/host_control.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${ACTOR_CAPABILITY_CLI_HELPER}" || ! -f "${ACTOR_SIDE_THREAD_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${TASK_SYS_RUNTIME_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${ACTOR_SIDE_THREAD_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${TASK_SYS_RUNTIME_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${HOST_CONTROL_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -28,7 +27,7 @@ source "${WORKSPACE_HELPER}"
 source "${BROWSER_HELPER}"
 source "${APP_SERVER_HELPER}"
 source "${DAEMON_HELPER}"
-source "${INSTANCE_HELPER}"
+source "${HOST_CONTROL_HELPER}"
 source "${CLEANUP_HELPER}"
 source "${RUNTIME_BROKER_HELPER}"
 
@@ -92,296 +91,6 @@ Paths:
 EOF
 }
 
-start_codex() {
-  local role actor_id instance_json json arg bootstrap_stdout
-
-  role=""
-  actor_id=""
-  instance_json=""
-  json=0
-  if [[ $# -eq 0 ]]; then
-    echo "instance start requires --role <role>" >&2
-    print_help >&2
-    return 2
-  fi
-
-  while [[ $# -gt 0 ]]; do
-    arg="$1"
-    case "${arg}" in
-      --role)
-        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "Missing value for --role" >&2
-          print_help >&2
-          return 2
-        fi
-        role="${2}"
-        shift 2
-        ;;
-      --role=*)
-        role="${arg#--role=}"
-        if [[ -z "${role}" ]]; then
-          echo "Missing value for --role" >&2
-          print_help >&2
-          return 2
-        fi
-        shift
-        ;;
-      --json)
-        json=1
-        shift
-        ;;
-      --)
-        echo "instance start no longer accepts Codex args; use instance input after the service starts." >&2
-        return 2
-        ;;
-      *)
-        echo "Unknown instance start option: ${arg}" >&2
-        print_help >&2
-        return 2
-        ;;
-    esac
-  done
-
-  if [[ -z "${role}" ]]; then
-    echo "instance start requires --role <role>" >&2
-    print_help >&2
-    return 2
-  fi
-
-  buddyswitch_validate_role_id "${role}" || return $?
-  actor_id="$(buddyswitch_generate_actor_id "${role}")"
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
-
-  if [[ "${json}" -eq 1 ]]; then
-    if ! bootstrap_stdout="$(
-      (
-        unset BUDDYSWITCH_ROLE_ID
-        unset BUDDYSWITCH_ACTOR_ID
-        unset BUDDYSWITCH_INSTANCE_JSON
-        BUDDYSWITCH_START_ROLE="${role}" \
-        BUDDYSWITCH_START_ACTOR_ID="${actor_id}" \
-          buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-start-bootstrap"
-      )
-    )"; then
-      if [[ -n "${bootstrap_stdout}" ]]; then
-        printf '%s\n' "${bootstrap_stdout}" >&2
-      fi
-      return 1
-    fi
-  else
-    (
-      unset BUDDYSWITCH_ROLE_ID
-      unset BUDDYSWITCH_ACTOR_ID
-      unset BUDDYSWITCH_INSTANCE_JSON
-      BUDDYSWITCH_START_ROLE="${role}" \
-      BUDDYSWITCH_START_ACTOR_ID="${actor_id}" \
-        buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-start-bootstrap"
-    )
-  fi
-
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${role}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" "${instance_json}" <<'PY'
-import json
-import sys
-
-payload = {
-    "actor_id": sys.argv[1],
-    "role": sys.argv[2],
-    "workspace_dir": sys.argv[3],
-    "project_workspace_dir": sys.argv[4],
-    "instance_record": sys.argv[5],
-}
-print(json.dumps(payload, ensure_ascii=True))
-PY
-    return 0
-  fi
-
-  echo "BuddySwitch instance: ${actor_id} (${role})"
-  echo "Workspace: ${BUDDYSWITCH_WORKSPACE_DIR}"
-  echo "Project workspace: ${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
-  echo "Instance record: ${instance_json}"
-  echo "Input: ./buddyswitch-codex instance input ${actor_id} --text \"<text>\""
-  echo "Attach: ./buddyswitch-codex instance attach ${actor_id}"
-  echo "Stop: ./buddyswitch-codex instance stop ${actor_id}"
-  echo "Delete instance: ./buddyswitch-codex instance delete ${actor_id} --yes"
-}
-
-buddyswitch_start_failure_cleanup() {
-  local actor_id="$1"
-  local phase="$2"
-  local message="$3"
-  local thread_id="${4:-}"
-  local browser_port="${5:-}"
-  local stop_output=""
-
-  stop_output="$(buddyswitch_app_server_stop 2>&1)" || {
-    echo "Warning: app-server stop failed during ${phase} cleanup for ${actor_id}." >&2
-    [[ -n "${stop_output}" ]] && echo "${stop_output}" >&2
-  }
-  buddyswitch_runtime_broker_stop || true
-  buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-  buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-  buddyswitch_instance_record_failure "${actor_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}"
-}
-
-buddyswitch_thread_bootstrap_failure_is_timeout_like() {
-  local message="$1"
-
-  [[ "${message}" == *"timed out waiting for thread/inject_items"* ]] ||
-    [[ "${message}" == *"timed out waiting for thread/bootstrap"* ]] ||
-    [[ "${message}" == *"AppServerTimeout"* ]]
-}
-
-buddyswitch_start_thread_bootstrap_with_retry() {
-  local thread_id="$1"
-  local output retry_output
-
-  BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR=""
-  if output="$(buddyswitch_app_server_thread_bootstrap "${thread_id}" 2>&1)"; then
-    return 0
-  fi
-  BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR="${output}"
-  if ! buddyswitch_thread_bootstrap_failure_is_timeout_like "${output}"; then
-    [[ -n "${output}" ]] && echo "${output}" >&2
-    return 1
-  fi
-
-  echo "Thread bootstrap timed out for ${thread_id}; retrying once." >&2
-  if retry_output="$(buddyswitch_app_server_thread_bootstrap "${thread_id}" 2>&1)"; then
-    BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR=""
-    return 0
-  fi
-  BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR="${retry_output:-${output}}"
-  [[ -n "${retry_output}" ]] && echo "${retry_output}" >&2
-  return 1
-}
-
-start_locked_bootstrap() {
-  local requested_role requested_actor_id app_server_json thread_json thread_id
-  buddyswitch_require_runtime_lock
-  requested_role="${BUDDYSWITCH_START_ROLE:-}"
-  requested_actor_id="${BUDDYSWITCH_START_ACTOR_ID:-}"
-
-  if [[ -z "${requested_role}" ]]; then
-    echo "BUDDYSWITCH_START_ROLE is required for product instance bootstrap." >&2
-    return 2
-  fi
-  if [[ -z "${requested_actor_id}" ]]; then
-    echo "BUDDYSWITCH_START_ACTOR_ID is required for product instance bootstrap." >&2
-    return 2
-  fi
-  buddyswitch_validate_role_id "${requested_role}" || return $?
-  buddyswitch_validate_actor_id "${requested_actor_id}" || return $?
-  buddyswitch_require_env_profile "${requested_role}" || return $?
-  buddyswitch_require_role_agents_template "${requested_role}" || return $?
-  buddyswitch_env_bind_instance "${requested_actor_id}" || return $?
-
-  buddyswitch_ensure_shared_env
-  buddyswitch_workspace_prepare_execution_worktree
-
-  buddyswitch_workspace_ensure_project_worktree
-  buddyswitch_workspace_repair_runtime_projects_app_projection
-  buddyswitch_instance_ensure_private_writable_surface
-  buddyswitch_instance_activate "${requested_actor_id}" "${requested_role}" "inactive" >/dev/null
-  "${BUDDYSWITCH_PYTHON}" "${ACTOR_CAPABILITY_CLI_HELPER}" seed --instance-json "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null
-  buddyswitch_runtime_broker_ensure
-  buddyswitch_patch_codex_config
-  if ! buddyswitch_env_mcp_ensure; then
-    buddyswitch_runtime_broker_stop
-    return 1
-  fi
-  if ! buddyswitch_browser_register_cockpit_mcp; then
-    buddyswitch_runtime_broker_stop
-    return 1
-  fi
-  app_server_json="$(buddyswitch_app_server_ensure)" || {
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "app_server_ensure" \
-      "App-server ensure failed." \
-      "" \
-      ""
-    return 1
-  }
-  thread_json="$(buddyswitch_app_server_thread_start)" || {
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "thread_start" \
-      "${thread_json:-thread/start failed.}" \
-      "" \
-      ""
-    return 1
-  }
-  thread_id="$(
-    "${BUDDYSWITCH_PYTHON}" - "${thread_json}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-thread = payload.get("thread")
-if isinstance(thread, dict):
-    thread_id = thread.get("id")
-    if isinstance(thread_id, str):
-        print(thread_id)
-PY
-  )"
-  if [[ -z "${thread_id}" ]]; then
-    echo "App-server thread start did not return thread.id." >&2
-    echo "${thread_json}" >&2
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "thread_start" \
-      "App-server thread start did not return thread.id." \
-      "" \
-      ""
-    return 1
-  fi
-  if ! buddyswitch_start_thread_bootstrap_with_retry "${thread_id}"; then
-    echo "Thread bootstrap failed for ${thread_id}." >&2
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "thread_bootstrap" \
-      "${BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR:-Thread bootstrap failed for ${thread_id}.}" \
-      "${thread_id}" \
-      ""
-    return 1
-  fi
-  buddyswitch_instance_set_app_server \
-    "${requested_actor_id}" \
-    "${thread_id}" \
-    "$(_buddyswitch_app_server_json_field "${app_server_json}" "pid")" \
-    "$(_buddyswitch_app_server_json_field "${app_server_json}" "socket_path")" \
-    "$(_buddyswitch_app_server_json_field "${app_server_json}" "log_file")" \
-    "active"
-  if ! buddyswitch_daemon_start >/dev/null; then
-    echo "Daemon start failed for ${requested_actor_id}." >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${requested_actor_id}" || true
-    buddyswitch_instance_clear_app_server "${requested_actor_id}" "inactive"
-    return 1
-  fi
-}
-
-instance_set_inactive_locked() {
-  local actor_id="${1:-}" daemon_output=""
-  buddyswitch_require_runtime_lock
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  daemon_output="$(buddyswitch_daemon_stop 2>&1)" || {
-    echo "Warning: daemon stop failed for ${actor_id}." >&2
-    [[ -n "${daemon_output}" ]] && echo "${daemon_output}" >&2
-  }
-  buddyswitch_app_server_stop || true
-  buddyswitch_runtime_broker_stop
-  buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-  buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-}
 
 instance_input() {
   local actor_id="${1:-}" text="" thread_id="" role_id="" arg output runtime_output instruction_json task_id json
@@ -653,25 +362,6 @@ PY
   instance_side_print_start_result "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" "${json}"
 }
 
-instance_require_active_service_thread() {
-  local actor_id="$1"
-  local action_label="$2"
-  local thread_id
-
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
-  if [[ -z "${thread_id}" ]]; then
-    echo "Instance ${action_label} blocked: ${actor_id} has no thread id; stop/delete it and start a new instance." >&2
-    return 3
-  fi
-  if ! buddyswitch_app_server_is_active; then
-    echo "Instance ${action_label} blocked: ${actor_id} is unhealthy or inactive." >&2
-    return 3
-  fi
-  INSTANCE_ACTIVE_THREAD_ID="${thread_id}"
-}
 
 instance_side_cleanup() {
   local actor_id="${1:-}" side_thread_id="" parent_thread_id="" arg output json=0
@@ -891,126 +581,6 @@ else:
 PY
 }
 
-instance_compact() {
-  local actor_id="${1:-}" json=0 thread_id output
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance compact option: $1" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  instance_require_active_service_thread "${actor_id}" "compact" || return $?
-  thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
-  output="$(buddyswitch_app_server_compact "${thread_id}" 2>&1)" || {
-    [[ -n "${output}" ]] && echo "${output}" >&2
-    return 1
-  }
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${thread_id}" <<'PY'
-import json
-import sys
-
-json.loads(sys.argv[1])
-print(json.dumps({"actor_id": sys.argv[2], "thread_id": sys.argv[3], "started": True}, ensure_ascii=True))
-PY
-    return 0
-  fi
-  echo "Compaction started: ${thread_id}"
-}
-
-instance_clear() {
-  local actor_id="${1:-}" json=0 previous_thread_id output new_thread_id daemon_output=""
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance clear option: $1" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  instance_require_active_service_thread "${actor_id}" "clear" || return $?
-  previous_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
-  daemon_output="$(buddyswitch_daemon_stop 2>&1)" || {
-    echo "Warning: daemon stop failed for ${actor_id}." >&2
-    [[ -n "${daemon_output}" ]] && echo "${daemon_output}" >&2
-  }
-  output="$(buddyswitch_app_server_thread_clear 2>&1)" || {
-    [[ -n "${output}" ]] && echo "${output}" >&2
-    return 1
-  }
-  new_thread_id="$(
-    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-thread = payload.get("thread")
-if isinstance(thread, dict):
-    thread_id = thread.get("id")
-    if isinstance(thread_id, str):
-        print(thread_id)
-PY
-  )"
-  if [[ -z "${new_thread_id}" ]]; then
-    echo "App-server clear did not return thread.id." >&2
-    echo "${output}" >&2
-    return 1
-  fi
-  buddyswitch_instance_set_thread_id "${actor_id}" "${new_thread_id}" || return $?
-  if ! buddyswitch_app_server_thread_bootstrap "${new_thread_id}" >/dev/null; then
-    echo "Thread bootstrap failed for ${new_thread_id}." >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-    buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-    return 1
-  fi
-  if ! buddyswitch_daemon_start >/dev/null; then
-    echo "Daemon start failed for ${actor_id}." >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-    buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-    return 1
-  fi
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${previous_thread_id}" "${new_thread_id}" <<'PY'
-import json
-import sys
-
-payload = {
-    "actor_id": sys.argv[1],
-    "previous_thread_id": sys.argv[2],
-    "thread_id": sys.argv[3],
-}
-print(json.dumps(payload, ensure_ascii=True))
-PY
-    return 0
-  fi
-  echo "Thread cleared: ${previous_thread_id} -> ${new_thread_id}"
-}
 
 instance_attach() {
   local actor_id="${1:-}" role thread_id socket_path output resumed_thread_id
@@ -1065,496 +635,6 @@ instance_attach() {
     buddyswitch_run_codex resume --remote "unix://${socket_path}" "${thread_id}"
 }
 
-instance_resume() {
-  local actor_id="${1:-}" json=0 arg payload resume_status
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-  while [[ $# -gt 0 ]]; do
-    arg="$1"
-    case "${arg}" in
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance resume option: ${arg}" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  payload="$(
-    buddyswitch_with_runtime_lock \
-      "${REPO_ROOT}/buddyswitch-codex" \
-      "__locked-instance-resume" \
-      "${actor_id}"
-  )"
-  resume_status=$?
-  if [[ "${resume_status}" -ne 0 ]]; then
-    if [[ -n "${payload}" ]]; then
-      printf '%s\n' "${payload}" >&2
-    fi
-    return "${resume_status}"
-  fi
-
-  if [[ "${json}" -eq 1 ]]; then
-    printf '%s\n' "${payload}"
-    return 0
-  fi
-
-  "${BUDDYSWITCH_PYTHON}" - "${payload}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-print(f"Instance resumed: {payload.get('actor_id', '')}")
-print(f"Thread: {payload.get('thread_id', '')}")
-PY
-}
-
-instance_resume_locked() {
-  local actor_id="${1:-}" role thread_id app_server_json
-  local browser_output="" resume_json="" resumed_thread_id
-
-  buddyswitch_require_runtime_lock
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  role="$(buddyswitch_instance_validate_record "${actor_id}")" || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
-  if [[ -z "${thread_id}" ]]; then
-    echo "Instance resume blocked: ${actor_id} has no thread id; delete it and start a new instance." >&2
-    return 3
-  fi
-
-  if buddyswitch_app_server_is_active; then
-    if ! buddyswitch_daemon_start >/dev/null; then
-      echo "Daemon start failed for ${actor_id}." >&2
-      return 1
-    fi
-    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${thread_id}" <<'PY'
-import json
-import sys
-
-print(json.dumps({
-    "actor_id": sys.argv[1],
-    "thread_id": sys.argv[2],
-    "status": "active",
-}, ensure_ascii=True))
-PY
-    return 0
-  fi
-
-  buddyswitch_require_env_profile "${role}" || return $?
-  buddyswitch_require_role_agents_template "${role}" || return $?
-  buddyswitch_ensure_shared_env
-  buddyswitch_workspace_ensure_project_worktree
-  buddyswitch_workspace_repair_runtime_projects_app_projection
-  buddyswitch_instance_ensure_private_writable_surface
-  buddyswitch_runtime_broker_ensure
-  export BUDDYSWITCH_ROLE_ID="${role}"
-  buddyswitch_patch_codex_config
-
-  browser_output="$(buddyswitch_browser_register_cockpit_mcp 2>&1)" || {
-    [[ -n "${browser_output}" ]] && echo "${browser_output}" >&2
-    buddyswitch_runtime_broker_stop
-    return 1
-  }
-
-  app_server_json="$(buddyswitch_app_server_ensure)" || {
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-    return 1
-  }
-
-  resume_json="$(buddyswitch_app_server_thread_resume "${thread_id}" 2>&1)" || {
-    echo "thread/resume failed for ${thread_id}" >&2
-    [[ -n "${resume_json}" ]] && echo "${resume_json}" >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-    buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-    return 1
-  }
-
-  resumed_thread_id="$(
-    "${BUDDYSWITCH_PYTHON}" -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${resume_json}"
-  )" || {
-    echo "thread/resume returned invalid JSON for ${thread_id}" >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-    buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-    return 1
-  }
-
-  if [[ "${resumed_thread_id}" != "${thread_id}" ]]; then
-    echo "thread/resume returned unexpected thread id: ${resumed_thread_id}" >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-    buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-    return 1
-  fi
-
-  buddyswitch_instance_set_app_server \
-    "${actor_id}" \
-    "${thread_id}" \
-    "$(_buddyswitch_app_server_json_field "${app_server_json}" "pid")" \
-    "$(_buddyswitch_app_server_json_field "${app_server_json}" "socket_path")" \
-    "$(_buddyswitch_app_server_json_field "${app_server_json}" "log_file")" \
-    "active"
-  if ! buddyswitch_daemon_start >/dev/null; then
-    echo "Daemon start failed for ${actor_id}." >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-    buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
-    return 1
-  fi
-
-  "${BUDDYSWITCH_PYTHON}" - "${actor_id}" "${thread_id}" <<'PY'
-import json
-import sys
-
-print(json.dumps({
-    "actor_id": sys.argv[1],
-    "thread_id": sys.argv[2],
-    "status": "active",
-}, ensure_ascii=True))
-PY
-}
-
-instance_stop() {
-  local actor_id="${1:-}" json=0
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance stop option: $1" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
-
-  buddyswitch_with_runtime_lock \
-    "${REPO_ROOT}/buddyswitch-codex" \
-    "__locked-instance-set-inactive" \
-    "${actor_id}"
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" <<'PY'
-import json
-import sys
-
-print(json.dumps({"actor_id": sys.argv[1], "status": "inactive"}, ensure_ascii=True))
-PY
-    return 0
-  fi
-  echo "Instance stopped: ${actor_id}"
-}
-
-instance_status_json() {
-  local actor_id="$1" app_status_json daemon_status_json runtime_broker_status_json thread_id thread_json=""
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
-  app_status_json="$(buddyswitch_app_server_status_json 2>/dev/null || true)"
-  if [[ -z "${app_status_json}" ]]; then
-    app_status_json='{"healthy": false, "pid": null, "pid_live": false, "socket_path": "", "socket_exists": false, "probe": null}'
-  fi
-  daemon_status_json="$(buddyswitch_daemon_status_json 2>/dev/null || true)"
-  if [[ -z "${daemon_status_json}" ]]; then
-    daemon_status_json='{"live": false, "pid": null, "pid_live": false, "last_error": null}'
-  fi
-  runtime_broker_status_json="$(buddyswitch_runtime_broker_status_json 2>/dev/null || true)"
-  if [[ -z "${runtime_broker_status_json}" ]]; then
-    runtime_broker_status_json='{"healthy": false, "pid": null, "pid_live": false, "socket_path": "", "log_file": "", "log": {"path": "", "exists": false, "size_bytes": 0, "mtime": null, "last_event": null}}'
-  fi
-  if [[ -n "${thread_id}" ]]; then
-    if "${BUDDYSWITCH_PYTHON}" - "${app_status_json}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-raise SystemExit(0 if payload.get("healthy") else 1)
-PY
-    then
-      thread_json="$(buddyswitch_app_server_thread_read "${thread_id}" 2>/dev/null || true)"
-    fi
-  fi
-  "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_INSTANCE_JSON}" "${app_status_json}" "${daemon_status_json}" "${runtime_broker_status_json}" "${thread_json}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-instance_payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-app_server = json.loads(sys.argv[2]) if sys.argv[2] else {}
-daemon = json.loads(sys.argv[3]) if sys.argv[3] else {}
-runtime_broker = json.loads(sys.argv[4]) if sys.argv[4] else {}
-thread_payload = json.loads(sys.argv[5]) if sys.argv[5] else {}
-
-thread = thread_payload.get("thread") if isinstance(thread_payload, dict) else None
-thread_status = None
-if isinstance(thread, dict):
-    raw_status = thread.get("status")
-    if isinstance(raw_status, str):
-        thread_status = raw_status.lower()
-    elif isinstance(raw_status, dict):
-        status_type = raw_status.get("type")
-        if isinstance(status_type, str):
-            thread_status = status_type.lower()
-
-payload = {
-    "actor_id": instance_payload.get("actor_id"),
-    "role": instance_payload.get("role"),
-    "status": instance_payload.get("status"),
-    "workspace_dir": instance_payload.get("workspace_dir"),
-    "browser_port": instance_payload.get("browser_port"),
-    "updated_at": instance_payload.get("updated_at"),
-    "thread_id": instance_payload.get("thread_id"),
-    "app_server": app_server,
-    "daemon": daemon,
-    "runtime_broker": runtime_broker,
-    "thread": {
-        "status": thread_status,
-        "raw": thread,
-    },
-}
-print(json.dumps(payload, ensure_ascii=True))
-PY
-}
-
-instance_status() {
-  local actor_id="${1:-}" json=0 payload="" arg
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-  while [[ $# -gt 0 ]]; do
-    arg="$1"
-    case "${arg}" in
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance status option: ${arg}" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  payload="$(instance_status_json "${actor_id}")" || return $?
-  if [[ "${json}" -eq 1 ]]; then
-    printf '%s\n' "${payload}"
-    return 0
-  fi
-
-  "${BUDDYSWITCH_PYTHON}" - "${payload}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-app_server = payload.get("app_server") if isinstance(payload.get("app_server"), dict) else {}
-daemon = payload.get("daemon") if isinstance(payload.get("daemon"), dict) else {}
-thread = payload.get("thread") if isinstance(payload.get("thread"), dict) else {}
-daemon_handlers = daemon.get("handlers") if isinstance(daemon.get("handlers"), dict) else {}
-registered_handlers = daemon_handlers.get("registered") if isinstance(daemon_handlers.get("registered"), list) else []
-handler_text = ", ".join(str(item) for item in registered_handlers if isinstance(item, str))
-print(f"Instance: {payload.get('actor_id')}")
-print(f"Buddy: {payload.get('role')}")
-print(f"Status: {payload.get('status')}")
-print(f"App-server health: {'healthy' if app_server.get('healthy') else 'unhealthy'}")
-print(f"Daemon health: {'healthy' if daemon.get('live') else 'unhealthy'}")
-print(f"Daemon handlers: {handler_text}")
-print("Delivery scope: daemon handler status is trigger-dispatch only; external channel delivery is separate.")
-print(f"Thread id: {payload.get('thread_id') or ''}")
-print(f"Thread status: {thread.get('status') or ''}")
-print(f"Browser port: {payload.get('browser_port') or ''}")
-print(f"Workspace: {payload.get('workspace_dir') or ''}")
-print(f"Updated: {payload.get('updated_at') or ''}")
-PY
-}
-
-instance_interrupt() {
-  local actor_id="${1:-}" thread_id output json=0
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance interrupt option: $1" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
-  if [[ -z "${thread_id}" ]]; then
-    echo "Instance interrupt blocked: ${actor_id} has no thread id; stop/delete it and start a new instance." >&2
-    return 3
-  fi
-  if ! buddyswitch_app_server_is_active; then
-    echo "Instance interrupt blocked: ${actor_id} is unhealthy or inactive." >&2
-    return 3
-  fi
-
-  output="$(buddyswitch_app_server_interrupt "${thread_id}" 2>&1)" || {
-    if [[ -n "${output}" ]]; then
-      echo "${output}" >&2
-    fi
-    return 1
-  }
-
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${thread_id}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-payload = {
-    "actor_id": sys.argv[2],
-    "thread_id": sys.argv[3],
-    "turn_id": source.get("turn_id"),
-}
-print(json.dumps(payload, ensure_ascii=True))
-PY
-    return 0
-  fi
-
-  "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-turn_id = payload.get("turn_id")
-print(f"Interrupted turn: {turn_id or ''}")
-PY
-}
-
-instance_delete() {
-  local actor_id="${1:-}" confirmed=0 json=0 arg delete_stdout
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-  for arg in "$@"; do
-    case "${arg}" in
-      --yes)
-        confirmed=1
-        ;;
-      --json)
-        json=1
-        ;;
-      *)
-        echo "Unknown instance delete option: ${arg}" >&2
-        buddyswitch_instance_usage >&2
-        return 2
-        ;;
-    esac
-  done
-
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  if [[ "${confirmed}" -ne 1 ]]; then
-    echo "BuddySwitch instance delete preview"
-    echo "Instance: ${actor_id}"
-    echo "Instance root: $(buddyswitch_instance_root "${actor_id}")"
-    echo "Shared state kept: ${BUDDYSWITCH_SHARED_ROOT}/state"
-    echo "Run with --yes to delete this instance root."
-    return 0
-  fi
-
-  if [[ "${json}" -eq 1 ]]; then
-    if ! delete_stdout="$(
-      BUDDYSWITCH_DELETE_ACTOR_ID="${actor_id}" \
-        buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-instance-delete"
-    )"; then
-      if [[ -n "${delete_stdout}" ]]; then
-        printf '%s\n' "${delete_stdout}" >&2
-      fi
-      return 1
-    fi
-    "${BUDDYSWITCH_PYTHON}" - "${actor_id}" <<'PY'
-import json
-import sys
-
-print(json.dumps({"actor_id": sys.argv[1], "deleted": True}, ensure_ascii=True))
-PY
-    return 0
-  fi
-
-  BUDDYSWITCH_DELETE_ACTOR_ID="${actor_id}" \
-    buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-instance-delete"
-}
-
-instance_delete_locked() {
-  local actor_id instance_root
-  buddyswitch_require_runtime_lock
-  actor_id="${BUDDYSWITCH_DELETE_ACTOR_ID:-}"
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  instance_root="$(buddyswitch_instance_require_safe_delete_root "${actor_id}")" || return $?
-  buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
-
-  if buddyswitch_instance_app_server_is_active "${actor_id}"; then
-    echo "Instance delete blocked: ${actor_id} is active." >&2
-    return 3
-  fi
-  if buddyswitch_browser_instance_pid_marker_is_active "${actor_id}"; then
-    echo "Instance delete blocked: active browser cockpit detected for ${actor_id}." >&2
-    return 3
-  fi
-  local browser_ownership
-  browser_ownership="$(buddyswitch_browser_instance_endpoint_ownership_state "${actor_id}")"
-  if [[ "${browser_ownership}" == "owned" ]]; then
-    echo "Instance delete blocked: active browser cockpit detected for ${actor_id}." >&2
-    return 3
-  fi
-  if [[ "${browser_ownership}" == "unknown" ]]; then
-    echo "Instance delete blocked: active browser cockpit ownership could not be verified for ${actor_id}." >&2
-    return 3
-  fi
-
-  buddyswitch_runtime_broker_stop
-  buddyswitch_workspace_remove_registered_worktrees_under_strict "${instance_root}" || return $?
-  buddyswitch_workspace_force_remove_path "${instance_root}"
-  echo "Instance deleted: ${actor_id}"
-}
 
 browser_ensure_locked() {
   local actor_id="${BUDDYSWITCH_BROWSER_INSTANCE_ID:-}"
@@ -1960,13 +1040,82 @@ web_main() {
   return "${status}"
 }
 
+buddyswitch_instance_host_control() {
+  "${BUDDYSWITCH_PYTHON}" -m tools.launcher.host_control "$@"
+}
+
+buddyswitch_instance_main() {
+  local command="${1:-}"
+  case "${command}" in
+    roles|start|list|capabilities|compact|clear|resume|stop|status|interrupt|delete)
+      shift || true
+      buddyswitch_instance_host_control "${command}" "$@"
+      ;;
+    input)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "actor id is required" >&2
+        print_help >&2
+        return 2
+      fi
+      instance_input "$@"
+      ;;
+    side)
+      shift || true
+      if [[ "${1:-}" == "close" ]]; then
+        shift || true
+        if [[ $# -lt 1 ]]; then
+          echo "actor id is required" >&2
+          print_help >&2
+          return 2
+        fi
+        instance_side_cleanup "$@"
+        return $?
+      fi
+      if [[ $# -lt 1 ]]; then
+        echo "actor id is required" >&2
+        print_help >&2
+        return 2
+      fi
+      instance_side "$@"
+      ;;
+    goal)
+      shift || true
+      if [[ $# -lt 2 ]]; then
+        echo "actor id and goal action are required" >&2
+        print_help >&2
+        return 2
+      fi
+      instance_goal "$@"
+      ;;
+    attach)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "actor id is required" >&2
+        print_help >&2
+        return 2
+      fi
+      instance_attach "$@"
+      ;;
+    help|-h|--help)
+      print_help
+      ;;
+    "")
+      echo "instance command is required" >&2
+      print_help >&2
+      return 2
+      ;;
+    *)
+      echo "Unknown instance command: ${command}" >&2
+      print_help >&2
+      return 2
+      ;;
+  esac
+}
+
 main() {
   local command="${1:-}"
   case "${command}" in
-    __locked-start-bootstrap)
-      shift || true
-      start_locked_bootstrap "$@"
-      ;;
     __locked-reset)
       shift || true
       reset_shared_env_locked "$@"
@@ -1978,18 +1127,6 @@ main() {
     __locked-browser-release)
       shift || true
       browser_release_locked "$@"
-      ;;
-    __locked-instance-set-inactive)
-      shift || true
-      instance_set_inactive_locked "$@"
-      ;;
-    __locked-instance-resume)
-      shift || true
-      instance_resume_locked "$@"
-      ;;
-    __locked-instance-delete)
-      shift || true
-      instance_delete_locked "$@"
       ;;
     __locked-cleanup)
       shift || true

@@ -28,7 +28,9 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import web_im_identity
 import im_http_router
 import imessage_channel
-import actor_capability
+import host_control as host_control_module
+import actor_side_thread
+import side_thread_lifecycle
 from env.domain import task_sys, track_read
 from env.domain.identity import ActorIdentityProfile, IdentityRef
 from env.repos import runtime_files
@@ -49,14 +51,6 @@ STATIC_CONTENT_TYPES = {
 }
 VALID_INSTANCE_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
-
-
-@dataclass(frozen=True)
-class CommandResult:
-    returncode: int
-    stdout: str
-    stderr: str
-    timed_out: bool
 
 
 @dataclass(frozen=True)
@@ -134,45 +128,6 @@ class BusyGuard:
             self._active.discard(key)
 
 
-class LauncherCommandRunner:
-    def __init__(self, repo_root: Path) -> None:
-        self._launcher = repo_root / "buddyswitch-codex"
-        self._repo_root = repo_root
-
-    def run(self, args: list[str], *, timeout_seconds: float) -> CommandResult:
-        command = [str(self._launcher), *args]
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=self._repo_root,
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            return CommandResult(
-                returncode=1,
-                stdout=_coerce_process_text(exc.stdout),
-                stderr=_coerce_process_text(exc.stderr),
-                timed_out=True,
-            )
-        return CommandResult(
-            returncode=int(completed.returncode),
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            timed_out=False,
-        )
-
-
-def _coerce_process_text(value: str | bytes | None) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value
-
-
 def validate_bind_host(host: str) -> str:
     if host not in LOCAL_BIND_HOSTS:
         raise ValueError("BuddySwitch web host must stay local to 127.0.0.1 or localhost.")
@@ -185,16 +140,6 @@ def validate_actor_id(actor_id: str) -> str:
     return actor_id
 
 
-def load_command_json_object(stdout: str, *, message: str) -> dict[str, Any]:
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError as exc:
-        raise HttpError(status=502, code="COMMAND_FAILED", message=message) from exc
-    if not isinstance(payload, dict):
-        raise HttpError(status=502, code="COMMAND_FAILED", message=message)
-    return payload
-
-
 def bind_web_runtime_state() -> None:
     raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
     if isinstance(raw_shared_root, str) and raw_shared_root.strip():
@@ -203,15 +148,20 @@ def bind_web_runtime_state() -> None:
     runtime_files.refresh_runtime_roots_from_env()
 
 
-def map_command_failure(command_label: str, result: CommandResult) -> HttpError:
-    message = _command_error_message(command_label, result)
-    if result.timed_out:
-        return HttpError(status=504, code="COMMAND_TIMEOUT", message=message)
-    if result.returncode == 2:
-        return HttpError(status=400, code="INVALID_REQUEST", message=message)
-    if result.returncode == 3:
-        return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=message)
-    return HttpError(status=502, code="COMMAND_FAILED", message=message)
+def map_host_control_failure(error: host_control_module.HostControlError) -> HttpError:
+    if error.timed_out or error.code == "COMMAND_TIMEOUT":
+        return HttpError(status=504, code="COMMAND_TIMEOUT", message=error.message)
+    if error.code == "CAPABILITY_CONFIG_INVALID":
+        return HttpError(status=409, code="CAPABILITY_CONFIG_INVALID", message=error.message)
+    if error.code == "CAPABILITY_CONFIG_WRITE_FAILED":
+        return HttpError(status=502, code="CAPABILITY_CONFIG_WRITE_FAILED", message=error.message)
+    if error.code in {"INVALID_REQUEST"} or error.returncode == 2:
+        return HttpError(status=400, code="INVALID_REQUEST", message=error.message)
+    if error.code == "NOT_FOUND":
+        return HttpError(status=404, code="NOT_FOUND", message=error.message)
+    if error.code in {"LIFECYCLE_BLOCKED", "LOCK_BUSY"} or error.returncode in {3, 4}:
+        return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=error.message)
+    return HttpError(status=502, code="COMMAND_FAILED", message=error.message)
 
 
 def create_server(host: str, port: int, service: "WebManagementService") -> ThreadingHTTPServer:
@@ -347,7 +297,7 @@ class WebManagementService:
         self,
         *,
         repo_root: Path,
-        command_runner: Callable[[list[str], float], CommandResult] | Callable[..., CommandResult] | None = None,
+        host_control: host_control_module.HostControl | None = None,
         terminal_opener: Callable[[str], None] | None = None,
         web_im_identity_provider: web_im_identity.WebImIdentityProvider | None = None,
         im_session: external_im_session.ExternalImSession | None = None,
@@ -355,7 +305,7 @@ class WebManagementService:
         busy_guard: BusyGuard | None = None,
     ) -> None:
         self._repo_root = repo_root
-        self._runner = command_runner or LauncherCommandRunner(repo_root).run
+        self._host_control = host_control or host_control_module.HostControl(repo_root=repo_root)
         self._terminal_opener = terminal_opener or open_macos_terminal_app
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
@@ -552,11 +502,7 @@ class WebManagementService:
         )
 
     def _create_instance_under_lock(self, role: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "start", "--role", role, "--json"], timeout_seconds=120)
-        payload = load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance start for role {role}.",
-        )
+        payload = self._call_host_control(lambda: self._host_control.start(role))
         actor_id = payload.get("actor_id")
         if not isinstance(actor_id, str) or not actor_id:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for role {role}.")
@@ -573,11 +519,7 @@ class WebManagementService:
         )
 
     def _clear_under_lock(self, actor_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "clear", actor_id, "--json"], timeout_seconds=60)
-        cleared = load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance clear for {actor_id}.",
-        )
+        cleared = self._call_host_control(lambda: self._host_control.clear(actor_id))
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         previous_thread_id = cleared.get("previous_thread_id")
         thread_id = cleared.get("thread_id")
@@ -596,28 +538,47 @@ class WebManagementService:
         capability: str | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        args = ["instance", "side", actor_id]
-        if side_thread_id is not None:
-            args.extend(["--side-thread-id", side_thread_id])
-        args.extend(["--text", text])
-        if side_thread_id is None and capability:
-            args.extend(["--capability", capability])
-        args.append("--json")
-        result = self._run_command(args, timeout_seconds=timeout_seconds)
-        return load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance side for {actor_id}.",
-        )
+        del timeout_seconds
+        context = self._side_context(actor_id, "side")
+        try:
+            if side_thread_id is not None:
+                return side_thread_lifecycle.send_to_side_thread(
+                    socket_path=context["socket_path"],
+                    instance_json=context["instance_json"],
+                    actor_id=actor_id,
+                    parent_thread_id=context["thread_id"],
+                    side_thread_id=side_thread_id,
+                    text=text,
+                    permissions="buddyswitch-runtime",
+                )
+            return actor_side_thread.start_actor_side_thread(
+                socket_path=context["socket_path"],
+                instance_json=context["instance_json"],
+                actor_id=actor_id,
+                parent_thread_id=context["thread_id"],
+                text=text,
+                purpose="host_control.side",
+                workspace_dir=context["workspace_dir"],
+                shared_project_workspace_dir=context["shared_project_workspace_dir"],
+                permissions="buddyswitch-runtime",
+                capability_level=capability,
+            )
+        except Exception as exc:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
 
     def _run_side_cleanup_command(self, actor_id: str, side_thread_id: str, *, timeout_seconds: float) -> dict[str, Any]:
-        result = self._run_command(
-            ["instance", "side", "close", actor_id, "--side-thread-id", side_thread_id, "--json"],
-            timeout_seconds=timeout_seconds,
-        )
-        return load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance side close for {actor_id}.",
-        )
+        del timeout_seconds
+        context = self._side_context(actor_id, "side close")
+        try:
+            return side_thread_lifecycle.cleanup_side_thread(
+                socket_path=context["socket_path"],
+                instance_json=context["instance_json"],
+                actor_id=actor_id,
+                parent_thread_id=context["thread_id"],
+                side_thread_id=side_thread_id,
+            )
+        except Exception as exc:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
 
     def _side(self, actor_id: str, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
@@ -721,11 +682,7 @@ class WebManagementService:
         )
 
     def _interrupt_under_lock(self, actor_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "interrupt", actor_id, "--json"], timeout_seconds=30)
-        parsed = load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance interrupt for {actor_id}.",
-        )
+        parsed = self._call_host_control(lambda: self._host_control.interrupt(actor_id))
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
         turn_id = parsed.get("turn_id")
         if isinstance(turn_id, str):
@@ -743,11 +700,7 @@ class WebManagementService:
         )
 
     def _stop_under_lock(self, actor_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "stop", actor_id, "--json"], timeout_seconds=60)
-        load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance stop for {actor_id}.",
-        )
+        self._call_host_control(lambda: self._host_control.stop(actor_id))
         return {"ok": True, "instance": self._get_instance_status(actor_id)}
 
     def _resume(self, actor_id: str) -> dict[str, Any]:
@@ -761,11 +714,7 @@ class WebManagementService:
         )
 
     def _resume_under_lock(self, actor_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "resume", actor_id, "--json"], timeout_seconds=60)
-        load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance resume for {actor_id}.",
-        )
+        self._call_host_control(lambda: self._host_control.resume(actor_id))
         return {"ok": True, "instance": self._get_instance_status(actor_id)}
 
     def _delete(self, actor_id: str) -> dict[str, Any]:
@@ -779,11 +728,7 @@ class WebManagementService:
         )
 
     def _delete_under_lock(self, actor_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "delete", actor_id, "--yes", "--json"], timeout_seconds=60)
-        load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance delete for {actor_id}.",
-        )
+        self._call_host_control(lambda: self._host_control.delete(actor_id))
         return {"ok": True, "actor_id": actor_id}
 
     def _open_tui(
@@ -873,9 +818,7 @@ class WebManagementService:
             raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="No thread to attach.")
 
     def _list_buddies(self) -> list[dict[str, str]]:
-        result = self._run_command(["instance", "roles", "--json"], timeout_seconds=10)
-        payload = load_command_json_object(result.stdout, message="Invalid JSON from instance roles.")
-        roles = payload.get("roles")
+        roles = self._call_host_control(self._host_control.roles)
         if not isinstance(roles, list):
             raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid roles payload from launcher.")
         rows: list[dict[str, str]] = []
@@ -891,9 +834,7 @@ class WebManagementService:
         return rows
 
     def _list_instances(self) -> list[dict[str, Any]]:
-        result = self._run_command(["instance", "list", "--json"], timeout_seconds=10)
-        payload = load_command_json_object(result.stdout, message="Invalid JSON from instance list.")
-        instances = payload.get("instances")
+        instances = self._call_host_control(lambda: self._host_control.list_instances())
         if not isinstance(instances, list):
             raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
         rows: list[dict[str, Any]] = []
@@ -1043,6 +984,37 @@ class WebManagementService:
             "capabilities": self._read_actor_capabilities(actor_id)["capabilities"],
         }
 
+    def _side_context(self, actor_id: str, action_label: str) -> dict[str, Any]:
+        instance = self._get_instance_status(actor_id)
+        thread_id = instance.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise HttpError(
+                status=409,
+                code="LIFECYCLE_BLOCKED",
+                message=f"Instance {action_label} blocked: {actor_id} has no thread id.",
+            )
+        app_server = instance.get("app_server")
+        socket_path = app_server.get("socket_path") if isinstance(app_server, Mapping) else None
+        app_server_healthy = isinstance(app_server, Mapping) and bool(app_server.get("healthy"))
+        if not app_server_healthy or not isinstance(socket_path, str) or not socket_path.strip():
+            raise HttpError(
+                status=409,
+                code="LIFECYCLE_BLOCKED",
+                message=f"Instance {action_label} blocked: {actor_id} is unhealthy or inactive.",
+            )
+        workspace_dir = instance.get("workspace_dir")
+        if not isinstance(workspace_dir, str) or not workspace_dir.strip():
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status payload for {actor_id}.")
+        raw_project_workspace = os.environ.get("BUDDYSWITCH_PROJECT_WORKSPACE_DIR")
+        project_workspace = Path(raw_project_workspace) if raw_project_workspace else self._repo_root / "projects" / "app"
+        return {
+            "thread_id": thread_id,
+            "socket_path": Path(socket_path),
+            "workspace_dir": Path(workspace_dir),
+            "shared_project_workspace_dir": project_workspace,
+            "instance_json": self._instance_json_for_actor(actor_id),
+        }
+
     def _shared_root(self) -> Path:
         raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
         if isinstance(raw_shared_root, str) and raw_shared_root.strip():
@@ -1069,17 +1041,9 @@ class WebManagementService:
         return instance_json
 
     def _read_actor_capabilities(self, actor_id: str) -> dict[str, Any]:
-        instance_json = self._instance_json_for_actor(actor_id)
-        try:
-            capabilities = actor_capability.describe_actor_capabilities(
-                actor_capability.load_actor_capabilities(instance_json)
-            )
-        except actor_capability.ActorCapabilityError as exc:
-            raise HttpError(status=409, code="CAPABILITY_CONFIG_INVALID", message=str(exc)) from exc
-        return {"ok": True, "actor_id": actor_id, "capabilities": capabilities}
+        return self._call_host_control(lambda: self._host_control.capabilities_get(actor_id))
 
     def _replace_actor_capabilities(self, actor_id: str, body: bytes) -> dict[str, Any]:
-        instance_json = self._instance_json_for_actor(actor_id)
         payload = self._parse_json_body(body)
         if set(payload) != {"parent", "side"}:
             raise HttpError(
@@ -1087,22 +1051,11 @@ class WebManagementService:
                 code="INVALID_REQUEST",
                 message="capability request must contain exactly parent and side.",
             )
-        try:
-            config = actor_capability.replace_actor_capabilities(
-                instance_json,
-                parent_level=payload["parent"],
-                side_level=payload["side"],
-            )
-        except actor_capability.ActorCapabilityError as exc:
-            message = str(exc)
-            if "failed to write capability config" in message:
-                raise HttpError(status=502, code="CAPABILITY_CONFIG_WRITE_FAILED", message=message) from exc
-            raise HttpError(status=400, code="INVALID_REQUEST", message=message) from exc
-        return {
-            "ok": True,
-            "actor_id": actor_id,
-            "capabilities": actor_capability.describe_actor_capabilities(config),
-        }
+        parent = payload["parent"]
+        side = payload["side"]
+        if not isinstance(parent, str) or not isinstance(side, str):
+            raise HttpError(status=400, code="INVALID_REQUEST", message="capability levels must be strings.")
+        return self._call_host_control(lambda: self._host_control.capabilities_set(actor_id, parent, side))
 
     def _deliver_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
         return im_actor_delivery.deliver(payload)
@@ -1111,18 +1064,13 @@ class WebManagementService:
         return daemon_client.check_reachability(target_identity_id=target_identity_id)
 
     def _get_instance_status(self, actor_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "status", actor_id, "--json"], timeout_seconds=10)
-        payload = load_command_json_object(
-            result.stdout,
-            message=f"Invalid JSON from instance status for {actor_id}.",
-        )
-        return payload
+        return self._call_host_control(lambda: self._host_control.status(actor_id))
 
-    def _run_command(self, args: list[str], *, timeout_seconds: float) -> CommandResult:
-        result = self._runner(args, timeout_seconds=timeout_seconds)
-        if result.returncode != 0 or result.timed_out:
-            raise map_command_failure(" ".join(args), result)
-        return result
+    def _call_host_control(self, action: Callable[[], Any]) -> Any:
+        try:
+            return action()
+        except host_control_module.HostControlError as exc:
+            raise map_host_control_failure(exc) from exc
 
     def _start_lifecycle_operation(
         self,
@@ -1304,15 +1252,6 @@ class WebManagementService:
             self._busy_guard.release(key)
 
 
-def _command_error_message(command_label: str, result: CommandResult) -> str:
-    if result.timed_out:
-        return f"Command timed out: {command_label}"
-    message = _first_nonempty_line(result.stderr) or _first_nonempty_line(result.stdout)
-    if message:
-        return message
-    return f"Command failed: {command_label}"
-
-
 def _first_nonempty_line(text: str) -> str | None:
     for line in text.splitlines():
         cleaned = line.strip()
@@ -1353,9 +1292,10 @@ def _normalized_host_netloc(value: str | None) -> str | None:
 
 def build_open_tui_attach_command(repo_root: Path, actor_id: str) -> str:
     validate_actor_id(actor_id)
+    launcher = "./buddy" "switch-codex"
     return (
         f"cd {shlex.quote(str(repo_root))} "
-        f"&& ./buddyswitch-codex instance attach {shlex.quote(actor_id)}"
+        f"&& {launcher} instance attach {shlex.quote(actor_id)}"
     )
 
 

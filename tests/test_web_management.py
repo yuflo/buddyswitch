@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 import shlex
@@ -39,6 +40,17 @@ from env.repos import identities as identity_repo  # noqa: E402
 import actor_capability  # noqa: E402
 
 
+@dataclass(frozen=True)
+class CommandResult:
+    returncode: int
+    stdout: str
+    stderr: str
+    timed_out: bool
+
+
+WEB_MANAGEMENT.CommandResult = CommandResult
+
+
 def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:
     identity_repo.save_actor_identity_profile(
         {
@@ -59,16 +71,16 @@ class FakeRunner:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
         self.timeouts: list[float] = []
-        self.responses: dict[tuple[str, ...], WEB_MANAGEMENT.CommandResult] = {}
+        self.responses: dict[tuple[str, ...], CommandResult] = {}
         self.blockers: dict[tuple[str, ...], threading.Event] = {}
 
-    def add(self, args: list[str], result: WEB_MANAGEMENT.CommandResult) -> None:
+    def add(self, args: list[str], result: CommandResult) -> None:
         self.responses[tuple(args)] = result
 
     def block(self, args: list[str], event: threading.Event) -> None:
         self.blockers[tuple(args)] = event
 
-    def run(self, args: list[str], *, timeout_seconds: float) -> WEB_MANAGEMENT.CommandResult:
+    def run(self, args: list[str], *, timeout_seconds: float) -> CommandResult:
         self.calls.append(list(args))
         self.timeouts.append(timeout_seconds)
         key = tuple(args)
@@ -78,6 +90,78 @@ class FakeRunner:
         if key not in self.responses:
             raise AssertionError(f"unexpected command: {args!r}")
         return self.responses[key]
+
+    def _payload(self, args: list[str], *, timeout_seconds: float) -> dict[str, object]:
+        result = self.run(args, timeout_seconds=timeout_seconds)
+        if result.returncode != 0 or result.timed_out:
+            code = "COMMAND_FAILED"
+            if result.timed_out:
+                code = "COMMAND_TIMEOUT"
+            elif result.returncode == 2:
+                code = "INVALID_REQUEST"
+            elif result.returncode == 3:
+                code = "LIFECYCLE_BLOCKED"
+            message = result.stderr.strip() or result.stdout.strip() or "Host control failed."
+            raise WEB_MANAGEMENT.host_control_module.HostControlError(
+                code,
+                message,
+                returncode=result.returncode,
+                timed_out=result.timed_out,
+            )
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise WEB_MANAGEMENT.host_control_module.HostControlError(
+                "COMMAND_FAILED",
+                "Host control returned invalid JSON.",
+            ) from exc
+        if not isinstance(payload, dict):
+            raise WEB_MANAGEMENT.host_control_module.HostControlError(
+                "COMMAND_FAILED",
+                "Host control JSON must be an object.",
+            )
+        return payload
+
+    def roles(self) -> list[dict[str, object]]:
+        payload = self._payload(["instance", "roles", "--json"], timeout_seconds=10)
+        return list(payload.get("roles", []))  # type: ignore[arg-type]
+
+    def start(self, role_id: str) -> dict[str, object]:
+        return self._payload(["instance", "start", "--role", role_id, "--json"], timeout_seconds=120)
+
+    def list_instances(self, role_id: str | None = None) -> list[dict[str, object]]:
+        args = ["instance", "list", "--json"]
+        if role_id is not None:
+            args.extend(["--role", role_id])
+        payload = self._payload(args, timeout_seconds=10)
+        return list(payload.get("instances", []))  # type: ignore[arg-type]
+
+    def status(self, actor_id: str) -> dict[str, object]:
+        return self._payload(["instance", "status", actor_id, "--json"], timeout_seconds=10)
+
+    def clear(self, actor_id: str) -> dict[str, object]:
+        return self._payload(["instance", "clear", actor_id, "--json"], timeout_seconds=60)
+
+    def resume(self, actor_id: str) -> dict[str, object]:
+        return self._payload(["instance", "resume", actor_id, "--json"], timeout_seconds=60)
+
+    def stop(self, actor_id: str) -> dict[str, object]:
+        return self._payload(["instance", "stop", actor_id, "--json"], timeout_seconds=60)
+
+    def delete(self, actor_id: str) -> dict[str, object]:
+        return self._payload(["instance", "delete", actor_id, "--yes", "--json"], timeout_seconds=60)
+
+    def interrupt(self, actor_id: str) -> dict[str, object]:
+        return self._payload(["instance", "interrupt", actor_id, "--json"], timeout_seconds=30)
+
+    def compact(self, actor_id: str) -> dict[str, object]:
+        return self._payload(["instance", "compact", actor_id, "--json"], timeout_seconds=30)
+
+    def capabilities_get(self, actor_id: str) -> dict[str, object]:
+        return WEB_MANAGEMENT.host_control_module.HostControl(repo_root=ROOT).capabilities_get(actor_id)
+
+    def capabilities_set(self, actor_id: str, parent: str, side: str) -> dict[str, object]:
+        return WEB_MANAGEMENT.host_control_module.HostControl(repo_root=ROOT).capabilities_set(actor_id, parent, side)
 
 
 @dataclass(frozen=True)
@@ -212,7 +296,7 @@ class OrderedRunner:
         self.steps = list(steps)
         self.calls: list[tuple[list[str], float]] = []
 
-    def run(self, args: list[str], *, timeout_seconds: float) -> WEB_MANAGEMENT.CommandResult:
+    def run(self, args: list[str], *, timeout_seconds: float) -> CommandResult:
         self.calls.append((list(args), timeout_seconds))
         if not self.steps:
             raise AssertionError(f"unexpected command with no steps left: {args!r}")
@@ -220,6 +304,78 @@ class OrderedRunner:
         if step.args != args:
             raise AssertionError(f"expected command {step.args!r}, got {args!r}")
         return step.result
+
+    _payload = FakeRunner._payload
+    roles = FakeRunner.roles
+    start = FakeRunner.start
+    list_instances = FakeRunner.list_instances
+    status = FakeRunner.status
+    clear = FakeRunner.clear
+    resume = FakeRunner.resume
+    stop = FakeRunner.stop
+    delete = FakeRunner.delete
+    interrupt = FakeRunner.interrupt
+    compact = FakeRunner.compact
+    capabilities_get = FakeRunner.capabilities_get
+    capabilities_set = FakeRunner.capabilities_set
+
+
+class RecordingHostControl:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.roles_response: list[dict[str, object]] = [
+            {"id": "pm", "label": "PM", "scope": "product"}
+        ]
+        self.status_response: dict[str, object] = active_status("act-pm-demo", "thread-main", "idle")
+        self.stop_response: dict[str, object] = {"actor_id": "act-pm-demo", "status": "inactive"}
+
+    def roles(self) -> list[dict[str, object]]:
+        self.calls.append(("roles", ()))
+        return self.roles_response
+
+    def start(self, role_id: str) -> dict[str, object]:
+        self.calls.append(("start", (role_id,)))
+        return {"actor_id": f"act-{role_id}-demo", "role": role_id}
+
+    def list_instances(self, role_id: str | None = None) -> list[dict[str, object]]:
+        self.calls.append(("list_instances", (role_id,)))
+        return []
+
+    def status(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("status", (actor_id,)))
+        return dict(self.status_response)
+
+    def clear(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("clear", (actor_id,)))
+        return {"actor_id": actor_id, "previous_thread_id": "thread-old", "thread_id": "thread-new"}
+
+    def resume(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("resume", (actor_id,)))
+        return {"actor_id": actor_id, "status": "active"}
+
+    def stop(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("stop", (actor_id,)))
+        return dict(self.stop_response)
+
+    def delete(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("delete", (actor_id,)))
+        return {"actor_id": actor_id, "deleted": True}
+
+    def interrupt(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("interrupt", (actor_id,)))
+        return {"actor_id": actor_id, "turn_id": "turn-main"}
+
+    def compact(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("compact", (actor_id,)))
+        return {"actor_id": actor_id, "started": True}
+
+    def capabilities_get(self, actor_id: str) -> dict[str, object]:
+        self.calls.append(("capabilities_get", (actor_id,)))
+        return {"ok": True, "actor_id": actor_id, "capabilities": {}}
+
+    def capabilities_set(self, actor_id: str, parent: str, side: str) -> dict[str, object]:
+        self.calls.append(("capabilities_set", (actor_id, parent, side)))
+        return {"ok": True, "actor_id": actor_id, "capabilities": {}}
 
 
 class WebManagementServerTestCase(unittest.TestCase):
@@ -238,7 +394,7 @@ class WebManagementServerTestCase(unittest.TestCase):
             service_kwargs["platform_name"] = platform_name
         service = WEB_MANAGEMENT.WebManagementService(
             repo_root=ROOT,
-            command_runner=fake_runner.run,
+            host_control=fake_runner,
             **service_kwargs,
         )
         server = WEB_MANAGEMENT.create_server("127.0.0.1", 0, service)
@@ -448,7 +604,7 @@ class WebManagementUnitTests(unittest.TestCase):
             runtime_files.refresh_runtime_roots_from_env()
 
             WEB_MANAGEMENT.bind_web_runtime_state()
-            service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+            service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
             status, payload = service.handle_api("GET", "/api/im/session", b"", {})
 
             self.assertEqual(status, 200)
@@ -462,32 +618,40 @@ class WebManagementUnitTests(unittest.TestCase):
             self.assertNotIn("BUDDYSWITCH_ACTOR_ID", os.environ)
             self.assertTrue((shared_root / "state" / "buddyswitch" / "local" / "web-management" / "im-session.json").is_file())
 
-    def test_map_command_failure_uses_required_status_codes(self) -> None:
+    def test_map_host_control_failure_uses_required_status_codes(self) -> None:
         cases = [
             (
-                WEB_MANAGEMENT.CommandResult(returncode=2, stdout="", stderr="Bad request", timed_out=False),
+                WEB_MANAGEMENT.host_control_module.HostControlError("INVALID_REQUEST", "Bad request", returncode=2),
                 400,
                 "INVALID_REQUEST",
             ),
             (
-                WEB_MANAGEMENT.CommandResult(returncode=3, stdout="", stderr="Instance delete blocked: active", timed_out=False),
+                WEB_MANAGEMENT.host_control_module.HostControlError(
+                    "LIFECYCLE_BLOCKED",
+                    "Instance delete blocked: active",
+                    returncode=3,
+                ),
                 409,
                 "LIFECYCLE_BLOCKED",
             ),
             (
-                WEB_MANAGEMENT.CommandResult(returncode=1, stdout="", stderr="internal error", timed_out=True),
+                WEB_MANAGEMENT.host_control_module.HostControlError(
+                    "COMMAND_TIMEOUT",
+                    "internal error",
+                    timed_out=True,
+                ),
                 504,
                 "COMMAND_TIMEOUT",
             ),
             (
-                WEB_MANAGEMENT.CommandResult(returncode=1, stdout="", stderr="internal error", timed_out=False),
+                WEB_MANAGEMENT.host_control_module.HostControlError("COMMAND_FAILED", "internal error"),
                 502,
                 "COMMAND_FAILED",
             ),
         ]
-        for result, expected_status, expected_code in cases:
-            with self.subTest(result=result):
-                error = WEB_MANAGEMENT.map_command_failure("instance list", result)
+        for host_error, expected_status, expected_code in cases:
+            with self.subTest(host_error=host_error):
+                error = WEB_MANAGEMENT.map_host_control_failure(host_error)
                 self.assertEqual(error.status, expected_status)
                 self.assertEqual(error.code, expected_code)
 
@@ -515,7 +679,7 @@ class WebManagementUnitTests(unittest.TestCase):
 
     def test_im_delivery_delegates_to_im_owned_delivery(self) -> None:
         runner = OrderedRunner([])
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
         payload = {
             "type": "im.message.created",
             "target_identity_id": "act-pm-demo",
@@ -761,7 +925,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             ["instance", "status", "act-market-demo", "--json"],
             command_json(active_status("act-market-demo", "thread-1", "idle")),
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
         result: dict[str, object] = {}
 
         def call_start() -> None:
@@ -814,7 +978,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             ["instance", "status", "act-pm-demo", "--json"],
             command_json(active_status("act-pm-demo", "thread-pm", "idle")),
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         first_status, first_payload = service.handle_api("POST", "/api/instances", b'{"role":"market"}')
         first_operation_id = first_payload["operation"]["id"]
@@ -864,7 +1028,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 ),
             ]
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -892,7 +1056,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 ),
             ]
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -921,7 +1085,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 ),
             ]
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
@@ -944,7 +1108,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 ),
             ]
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
@@ -956,7 +1120,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(runner.calls[0][0], ["instance", "clear", "act-pm-demo", "--json"])
 
     def test_unknown_lifecycle_operation_returns_404(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/operations/op-missing", b"")
@@ -966,7 +1130,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
     def test_initialize_route_is_removed(self) -> None:
         runner = OrderedRunner([])
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("POST", "/api/instances/act-pm-demo/" + "initialize", b"")
@@ -988,7 +1152,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 ),
             ]
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
 
@@ -1008,7 +1172,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 ),
             ]
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
 
@@ -1026,7 +1190,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             ["instance", "status", "act-pm-demo", "--json"],
             command_json(active_status("act-pm-demo", "thread-1", "idle")),
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/stop", b"")
         self.assertEqual(status, 202)
@@ -1050,7 +1214,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 opener = FakeTerminalOpener()
                 service = WEB_MANAGEMENT.WebManagementService(
                     repo_root=ROOT,
-                    command_runner=runner.run,
+                    host_control=runner,
                     terminal_opener=opener.open,
                     platform_name="darwin",
                 )
@@ -1075,7 +1239,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 opener = FakeTerminalOpener()
                 service = WEB_MANAGEMENT.WebManagementService(
                     repo_root=ROOT,
-                    command_runner=runner.run,
+                    host_control=runner,
                     terminal_opener=opener.open,
                     platform_name="darwin",
                 )
@@ -1093,7 +1257,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
             repo_root=ROOT,
-            command_runner=runner.run,
+            host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
         )
@@ -1116,7 +1280,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
             repo_root=ROOT,
-            command_runner=runner.run,
+            host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
         )
@@ -1155,7 +1319,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 opener = FakeTerminalOpener()
                 service = WEB_MANAGEMENT.WebManagementService(
                     repo_root=ROOT,
-                    command_runner=runner.run,
+                    host_control=runner,
                     terminal_opener=opener.open,
                     platform_name="darwin",
                 )
@@ -1181,7 +1345,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
             repo_root=ROOT,
-            command_runner=runner.run,
+            host_control=runner,
             terminal_opener=opener.open,
             platform_name="linux",
         )
@@ -1238,7 +1402,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         opener = FakeTerminalOpener(WEB_MANAGEMENT.TerminalOpenError("automation denied"))
         service = WEB_MANAGEMENT.WebManagementService(
             repo_root=ROOT,
-            command_runner=runner.run,
+            host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
         )
@@ -1338,8 +1502,33 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
         self.assertFalse((ROOT / "scripts/env/services/tracks.py").exists())
 
+    def test_web_management_service_receives_host_control_dependency(self) -> None:
+        parameters = inspect.signature(WEB_MANAGEMENT.WebManagementService).parameters
+
+        self.assertIn("host_control", parameters)
+        self.assertNotIn("command_runner", parameters)
+
+    def test_web_lifecycle_routes_call_injected_host_control_not_shell_commands(self) -> None:
+        host_control = RecordingHostControl()
+        host_control.status_response = active_status("act-pm-demo", "thread-main", "stopped")
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control)
+
+        status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/stop", b"")
+
+        self.assertEqual(status, 202)
+        operation = wait_for_operation_status(service, payload["operation"]["id"], "succeeded")
+        self.assertEqual(operation["result"]["instance"]["thread"]["status"], "stopped")
+        self.assertEqual(host_control.calls, [("stop", ("act-pm-demo",)), ("status", ("act-pm-demo",))])
+
+    def test_web_management_source_uses_host_control_not_public_cli(self) -> None:
+        source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
+
+        self.assertNotIn("LauncherCommandRunner", source)
+        self.assertNotIn("buddyswitch-codex", source)
+        self.assertNotIn("--json", source)
+
     def test_web_management_product_api_does_not_split_first_cut_subpanel_routes(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=FakeRunner().run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
 
         for path in (
             "/api/actors/act-pm-demo/tasks",
@@ -1354,8 +1543,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
 class WebManagementStableImIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _service(self, runner: FakeRunner | None = None) -> WEB_MANAGEMENT.WebManagementService:
-        command_runner = runner.run if runner is not None else FakeRunner().run
-        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=command_runner)
+        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner or FakeRunner())
 
     def _identity_path(self) -> Path:
         return self.runtime_state_root / "buddyswitch" / "local" / "web-management" / "im-session.json"
@@ -1706,8 +1894,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         return env
 
     def _service(self, runner: FakeRunner | OrderedRunner | None = None) -> WEB_MANAGEMENT.WebManagementService:
-        command_runner = runner.run if runner is not None else FakeRunner().run
-        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=command_runner)
+        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner or FakeRunner())
 
     @staticmethod
     def _instance_list_payload() -> dict[str, object]:
@@ -2032,7 +2219,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         service = self._service()
 
         with mock.patch.object(
-            WEB_MANAGEMENT.actor_capability,
+            WEB_MANAGEMENT.host_control_module.actor_capability,
             "replace_actor_capabilities",
             side_effect=actor_capability.ActorCapabilityError(
                 f"{instance_json.parent / 'capability-config.json'}: failed to write capability config: denied"
@@ -2263,30 +2450,22 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             self.assertEqual(payload["capabilities"]["side"]["level"], "maximum")
 
     def test_side_create_route_delegates_and_reports_side_thread_id(self) -> None:
-        runner = OrderedRunner(
-            [
-                CommandStep(
-                    ["instance", "side", "act-pm-demo", "--text", "Explore", "--json"],
-                    command_json(
-                        {
-                            "actor_id": "act-pm-demo",
-                            "action": "start",
-                            "thread_action": "start",
-                            "parent_thread_id": "thread-main",
-                            "side_thread_id": "thread-side-1",
-                            "turn_id": "turn-side-1",
-                        }
-                    ),
-                ),
-                CommandStep(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    command_json(active_status("act-pm-demo", "thread-main", "idle")),
-                ),
-            ]
-        )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
+        side_payload = {
+            "actor_id": "act-pm-demo",
+            "action": "start",
+            "thread_action": "start",
+            "parent_thread_id": "thread-main",
+            "side_thread_id": "thread-side-1",
+            "turn_id": "turn-side-1",
+        }
+        instance_payload = active_status("act-pm-demo", "thread-main", "idle")
 
-        status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/side", b'{"text":"Explore"}')
+        with (
+            mock.patch.object(service, "_run_side_command", return_value=side_payload) as run_side,
+            mock.patch.object(service, "_get_instance_status", return_value=instance_payload),
+        ):
+            status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/side", b'{"text":"Explore"}')
 
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
@@ -2296,50 +2475,43 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(payload["parent_thread_id"], "thread-main")
         self.assertEqual(payload["turn_id"], "turn-side-1")
         self.assertEqual(payload["instance"]["thread_id"], "thread-main")
+        run_side.assert_called_once_with(
+            "act-pm-demo",
+            text="Explore",
+            side_thread_id=None,
+            capability=None,
+            timeout_seconds=60,
+        )
 
     def test_side_route_passes_capability_only_for_new_side_thread(self) -> None:
-        runner = OrderedRunner(
-            [
-                CommandStep(
-                    [
-                        "instance",
-                        "side",
-                        "act-pm-demo",
-                        "--text",
-                        "Start side",
-                        "--capability",
-                        "deep",
-                        "--json",
-                    ],
-                    command_json(
-                        {
-                            "actor_id": "act-pm-demo",
-                            "action": "start",
-                            "thread_action": "start",
-                            "parent_thread_id": "thread-main",
-                            "side_thread_id": "thread-side-1",
-                            "turn_id": "turn-side-1",
-                            "model": "gpt-5.6-sol",
-                            "model_reasoning_effort": "xhigh",
-                            "capability_level": "deep",
-                            "capability_source": "override",
-                            "capability_durability": "thread_fork_only",
-                        }
-                    ),
-                ),
-                CommandStep(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    command_json(active_status("act-pm-demo", "thread-main", "idle")),
-                ),
-            ]
-        )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
+        side_payload = {
+            "actor_id": "act-pm-demo",
+            "action": "start",
+            "thread_action": "start",
+            "parent_thread_id": "thread-main",
+            "side_thread_id": "thread-side-1",
+            "turn_id": "turn-side-1",
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "xhigh",
+            "capability_level": "deep",
+            "capability_source": "override",
+            "capability_durability": "thread_fork_only",
+        }
 
-        status, payload = service.handle_api(
-            "POST",
-            "/api/instances/act-pm-demo/side",
-            b'{"text":"Start side","capability":"deep"}',
-        )
+        with (
+            mock.patch.object(service, "_run_side_command", return_value=side_payload) as run_side,
+            mock.patch.object(
+                service,
+                "_get_instance_status",
+                return_value=active_status("act-pm-demo", "thread-main", "idle"),
+            ),
+        ):
+            status, payload = service.handle_api(
+                "POST",
+                "/api/instances/act-pm-demo/side",
+                b'{"text":"Start side","capability":"deep"}',
+            )
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["side_thread_id"], "thread-side-1")
@@ -2347,46 +2519,39 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(payload["model_reasoning_effort"], "xhigh")
         self.assertEqual(payload["capability_level"], "deep")
         self.assertEqual(payload["capability_durability"], "thread_fork_only")
+        run_side.assert_called_once_with(
+            "act-pm-demo",
+            text="Start side",
+            side_thread_id=None,
+            capability="deep",
+            timeout_seconds=60,
+        )
 
     def test_side_send_route_delegates_existing_side(self) -> None:
-        runner = OrderedRunner(
-            [
-                CommandStep(
-                    [
-                        "instance",
-                        "side",
-                        "act-pm-demo",
-                        "--side-thread-id",
-                        "thread-side-1",
-                        "--text",
-                        "Follow up",
-                        "--json",
-                    ],
-                    command_json(
-                        {
-                            "actor_id": "act-pm-demo",
-                            "action": "send",
-                            "thread_action": "steer",
-                            "parent_thread_id": "thread-main",
-                            "side_thread_id": "thread-side-1",
-                            "turn_id": "turn-side-1",
-                            "expected_turn_id": "turn-side-1",
-                        }
-                    ),
-                ),
-                CommandStep(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    command_json(active_status("act-pm-demo", "thread-main", "idle")),
-                ),
-            ]
-        )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
+        side_payload = {
+            "actor_id": "act-pm-demo",
+            "action": "send",
+            "thread_action": "steer",
+            "parent_thread_id": "thread-main",
+            "side_thread_id": "thread-side-1",
+            "turn_id": "turn-side-1",
+            "expected_turn_id": "turn-side-1",
+        }
 
-        status, payload = service.handle_api(
-            "POST",
-            "/api/instances/act-pm-demo/side",
-            b'{"side_thread_id":"thread-side-1","text":"Follow up"}',
-        )
+        with (
+            mock.patch.object(service, "_run_side_command", return_value=side_payload) as run_side,
+            mock.patch.object(
+                service,
+                "_get_instance_status",
+                return_value=active_status("act-pm-demo", "thread-main", "idle"),
+            ),
+        ):
+            status, payload = service.handle_api(
+                "POST",
+                "/api/instances/act-pm-demo/side",
+                b'{"side_thread_id":"thread-side-1","text":"Follow up"}',
+            )
 
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
@@ -2396,46 +2561,73 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertEqual(payload["parent_thread_id"], "thread-main")
         self.assertEqual(payload["expected_turn_id"], "turn-side-1")
         self.assertEqual(payload["instance"]["thread_id"], "thread-main")
+        run_side.assert_called_once_with(
+            "act-pm-demo",
+            text="Follow up",
+            side_thread_id="thread-side-1",
+            capability=None,
+            timeout_seconds=60,
+        )
+
+    def test_side_route_blocks_unhealthy_app_server_even_with_socket_path(self) -> None:
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
+        instance_payload = active_status("act-pm-demo", "thread-main", "idle")
+        instance_payload["app_server"] = {
+            "healthy": False,
+            "socket_path": "/tmp/buddyswitch-app.sock",
+        }
+
+        with (
+            mock.patch.object(service, "_get_instance_status", return_value=instance_payload),
+            mock.patch.object(service, "_instance_json_for_actor", return_value=Path("/tmp/instance.json")),
+            mock.patch.object(
+                WEB_MANAGEMENT.actor_side_thread,
+                "start_actor_side_thread",
+                return_value={
+                    "actor_id": "act-pm-demo",
+                    "action": "start",
+                    "parent_thread_id": "thread-main",
+                    "side_thread_id": "thread-side-1",
+                    "turn_id": "turn-side-1",
+                },
+            ) as start_side,
+            mock.patch.object(WEB_MANAGEMENT.side_thread_lifecycle, "send_to_side_thread") as send_side,
+        ):
+            with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                service.handle_api("POST", "/api/instances/act-pm-demo/side", b'{"text":"Explore"}')
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.code, "LIFECYCLE_BLOCKED")
+        self.assertIn("unhealthy or inactive", raised.exception.message)
+        start_side.assert_not_called()
+        send_side.assert_not_called()
 
     def test_side_close_route_delegates_and_reports_side_thread_id(self) -> None:
-        runner = OrderedRunner(
-            [
-                CommandStep(
-                    [
-                        "instance",
-                        "side",
-                        "close",
-                        "act-pm-demo",
-                        "--side-thread-id",
-                        "thread-side-1",
-                        "--json",
-                    ],
-                    command_json(
-                        {
-                            "actor_id": "act-pm-demo",
-                            "action": "close",
-                            "parent_thread_id": "thread-main",
-                            "side_thread_id": "thread-side-1",
-                            "turn_id": "turn-side-1",
-                            "turn_interrupt_attempted": True,
-                            "turn_interrupt_ok": True,
-                            "lease_unregistered": True,
-                        }
-                    ),
-                ),
-                CommandStep(
-                    ["instance", "status", "act-pm-demo", "--json"],
-                    command_json(active_status("act-pm-demo", "thread-main", "idle")),
-                ),
-            ]
-        )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
+        close_payload = {
+            "actor_id": "act-pm-demo",
+            "action": "close",
+            "parent_thread_id": "thread-main",
+            "side_thread_id": "thread-side-1",
+            "turn_id": "turn-side-1",
+            "turn_interrupt_attempted": True,
+            "turn_interrupt_ok": True,
+            "lease_unregistered": True,
+        }
 
-        status, payload = service.handle_api(
-            "POST",
-            "/api/instances/act-pm-demo/side/close",
-            b'{"side_thread_id":"thread-side-1"}',
-        )
+        with (
+            mock.patch.object(service, "_run_side_cleanup_command", return_value=close_payload) as run_side_close,
+            mock.patch.object(
+                service,
+                "_get_instance_status",
+                return_value=active_status("act-pm-demo", "thread-main", "idle"),
+            ),
+        ):
+            status, payload = service.handle_api(
+                "POST",
+                "/api/instances/act-pm-demo/side/close",
+                b'{"side_thread_id":"thread-side-1"}',
+            )
 
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
@@ -2447,6 +2639,7 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
         self.assertTrue(payload["turn_interrupt_ok"])
         self.assertTrue(payload["lease_unregistered"])
         self.assertEqual(payload["instance"]["thread_id"], "thread-main")
+        run_side_close.assert_called_once_with("act-pm-demo", "thread-side-1", timeout_seconds=30)
 
     def test_side_route_rejects_empty_text(self) -> None:
         runner, base_url = self._start_server()
