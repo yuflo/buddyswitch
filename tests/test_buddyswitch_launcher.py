@@ -356,14 +356,13 @@ class BuddySwitchLauncherTests(unittest.TestCase):
 set -euo pipefail
 source tools/launcher/env.sh
 PATH="$1"
-python_env_name="BUDDYSWITCH_PYTHON"
-export "${python_env_name}=/ignored/inherited/interpreter"
 buddyswitch_resolve_python
 printf '%s\n' "$BUDDYSWITCH_PYTHON"
 '''
             completed = subprocess.run(
                 ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
                 cwd=ROOT,
+                env={**os.environ, "BUDDYSWITCH_PYTHON": "/ignored/inherited/interpreter"},
                 text=True,
                 capture_output=True,
                 check=False,
