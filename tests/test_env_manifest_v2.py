@@ -110,6 +110,14 @@ class EnvManifestV2Tests(unittest.TestCase):
                 assert isinstance(templates, list)
                 self.assertTrue(templates)
 
+    def test_manifest_loader_has_one_standard_toml_path(self) -> None:
+        source = (ROOT / "scripts" / "env_manifest.py").read_text(encoding="utf-8")
+        compatibility_package = "tom" + "li"
+        self.assertIn("import tomllib", source)
+        self.assertNotRegex(source, rf"\b{compatibility_package}\b")
+        self.assertNotIn("_parse_toml_scalar", source)
+        self.assertNotIn("_parse_toml_array", source)
+
 
 if __name__ == "__main__":
     unittest.main()

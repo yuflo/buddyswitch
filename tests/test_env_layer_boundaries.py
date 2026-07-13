@@ -8,14 +8,10 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import uuid
 from pathlib import Path
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - python<3.11 fallback
-    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -145,7 +141,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         config_path = temp_root / f"{role}-config.toml"
         completed = subprocess.run(
             [
-                "python3",
+                sys.executable,
                 str(CODEX_CONFIG),
                 "--config",
                 str(config_path),

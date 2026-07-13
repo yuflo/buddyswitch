@@ -14,14 +14,9 @@ import subprocess
 import tempfile
 import sys
 import time
+import tomllib
 import unittest
 from pathlib import Path
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - python<3.11 fallback
-    import tomli as tomllib
-
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "buddyswitch-codex"
@@ -350,6 +345,9 @@ class BuddySwitchLauncherTests(unittest.TestCase):
     def _write_fake_codex(self, path: Path) -> None:
         helper_path = ROOT / "tests" / "helpers" / "fake_codex.py"
         self._write_exec(path, helper_path.read_text(encoding="utf-8"))
+        python3_path = path.with_name("python3")
+        if not python3_path.exists():
+            python3_path.symlink_to(sys.executable)
 
     def test_python_resolver_uses_only_path_python_and_overwrites_inherited_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
