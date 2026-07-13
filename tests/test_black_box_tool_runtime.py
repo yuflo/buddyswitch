@@ -24,7 +24,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
     "evidence": {"approve_downgrade", "issue_browser"},
     "message": {"contacts", "conversation", "get", "list", "mark", "send"},
     "search": {"request", "status"},
-    "task_sys": {"list", "get", "close", "need_parent"},
+    "task_sys": {"list", "get", "update_task_analysis", "close", "need_parent"},
     "track": {
         "add_comment",
         "add_material",
