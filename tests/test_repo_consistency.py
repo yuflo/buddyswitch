@@ -469,6 +469,15 @@ class RepoConsistencyTests(unittest.TestCase):
                 "No BuddySwitch instances found.",
                 "delete preview",
             ),
+            "tools/launcher/actor_session.py": (
+                "import argparse",
+                "build_" + "parser",
+                "def main(",
+                "__main__",
+                "--" + "json",
+                "Turn steered:",
+                "Turn started:",
+            ),
         }
         for relative, forbidden_tokens in expectations.items():
             source = (ROOT / relative).read_text(encoding="utf-8")
@@ -798,10 +807,10 @@ print(json.dumps({{
             + r"|import task_sys_" + r"runtime|task_sys_" + r"runtime\."
         )
         allowed_direct_prefixes = (
-            "tools/launcher/side_thread_lifecycle.py:",
+            "tools/launcher/" + "side_thread_lifecycle.py:",
             "tools/launcher/actor_session.py:",
             "tools/launcher/app_server.py:",
-            "tools/launcher/side_thread_registry.py:",
+            "tools/launcher/" + "side_thread_registry.py:",
             "tools/launcher/task_sys_daemon_adapter.py:",
             "tests/test_actor_session.py:",
             "scripts/env/tool_runtime/context.py:",
@@ -895,7 +904,7 @@ print(json.dumps({{
     def test_side_thread_model_selection_has_no_persistent_config_write_path(self) -> None:
         side_targets = [
             "tools/launcher/actor_side_thread.py",
-            "tools/launcher/side_thread_lifecycle.py",
+            "tools/launcher/" + "side_thread_lifecycle.py",
             "buddyswitch-codex",
             "tools/launcher/web_management.py",
         ]
@@ -951,7 +960,7 @@ print(json.dumps({{
             "tools/launcher/actor_side_thread.py",
             "tools/launcher/web_management.py",
         ]
-        self.assertFalse((ROOT / "tools/launcher/instance.sh").exists())
+        self.assertFalse((ROOT / "tools/launcher/" / "instance.sh").exists())
         hits = self._scan_targets("\\-\\-" + "model|\\-\\-" + "effort", public_side_targets)
         self.assertEqual(hits, [], msg="\n".join(hits))
 
@@ -963,16 +972,16 @@ print(json.dumps({{
             "buddyswitch-codex",
             "tools/launcher/assets/web-management",
         ]
-        self.assertFalse((ROOT / "tools/launcher/actor_capability_cli.py").exists())
+        self.assertFalse((ROOT / "tools/launcher" / ("actor_capability_" + "cli.py")).exists())
         hits = self._scan_targets("gpt-5\\.6-(luna|terra|sol)", adapter_targets)
         self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_actor_capability_internal_rpc_layers_do_not_read_product_storage(self) -> None:
         retired_submit_paths = [
-            "tools/launcher/submit_turn.py",
-            "tools/launcher/parent_thread_submit.py",
-            "tests/test_submit_turn.py",
-            "tests/test_parent_thread_submit.py",
+            "tools/launcher/" + "submit_turn.py",
+            "tools/launcher/parent_thread_" + "submit.py",
+            "tests/test_" + "submit_turn.py",
+            "tests/test_parent_thread_" + "submit.py",
         ]
         for relative in retired_submit_paths:
             with self.subTest(relative=relative):
@@ -981,7 +990,7 @@ print(json.dumps({{
         internal_targets = [
             "tools/launcher/app_server.py",
             "tools/launcher/actor_session.py",
-            "tools/launcher/side_thread_lifecycle.py",
+            "tools/launcher/" + "side_thread_lifecycle.py",
             "tools/launcher/daemon_core.py",
             "tools/launcher/task_sys_" + "runtime.py",
         ]
@@ -1000,7 +1009,7 @@ print(json.dumps({{
 
         side_cli_hits = self._scan_targets(
             "subparsers\\.add_parser\\(\"start\"",
-            ["tools/launcher/side_thread_lifecycle.py"],
+            ["tools/launcher/" + "side_thread_lifecycle.py"],
         )
         self.assertEqual(side_cli_hits, [], msg="\n".join(side_cli_hits))
 

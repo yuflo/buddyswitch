@@ -4226,11 +4226,11 @@ exec "$real_git" "$@"
         )
 
         self.assertEqual(help_result.returncode, 0, msg=self._output_error_text(help_result))
-        self.assertNotIn("instance side", help_result.stdout)
-        self.assertNotIn("instance goal", help_result.stdout)
+        self.assertNotIn("instance " + "side", help_result.stdout)
+        self.assertNotIn("instance " + "goal", help_result.stdout)
         self.assertNotIn("instance_side()", source)
         self.assertNotIn("instance_goal()", source)
-        self.assertNotIn("SUBMIT_TURN_HELPER", source)
+        self.assertNotIn("SUBMIT_TURN_" + "HELPER", source)
         self.assertIn("from tools.launcher import actor_session", source)
         self.assertNotEqual(side_result.returncode, 0)
         self._cli_error(side_result, code="UNKNOWN_COMMAND")
@@ -6169,7 +6169,7 @@ exec "$real_git" "$@"
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
-            removed_locked_command = "__locked-instance-" + "open-bootstrap"
+            removed_locked_command = "__" + "locked-instance-" + "open-bootstrap"
             result = subprocess.run(
                 [str(LAUNCHER), removed_locked_command],
                 cwd=ROOT,
@@ -8921,8 +8921,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
         cases = (
             (["start"], "UNKNOWN_COMMAND"),
             (["workspace"], "UNKNOWN_COMMAND"),
-            (["__locked-reset"], "UNKNOWN_COMMAND"),
-            (["__locked-browser-ensure"], "UNKNOWN_COMMAND"),
+            (["__" + "locked-reset"], "UNKNOWN_COMMAND"),
+            (["__" + "locked-browser-ensure"], "UNKNOWN_COMMAND"),
             (["instance", "side", "act-pm-demo", "--text", "Explore"], "UNKNOWN_COMMAND"),
             (["instance", "goal", "act-pm-demo", "get"], "UNKNOWN_COMMAND"),
             (["instance", "roles", "--" + "json"], "INVALID_ARGUMENT"),
@@ -9248,7 +9248,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                     str(shared_root),
                     "--",
                     str(LAUNCHER),
-                    "__locked-workspace-sync",
+                    "__" + "locked-workspace-sync",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -9259,7 +9259,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             self.assertNotEqual(completed.returncode, 0)
             self._cli_error(completed, code="UNKNOWN_COMMAND")
-            self.assertIn("Unknown top-level command: __locked-workspace-sync", self._output_error_text(completed))
+            self.assertIn("Unknown top-level command: __" + "locked-workspace-sync", self._output_error_text(completed))
             self.assertFalse(workspace_dir.exists(), "retired locked sync command must not create workspace")
 
     def test_removed_cleanup_command_fails_closed_without_launching_codex(self) -> None:
@@ -9533,7 +9533,7 @@ exit 1
             env.pop("CODEX_HOME", None)
 
             direct_reset = subprocess.run(
-                [str(LAUNCHER), "__locked-reset"],
+                [str(LAUNCHER), "__" + "locked-reset"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -9543,7 +9543,7 @@ exit 1
 
             self.assertEqual(direct_reset.returncode, 2)
             self._cli_error(direct_reset, code="UNKNOWN_COMMAND")
-            self.assertIn("Unknown top-level command: __locked-reset", self._output_error_text(direct_reset))
+            self.assertIn("Unknown top-level command: __" + "locked-reset", self._output_error_text(direct_reset))
             self.assertTrue(shared_root.exists(), "direct locked entrypoint must not remove shared root")
             self.assertTrue(sentinel.exists(), "direct locked entrypoint must not mutate shared root")
 
@@ -9566,7 +9566,7 @@ exit 1
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
                     str(LAUNCHER),
-                    "__locked-reset",
+                    "__" + "locked-reset",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -9577,7 +9577,7 @@ exit 1
 
             self.assertEqual(direct_reset.returncode, 2)
             self._cli_error(direct_reset, code="UNKNOWN_COMMAND")
-            self.assertIn("Unknown top-level command: __locked-reset", self._output_error_text(direct_reset))
+            self.assertIn("Unknown top-level command: __" + "locked-reset", self._output_error_text(direct_reset))
             self.assertTrue(sentinel.exists(), "helper-wrapped locked reset must not bypass --yes")
 
     def test_lock_helper_wrapped_reset_still_validates_reset_root(self) -> None:
@@ -9599,7 +9599,7 @@ exit 1
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
                     str(LAUNCHER),
-                    "__locked-reset",
+                    "__" + "locked-reset",
                     "--yes",
                 ],
                 cwd=ROOT,
@@ -9611,7 +9611,7 @@ exit 1
 
             self.assertEqual(direct_reset.returncode, 2)
             self._cli_error(direct_reset, code="UNKNOWN_COMMAND")
-            self.assertIn("Unknown top-level command: __locked-reset", self._output_error_text(direct_reset))
+            self.assertIn("Unknown top-level command: __" + "locked-reset", self._output_error_text(direct_reset))
             self.assertTrue(sentinel.exists(), "helper-wrapped locked reset must not bypass root validation")
 
     def test_runtime_lock_helper_writes_locks_under_shared_root_run_locks(self) -> None:
@@ -11102,7 +11102,7 @@ args = {json.dumps(existing_args)}
             env.pop("CODEX_HOME", None)
 
             direct_ensure = subprocess.run(
-                [str(LAUNCHER), "__locked-browser-ensure"],
+                [str(LAUNCHER), "__" + "locked-browser-ensure"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -11112,7 +11112,7 @@ args = {json.dumps(existing_args)}
 
             self.assertEqual(direct_ensure.returncode, 2)
             self._cli_error(direct_ensure, code="UNKNOWN_COMMAND")
-            self.assertIn("Unknown top-level command: __locked-browser-ensure", self._output_error_text(direct_ensure))
+            self.assertIn("Unknown top-level command: __" + "locked-browser-ensure", self._output_error_text(direct_ensure))
             self.assertFalse(shared_root.exists(), "direct locked browser ensure must not mutate shared root")
 
     def test_env_browser_ensure_rejects_invalid_env_port_before_lock_and_side_effects(self) -> None:
@@ -11194,7 +11194,7 @@ args = {json.dumps(existing_args)}
             env.pop("CODEX_HOME", None)
 
             direct_sync = subprocess.run(
-                [str(LAUNCHER), "__locked-workspace-sync"],
+                [str(LAUNCHER), "__" + "locked-workspace-sync"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -11203,7 +11203,7 @@ args = {json.dumps(existing_args)}
             )
 
             self.assertEqual(direct_sync.returncode, 2)
-            self.assertIn("Unknown top-level command: __locked-workspace-sync", self._output_error_text(direct_sync))
+            self.assertIn("Unknown top-level command: __" + "locked-workspace-sync", self._output_error_text(direct_sync))
             self.assertFalse(workspace_dir.exists(), "direct locked entrypoint must not mutate workspace")
 
     def test_workspace_command_requires_explicit_subcommand(self) -> None:

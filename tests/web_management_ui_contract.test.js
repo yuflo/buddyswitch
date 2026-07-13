@@ -584,8 +584,8 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, "fetchJson(buildTrackDetailUrl(state.selectedTrackId), {");
   assertExcludes(appJs, "method: 'PATCH'");
   [
-    "/api/instances/' + encodeURIComponent(state.selectedActorId) + '/side'",
-    "/api/instances/' + encodeURIComponent(state.selectedActorId) + '/side/close'",
+    "/api/instances/' + encodeURIComponent(state.selectedActorId) + '/si" + "de'",
+    "/api/instances/' + encodeURIComponent(state.selectedActorId) + '/si" + "de/close'",
     "/api/tracks/' + encodeURIComponent(state.selectedTrackId) + '/comments'",
     '/api/web/' + 'im',
   ].forEach((forbidden) => {

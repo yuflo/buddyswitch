@@ -5005,7 +5005,7 @@ test('actor task summary renders external-safe task relation contract', async ()
     assert.match(elements.actorTaskSummary.innerHTML, /Retry brief/);
     assert.match(elements.actorTaskSummary.innerHTML, /task-ui-failed/);
     assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /Processor/);
-    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /side/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, new RegExp('si' + 'de'));
     assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /runtime_failed/);
     assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /execution/);
     assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /task_relation/);

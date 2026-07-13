@@ -185,10 +185,6 @@ buddyswitch_cleanup_validate_shared_root() {
   fi
 }
 
-buddyswitch_cleanup_main() {
-  buddyswitch_with_runtime_lock "${BUDDYSWITCH_CLEANUP_REPO_ROOT}/buddyswitch-codex" "__locked-cleanup" "$@"
-}
-
 buddyswitch_cleanup_run_locked() {
   local state_root="${BUDDYSWITCH_SHARED_ROOT}/state"
   local target_root=""

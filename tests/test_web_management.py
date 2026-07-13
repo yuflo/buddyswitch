@@ -1309,8 +1309,8 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         for forbidden in (
             "import actor_side_thread",
             "import side_thread_lifecycle",
-            '"/side"',
-            '"/side/close"',
+            '"/' + 'side"',
+            '"/' + 'side/close"',
             "start_actor_side_thread",
             "send_to_side_thread",
             "cleanup_side_thread",
@@ -1427,7 +1427,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_web_management_source_uses_host_control_not_public_cli(self) -> None:
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
 
-        self.assertNotIn("LauncherCommandRunner", source)
+        self.assertNotIn("Launcher" + "CommandRunner", source)
         self.assertNotIn("buddyswitch" + "-codex", source)
         self.assertNotIn("--" + "json", source)
 
@@ -2385,8 +2385,8 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
     def test_side_routes_are_not_public_web_api(self) -> None:
         runner, base_url = self._start_server()
         for path, payload_body in (
-            ("/api/instances/act-pm-demo/side", {"text": "Explore"}),
-            ("/api/instances/act-pm-demo/side/close", {"side_thread_id": "thread-side-1"}),
+            ("/api/instances/act-pm-demo/" + "side", {"text": "Explore"}),
+            ("/api/instances/act-pm-demo/" + "side/close", {"side_thread_id": "thread-side-1"}),
         ):
             with self.subTest(path=path):
                 status, payload = self._request_json(

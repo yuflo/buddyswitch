@@ -1,4 +1,4 @@
-"""Tests for instance side-thread registry helper."""
+"""Tests for the actor side-thread registry helper."""
 
 from __future__ import annotations
 

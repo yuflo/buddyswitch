@@ -1,6 +1,5 @@
 """Actor session input and attach boundary."""
 
-import argparse
 import json
 import os
 import re
@@ -269,62 +268,3 @@ def _path_value(value: Any, fallback: Path) -> Path:
     if isinstance(value, str) and value.strip():
         return Path(value.strip())
     return fallback
-
-
-def _session_from_args(args: argparse.Namespace) -> ActorSession:
-    return ActorSession(
-        shared_root=Path(args.shared_root),
-        repo_root=Path(args.repo_root),
-        codex_bin=args.codex_bin,
-    )
-
-
-def _command_input(args: argparse.Namespace) -> int:
-    payload = _session_from_args(args).input(args.actor_id, args.text)
-    if args.json:
-        print(json.dumps(payload, ensure_ascii=True))
-        return 0
-    action = payload.get("action")
-    turn_id = payload.get("turn_id") or payload.get("expected_turn_id") or ""
-    if action == "steer":
-        print(f"Turn steered: {turn_id}")
-    else:
-        print(f"Turn started: {turn_id}")
-    return 0
-
-
-def _command_attach(args: argparse.Namespace) -> int:
-    _session_from_args(args).exec_attach(args.actor_id)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--shared-root", required=True)
-    parser.add_argument("--repo-root", required=True)
-    parser.add_argument("--codex-bin", default="codex")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    input_parser = subparsers.add_parser("input")
-    input_parser.add_argument("actor_id")
-    input_parser.add_argument("--text", required=True)
-    input_parser.add_argument("--json", action="store_true")
-    input_parser.set_defaults(func=_command_input)
-
-    attach_parser = subparsers.add_parser("attach")
-    attach_parser.add_argument("actor_id")
-    attach_parser.set_defaults(func=_command_attach)
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        return int(args.func(args))
-    except ActorSessionError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

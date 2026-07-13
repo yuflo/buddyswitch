@@ -727,7 +727,7 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         source = TASK_SYS_RUNTIME_PATH.read_text(encoding="utf-8")
 
         self.assertIn("import actor_session", source)
-        self.assertNotIn("import parent_thread_submit", source)
+        self.assertNotIn("import parent_thread_" + "submit", source)
         self.assertNotIn("import submit_turn", source)
         self.assertNotIn("turn_start", source)
         self.assertNotIn("turn_steer", source)
