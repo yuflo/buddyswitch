@@ -520,7 +520,6 @@ print(json.dumps({{
             "tests/test_buddyswitch_launcher.py",
             "tests/test_browser_cockpit_launcher.py",
             "tests/test_imessage_channel.py",
-            "tests/test_submit_turn.py",
             "tests/test_web_management.py",
         }
         allowed_lines = (
@@ -647,9 +646,11 @@ print(json.dumps({{
         )
         allowed_direct_prefixes = (
             "tools/launcher/side_thread_lifecycle.py:",
+            "tools/launcher/actor_session.py:",
             "tools/launcher/app_server.py:",
             "tools/launcher/side_thread_registry.py:",
             "tools/launcher/task_sys_daemon_adapter.py:",
+            "tests/test_actor_session.py:",
             "scripts/env/tool_runtime/context.py:",
             "scripts/env/tool_runtime/task_sys_runtime_client.py:",
             "tests/test_side_thread_lifecycle.py:",
@@ -704,19 +705,39 @@ print(json.dumps({{
 
     def test_parent_thread_settings_update_is_limited_to_parent_boundary(self) -> None:
         targets = ["tools/launcher", "tests"]
-        hits = self._scan_targets("thread/" + "settings/update", targets)
+        rpc_hits = self._scan_targets("thread/" + "settings/update", targets)
 
-        allowed_paths = {
+        allowed_rpc_paths = {
             "tools/launcher/app_server.py",
             "tests/test_app_server_client.py",
+            "tests/test_buddyswitch_launcher.py",
             "tests/test_repo_consistency.py",
         }
         disallowed: list[str] = []
-        for line in hits:
+        for line in rpc_hits:
             path = line.split(":", 1)[0]
-            if path not in allowed_paths:
+            if path not in allowed_rpc_paths:
                 disallowed.append(line)
+
+        update_helper_hits = self._scan_targets("thread_settings_update", targets)
+        allowed_update_helper_paths = {
+            "tools/launcher/app_server.py",
+            "tools/launcher/actor_session.py",
+            "tests/test_actor_session.py",
+            "tests/test_app_server_client.py",
+            "tests/test_repo_consistency.py",
+        }
+        for line in update_helper_hits:
+            path = line.split(":", 1)[0]
+            if path not in allowed_update_helper_paths:
+                disallowed.append(line)
+
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+        app_server_source = (ROOT / "tools/launcher/app_server.py").read_text(encoding="utf-8")
+        actor_session_source = (ROOT / "tools/launcher/actor_session.py").read_text(encoding="utf-8")
+        self.assertIn("thread/" + "settings/update", app_server_source)
+        self.assertIn("app_server.thread_settings_update", actor_session_source)
 
     def test_side_thread_model_selection_has_no_persistent_config_write_path(self) -> None:
         side_targets = [
@@ -741,7 +762,7 @@ print(json.dumps({{
             "buddyswitch-codex",
             "tools/launcher",
             "tests/test_actor_capability.py",
-            "tests/test_parent_thread_submit.py",
+            "tests/test_actor_session.py",
             "tests/test_actor_side_thread.py",
             "tests/test_buddyswitch_launcher.py",
             "tests/test_web_management.py",
@@ -794,9 +815,19 @@ print(json.dumps({{
         self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_actor_capability_internal_rpc_layers_do_not_read_product_storage(self) -> None:
+        retired_submit_paths = [
+            "tools/launcher/submit_turn.py",
+            "tools/launcher/parent_thread_submit.py",
+            "tests/test_submit_turn.py",
+            "tests/test_parent_thread_submit.py",
+        ]
+        for relative in retired_submit_paths:
+            with self.subTest(relative=relative):
+                self.assertFalse((ROOT / relative).exists())
+
         internal_targets = [
             "tools/launcher/app_server.py",
-            "tools/launcher/submit_turn.py",
+            "tools/launcher/actor_session.py",
             "tools/launcher/side_thread_lifecycle.py",
             "tools/launcher/daemon_core.py",
             "tools/launcher/task_sys_" + "runtime.py",

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -58,61 +56,3 @@ def start_actor_side_thread(
         model_reasoning_effort=resolved.effort,
     )
     return actor_capability.apply_side_capability_metadata(payload, resolved)
-
-
-def _print_json(payload: Any) -> None:
-    print(json.dumps(payload, ensure_ascii=True))
-
-
-def _command_start(args: argparse.Namespace) -> int:
-    _print_json(
-        start_actor_side_thread(
-            socket_path=Path(args.socket),
-            instance_json=Path(args.instance_json),
-            actor_id=args.actor_id,
-            parent_thread_id=args.parent_thread_id,
-            text=args.text,
-            purpose=args.purpose,
-            workspace_dir=Path(args.workspace_dir),
-            shared_project_workspace_dir=Path(args.shared_project_workspace_dir),
-            permissions=args.permissions,
-            task_id=args.task_id,
-            capability_level=args.capability,
-        )
-    )
-    return 0
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    start = subparsers.add_parser("start")
-    start.add_argument("--socket", required=True)
-    start.add_argument("--instance-json", required=True)
-    start.add_argument("--actor-id", required=True)
-    start.add_argument("--parent-thread-id", required=True)
-    start.add_argument("--text", required=True)
-    start.add_argument("--purpose", required=True)
-    start.add_argument("--workspace-dir", required=True)
-    start.add_argument("--shared-project-workspace-dir", required=True)
-    start.add_argument("--permissions", required=True)
-    start.add_argument("--task-id")
-    start.add_argument("--capability")
-    start.set_defaults(func=_command_start)
-
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        return int(args.func(args))
-    except Exception as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

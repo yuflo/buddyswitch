@@ -7,17 +7,13 @@ ENV_HELPER="${REPO_ROOT}/tools/launcher/env.sh"
 WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
-SUBMIT_TURN_HELPER="${REPO_ROOT}/tools/launcher/submit_turn.py"
-ACTOR_SIDE_THREAD_HELPER="${REPO_ROOT}/tools/launcher/actor_side_thread.py"
-TASK_SYS_INGRESS_HELPER="${REPO_ROOT}/tools/launcher/task_sys_ingress.py"
-TASK_SYS_RUNTIME_CLIENT_HELPER="${REPO_ROOT}/scripts/env/tool_runtime/task_sys_runtime_client.py"
 DAEMON_HELPER="${REPO_ROOT}/tools/launcher/daemon.sh"
 HOST_CONTROL_HELPER="${REPO_ROOT}/tools/launcher/host_control.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${SUBMIT_TURN_HELPER}" || ! -f "${ACTOR_SIDE_THREAD_HELPER}" || ! -f "${TASK_SYS_INGRESS_HELPER}" || ! -f "${TASK_SYS_RUNTIME_CLIENT_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${HOST_CONTROL_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${HOST_CONTROL_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -39,12 +35,8 @@ Usage:
   buddyswitch-codex instance roles [--json]
   buddyswitch-codex instance start --role <role> [--json]
   buddyswitch-codex instance input <actor-id> --text <text> [--json]
-  buddyswitch-codex instance side <actor-id> --text <text> [--capability <level>] [--json]
-  buddyswitch-codex instance side <actor-id> --side-thread-id <side-thread-id> --text <text> [--json]
-  buddyswitch-codex instance side close <actor-id> --side-thread-id <side-thread-id> [--json]
   buddyswitch-codex instance capabilities <actor-id> get [--json]
   buddyswitch-codex instance capabilities <actor-id> set --parent <level> --side <level> [--json]
-  buddyswitch-codex instance goal <actor-id> get|set|clear [--json]
   buddyswitch-codex instance compact <actor-id> [--json]
   buddyswitch-codex instance clear <actor-id> [--json]
   buddyswitch-codex instance attach <actor-id>
@@ -93,7 +85,7 @@ EOF
 
 
 instance_input() {
-  local actor_id="${1:-}" text="" thread_id="" role_id="" arg output runtime_output instruction_json task_id json
+  local actor_id="${1:-}" text="" arg json
   json=0
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
@@ -128,462 +120,22 @@ instance_input() {
     return 2
   fi
 
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  buddyswitch_instance_validate_record "${actor_id}" >/dev/null || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
-  role_id="$(buddyswitch_instance_record_field "${actor_id}" "role" || true)"
-  if [[ -z "${thread_id}" ]]; then
-    echo "Instance input blocked: ${actor_id} has no thread id; stop/delete it and start a new instance." >&2
-    return 3
-  fi
-  if [[ -z "${role_id}" ]]; then
-    echo "Instance input blocked: ${actor_id} has no role; stop/delete it and start a new instance." >&2
-    return 3
-  fi
-  if ! buddyswitch_app_server_is_active; then
-    echo "Instance input blocked: ${actor_id} is unhealthy or inactive." >&2
-    return 3
-  fi
-
-  output="$(
-    BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state" \
-    "${BUDDYSWITCH_PYTHON}" "${TASK_SYS_INGRESS_HELPER}" user-input \
-      --actor-id "${actor_id}" \
-      --role-id "${role_id}" \
-      --thread-id "${thread_id}" \
-      --text "${text}" \
-      --surface "cli" 2>&1
-  )" || {
-    if [[ -n "${output}" ]]; then
-      echo "${output}" >&2
-    fi
-    return 1
-  }
-  instruction_json="$(
-    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-instruction = payload.get("instruction")
-if not isinstance(instruction, dict):
-    raise SystemExit("Task Sys ingress did not return an instruction")
-print(json.dumps(instruction, ensure_ascii=True))
-PY
-  )" || return 1
-  runtime_output="$(
-    "${BUDDYSWITCH_PYTHON}" "${TASK_SYS_RUNTIME_CLIENT_HELPER}" execute \
-      --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}" \
-      --instruction-json "${instruction_json}" 2>&1
-  )" || {
-    [[ -n "${runtime_output}" ]] && echo "${runtime_output}" >&2
-    return 1
-  }
-
+  local -a command=(
+    "${BUDDYSWITCH_PYTHON}" -m tools.launcher.actor_session
+    --shared-root "${BUDDYSWITCH_SHARED_ROOT}"
+    --repo-root "${REPO_ROOT}"
+    input
+    "${actor_id}"
+    --text "${text}"
+  )
   if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${output}" "${runtime_output}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-payload["runtime"] = json.loads(sys.argv[2])
-print(json.dumps(payload, ensure_ascii=True))
-PY
-    return 0
+    command+=(--json)
   fi
-  task_id="$(
-    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-value = payload.get("task_id")
-if isinstance(value, str):
-    print(value)
-PY
-  )"
-  echo "Task created: ${task_id}"
+  PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" "${command[@]}"
 }
-
-instance_side_print_start_result() {
-  local output="$1" actor_id="$2" parent_thread_id="$3" side_thread_id="$4" json="$5"
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-payload = {
-    "actor_id": sys.argv[2],
-    "parent_thread_id": sys.argv[3],
-    "side_thread_id": sys.argv[4],
-    "action": "start",
-    "thread_action": source.get("thread_action"),
-}
-for key in ("turn_id", "expected_turn_id"):
-    value = source.get(key)
-    if isinstance(value, str) and value:
-        payload[key] = value
-for key in (
-    "model",
-    "model_reasoning_effort",
-    "capability_level",
-    "capability_source",
-    "capability_durability",
-):
-    value = source.get(key)
-    if isinstance(value, str) and value:
-        payload[key] = value
-print(json.dumps(payload, ensure_ascii=True))
-PY
-    return 0
-  fi
-  echo "Side conversation started: ${side_thread_id}"
-}
-
-instance_side_print_send_result() {
-  local output="$1" actor_id="$2" parent_thread_id="$3" side_thread_id="$4" json="$5"
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-payload = {
-    "actor_id": sys.argv[2],
-    "parent_thread_id": sys.argv[3],
-    "side_thread_id": sys.argv[4],
-    "action": "send",
-    "thread_action": source.get("thread_action"),
-}
-for key in ("turn_id", "expected_turn_id"):
-    value = source.get(key)
-    if isinstance(value, str) and value:
-        payload[key] = value
-print(json.dumps(payload, ensure_ascii=True))
-PY
-    return 0
-  fi
-  echo "Side conversation sent: ${side_thread_id}"
-}
-
-instance_side() {
-  local actor_id="${1:-}" text="" side_thread_id="" parent_thread_id="" capability="" arg output json=0
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-
-  while [[ $# -gt 0 ]]; do
-    arg="$1"
-    case "${arg}" in
-      --text)
-        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "instance side requires --text <text>" >&2
-          return 2
-        fi
-        text="$2"
-        shift 2
-        ;;
-      --side-thread-id)
-        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "instance side requires --side-thread-id <side-thread-id>" >&2
-          return 2
-        fi
-        side_thread_id="$2"
-        shift 2
-        ;;
-      --capability)
-        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "instance side requires --capability <level>" >&2
-          return 2
-        fi
-        capability="$2"
-        shift 2
-        ;;
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance side option: ${arg}" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  if [[ -z "${text}" ]]; then
-    echo "instance side requires --text <text>" >&2
-    return 2
-  fi
-  if [[ -n "${side_thread_id}" && -n "${capability}" ]]; then
-    echo "instance side --capability only applies when starting a new side thread" >&2
-    return 2
-  fi
-
-  instance_require_active_service_thread "${actor_id}" "side" || return $?
-  parent_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
-
-  if [[ -n "${side_thread_id}" ]]; then
-    output="$(buddyswitch_side_thread_lifecycle_send "${actor_id}" "${parent_thread_id}" "${side_thread_id}" "${text}" 2>&1)" || {
-      if [[ "${output}" == *"turn/steer failed"* ]]; then
-        echo "Instance side blocked: active turn is not steerable; retry later or close it." >&2
-        echo "${output}" >&2
-        return 1
-      fi
-      [[ -n "${output}" ]] && echo "${output}" >&2
-      return 1
-    }
-    instance_side_print_send_result "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" "${json}"
-    return $?
-  fi
-
-  output="$(buddyswitch_actor_side_thread_start "${actor_id}" "${parent_thread_id}" "${text}" "${capability}" 2>&1)" || {
-    [[ -n "${output}" ]] && echo "${output}" >&2
-    return 1
-  }
-  side_thread_id="$(
-    "${BUDDYSWITCH_PYTHON}" - "${output}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-value = payload.get("side_thread_id")
-if isinstance(value, str):
-    print(value)
-PY
-  )"
-  if [[ -z "${side_thread_id}" ]]; then
-    echo "Side start returned no side_thread_id." >&2
-    return 1
-  fi
-  instance_side_print_start_result "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" "${json}"
-}
-
-
-instance_side_cleanup() {
-  local actor_id="${1:-}" side_thread_id="" parent_thread_id="" arg output json=0
-  if [[ -z "${actor_id}" ]]; then
-    echo "actor id is required" >&2
-    return 2
-  fi
-  shift || true
-
-  while [[ $# -gt 0 ]]; do
-    arg="$1"
-    case "${arg}" in
-      --side-thread-id)
-        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "instance side close requires --side-thread-id <side-thread-id>" >&2
-          return 2
-        fi
-        side_thread_id="$2"
-        shift 2
-        ;;
-      --json)
-        json=1
-        shift
-        ;;
-      *)
-        echo "Unknown instance side close option: ${arg}" >&2
-        return 2
-        ;;
-    esac
-  done
-
-  if [[ -z "${side_thread_id}" ]]; then
-    echo "instance side close requires --side-thread-id <side-thread-id>" >&2
-    return 2
-  fi
-
-  instance_require_active_service_thread "${actor_id}" "side close" || return $?
-  parent_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
-
-  output="$(buddyswitch_side_thread_lifecycle_cleanup "${actor_id}" "${parent_thread_id}" "${side_thread_id}" 2>&1)" || {
-    [[ -n "${output}" ]] && echo "${output}" >&2
-    return 1
-  }
-
-  if [[ "${json}" -eq 1 ]]; then
-    "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-payload = {
-    "actor_id": sys.argv[2],
-    "parent_thread_id": sys.argv[3],
-    "side_thread_id": sys.argv[4],
-    "action": "close",
-}
-for key in (
-    "turn_id",
-    "turn_interrupt_attempted",
-    "turn_interrupt_ok",
-    "turn_interrupt_error",
-    "lease_unregistered",
-    "lease_unregister_error",
-):
-    value = source.get(key)
-    if value is not None:
-        payload[key] = value
-print(json.dumps(payload, ensure_ascii=True))
-PY
-    return 0
-  fi
-  echo "Side conversation closed: ${side_thread_id}"
-}
-
-instance_goal_print_json() {
-  local output="$1"
-  local actor_id="$2"
-  local thread_id="$3"
-  local action="$4"
-
-  "${BUDDYSWITCH_PYTHON}" - "${output}" "${actor_id}" "${thread_id}" "${action}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-payload = {
-    "actor_id": sys.argv[2],
-    "thread_id": sys.argv[3],
-}
-action = sys.argv[4]
-if action in {"get", "set"}:
-    payload["goal"] = source.get("goal")
-elif action == "clear":
-    payload["cleared"] = bool(source.get("cleared"))
-print(json.dumps(payload, ensure_ascii=True))
-PY
-}
-
-instance_goal() {
-  local actor_id="${1:-}" action="${2:-}" json=0 objective="" status="" token_budget="" arg thread_id output
-  if [[ -z "${actor_id}" || -z "${action}" ]]; then
-    echo "instance goal requires <actor-id> get|set|clear" >&2
-    return 2
-  fi
-  shift 2 || true
-
-  case "${action}" in
-    get|clear)
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          --json)
-            json=1
-            shift
-            ;;
-          *)
-            echo "Unknown instance goal ${action} option: $1" >&2
-            return 2
-            ;;
-        esac
-      done
-      ;;
-    set)
-      while [[ $# -gt 0 ]]; do
-        arg="$1"
-        case "${arg}" in
-          --objective)
-            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-              echo "instance goal set requires --objective <text>" >&2
-              return 2
-            fi
-            objective="$2"
-            shift 2
-            ;;
-          --status)
-            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-              echo "instance goal set requires --status <status>" >&2
-              return 2
-            fi
-            status="$2"
-            shift 2
-            ;;
-          --token-budget)
-            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-              echo "instance goal set requires --token-budget <tokens>" >&2
-              return 2
-            fi
-            token_budget="$2"
-            if ! [[ "${token_budget}" =~ ^[0-9]+$ ]]; then
-              echo "instance goal set requires a numeric --token-budget value" >&2
-              return 2
-            fi
-            shift 2
-            ;;
-          --json)
-            json=1
-            shift
-            ;;
-          *)
-            echo "Unknown instance goal set option: ${arg}" >&2
-            return 2
-            ;;
-        esac
-      done
-      if [[ -z "${objective}" && -z "${status}" && -z "${token_budget}" ]]; then
-        echo "instance goal set requires --objective, --status, or --token-budget" >&2
-        return 2
-      fi
-      ;;
-    *)
-      echo "Unknown instance goal action: ${action}" >&2
-      return 2
-      ;;
-  esac
-
-  instance_require_active_service_thread "${actor_id}" "goal" || return $?
-  thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
-  case "${action}" in
-    get)
-      output="$(buddyswitch_app_server_goal_get "${thread_id}" 2>&1)" || {
-        [[ -n "${output}" ]] && echo "${output}" >&2
-        return 1
-      }
-      ;;
-    set)
-      output="$(buddyswitch_app_server_goal_set "${thread_id}" "${objective}" "${status}" "${token_budget}" 2>&1)" || {
-        [[ -n "${output}" ]] && echo "${output}" >&2
-        return 1
-      }
-      ;;
-    clear)
-      output="$(buddyswitch_app_server_goal_clear "${thread_id}" 2>&1)" || {
-        [[ -n "${output}" ]] && echo "${output}" >&2
-        return 1
-      }
-      ;;
-  esac
-
-  if [[ "${json}" -eq 1 ]]; then
-    instance_goal_print_json "${output}" "${actor_id}" "${thread_id}" "${action}"
-    return 0
-  fi
-
-  "${BUDDYSWITCH_PYTHON}" - "${output}" "${action}" <<'PY'
-import json
-import sys
-
-source = json.loads(sys.argv[1])
-action = sys.argv[2]
-if action == "clear":
-    print(f"Goal cleared: {'yes' if source.get('cleared') else 'no'}")
-else:
-    goal = source.get("goal")
-    if isinstance(goal, dict):
-        print(f"Goal: {goal.get('objective') or ''}")
-    else:
-        print("No active goal.")
-PY
-}
-
 
 instance_attach() {
-  local actor_id="${1:-}" role thread_id socket_path output resumed_thread_id
+  local actor_id="${1:-}"
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
     return 2
@@ -594,45 +146,11 @@ instance_attach() {
     return 2
   fi
 
-  buddyswitch_validate_actor_id "${actor_id}" || return $?
-  role="$(buddyswitch_instance_validate_record "${actor_id}")" || return $?
-  buddyswitch_env_bind_instance "${actor_id}" || return $?
-  thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
-  if [[ -z "${thread_id}" ]]; then
-    echo "Instance attach blocked: ${actor_id} has no thread id; stop/delete it and start a new instance." >&2
-    return 3
-  fi
-  if ! buddyswitch_app_server_is_active; then
-    echo "Instance attach blocked: ${actor_id} is unhealthy or inactive." >&2
-    return 3
-  fi
-
-  socket_path="$(buddyswitch_instance_record_field "${actor_id}" "app_server_socket" || true)"
-  if [[ -z "${socket_path}" ]]; then
-    socket_path="$(buddyswitch_app_server_socket)"
-  fi
-
-  output="$(buddyswitch_app_server_thread_resume "${thread_id}" 2>&1)" || {
-    echo "thread/resume failed for ${thread_id}" >&2
-    [[ -n "${output}" ]] && echo "${output}" >&2
-    return 1
-  }
-  resumed_thread_id="$(
-    "${BUDDYSWITCH_PYTHON}" -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${output}"
-  )" || {
-    echo "thread/resume returned invalid JSON for ${thread_id}" >&2
-    return 1
-  }
-  if [[ "${resumed_thread_id}" != "${thread_id}" ]]; then
-    echo "thread/resume returned unexpected thread id: ${resumed_thread_id}" >&2
-    return 1
-  fi
-
-  cd "${BUDDYSWITCH_WORKSPACE_DIR}"
-  BUDDYSWITCH_ROLE_ID="${role}" \
-  BUDDYSWITCH_ACTOR_ID="${actor_id}" \
-  BUDDYSWITCH_INSTANCE_JSON="${BUDDYSWITCH_INSTANCE_JSON}" \
-    buddyswitch_run_codex resume --remote "unix://${socket_path}" "${thread_id}"
+  PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" \
+    "${BUDDYSWITCH_PYTHON}" -m tools.launcher.actor_session \
+      --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
+      --repo-root "${REPO_ROOT}" \
+      attach "${actor_id}"
 }
 
 
@@ -1059,34 +577,6 @@ buddyswitch_instance_main() {
         return 2
       fi
       instance_input "$@"
-      ;;
-    side)
-      shift || true
-      if [[ "${1:-}" == "close" ]]; then
-        shift || true
-        if [[ $# -lt 1 ]]; then
-          echo "actor id is required" >&2
-          print_help >&2
-          return 2
-        fi
-        instance_side_cleanup "$@"
-        return $?
-      fi
-      if [[ $# -lt 1 ]]; then
-        echo "actor id is required" >&2
-        print_help >&2
-        return 2
-      fi
-      instance_side "$@"
-      ;;
-    goal)
-      shift || true
-      if [[ $# -lt 2 ]]; then
-        echo "actor id and goal action are required" >&2
-        print_help >&2
-        return 2
-      fi
-      instance_goal "$@"
       ;;
     attach)
       shift || true

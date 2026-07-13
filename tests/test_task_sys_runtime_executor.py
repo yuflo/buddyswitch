@@ -299,7 +299,7 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["action"], "start_side")
         self.assertEqual(result["side_thread_id"], "thr-side-1")
         self.assertEqual(result["turn_id"], "turn-side-1")
-        self.assertEqual(result["stage"], "side_turn_started")
+        self.assertEqual(result["stage"], "side_started")
         self.assertEqual(len(calls), 1)
         call = calls[0]
         self.assertEqual(call["socket_path"], context.socket_path)
@@ -378,8 +378,8 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["task_id"], task_id)
         self.assertEqual(result["side_thread_id"], "thr-side-retry")
         self.assertEqual(result["turn_id"], "turn-side-retry")
-        self.assertEqual(result["stage"], "side_turn_started")
-        self.assertEqual([attempt["stage"] for attempt in result["attempts"]], ["side_lifecycle", "side_turn_started"])
+        self.assertEqual(result["stage"], "side_started")
+        self.assertEqual([attempt["stage"] for attempt in result["attempts"]], ["side_lifecycle", "side_started"])
         self.assertEqual(len(calls), 2)
 
     def test_execute_start_side_records_runtime_failed_after_bounded_lifecycle_failures(self) -> None:
@@ -577,19 +577,19 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
     def test_execute_submit_parent_uses_instruction_frame_without_interrupt(self) -> None:
         context = self._context()
         calls: list[dict[str, Any]] = []
-        original_submit = self.module.parent_thread_submit.submit_parent_turn
+        original_submit = self.module.actor_session.input_actor_turn
         original_interrupt = self.module.app_server.interrupt_turn
 
-        def fake_submit_parent_turn(**kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "submit_parent_turn", **kwargs})
+        def fake_input_actor_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"helper": "input_actor_turn", **kwargs})
             return {"turn_id": "turn-parent-1"}
 
         def fake_interrupt_turn(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
             raise AssertionError("submit_parent must not interrupt")
 
-        self.addCleanup(setattr, self.module.parent_thread_submit, "submit_parent_turn", original_submit)
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_submit)
         self.addCleanup(setattr, self.module.app_server, "interrupt_turn", original_interrupt)
-        self.module.parent_thread_submit.submit_parent_turn = fake_submit_parent_turn
+        self.module.actor_session.input_actor_turn = fake_input_actor_turn
         self.module.app_server.interrupt_turn = fake_interrupt_turn
 
         result = self.module.execute_instruction(context, self._parent_instruction())
@@ -597,86 +597,45 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["action"], "submit_parent")
         self.assertEqual(result["turn_id"], "turn-parent-1")
         self.assertEqual(result["task_id"], "task-user-input-abcdef123456")
-        self.assertEqual([call["helper"] for call in calls], ["submit_parent_turn"])
+        self.assertEqual([call["helper"] for call in calls], ["input_actor_turn"])
         self.assertEqual(calls[0]["instance_json"], context.instance_json)
         self.assertEqual(calls[0]["thread_id"], "thr-main")
         self.assertIn("task_sys.parent_frame", calls[0]["text"])
         self.assertIn("task-user-input-abcdef123456", calls[0]["text"])
 
-    def test_execute_submit_parent_applies_capability_settings_before_turn_start(self) -> None:
+    def test_execute_submit_parent_delegates_capability_and_start_steer_to_actor_session(self) -> None:
         context = self._context()
-        actor_capability.replace_actor_capabilities(
-            context.instance_json,
-            parent_level="deep",
-            side_level="fast",
-        )
         calls: list[dict[str, Any]] = []
-        original_update = self.module.parent_thread_submit.app_server.thread_settings_update
-        original_read = self.module.parent_thread_submit.submit_turn.app_server.thread_read
-        original_start = self.module.parent_thread_submit.submit_turn.app_server.turn_start
+        original_input = self.module.actor_session.input_actor_turn
 
-        def fake_update(socket_path: Path, thread_id: str, *, model: str | None, effort: str | None) -> dict[str, Any]:
-            calls.append(
-                {
-                    "helper": "thread_settings_update",
-                    "socket_path": socket_path,
-                    "thread_id": thread_id,
-                    "model": model,
-                    "effort": effort,
-                }
-            )
-            return {"threadId": thread_id, "model": model, "effort": effort}
-
-        def fake_thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, Any]:
-            calls.append(
-                {
-                    "helper": "thread_read",
-                    "socket_path": socket_path,
-                    "thread_id": thread_id,
-                    "include_turns": include_turns,
-                }
-            )
-            return {"thread": {"id": thread_id, "status": "idle"}}
-
-        def fake_turn_start(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
-            calls.append(
-                {
-                    "helper": "turn_start",
-                    "socket_path": socket_path,
-                    "thread_id": thread_id,
-                    "text": text,
-                    "permissions": permissions,
-                }
-            )
+        def fake_input_actor_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
             return {"action": "start", "turn_id": "turn-parent-contract"}
 
-        self.addCleanup(setattr, self.module.parent_thread_submit.app_server, "thread_settings_update", original_update)
-        self.addCleanup(setattr, self.module.parent_thread_submit.submit_turn.app_server, "thread_read", original_read)
-        self.addCleanup(setattr, self.module.parent_thread_submit.submit_turn.app_server, "turn_start", original_start)
-        self.module.parent_thread_submit.app_server.thread_settings_update = fake_update
-        self.module.parent_thread_submit.submit_turn.app_server.thread_read = fake_thread_read
-        self.module.parent_thread_submit.submit_turn.app_server.turn_start = fake_turn_start
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_input)
+        self.module.actor_session.input_actor_turn = fake_input_actor_turn
 
         result = self.module.execute_instruction(context, self._parent_instruction())
 
         self.assertEqual(result["action"], "submit_parent")
         self.assertEqual(result["turn_id"], "turn-parent-contract")
-        self.assertEqual([call["helper"] for call in calls], ["thread_settings_update", "thread_read", "turn_start"])
-        self.assertEqual(calls[0]["model"], "gpt-5.6-sol")
-        self.assertEqual(calls[0]["effort"], "xhigh")
-        self.assertEqual(calls[2]["thread_id"], "thr-main")
-        self.assertIn("task_sys.parent_frame", calls[2]["text"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["socket_path"], context.socket_path)
+        self.assertEqual(calls[0]["instance_json"], context.instance_json)
+        self.assertEqual(calls[0]["thread_id"], "thr-main")
+        self.assertEqual(calls[0]["permissions"], context.permissions)
+        self.assertIn("task_sys.parent_frame", calls[0]["text"])
 
     def test_execute_submit_parent_rejects_checkpoint_frame(self) -> None:
         context = self._context()
-        original_submit = self.module.parent_thread_submit.submit_parent_turn
+        original_submit = self.module.actor_session.input_actor_turn
 
-        def fake_submit_parent_turn(**kwargs: Any) -> dict[str, Any]:
+        def fake_input_actor_turn(**kwargs: Any) -> dict[str, Any]:
             del kwargs
             return {"turn_id": "turn-checkpoint-1"}
 
-        self.addCleanup(setattr, self.module.parent_thread_submit, "submit_parent_turn", original_submit)
-        self.module.parent_thread_submit.submit_parent_turn = fake_submit_parent_turn
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_submit)
+        self.module.actor_session.input_actor_turn = fake_input_actor_turn
 
         with self.assertRaisesRegex(ValueError, "unsupported submit_parent frame kind"):
             self.module.execute_instruction(context, self._checkpoint_instruction())
@@ -684,20 +643,20 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
     def test_execute_interrupt_submit_parent_interrupts_before_submit(self) -> None:
         context = self._context()
         calls: list[dict[str, Any]] = []
-        original_submit = self.module.parent_thread_submit.submit_parent_turn
+        original_submit = self.module.actor_session.input_actor_turn
         original_interrupt = self.module.app_server.interrupt_turn
 
         def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
             calls.append({"helper": "interrupt_turn", "socket_path": socket_path, "thread_id": thread_id})
             return {"turn_id": "turn-active-1"}
 
-        def fake_submit_parent_turn(**kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "submit_parent_turn", **kwargs})
+        def fake_input_actor_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"helper": "input_actor_turn", **kwargs})
             return {"turn_id": "turn-parent-2"}
 
-        self.addCleanup(setattr, self.module.parent_thread_submit, "submit_parent_turn", original_submit)
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_submit)
         self.addCleanup(setattr, self.module.app_server, "interrupt_turn", original_interrupt)
-        self.module.parent_thread_submit.submit_parent_turn = fake_submit_parent_turn
+        self.module.actor_session.input_actor_turn = fake_input_actor_turn
         self.module.app_server.interrupt_turn = fake_interrupt_turn
 
         result = self.module.execute_instruction(context, self._parent_instruction(interrupt=True))
@@ -705,27 +664,27 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["action"], "interrupt_submit_parent")
         self.assertEqual(result["turn_id"], "turn-parent-2")
         self.assertEqual(result["interrupted_turn_id"], "turn-active-1")
-        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "submit_parent_turn"])
+        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "input_actor_turn"])
         self.assertEqual(calls[0]["thread_id"], "thr-main")
         self.assertIn("task_sys.parent_frame", calls[1]["text"])
 
     def test_execute_interrupt_submit_parent_idle_parent_submits_without_interrupted_turn(self) -> None:
         context = self._context()
         calls: list[dict[str, Any]] = []
-        original_submit = self.module.parent_thread_submit.submit_parent_turn
+        original_submit = self.module.actor_session.input_actor_turn
         original_interrupt = self.module.app_server.interrupt_turn
 
         def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
             calls.append({"helper": "interrupt_turn", "socket_path": socket_path, "thread_id": thread_id})
             raise self.module.app_server.AppServerUnavailableError("thread thr-main has no active in-progress turn")
 
-        def fake_submit_parent_turn(**kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "submit_parent_turn", **kwargs})
+        def fake_input_actor_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"helper": "input_actor_turn", **kwargs})
             return {"turn_id": "turn-parent-idle"}
 
-        self.addCleanup(setattr, self.module.parent_thread_submit, "submit_parent_turn", original_submit)
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_submit)
         self.addCleanup(setattr, self.module.app_server, "interrupt_turn", original_interrupt)
-        self.module.parent_thread_submit.submit_parent_turn = fake_submit_parent_turn
+        self.module.actor_session.input_actor_turn = fake_input_actor_turn
         self.module.app_server.interrupt_turn = fake_interrupt_turn
 
         result = self.module.execute_instruction(context, self._parent_instruction(interrupt=True))
@@ -733,13 +692,13 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["action"], "interrupt_submit_parent")
         self.assertEqual(result["turn_id"], "turn-parent-idle")
         self.assertNotIn("interrupted_turn_id", result)
-        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "submit_parent_turn"])
+        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "input_actor_turn"])
         self.assertIn("task_sys.parent_frame", calls[1]["text"])
 
     def test_execute_interrupt_submit_parent_no_active_turn_race_submits_without_interrupted_turn(self) -> None:
         context = self._context()
         calls: list[dict[str, Any]] = []
-        original_submit = self.module.parent_thread_submit.submit_parent_turn
+        original_submit = self.module.actor_session.input_actor_turn
         original_interrupt = self.module.app_server.interrupt_turn
 
         def fake_interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
@@ -748,13 +707,13 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
                 "thread thr-main is active but no in-progress turn was found"
             )
 
-        def fake_submit_parent_turn(**kwargs: Any) -> dict[str, Any]:
-            calls.append({"helper": "submit_parent_turn", **kwargs})
+        def fake_input_actor_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"helper": "input_actor_turn", **kwargs})
             return {"turn_id": "turn-parent-race"}
 
-        self.addCleanup(setattr, self.module.parent_thread_submit, "submit_parent_turn", original_submit)
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_submit)
         self.addCleanup(setattr, self.module.app_server, "interrupt_turn", original_interrupt)
-        self.module.parent_thread_submit.submit_parent_turn = fake_submit_parent_turn
+        self.module.actor_session.input_actor_turn = fake_input_actor_turn
         self.module.app_server.interrupt_turn = fake_interrupt_turn
 
         result = self.module.execute_instruction(context, self._parent_instruction(interrupt=True))
@@ -762,7 +721,16 @@ class TaskSysRuntimeExecutorTests(unittest.TestCase):
         self.assertEqual(result["action"], "interrupt_submit_parent")
         self.assertEqual(result["turn_id"], "turn-parent-race")
         self.assertNotIn("interrupted_turn_id", result)
-        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "submit_parent_turn"])
+        self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "input_actor_turn"])
+
+    def test_task_sys_runtime_uses_actor_session_without_submit_turn_or_cli_imports(self) -> None:
+        source = TASK_SYS_RUNTIME_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("import actor_session", source)
+        self.assertNotIn("import parent_thread_submit", source)
+        self.assertNotIn("import submit_turn", source)
+        self.assertNotIn("turn_start", source)
+        self.assertNotIn("turn_steer", source)
 
 
 if __name__ == "__main__":

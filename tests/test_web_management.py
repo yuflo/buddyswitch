@@ -6,7 +6,6 @@ import importlib.util
 import inspect
 import json
 import os
-import shlex
 import subprocess
 import sys
 import threading
@@ -276,8 +275,33 @@ OPEN_TUI_HEADERS = {
 }
 
 
-def expected_attach_command(actor_id: str) -> str:
-    return f"cd {shlex.quote(str(ROOT))} && ./buddyswitch-codex instance attach {shlex.quote(actor_id)}"
+def fake_attach_descriptor(actor_id: str = "act-pm-demo", thread_id: str = "thread-1") -> object:
+    instance_root = Path("/tmp") / actor_id
+    return WEB_MANAGEMENT.actor_session.AttachDescriptor(
+        actor_id=actor_id,
+        thread_id=thread_id,
+        cwd=instance_root / "workspace",
+        argv=("codex", "resume", "--remote", "unix:///tmp/app-server-web.sock", thread_id),
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(instance_root / "home"),
+            "CODEX_HOME": str(instance_root / "codex-home"),
+            "XDG_CONFIG_HOME": str(instance_root / "xdg-config"),
+            "BUDDYSWITCH_ACTOR_ID": actor_id,
+            "BUDDYSWITCH_ROLE_ID": "pm",
+            "BUDDYSWITCH_INSTANCE_JSON": str(instance_root / "instance.json"),
+            "BUDDYSWITCH_ACTOR_PRIVATE_DIR": str(instance_root / "workspace" / "private"),
+            "BUDDYSWITCH_INSTANCE_TMP": str(instance_root / "tmp"),
+        },
+    )
+
+
+def assert_open_tui_command_uses_descriptor(test_case: unittest.TestCase, command: str, *, actor_id: str = "act-pm-demo") -> None:
+    test_case.assertIn("codex resume --remote unix:///tmp/app-server-web.sock thread-1", command)
+    test_case.assertIn(f"BUDDYSWITCH_ACTOR_ID={actor_id}", command)
+    test_case.assertIn("BUDDYSWITCH_INSTANCE_JSON=/tmp/act-pm-demo/instance.json", command)
+    test_case.assertNotIn("buddyswitch-codex", command)
+    test_case.assertNotIn("instance attach", command)
 
 
 class FakeTerminalOpener:
@@ -1350,14 +1374,19 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             platform_name="linux",
         )
 
-        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+        descriptor = fake_attach_descriptor()
+        with (
+            mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach", return_value=descriptor) as resolve_attach,
+            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
+        ):
             service.handle_api("POST", "/api/instances/act-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.code, "UNSUPPORTED_PLATFORM")
         self.assertEqual(raised.exception.message, "Could not open Terminal.")
-        self.assertEqual(raised.exception.details["command"], expected_attach_command("act-pm-demo"))
+        assert_open_tui_command_uses_descriptor(self, raised.exception.details["command"])
         self.assertEqual(opener.commands, [])
+        resolve_attach.assert_called_once_with("act-pm-demo")
 
     def test_open_tui_route_delegates_to_fake_terminal_opener(self) -> None:
         runner = FakeRunner()
@@ -1368,27 +1397,30 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         opener = FakeTerminalOpener()
         _, base_url = self._start_server(runner, terminal_opener=opener.open, platform_name="darwin")
 
-        status, payload = self._request_json(
-            base_url,
-            method="POST",
-            path="/api/instances/act-pm-demo/open-tui",
-            payload={},
-            headers={"X-BuddySwitch-Web": "1", "Origin": base_url},
-        )
+        descriptor = fake_attach_descriptor()
+        with mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach", return_value=descriptor) as resolve_attach:
+            status, payload = self._request_json(
+                base_url,
+                method="POST",
+                path="/api/instances/act-pm-demo/open-tui",
+                payload={},
+                headers={"X-BuddySwitch-Web": "1", "Origin": base_url},
+            )
 
-        expected_command = expected_attach_command("act-pm-demo")
         self.assertEqual(status, 200)
+        assert_open_tui_command_uses_descriptor(self, payload["command"])
         self.assertEqual(
             payload,
             {
                 "ok": True,
                 "actor_id": "act-pm-demo",
-                "command": expected_command,
+                "command": payload["command"],
                 "terminal": "Terminal.app",
             },
         )
-        self.assertEqual(opener.commands, [expected_command])
+        self.assertEqual(opener.commands, [payload["command"]])
         self.assertEqual(runner.calls, [["instance", "status", "act-pm-demo", "--json"]])
+        resolve_attach.assert_called_once_with("act-pm-demo")
 
     def test_open_tui_route_returns_copy_command_when_terminal_open_fails(self) -> None:
         runner = OrderedRunner(
@@ -1407,15 +1439,19 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             platform_name="darwin",
         )
 
-        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+        descriptor = fake_attach_descriptor()
+        with (
+            mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach", return_value=descriptor) as resolve_attach,
+            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
+        ):
             service.handle_api("POST", "/api/instances/act-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
 
-        expected_command = expected_attach_command("act-pm-demo")
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.code, "TERMINAL_OPEN_FAILED")
         self.assertEqual(raised.exception.message, "Could not open Terminal.")
-        self.assertEqual(raised.exception.details["command"], expected_command)
-        self.assertEqual(opener.commands, [expected_command])
+        assert_open_tui_command_uses_descriptor(self, raised.exception.details["command"])
+        self.assertEqual(opener.commands, [raised.exception.details["command"]])
+        resolve_attach.assert_called_once_with("act-pm-demo")
 
     def test_create_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
         runner = FakeRunner()
@@ -1501,6 +1537,21 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 self.assertNotIn(forbidden, source)
 
         self.assertFalse((ROOT / "scripts/env/services/tracks.py").exists())
+
+    def test_web_management_has_no_public_side_runtime_surface(self) -> None:
+        source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
+
+        for forbidden in (
+            "import actor_side_thread",
+            "import side_thread_lifecycle",
+            '"/side"',
+            '"/side/close"',
+            "start_actor_side_thread",
+            "send_to_side_thread",
+            "cleanup_side_thread",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
 
     def test_web_management_service_receives_host_control_dependency(self) -> None:
         parameters = inspect.signature(WEB_MANAGEMENT.WebManagementService).parameters
@@ -2449,237 +2500,21 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             self.assertEqual(payload["capabilities"]["parent"]["level"], "deep")
             self.assertEqual(payload["capabilities"]["side"]["level"], "maximum")
 
-    def test_side_create_route_delegates_and_reports_side_thread_id(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
-        side_payload = {
-            "actor_id": "act-pm-demo",
-            "action": "start",
-            "thread_action": "start",
-            "parent_thread_id": "thread-main",
-            "side_thread_id": "thread-side-1",
-            "turn_id": "turn-side-1",
-        }
-        instance_payload = active_status("act-pm-demo", "thread-main", "idle")
-
-        with (
-            mock.patch.object(service, "_run_side_command", return_value=side_payload) as run_side,
-            mock.patch.object(service, "_get_instance_status", return_value=instance_payload),
-        ):
-            status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/side", b'{"text":"Explore"}')
-
-        self.assertEqual(status, 200)
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["action"], "start")
-        self.assertEqual(payload["thread_action"], "start")
-        self.assertEqual(payload["side_thread_id"], "thread-side-1")
-        self.assertEqual(payload["parent_thread_id"], "thread-main")
-        self.assertEqual(payload["turn_id"], "turn-side-1")
-        self.assertEqual(payload["instance"]["thread_id"], "thread-main")
-        run_side.assert_called_once_with(
-            "act-pm-demo",
-            text="Explore",
-            side_thread_id=None,
-            capability=None,
-            timeout_seconds=60,
-        )
-
-    def test_side_route_passes_capability_only_for_new_side_thread(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
-        side_payload = {
-            "actor_id": "act-pm-demo",
-            "action": "start",
-            "thread_action": "start",
-            "parent_thread_id": "thread-main",
-            "side_thread_id": "thread-side-1",
-            "turn_id": "turn-side-1",
-            "model": "gpt-5.6-sol",
-            "model_reasoning_effort": "xhigh",
-            "capability_level": "deep",
-            "capability_source": "override",
-            "capability_durability": "thread_fork_only",
-        }
-
-        with (
-            mock.patch.object(service, "_run_side_command", return_value=side_payload) as run_side,
-            mock.patch.object(
-                service,
-                "_get_instance_status",
-                return_value=active_status("act-pm-demo", "thread-main", "idle"),
-            ),
-        ):
-            status, payload = service.handle_api(
-                "POST",
-                "/api/instances/act-pm-demo/side",
-                b'{"text":"Start side","capability":"deep"}',
-            )
-
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["side_thread_id"], "thread-side-1")
-        self.assertEqual(payload["model"], "gpt-5.6-sol")
-        self.assertEqual(payload["model_reasoning_effort"], "xhigh")
-        self.assertEqual(payload["capability_level"], "deep")
-        self.assertEqual(payload["capability_durability"], "thread_fork_only")
-        run_side.assert_called_once_with(
-            "act-pm-demo",
-            text="Start side",
-            side_thread_id=None,
-            capability="deep",
-            timeout_seconds=60,
-        )
-
-    def test_side_send_route_delegates_existing_side(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
-        side_payload = {
-            "actor_id": "act-pm-demo",
-            "action": "send",
-            "thread_action": "steer",
-            "parent_thread_id": "thread-main",
-            "side_thread_id": "thread-side-1",
-            "turn_id": "turn-side-1",
-            "expected_turn_id": "turn-side-1",
-        }
-
-        with (
-            mock.patch.object(service, "_run_side_command", return_value=side_payload) as run_side,
-            mock.patch.object(
-                service,
-                "_get_instance_status",
-                return_value=active_status("act-pm-demo", "thread-main", "idle"),
-            ),
-        ):
-            status, payload = service.handle_api(
-                "POST",
-                "/api/instances/act-pm-demo/side",
-                b'{"side_thread_id":"thread-side-1","text":"Follow up"}',
-            )
-
-        self.assertEqual(status, 200)
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["action"], "send")
-        self.assertEqual(payload["thread_action"], "steer")
-        self.assertEqual(payload["side_thread_id"], "thread-side-1")
-        self.assertEqual(payload["parent_thread_id"], "thread-main")
-        self.assertEqual(payload["expected_turn_id"], "turn-side-1")
-        self.assertEqual(payload["instance"]["thread_id"], "thread-main")
-        run_side.assert_called_once_with(
-            "act-pm-demo",
-            text="Follow up",
-            side_thread_id="thread-side-1",
-            capability=None,
-            timeout_seconds=60,
-        )
-
-    def test_side_route_blocks_unhealthy_app_server_even_with_socket_path(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
-        instance_payload = active_status("act-pm-demo", "thread-main", "idle")
-        instance_payload["app_server"] = {
-            "healthy": False,
-            "socket_path": "/tmp/buddyswitch-app.sock",
-        }
-
-        with (
-            mock.patch.object(service, "_get_instance_status", return_value=instance_payload),
-            mock.patch.object(service, "_instance_json_for_actor", return_value=Path("/tmp/instance.json")),
-            mock.patch.object(
-                WEB_MANAGEMENT.actor_side_thread,
-                "start_actor_side_thread",
-                return_value={
-                    "actor_id": "act-pm-demo",
-                    "action": "start",
-                    "parent_thread_id": "thread-main",
-                    "side_thread_id": "thread-side-1",
-                    "turn_id": "turn-side-1",
-                },
-            ) as start_side,
-            mock.patch.object(WEB_MANAGEMENT.side_thread_lifecycle, "send_to_side_thread") as send_side,
-        ):
-            with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
-                service.handle_api("POST", "/api/instances/act-pm-demo/side", b'{"text":"Explore"}')
-
-        self.assertEqual(raised.exception.status, 409)
-        self.assertEqual(raised.exception.code, "LIFECYCLE_BLOCKED")
-        self.assertIn("unhealthy or inactive", raised.exception.message)
-        start_side.assert_not_called()
-        send_side.assert_not_called()
-
-    def test_side_close_route_delegates_and_reports_side_thread_id(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=FakeRunner())
-        close_payload = {
-            "actor_id": "act-pm-demo",
-            "action": "close",
-            "parent_thread_id": "thread-main",
-            "side_thread_id": "thread-side-1",
-            "turn_id": "turn-side-1",
-            "turn_interrupt_attempted": True,
-            "turn_interrupt_ok": True,
-            "lease_unregistered": True,
-        }
-
-        with (
-            mock.patch.object(service, "_run_side_cleanup_command", return_value=close_payload) as run_side_close,
-            mock.patch.object(
-                service,
-                "_get_instance_status",
-                return_value=active_status("act-pm-demo", "thread-main", "idle"),
-            ),
-        ):
-            status, payload = service.handle_api(
-                "POST",
-                "/api/instances/act-pm-demo/side/close",
-                b'{"side_thread_id":"thread-side-1"}',
-            )
-
-        self.assertEqual(status, 200)
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["action"], "close")
-        self.assertEqual(payload["side_thread_id"], "thread-side-1")
-        self.assertEqual(payload["parent_thread_id"], "thread-main")
-        self.assertEqual(payload["turn_id"], "turn-side-1")
-        self.assertTrue(payload["turn_interrupt_attempted"])
-        self.assertTrue(payload["turn_interrupt_ok"])
-        self.assertTrue(payload["lease_unregistered"])
-        self.assertEqual(payload["instance"]["thread_id"], "thread-main")
-        run_side_close.assert_called_once_with("act-pm-demo", "thread-side-1", timeout_seconds=30)
-
-    def test_side_route_rejects_empty_text(self) -> None:
+    def test_side_routes_are_not_public_web_api(self) -> None:
         runner, base_url = self._start_server()
-        status, payload = self._request_json(
-            base_url,
-            method="POST",
-            path="/api/instances/act-pm-demo/side",
-            payload={"text": "   "},
-        )
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
-        self.assertEqual(runner.calls, [])
-
-    def test_side_route_rejects_capability_with_existing_side_thread_id(self) -> None:
-        runner, base_url = self._start_server()
-        status, payload = self._request_json(
-            base_url,
-            method="POST",
-            path="/api/instances/act-pm-demo/side",
-            payload={
-                "side_thread_id": "thread-side-1",
-                "text": "Follow up",
-                "capability": "deep",
-            },
-        )
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
-        self.assertIn("only applies when starting a new side thread", payload["error"]["message"])
-        self.assertEqual(runner.calls, [])
-
-    def test_side_close_route_rejects_missing_side_thread_id(self) -> None:
-        runner, base_url = self._start_server()
-        status, payload = self._request_json(
-            base_url,
-            method="POST",
-            path="/api/instances/act-pm-demo/side/close",
-            payload={},
-        )
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+        for path, payload_body in (
+            ("/api/instances/act-pm-demo/side", {"text": "Explore"}),
+            ("/api/instances/act-pm-demo/side/close", {"side_thread_id": "thread-side-1"}),
+        ):
+            with self.subTest(path=path):
+                status, payload = self._request_json(
+                    base_url,
+                    method="POST",
+                    path=path,
+                    payload=payload_body,
+                )
+                self.assertEqual(status, 404)
+                self.assertEqual(payload["error"]["code"], "NOT_FOUND")
         self.assertEqual(runner.calls, [])
 
     def test_interrupt_route_delegates_and_parses_turn_id(self) -> None:

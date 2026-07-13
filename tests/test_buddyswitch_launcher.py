@@ -1634,27 +1634,6 @@ exec "$real_git" "$@"
     def _assert_raw_input(self, text: str, *, raw_text: str) -> None:
         self.assertEqual(text, raw_text)
 
-    def _assert_task_sys_input_task(self, shared_root: Path, payload: dict[str, object], *, text: str) -> dict[str, object]:
-        task_id = payload.get("task_id")
-        self.assertIsInstance(task_id, str, msg=payload)
-        assert isinstance(task_id, str)
-        task_path = shared_root / "state" / "buddyswitch" / "objects" / "task-sys" / "tasks" / f"{task_id}.json"
-        self.assertTrue(task_path.exists(), msg=task_path)
-        record = json.loads(task_path.read_text(encoding="utf-8"))
-        self.assertEqual(record["id"], task_id)
-        self.assertEqual(record["source_type"], "user.input")
-        self.assertEqual(record["source_ref"]["surface"], "cli")
-        self.assertIsInstance(record["source_ref"]["id"], str)
-        self.assertEqual(record["inbound_context"]["text"], text)
-        self.assertEqual(record["inbound_context"]["surface"], "cli")
-        self.assertEqual(record["actor_target"]["actor_id"], payload["actor_id"])
-        self.assertEqual(record["actor_target"]["role_id"], payload["role_id"])
-        self.assertEqual(record["status"], "in_progress")
-        self.assertEqual(record["execution"]["processor"], "side")
-        self.assertEqual(record["task_relation"], {"kind": "independent", "target_task_id": None})
-        self.assertNotIn("active_processor", record)
-        return record
-
     def _runtime_sparse_list(self, workspace_dir: Path) -> list[str]:
         return subprocess.check_output(
             ["git", "-C", str(workspace_dir), "sparse-checkout", "list"],
@@ -3318,7 +3297,7 @@ exec "$real_git" "$@"
             self.assertTrue(main_thread["rollout_materialized"])
             self.assertEqual(main_thread["injected_items"][0]["role"], "assistant")
 
-    def test_instance_input_records_task_without_materializing_turn(self) -> None:
+    def test_instance_input_starts_parent_turn_and_materializes_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), role="pm")
             completed = ctx["completed"]
@@ -3332,6 +3311,7 @@ exec "$real_git" "$@"
                 json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n",
                 encoding="utf-8",
             )
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
 
             input_result = subprocess.run(
                 [str(LAUNCHER), "instance", "input", ctx["actor_id"], "--text", "materialize", "--json"],
@@ -3343,10 +3323,26 @@ exec "$real_git" "$@"
             )
 
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
-            self.assertFalse(state_payload["threads"][thread_id]["rollout_materialized"])
             payload = json.loads(input_result.stdout)
-            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="materialize")
+            self.assertEqual(payload["actor_id"], ctx["actor_id"])
+            self.assertEqual(payload["thread_id"], thread_id)
+            self.assertEqual(payload["action"], "start")
+            self.assertNotIn("task_id", payload)
+            self.assertNotIn("runtime", payload)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            self.assertTrue(state_payload["threads"][thread_id]["rollout_materialized"])
+            self.assertEqual(state_payload["threads"][thread_id]["turns"][0]["id"], payload["turn_id"])
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [
+                row["rpc_method"]
+                for row in rpc_rows
+                if row["rpc_method"] not in {"initialize", "initialized"}
+            ]
+            self.assertEqual(methods[:3], ["thread/settings/update", "thread/read", "turn/start"])
+            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
+            self.assertEqual(turn_start["params"]["threadId"], thread_id)
+            self.assertEqual(turn_start["params"]["input"][0]["text"], "materialize")
 
     def test_start_bootstraps_main_thread_rollout_before_daemon_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3701,7 +3697,7 @@ exec "$real_git" "$@"
                 broker_socket=str(payload["runtime_broker_socket"]),
             )
 
-    def test_input_creates_task_sys_task_when_thread_idle(self) -> None:
+    def test_input_sends_direct_parent_turn_when_thread_idle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -3725,33 +3721,27 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            calls = [
-                json.loads(line)
-                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
-                if line.strip()
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [
+                row["rpc_method"]
+                for row in rpc_rows
+                if row["rpc_method"] not in {"initialize", "initialized"}
             ]
-            rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("thread/fork", methods)
-            self.assertIn("thread/inject_items", methods)
+            self.assertEqual(methods[:3], ["thread/settings/update", "thread/read", "turn/start"])
+            self.assertNotIn("thread/fork", methods)
+            self.assertNotIn("thread/inject_items", methods)
             self.assertIn("turn/start", methods)
             self.assertNotIn("turn/steer", methods)
+            settings = next(row for row in rpc_rows if row["rpc_method"] == "thread/settings/update")
+            self.assertEqual(settings["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(settings["params"]["model"], "gpt-5.6-terra")
+            self.assertEqual(settings["params"]["effort"], "high")
             turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            prompt = turn_start["params"]["input"][0]["text"]
-            self.assertIn("task_sys.side_frame", prompt)
-            self.assertIn("task_sys.close", prompt)
-            self.assertIn("task_sys.need_parent", prompt)
-            self.assertIn("Task created:", input_result.stdout)
-            task_id = input_result.stdout.strip().removeprefix("Task created: ").strip()
-            payload = {
-                "actor_id": ctx["actor_id"],
-                "role_id": ctx["instance_payload"]["role"],
-                "task_id": task_id,
-            }
-            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Draft brief")
+            self.assertEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(turn_start["params"]["input"][0]["text"], "Draft brief")
+            self.assertIn("Turn started:", input_result.stdout)
 
-    def test_input_json_creates_task_sys_task_when_thread_idle(self) -> None:
+    def test_input_json_sends_direct_parent_turn_when_thread_idle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -3778,27 +3768,29 @@ exec "$real_git" "$@"
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
             payload = json.loads(input_result.stdout)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
-            self.assertEqual(payload["role_id"], ctx["instance_payload"]["role"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(payload["action"], "task_created")
-            self.assertEqual(payload["instruction_type"], "start_side")
-            self.assertTrue(payload["task_id"])
-            self.assertEqual(payload["runtime"]["action"], "start_side")
-            self.assertTrue(payload["runtime"]["side_thread_id"])
+            self.assertEqual(payload["action"], "start")
+            self.assertTrue(payload["turn_id"])
+            self.assertNotIn("task_id", payload)
+            self.assertNotIn("runtime", payload)
             self.assertNotIn("Started turn:", input_result.stdout)
 
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("thread/fork", methods)
-            self.assertIn("thread/inject_items", methods)
+            methods = [
+                row["rpc_method"]
+                for row in rpc_rows
+                if row["rpc_method"] not in {"initialize", "initialized"}
+            ]
+            self.assertIn("thread/settings/update", methods)
+            self.assertNotIn("thread/fork", methods)
+            self.assertNotIn("thread/inject_items", methods)
             self.assertIn("turn/start", methods)
             self.assertNotIn("turn/steer", methods)
             turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
-            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Draft brief")
+            self.assertEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(turn_start["params"]["input"][0]["text"], "Draft brief")
 
-    def test_input_creates_task_sys_task_when_thread_active(self) -> None:
+    def test_input_sends_direct_parent_steer_when_thread_active(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -3840,28 +3832,22 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            calls = [
-                json.loads(line)
-                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
-                if line.strip()
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [
+                row["rpc_method"]
+                for row in rpc_rows
+                if row["rpc_method"] not in {"initialize", "initialized"}
             ]
-            rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("thread/fork", methods)
-            self.assertIn("thread/inject_items", methods)
-            self.assertIn("turn/start", methods)
-            self.assertNotIn("turn/steer", methods)
-            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
-            self.assertIn("Task created:", input_result.stdout)
-            task_id = input_result.stdout.strip().removeprefix("Task created: ").strip()
-            payload = {
-                "actor_id": ctx["actor_id"],
-                "role_id": ctx["instance_payload"]["role"],
-                "task_id": task_id,
-            }
-            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Steer current turn")
+            self.assertEqual(methods[:4], ["thread/settings/update", "thread/read", "thread/turns/list", "turn/steer"])
+            self.assertNotIn("thread/fork", methods)
+            self.assertNotIn("thread/inject_items", methods)
+            self.assertNotIn("turn/start", methods)
+            self.assertIn("turn/steer", methods)
+            steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
+            self.assertEqual(steer["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(steer["params"]["expectedTurnId"], "turn-123")
+            self.assertEqual(steer["params"]["input"][0]["text"], "Steer current turn")
+            self.assertIn("Turn steered:", input_result.stdout)
 
     def test_input_rejects_unknown_option_without_rpc_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3892,7 +3878,7 @@ exec "$real_git" "$@"
             self.assertIn("Unknown instance input option: --bogus-input-option", input_result.stderr)
             self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
 
-    def test_input_json_creates_task_sys_task_when_thread_active(self) -> None:
+    def test_input_json_sends_direct_parent_steer_when_thread_active(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -3937,904 +3923,63 @@ exec "$real_git" "$@"
             self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
             payload = json.loads(input_result.stdout)
             self.assertEqual(payload["actor_id"], ctx["actor_id"])
-            self.assertEqual(payload["role_id"], ctx["instance_payload"]["role"])
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(payload["action"], "task_created")
-            self.assertEqual(payload["instruction_type"], "start_side")
-            self.assertTrue(payload["task_id"])
-            self.assertEqual(payload["runtime"]["action"], "start_side")
-            self.assertTrue(payload["runtime"]["side_thread_id"])
+            self.assertEqual(payload["action"], "steer")
+            self.assertEqual(payload["expected_turn_id"], "turn-123")
+            self.assertTrue(payload["turn_id"])
+            self.assertNotIn("task_id", payload)
+            self.assertNotIn("runtime", payload)
             self.assertNotIn("Steered turn:", input_result.stdout)
             rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("thread/fork", methods)
-            self.assertIn("thread/inject_items", methods)
-            self.assertIn("turn/start", methods)
-            self.assertNotIn("turn/steer", methods)
-            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
-            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Steer current turn")
-
-    def test_side_creates_child_injects_boundary_and_sends_text(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={"next_side_thread_id": "thread-side-1"},
-            )
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--text",
-                    "Explore the API shape",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
-            payload = json.loads(side_result.stdout)
-            self.assertEqual(payload["actor_id"], ctx["actor_id"])
-            self.assertEqual(payload["parent_thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(payload["side_thread_id"], "thread-side-1")
-            self.assertEqual(payload["action"], "start")
-            self.assertTrue(payload.get("turn_id"))
-
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertIn("thread/fork", methods)
-            self.assertIn("thread/inject_items", methods)
-            self.assertIn("turn/start", methods)
-
-            fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
-            self.assertEqual(fork["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            self.assertTrue(fork["params"]["ephemeral"])
-            self.assertEqual(fork["params"]["permissions"], "buddyswitch-runtime")
-            self.assertIn("runtimeWorkspaceRoots", fork["params"])
-            self.assertIn("developerInstructions", fork["params"])
-            self.assertIn("side conversation", fork["params"]["developerInstructions"])
-
-            inject = next(row for row in rpc_rows if row["rpc_method"] == "thread/inject_items")
-            self.assertEqual(inject["params"]["threadId"], "thread-side-1")
-            item = inject["params"]["items"][0]
-            self.assertEqual(item["type"], "message")
-            self.assertEqual(item["role"], "user")
-            self.assertIn("Side conversation boundary.", item["content"][0]["text"])
-
-            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertEqual(turn_start["params"]["threadId"], "thread-side-1")
-            self.assertEqual(
-                turn_start["params"]["input"],
-                [{"type": "text", "text": "Explore the API shape", "text_elements": []}],
-            )
-            self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
-            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-
-            instance_payload = json.loads((ctx["instance_root"] / "instance.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(instance_payload["side_threads"]), 1)
-            side_thread = instance_payload["side_threads"][0]
-            self.assertEqual(side_thread["thread_id"], "thread-side-1")
-            self.assertEqual(side_thread["parent_thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(side_thread["status"], "open")
-
-    def test_side_start_accepts_capability_as_thread_fork_only_override(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={"next_side_thread_id": "thread-side-1"},
-            )
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--text",
-                    "Use a specific side capability",
-                    "--capability",
-                    "deep",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
-            payload = json.loads(side_result.stdout)
-            self.assertEqual(payload["action"], "start")
-            self.assertEqual(payload["model"], "gpt-5.6-sol")
-            self.assertEqual(payload["model_reasoning_effort"], "xhigh")
-            self.assertEqual(payload["capability_level"], "deep")
-            self.assertEqual(payload["capability_source"], "override")
-            self.assertEqual(payload["capability_durability"], "thread_fork_only")
-
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
-            self.assertEqual(fork["params"]["model"], "gpt-5.6-sol")
-            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "xhigh"})
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertNotIn("thread/" + "settings/update", methods)
-            self.assertNotIn("config/" + "batchWrite", methods)
-
-            instance_payload = json.loads((ctx["instance_root"] / "instance.json").read_text(encoding="utf-8"))
-            side_thread = instance_payload["side_threads"][0]
-            self.assertNotIn("model", side_thread)
-            self.assertNotIn("model_reasoning_effort", side_thread)
-
-    def test_side_start_uses_saved_capability_snapshot_for_new_thread(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={"next_side_thread_id": "thread-side-1"},
-            )
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            (Path(str(ctx["instance_root"])) / "capability-config.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "catalog_version": 1,
-                        "parent": {"level": "balanced", "model": "gpt-5.6-terra", "effort": "high"},
-                        "side": {"level": "maximum", "model": "gpt-5.6-sol", "effort": "max"},
-                    },
-                    ensure_ascii=True,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--text",
-                    "Use configured side defaults",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
-            payload = json.loads(side_result.stdout)
-            self.assertEqual(payload["action"], "start")
-            self.assertEqual(payload["model"], "gpt-5.6-sol")
-            self.assertEqual(payload["model_reasoning_effort"], "max")
-            self.assertEqual(payload["capability_level"], "maximum")
-            self.assertEqual(payload["capability_source"], "actor_config")
-            self.assertEqual(payload["capability_durability"], "thread_fork_only")
-
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
-            self.assertEqual(fork["params"]["model"], "gpt-5.6-sol")
-            self.assertEqual(fork["params"]["config"], {"model_reasoning_effort": "max"})
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertNotIn("thread/" + "settings/update", methods)
-            self.assertNotIn("config/" + "batchWrite", methods)
-
-            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
-            side_thread = instance_payload["side_threads"][0]
-            self.assertNotIn("model", side_thread)
-            self.assertNotIn("model_reasoning_effort", side_thread)
-
-    def test_side_create_human_output_prints_side_thread_id(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={"next_side_thread_id": "thread-side-1"},
-            )
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--text",
-                    "Explore the API shape",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
-            self.assertIn("Side conversation started:", side_result.stdout)
-            self.assertIn("thread-side-1", side_result.stdout)
-            self.assertNotIn("{", side_result.stdout)
-
-    def test_side_send_existing_active_child_ignores_saved_capability_and_steers_side_not_parent(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            (Path(str(ctx["instance_root"])) / "capability-config.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "catalog_version": 1,
-                        "parent": {"level": "balanced", "model": "gpt-5.6-terra", "effort": "high"},
-                        "side": {"level": "maximum", "model": "gpt-5.6-sol", "effort": "max"},
-                    },
-                    ensure_ascii=True,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            self._set_instance_side_threads(
-                ctx["instance_root"],
-                [
-                    {
-                        "thread_id": "thread-side-1",
-                        "parent_thread_id": main_thread_id,
-                        "status": "open",
-                        "turn_id": "turn-side-1",
-                    }
-                ],
-            )
-            self._set_fake_side_thread_state(
-                Path(str(ctx["state_file"])),
-                main_thread_id=main_thread_id,
-                side_thread_id="thread-side-1",
-                side_status={"type": "active", "activeFlags": []},
-                side_turns=[
-                    {
-                        "id": "turn-side-1",
-                        "items": [],
-                        "itemsView": "summary",
-                        "status": "inProgress",
-                        "error": None,
-                        "startedAt": 0,
-                        "completedAt": None,
-                        "durationMs": None,
-                    }
-                ],
-            )
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    "thread-side-1",
-                    "--text",
-                    "Narrow that answer",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
-            payload = json.loads(side_result.stdout)
-            self.assertEqual(payload["action"], "send")
-            self.assertEqual(payload["side_thread_id"], "thread-side-1")
-            self.assertEqual(payload["parent_thread_id"], main_thread_id)
-            self.assertEqual(payload["thread_action"], "steer")
-            self.assertEqual(payload["expected_turn_id"], "turn-side-1")
-            self.assertNotIn("model", payload)
-            self.assertNotIn("model_reasoning_effort", payload)
-            self.assertNotIn("capability_source", payload)
-
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            methods = [row["rpc_method"] for row in rpc_rows]
+            methods = [
+                row["rpc_method"]
+                for row in rpc_rows
+                if row["rpc_method"] not in {"initialize", "initialized"}
+            ]
+            self.assertIn("thread/settings/update", methods)
             self.assertNotIn("thread/fork", methods)
-            self.assertNotIn("thread/" + "settings/update", methods)
+            self.assertNotIn("thread/inject_items", methods)
+            self.assertNotIn("turn/start", methods)
             self.assertIn("turn/steer", methods)
             steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
-            self.assertEqual(steer["params"]["threadId"], "thread-side-1")
-            self.assertEqual(steer["params"]["expectedTurnId"], "turn-side-1")
-            self.assertNotEqual(steer["params"]["threadId"], main_thread_id)
+            self.assertEqual(steer["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(steer["params"]["input"][0]["text"], "Steer current turn")
 
-    def test_side_send_existing_idle_child_starts_side_turn(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+    def test_public_instance_side_and_goal_commands_are_removed(self) -> None:
+        source = LAUNCHER.read_text(encoding="utf-8")
+        help_result = subprocess.run(
+            [str(LAUNCHER), "instance", "help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        side_result = subprocess.run(
+            [str(LAUNCHER), "instance", "side", "act-pm-demo", "--text", "Explore"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        goal_result = subprocess.run(
+            [str(LAUNCHER), "instance", "goal", "act-pm-demo", "get"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
 
-            main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            self._set_instance_side_threads(
-                ctx["instance_root"],
-                [
-                    {
-                        "thread_id": "thread-side-1",
-                        "parent_thread_id": main_thread_id,
-                        "status": "open",
-                        "turn_id": "turn-side-1",
-                    }
-                ],
-            )
-            self._set_fake_side_thread_state(
-                Path(str(ctx["state_file"])),
-                main_thread_id=main_thread_id,
-                side_thread_id="thread-side-1",
-                side_status={"type": "idle"},
-                side_turns=[],
-            )
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    "thread-side-1",
-                    "--text",
-                    "Follow up",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
-            payload = json.loads(side_result.stdout)
-            self.assertEqual(payload["action"], "send")
-            self.assertEqual(payload["thread_action"], "start")
-
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertEqual(turn_start["params"]["threadId"], "thread-side-1")
-            self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
-
-    def test_side_send_rejects_unknown_side_thread_without_rpc_mutation(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    "thread-unknown",
-                    "--text",
-                    "Do not send",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertNotEqual(side_result.returncode, 0)
-            self.assertIn("not registered", side_result.stderr.lower())
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertNotIn("thread/fork", methods)
-            self.assertNotIn("turn/start", methods)
-            self.assertNotIn("turn/steer", methods)
-            self.assertNotIn("turn/interrupt", methods)
-
-    def test_side_send_rejects_capability_override_before_rpc_mutation(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            self._set_instance_side_threads(
-                ctx["instance_root"],
-                [
-                    {
-                        "thread_id": "thread-side-1",
-                        "parent_thread_id": main_thread_id,
-                        "status": "open",
-                        "turn_id": "turn-side-1",
-                    }
-                ],
-            )
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-
-            side_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    "thread-side-1",
-                    "--text",
-                    "Bad switch",
-                    "--capability",
-                    "deep",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertNotEqual(side_result.returncode, 0)
-            self.assertIn("only applies when starting a new side thread", side_result.stderr)
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            self.assertEqual(rpc_rows, [])
-
-    def test_side_send_rejects_main_thread_id_as_side_thread(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    main_thread_id,
-                    "--text",
-                    "Bad",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("main thread", result.stderr.lower())
-            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
-            self.assertNotIn("turn/start", methods)
-            self.assertNotIn("turn/steer", methods)
-            self.assertNotIn("turn/interrupt", methods)
-
-    def test_side_close_rejects_main_thread_id_as_side_thread(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    "close",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    main_thread_id,
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("main thread", result.stderr.lower())
-            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
-            self.assertNotIn("turn/interrupt", methods)
-            self.assertNotIn("turn/start", methods)
-            self.assertNotIn("turn/steer", methods)
-
-    def test_side_close_interrupts_registered_child_and_removes_registry(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            main_turn = {
-                "id": "turn-main-1",
-                "items": [],
-                "itemsView": "summary",
-                "status": "inProgress",
-                "error": None,
-                "startedAt": 0,
-                "completedAt": None,
-                "durationMs": None,
-            }
-            self._set_instance_side_threads(
-                ctx["instance_root"],
-                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open", "turn_id": "turn-side-1"}],
-            )
-            self._set_fake_side_thread_state(
-                Path(str(ctx["state_file"])),
-                main_thread_id=main_thread_id,
-                main_status={"type": "active", "activeFlags": []},
-                main_turns=[main_turn],
-                side_thread_id="thread-side-1",
-                side_status={"type": "active", "activeFlags": []},
-                side_turns=[
-                    {
-                        "id": "turn-side-1",
-                        "items": [],
-                        "itemsView": "summary",
-                        "status": "inProgress",
-                        "error": None,
-                        "startedAt": 0,
-                        "completedAt": None,
-                        "durationMs": None,
-                    }
-                ],
-            )
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-
-            close_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    "close",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    "thread-side-1",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(close_result.returncode, 0, msg=close_result.stderr)
-            payload = json.loads(close_result.stdout)
-            self.assertEqual(payload["action"], "close")
-            self.assertEqual(payload["side_thread_id"], "thread-side-1")
-            self.assertEqual(payload["parent_thread_id"], main_thread_id)
-            self.assertEqual(payload["turn_id"], "turn-side-1")
-            self.assertTrue(payload["turn_interrupt_attempted"])
-            self.assertTrue(payload["turn_interrupt_ok"])
-            self.assertTrue(payload["lease_unregistered"])
-
-            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
-            interrupt = next(row for row in rpc_rows if row["rpc_method"] == "turn/interrupt")
-            self.assertEqual(interrupt["params"]["threadId"], "thread-side-1")
-            self.assertEqual(interrupt["params"]["turnId"], "turn-side-1")
-
-            instance_payload = json.loads((ctx["instance_root"] / "instance.json").read_text(encoding="utf-8"))
-            self.assertEqual(instance_payload.get("side_threads", []), [])
-
-            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
-            main_state = state_payload["threads"][main_thread_id]
-            self.assertEqual(main_state["turns"][0]["status"], "inProgress")
-
-    def test_side_close_idle_registered_child_skips_turn_interrupt(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            main_thread_id = str(ctx["instance_payload"]["thread_id"])
-            self._set_instance_side_threads(
-                ctx["instance_root"],
-                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
-            )
-            self._set_fake_side_thread_state(
-                Path(str(ctx["state_file"])),
-                main_thread_id=main_thread_id,
-                side_thread_id="thread-side-1",
-                side_status={"type": "idle"},
-                side_turns=[],
-            )
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-
-            close_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    "close",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    "thread-side-1",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(close_result.returncode, 0, msg=close_result.stderr)
-            payload = json.loads(close_result.stdout)
-            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
-            self.assertNotIn("turn/interrupt", methods)
-            self.assertNotIn("startup_" + "interrupt", payload)
-            self.assertFalse(payload["turn_interrupt_attempted"])
-            self.assertTrue(payload["lease_unregistered"])
-
-    def test_side_create_requires_text(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            result = subprocess.run(
-                [str(LAUNCHER), "instance", "side", ctx["actor_id"]],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("requires --text", result.stderr)
-            self.assertEqual(self._read_json_lines(Path(str(ctx["calls_path"]))), [])
-
-    def test_side_send_requires_text(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--side-thread-id",
-                    "thread-side-1",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("requires --text", result.stderr)
-            self.assertEqual(self._read_json_lines(Path(str(ctx["calls_path"]))), [])
-
-    def test_side_close_requires_side_thread_id(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            result = subprocess.run(
-                [str(LAUNCHER), "instance", "side", "close", ctx["actor_id"]],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("requires --side-thread-id", result.stderr)
-            self.assertEqual(self._read_json_lines(Path(str(ctx["calls_path"]))), [])
-
-    def test_side_rejects_inactive_or_unhealthy_instance(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
-            state_payload["errors"] = {
-                "thread/loaded/list": {"code": -32001, "message": "probe failed"}
-            }
-            Path(str(ctx["state_file"])).write_text(
-                json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-
-            result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "side",
-                    ctx["actor_id"],
-                    "--text",
-                    "Explore",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 3)
-            self.assertIn("unhealthy or inactive", result.stderr.lower())
-            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
-            self.assertNotIn("thread/fork", methods)
-            self.assertNotIn("turn/start", methods)
-            self.assertNotIn("turn/steer", methods)
-            self.assertNotIn("turn/interrupt", methods)
-
-    def test_goal_set_json_calls_thread_goal_set(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            goal_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "goal",
-                    ctx["actor_id"],
-                    "set",
-                    "--objective",
-                    "Ship launcher goal API",
-                    "--token-budget",
-                    "1234",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(goal_result.returncode, 0, msg=goal_result.stderr)
-            payload = json.loads(goal_result.stdout)
-            self.assertEqual(payload["actor_id"], ctx["actor_id"])
-            self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(payload["goal"]["objective"], "Ship launcher goal API")
-            self.assertEqual(payload["goal"]["tokenBudget"], 1234)
-            calls = [
-                json.loads(line)
-                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
-            goal_set = next(row for row in rpc_rows if row["rpc_method"] == "thread/goal/set")
-            self.assertEqual(goal_set["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(goal_set["params"]["objective"], "Ship launcher goal API")
-            self.assertEqual(goal_set["params"]["tokenBudget"], 1234)
-
-    def test_goal_get_and_clear_json_use_thread_goal_rpc(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={
-                    "goal": {
-                        "threadId": "thread-act-pm-test",
-                        "objective": "Existing objective",
-                        "status": "active",
-                        "tokenBudget": None,
-                        "tokensUsed": 0,
-                        "timeUsedSeconds": 0,
-                        "createdAt": 0,
-                        "updatedAt": 0,
-                    }
-                },
-            )
-            completed = ctx["completed"]
-            assert isinstance(completed, subprocess.CompletedProcess)
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
-            get_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "goal",
-                    ctx["actor_id"],
-                    "get",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(get_result.returncode, 0, msg=get_result.stderr)
-            get_payload = json.loads(get_result.stdout)
-            self.assertEqual(get_payload["goal"]["objective"], "Existing objective")
-
-            clear_result = subprocess.run(
-                [
-                    str(LAUNCHER),
-                    "instance",
-                    "goal",
-                    ctx["actor_id"],
-                    "clear",
-                    "--json",
-                ],
-                cwd=ROOT,
-                env=ctx["env"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
-            clear_payload = json.loads(clear_result.stdout)
-            self.assertEqual(clear_payload["actor_id"], ctx["actor_id"])
-            self.assertEqual(clear_payload["thread_id"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(clear_payload["cleared"], True)
-            calls = [
-                json.loads(line)
-                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            methods = [row["rpc_method"] for row in calls if row["argv"][:1] == ["json-rpc"]]
-            self.assertIn("thread/goal/get", methods)
-            self.assertIn("thread/goal/clear", methods)
+        self.assertEqual(help_result.returncode, 0, msg=help_result.stderr)
+        self.assertNotIn("instance side", help_result.stdout)
+        self.assertNotIn("instance goal", help_result.stdout)
+        self.assertNotIn("instance_side()", source)
+        self.assertNotIn("instance_goal()", source)
+        self.assertNotIn("SUBMIT_TURN_HELPER", source)
+        self.assertIn("tools.launcher.actor_session", source)
+        self.assertNotEqual(side_result.returncode, 0)
+        self.assertIn("Unknown instance command: side", side_result.stderr)
+        self.assertNotEqual(goal_result.returncode, 0)
+        self.assertIn("Unknown instance command: goal", goal_result.stderr)
 
     def test_compact_json_calls_thread_compact_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -5198,7 +4343,7 @@ exec "$real_git" "$@"
             resume_rpc = next(row for row in calls if row.get("rpc_method") == "thread/resume")
             self.assertEqual(resume_rpc["params"]["threadId"], "thread-cleared")
 
-    def test_input_records_task_without_steering_non_steerable_active_turn(self) -> None:
+    def test_input_reports_non_steerable_active_turn_without_task_sys_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -5245,27 +4390,21 @@ exec "$real_git" "$@"
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
-            self.assertIn("Task created:", input_result.stdout)
-            calls = [
-                json.loads(line)
-                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
-                if line.strip()
+            self.assertNotEqual(input_result.returncode, 0)
+            self.assertIn("turn not steerable", input_result.stderr)
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [
+                row["rpc_method"]
+                for row in rpc_rows
+                if row["rpc_method"] not in {"initialize", "initialized"}
             ]
-            rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
-            methods = [row["rpc_method"] for row in rpc_rows]
-            self.assertNotIn("turn/steer", methods)
-            self.assertIn("turn/start", methods)
-            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
-            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            self.assertIn("task_sys.side_frame", turn_start["params"]["input"][0]["text"])
-            task_id = input_result.stdout.strip().removeprefix("Task created: ").strip()
-            payload = {
-                "actor_id": ctx["actor_id"],
-                "role_id": ctx["instance_payload"]["role"],
-                "task_id": task_id,
-            }
-            self._assert_task_sys_input_task(Path(str(ctx["shared_root"])), payload, text="Steer current turn")
+            self.assertIn("thread/settings/update", methods)
+            self.assertIn("thread/read", methods)
+            self.assertIn("thread/turns/list", methods)
+            self.assertIn("turn/steer", methods)
+            self.assertNotIn("thread/fork", methods)
+            self.assertNotIn("thread/inject_items", methods)
+            self.assertNotIn("turn/start", methods)
 
     def test_input_rejects_inactive_or_unhealthy_instance(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -5765,8 +4904,8 @@ exec "$real_git" "$@"
                     instance_payload["thread_id"],
                 ],
             )
-            instance_root = Path(str(ctx["instance_root"]))
-            self.assertEqual(payload["cwd"], str((instance_root / "workspace").resolve()))
+            instance_root = Path(str(ctx["instance_root"])).resolve(strict=False)
+            self.assertEqual(payload["cwd"], str(instance_root / "workspace"))
             self.assertEqual(payload["home"], str(instance_root / "home"))
             self.assertEqual(payload["codex_home"], str(instance_root / "codex-home"))
             self.assertEqual(payload["xdg_config_home"], str(instance_root / "xdg-config"))

@@ -116,6 +116,14 @@ class ActorSideThreadTests(unittest.TestCase):
             with self.assertRaisesRegex(actor_side_thread.ActorSideThreadError, "side capability invalid"):
                 actor_side_thread.start_actor_side_thread(**self._start_kwargs(instance_json))
 
+    def test_actor_side_thread_keeps_internal_callable_without_public_cli(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "actor_side_thread.py").read_text(encoding="utf-8")
+
+        self.assertTrue(callable(actor_side_thread.start_actor_side_thread))
+        self.assertNotIn("argparse", source)
+        self.assertNotIn("build_parser", source)
+        self.assertNotIn("if __name__", source)
+
 
 if __name__ == "__main__":
     unittest.main()

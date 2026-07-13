@@ -925,13 +925,19 @@ def active_turn_id(socket_path: Path, thread_id: str) -> str | None:
 def input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
     if not permissions:
         raise AppServerProtocolError("input turn requires an explicit permissions profile")
-    thread_payload = thread_read(socket_path, thread_id, include_turns=False)
-    thread = thread_payload.get("thread")
-    if not isinstance(thread, dict):
-        raise AppServerProtocolError("thread/read did not return a thread object")
-    status_kind = _thread_status_kind(thread.get("status"))
-    if status_kind == "idle":
-        with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        thread_payload = client.request(
+            "thread/read",
+            {
+                "threadId": thread_id,
+                "includeTurns": False,
+            },
+        )
+        thread = thread_payload.get("thread")
+        if not isinstance(thread, dict):
+            raise AppServerProtocolError("thread/read did not return a thread object")
+        status_kind = _thread_status_kind(thread.get("status"))
+        if status_kind == "idle":
             result = client.request(
                 "turn/start",
                 {
@@ -940,19 +946,38 @@ def input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -
                     "permissions": permissions,
                 },
             )
-        turn = result.get("turn")
-        turn_id = turn.get("id") if isinstance(turn, dict) else None
-        return {"action": "start", "turn": turn, "turn_id": turn_id}
-    if status_kind != "active":
-        raise AppServerUnavailableError(f"thread {thread_id} is not active or idle")
+            turn = result.get("turn")
+            turn_id = turn.get("id") if isinstance(turn, dict) else None
+            return {"action": "start", "turn": turn, "turn_id": turn_id}
+        if status_kind != "active":
+            raise AppServerUnavailableError(f"thread {thread_id} is not active or idle")
 
-    in_progress_turn_id = active_turn_id(socket_path, thread_id)
-    if not in_progress_turn_id:
-        raise AppServerUnavailableError(f"thread {thread_id} is active but no in-progress turn was found")
+        turns_payload = client.request(
+            "thread/turns/list",
+            {
+                "threadId": thread_id,
+                "limit": 5,
+                "sortDirection": "desc",
+                "itemsView": "summary",
+            },
+        )
+        turns = turns_payload.get("data")
+        if not isinstance(turns, list):
+            raise AppServerProtocolError("thread/turns/list did not return a data list")
+        in_progress_turn_id = None
+        for turn in turns:
+            if not isinstance(turn, dict):
+                continue
+            if _turn_status_kind(turn.get("status")) == "inprogress":
+                candidate = turn.get("id")
+                if isinstance(candidate, str) and candidate:
+                    in_progress_turn_id = candidate
+                    break
+        if not in_progress_turn_id:
+            raise AppServerUnavailableError(f"thread {thread_id} is active but no in-progress turn was found")
 
-    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
         result = client.request("turn/steer", build_turn_steer_params(thread_id, in_progress_turn_id, text))
-    return {"action": "steer", "turn_id": result.get("turnId"), "expected_turn_id": in_progress_turn_id}
+        return {"action": "steer", "turn_id": result.get("turnId"), "expected_turn_id": in_progress_turn_id}
 
 
 def turn_start(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
@@ -1125,30 +1150,6 @@ def _command_interrupt(args: argparse.Namespace) -> int:
     return 0
 
 
-def _command_goal_get(args: argparse.Namespace) -> int:
-    payload = goal_get(Path(args.socket), args.thread_id)
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0
-
-
-def _command_goal_set(args: argparse.Namespace) -> int:
-    payload = goal_set(
-        Path(args.socket),
-        args.thread_id,
-        objective=args.objective,
-        status=args.status,
-        token_budget=args.token_budget,
-    )
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0
-
-
-def _command_goal_clear(args: argparse.Namespace) -> int:
-    payload = goal_clear(Path(args.socket), args.thread_id)
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0
-
-
 def _command_compact(args: argparse.Namespace) -> int:
     payload = compact_start(Path(args.socket), args.thread_id)
     print(json.dumps(payload, ensure_ascii=True))
@@ -1219,24 +1220,6 @@ def build_parser() -> argparse.ArgumentParser:
     interrupt.add_argument("--socket", required=True)
     interrupt.add_argument("--thread-id", required=True)
     interrupt.set_defaults(func=_command_interrupt)
-
-    goal_get_parser = subparsers.add_parser("goal-get")
-    goal_get_parser.add_argument("--socket", required=True)
-    goal_get_parser.add_argument("--thread-id", required=True)
-    goal_get_parser.set_defaults(func=_command_goal_get)
-
-    goal_set_parser = subparsers.add_parser("goal-set")
-    goal_set_parser.add_argument("--socket", required=True)
-    goal_set_parser.add_argument("--thread-id", required=True)
-    goal_set_parser.add_argument("--objective")
-    goal_set_parser.add_argument("--status")
-    goal_set_parser.add_argument("--token-budget", type=int)
-    goal_set_parser.set_defaults(func=_command_goal_set)
-
-    goal_clear_parser = subparsers.add_parser("goal-clear")
-    goal_clear_parser.add_argument("--socket", required=True)
-    goal_clear_parser.add_argument("--thread-id", required=True)
-    goal_clear_parser.set_defaults(func=_command_goal_clear)
 
     compact = subparsers.add_parser("compact")
     compact.add_argument("--socket", required=True)

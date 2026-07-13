@@ -6,7 +6,6 @@ import argparse
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import threading
@@ -29,8 +28,7 @@ import web_im_identity
 import im_http_router
 import imessage_channel
 import host_control as host_control_module
-import actor_side_thread
-import side_thread_lifecycle
+import actor_session
 from env.domain import task_sys, track_read
 from env.domain.identity import ActorIdentityProfile, IdentityRef
 from env.repos import runtime_files
@@ -393,10 +391,6 @@ class WebManagementService:
             return 200, {"ok": True, "instance": self._get_instance_status(actor_id)}
         if method == "POST" and action == "clear":
             return 202, self._clear(actor_id)
-        if method == "POST" and action == "side":
-            return 200, self._side(actor_id, body)
-        if method == "POST" and action == "side-close":
-            return 200, self._side_cleanup(actor_id, body)
         if method == "POST" and action == "interrupt":
             return 200, self._interrupt(actor_id)
         if method == "POST" and action == "resume":
@@ -431,10 +425,6 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/status")], "status"
         if path.startswith(status_prefix) and path.endswith("/clear"):
             return path[len(status_prefix) : -len("/clear")], "clear"
-        if path.startswith(status_prefix) and path.endswith("/side/close"):
-            return path[len(status_prefix) : -len("/side/close")], "side-close"
-        if path.startswith(status_prefix) and path.endswith("/side"):
-            return path[len(status_prefix) : -len("/side")], "side"
         if path.startswith(status_prefix) and path.endswith("/interrupt"):
             return path[len(status_prefix) : -len("/interrupt")], "interrupt"
         if path.startswith(status_prefix) and path.endswith("/resume"):
@@ -529,152 +519,6 @@ class WebManagementService:
             payload["thread_id"] = thread_id
         return payload
 
-    def _run_side_command(
-        self,
-        actor_id: str,
-        *,
-        text: str,
-        side_thread_id: str | None,
-        capability: str | None,
-        timeout_seconds: float,
-    ) -> dict[str, Any]:
-        del timeout_seconds
-        context = self._side_context(actor_id, "side")
-        try:
-            if side_thread_id is not None:
-                return side_thread_lifecycle.send_to_side_thread(
-                    socket_path=context["socket_path"],
-                    instance_json=context["instance_json"],
-                    actor_id=actor_id,
-                    parent_thread_id=context["thread_id"],
-                    side_thread_id=side_thread_id,
-                    text=text,
-                    permissions="buddyswitch-runtime",
-                )
-            return actor_side_thread.start_actor_side_thread(
-                socket_path=context["socket_path"],
-                instance_json=context["instance_json"],
-                actor_id=actor_id,
-                parent_thread_id=context["thread_id"],
-                text=text,
-                purpose="host_control.side",
-                workspace_dir=context["workspace_dir"],
-                shared_project_workspace_dir=context["shared_project_workspace_dir"],
-                permissions="buddyswitch-runtime",
-                capability_level=capability,
-            )
-        except Exception as exc:
-            raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
-
-    def _run_side_cleanup_command(self, actor_id: str, side_thread_id: str, *, timeout_seconds: float) -> dict[str, Any]:
-        del timeout_seconds
-        context = self._side_context(actor_id, "side close")
-        try:
-            return side_thread_lifecycle.cleanup_side_thread(
-                socket_path=context["socket_path"],
-                instance_json=context["instance_json"],
-                actor_id=actor_id,
-                parent_thread_id=context["thread_id"],
-                side_thread_id=side_thread_id,
-            )
-        except Exception as exc:
-            raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
-
-    def _side(self, actor_id: str, body: bytes) -> dict[str, Any]:
-        payload = self._parse_json_body(body)
-        unknown = set(payload) - {"text", "side_thread_id", "capability"}
-        if unknown:
-            raise HttpError(
-                status=400,
-                code="INVALID_REQUEST",
-                message=f"unknown side request key: {sorted(unknown)[0]}",
-            )
-        text = payload.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
-        side_thread_id = payload.get("side_thread_id")
-        if side_thread_id is not None and (not isinstance(side_thread_id, str) or not side_thread_id.strip()):
-            raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
-        capability = payload.get("capability")
-        if capability is not None and (not isinstance(capability, str) or not capability.strip()):
-            raise HttpError(status=400, code="INVALID_REQUEST", message="capability must not be empty.")
-        normalized_capability = capability.strip() if isinstance(capability, str) else None
-        if side_thread_id is not None and normalized_capability is not None:
-            raise HttpError(
-                status=400,
-                code="INVALID_REQUEST",
-                message="capability only applies when starting a new side thread.",
-            )
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._side_under_lock(
-                actor_id,
-                text,
-                side_thread_id if isinstance(side_thread_id, str) else None,
-                normalized_capability,
-            ),
-        )
-
-    def _side_under_lock(
-        self,
-        actor_id: str,
-        text: str,
-        side_thread_id: str | None,
-        capability: str | None,
-    ) -> dict[str, Any]:
-        parsed = self._run_side_command(
-            actor_id,
-            text=text,
-            side_thread_id=side_thread_id,
-            capability=capability,
-            timeout_seconds=60,
-        )
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
-        for key in (
-            "action",
-            "thread_action",
-            "parent_thread_id",
-            "side_thread_id",
-            "turn_id",
-            "expected_turn_id",
-            "model",
-            "model_reasoning_effort",
-            "capability_level",
-            "capability_source",
-            "capability_durability",
-        ):
-            value = parsed.get(key)
-            if isinstance(value, str):
-                payload[key] = value
-        return payload
-
-    def _side_cleanup(self, actor_id: str, body: bytes) -> dict[str, Any]:
-        payload = self._parse_json_body(body)
-        side_thread_id = payload.get("side_thread_id")
-        if not isinstance(side_thread_id, str) or not side_thread_id.strip():
-            raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
-        return self._run_busy(
-            f"instance:{actor_id}",
-            lambda: self._side_cleanup_under_lock(actor_id, side_thread_id),
-        )
-
-    def _side_cleanup_under_lock(self, actor_id: str, side_thread_id: str) -> dict[str, Any]:
-        parsed = self._run_side_cleanup_command(actor_id, side_thread_id, timeout_seconds=30)
-        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(actor_id)}
-        for key in ("action", "parent_thread_id", "side_thread_id", "turn_id"):
-            value = parsed.get(key)
-            if isinstance(value, str):
-                payload[key] = value
-        for key in ("turn_interrupt_attempted", "turn_interrupt_ok", "lease_unregistered"):
-            value = parsed.get(key)
-            if isinstance(value, bool):
-                payload[key] = value
-        for key in ("turn_interrupt_error", "lease_unregister_error"):
-            value = parsed.get(key)
-            if isinstance(value, str):
-                payload[key] = value
-        return payload
-
     def _interrupt(self, actor_id: str) -> dict[str, Any]:
         return self._run_busy(
             f"instance:{actor_id}",
@@ -740,7 +584,14 @@ class WebManagementService:
         self._validate_open_tui_request(headers, body)
         instance = self._get_instance_status(actor_id)
         self._validate_open_tui_instance(instance)
-        command = build_open_tui_attach_command(self._repo_root, actor_id)
+        try:
+            descriptor = actor_session.ActorSession(
+                shared_root=self._shared_root(),
+                repo_root=self._repo_root,
+            ).resolve_attach(actor_id)
+        except actor_session.ActorSessionError as exc:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
+        command = build_open_tui_attach_command(descriptor)
         if self._platform_name != "darwin":
             raise HttpError(
                 status=400,
@@ -982,37 +833,6 @@ class WebManagementService:
                 }
             },
             "capabilities": self._read_actor_capabilities(actor_id)["capabilities"],
-        }
-
-    def _side_context(self, actor_id: str, action_label: str) -> dict[str, Any]:
-        instance = self._get_instance_status(actor_id)
-        thread_id = instance.get("thread_id")
-        if not isinstance(thread_id, str) or not thread_id.strip():
-            raise HttpError(
-                status=409,
-                code="LIFECYCLE_BLOCKED",
-                message=f"Instance {action_label} blocked: {actor_id} has no thread id.",
-            )
-        app_server = instance.get("app_server")
-        socket_path = app_server.get("socket_path") if isinstance(app_server, Mapping) else None
-        app_server_healthy = isinstance(app_server, Mapping) and bool(app_server.get("healthy"))
-        if not app_server_healthy or not isinstance(socket_path, str) or not socket_path.strip():
-            raise HttpError(
-                status=409,
-                code="LIFECYCLE_BLOCKED",
-                message=f"Instance {action_label} blocked: {actor_id} is unhealthy or inactive.",
-            )
-        workspace_dir = instance.get("workspace_dir")
-        if not isinstance(workspace_dir, str) or not workspace_dir.strip():
-            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status payload for {actor_id}.")
-        raw_project_workspace = os.environ.get("BUDDYSWITCH_PROJECT_WORKSPACE_DIR")
-        project_workspace = Path(raw_project_workspace) if raw_project_workspace else self._repo_root / "projects" / "app"
-        return {
-            "thread_id": thread_id,
-            "socket_path": Path(socket_path),
-            "workspace_dir": Path(workspace_dir),
-            "shared_project_workspace_dir": project_workspace,
-            "instance_json": self._instance_json_for_actor(actor_id),
         }
 
     def _shared_root(self) -> Path:
@@ -1290,13 +1110,8 @@ def _normalized_host_netloc(value: str | None) -> str | None:
     return value.strip().lower()
 
 
-def build_open_tui_attach_command(repo_root: Path, actor_id: str) -> str:
-    validate_actor_id(actor_id)
-    launcher = "./buddy" "switch-codex"
-    return (
-        f"cd {shlex.quote(str(repo_root))} "
-        f"&& {launcher} instance attach {shlex.quote(actor_id)}"
-    )
+def build_open_tui_attach_command(descriptor: actor_session.AttachDescriptor) -> str:
+    return actor_session.terminal_command_from_descriptor(descriptor)
 
 
 def _quote_applescript_string(value: str) -> str:

@@ -972,6 +972,102 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(results[0]["turn_id"], "turn-2")
             self.assertEqual(results[0]["expected_turn_id"], "turn-1")
 
+    def test_input_turn_starts_idle_thread_with_single_app_server_primitive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_input() -> None:
+                try:
+                    results.append(APP_SERVER.input_turn(socket_path, "thread-1", "hello", "buddyswitch-runtime"))
+                except BaseException as exc:
+                    errors.append(exc)
+
+            request_thread = threading.Thread(target=run_input, daemon=True)
+            request_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            read = server.next_message()
+            self.assertEqual(read["method"], "thread/read")
+            server.send_response(read["id"], {"thread": {"id": "thread-1", "status": {"type": "idle"}}})
+
+            start = server.next_message()
+            self.assertEqual(start["method"], "turn/start")
+            params = start["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(params["threadId"], "thread-1")
+            self.assertEqual(params["input"], APP_SERVER.text_input_payload("hello"))
+            self.assertEqual(params["permissions"], "buddyswitch-runtime")
+            server.send_response(start["id"], {"turn": {"id": "turn-start-1"}})
+            request_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [{"action": "start", "turn": {"id": "turn-start-1"}, "turn_id": "turn-start-1"}])
+
+    def test_input_turn_steers_active_thread_with_single_app_server_primitive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_input() -> None:
+                try:
+                    results.append(APP_SERVER.input_turn(socket_path, "thread-1", "hello", "buddyswitch-runtime"))
+                except BaseException as exc:
+                    errors.append(exc)
+
+            request_thread = threading.Thread(target=run_input, daemon=True)
+            request_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            read = server.next_message()
+            self.assertEqual(read["method"], "thread/read")
+            server.send_response(read["id"], {"thread": {"id": "thread-1", "status": {"type": "active", "activeFlags": []}}})
+
+            turns = server.next_message()
+            self.assertEqual(turns["method"], "thread/turns/list")
+            server.send_response(
+                turns["id"],
+                {
+                    "data": [
+                        {
+                            "id": "turn-active-1",
+                            "items": [],
+                            "itemsView": "summary",
+                            "status": "inProgress",
+                            "error": None,
+                            "startedAt": 0,
+                            "completedAt": None,
+                            "durationMs": None,
+                        }
+                    ]
+                },
+            )
+
+            steer = server.next_message()
+            self.assertEqual(steer["method"], "turn/steer")
+            self.assertEqual(steer["params"], APP_SERVER.build_turn_steer_params("thread-1", "turn-active-1", "hello"))
+            server.send_response(steer["id"], {"turnId": "turn-steer-1"})
+            request_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [{"action": "steer", "turn_id": "turn-steer-1", "expected_turn_id": "turn-active-1"}])
+
     def test_turn_interrupt_sends_known_turn_id(self) -> None:
         self.assertTrue(hasattr(APP_SERVER, "turn_interrupt"), "APP_SERVER.turn_interrupt is required by side_thread_lifecycle")
         with tempfile.TemporaryDirectory() as temp_root:
@@ -1069,9 +1165,14 @@ class AppServerClientTests(unittest.TestCase):
 
     def test_side_composite_commands_are_not_app_server_entrypoints(self) -> None:
         parser = APP_SERVER.build_parser()
-        for command in ("side-start", "side-close"):
+        for command in ("side-start", "side-close", "goal-get", "goal-set", "goal-clear"):
             with self.subTest(command=command), self.assertRaises(SystemExit):
                 parser.parse_args([command])
+
+    def test_goal_callables_remain_app_server_owned(self) -> None:
+        self.assertTrue(hasattr(APP_SERVER, "goal_get"))
+        self.assertTrue(hasattr(APP_SERVER, "goal_set"))
+        self.assertTrue(hasattr(APP_SERVER, "goal_clear"))
 
     def test_server_error_is_reported_without_retrying_mutating_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

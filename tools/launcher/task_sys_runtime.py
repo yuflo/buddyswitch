@@ -18,8 +18,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import app_server  # noqa: E402
+import actor_session  # noqa: E402
 import actor_side_thread  # noqa: E402
-import parent_thread_submit  # noqa: E402
 import side_thread_lifecycle  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 
@@ -446,7 +446,7 @@ def _start_side_attempt(
     turn_id = _require_text(payload.get("turn_id"), "turn_id")
     attempt = {
         "attempt": attempt_number,
-        "stage": "side_turn_started",
+        "stage": "side_started",
         "side_thread_id": side_thread_id,
         "turn_id": turn_id,
         "retryable": False,
@@ -456,7 +456,7 @@ def _start_side_attempt(
         {
             "ok": True,
             "action": "start_side",
-            "stage": "side_turn_started",
+            "stage": "side_started",
             "task_id": task_id,
             "side_thread_id": side_thread_id,
             "turn_id": turn_id,
@@ -558,7 +558,7 @@ def _execute_submit_parent(context: Any, instruction: Mapping[str, Any], *, inte
                 interrupted_turn_id = value.strip()
             else:
                 raise ValueError("interrupt submit parent instruction did not return an interrupted turn id")
-    result = parent_thread_submit.submit_parent_turn(
+    result = actor_session.input_actor_turn(
         socket_path=_socket_path(context),
         instance_json=_instance_json(context),
         thread_id=_main_thread_id(context),
