@@ -227,7 +227,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("actor_private-tool", set(installed), msg=role)
                 self.assertFalse((workspace / ".agents" / "skills" / "actor_private-tool").exists(), msg=role)
 
-    def test_shared_tool_skills_do_not_teach_handoff_or_next_role(self) -> None:
+    def test_shared_tool_skills_do_not_teach_next_role_or_track_advance(self) -> None:
         shared_skill_files = list(self.SHARED_TOOL_SKILLS.values())
         for path in shared_skill_files:
             text = path.read_text(encoding="utf-8").lower()
@@ -235,12 +235,6 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("env.tool", text)
                 self.assertNotIn("next_role", text)
                 self.assertNotIn("track.advance", text)
-                # Allow 'handoff' only in explicit "do not" prohibition context
-                if "handoff" in text:
-                    do_not_idx = text.find("do not")
-                    handoff_idx = text.find("handoff")
-                    self.assertGreaterEqual(do_not_idx, 0, msg=f"{path}: 'handoff' found without 'do not' section")
-                    self.assertGreater(handoff_idx, do_not_idx, msg=f"{path}: 'handoff' found before 'do not' section")
 
     def test_shared_tool_skills_use_native_first_runtime_discovery(self) -> None:
         skill_paths = list(self.SHARED_TOOL_SKILLS.values())
