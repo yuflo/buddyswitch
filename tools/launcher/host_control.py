@@ -340,9 +340,33 @@ def _expect_instance_rows(payload: dict[str, object]) -> list[dict[str, object]]
             "instances row",
             ("actor_id", "role", "status", "app_server_health", "updated_at", "workspace_dir"),
         )
+        _require_valid_actor_id_field(row, "instances row", "actor_id")
+        _require_valid_role_id_field(row, "instances row", "role")
         _require_nullable_str(row, "instances row", "thread_id")
         _require_nullable_int(row, "instances row", "browser_port")
     return rows
+
+
+def _require_valid_actor_id_field(payload: dict[str, object], operation: str, field_name: str) -> None:
+    try:
+        validate_actor_id(payload[field_name])  # type: ignore[arg-type]
+    except HostControlError as exc:
+        raise HostControlError(
+            "COMMAND_FAILED",
+            f"Invalid Host Control {operation} payload: {field_name} must be a valid actor id.",
+            returncode=1,
+        ) from exc
+
+
+def _require_valid_role_id_field(payload: dict[str, object], operation: str, field_name: str) -> None:
+    try:
+        validate_role_id(payload[field_name])  # type: ignore[arg-type]
+    except HostControlError as exc:
+        raise HostControlError(
+            "COMMAND_FAILED",
+            f"Invalid Host Control {operation} payload: {field_name} must be a valid role id.",
+            returncode=1,
+        ) from exc
 
 
 def _first_nonempty_line(text: str | None) -> str | None:

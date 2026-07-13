@@ -229,6 +229,26 @@ class HostControlTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, "COMMAND_FAILED")
                 self.assertIn(field_name, raised.exception.message)
 
+    def test_facade_rejects_instance_rows_with_invalid_actor_or_role_identifiers(self) -> None:
+        malformed_rows = [
+            ({**valid_instance_row(), "actor_id": "pm-demo"}, "actor_id"),
+            ({**valid_instance_row(), "actor_id": "act/pm-demo"}, "actor_id"),
+            ({**valid_instance_row(), "role": "--pm"}, "role"),
+            ({**valid_instance_row(), "role": "../pm"}, "role"),
+        ]
+
+        for row, field_name in malformed_rows:
+            with self.subTest(row=row):
+                runner = FakePrivateRunner()
+                runner.add("list", [], {"instances": [row]})
+                control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
+
+                with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+                    control.list_instances()
+
+                self.assertEqual(raised.exception.code, "COMMAND_FAILED")
+                self.assertIn(field_name, raised.exception.message)
+
     def test_facade_validates_actor_and_role_inputs_before_private_runner(self) -> None:
         runner = FakePrivateRunner()
         control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)

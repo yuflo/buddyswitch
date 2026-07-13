@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -48,7 +47,6 @@ STATIC_CONTENT_TYPES = {
     ".md": "text/markdown; charset=utf-8",
     ".txt": "text/plain; charset=utf-8",
 }
-VALID_INSTANCE_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -133,12 +131,6 @@ def validate_bind_host(host: str) -> str:
     return host
 
 
-def validate_actor_id(actor_id: str) -> str:
-    if not VALID_INSTANCE_ID_RE.fullmatch(actor_id):
-        raise ValueError("Invalid actor id.")
-    return actor_id
-
-
 def bind_web_runtime_state() -> None:
     raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
     if isinstance(raw_shared_root, str) and raw_shared_root.strip():
@@ -161,6 +153,20 @@ def map_host_control_failure(error: host_control_module.HostControlError) -> Htt
     if error.code in {"LIFECYCLE_BLOCKED", "LOCK_BUSY"} or error.returncode in {3, 4}:
         return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=error.message)
     return HttpError(status=502, code="COMMAND_FAILED", message=error.message)
+
+
+def map_actor_session_failure(error: actor_session.ActorSessionError) -> HttpError:
+    message = str(error)
+    if message == "invalid actor id":
+        return HttpError(status=400, code="INVALID_REQUEST", message="Invalid actor id.")
+    if message.startswith("actor not found:"):
+        actor_id = message.split(":", 1)[1].strip()
+        return HttpError(status=404, code="NOT_FOUND", message=f"actor instance not found: {actor_id}")
+    if message.startswith("actor has no thread id"):
+        return HttpError(status=409, code="OPEN_TUI_BLOCKED", message="No thread to attach.")
+    if message.startswith("actor app server unhealthy"):
+        return HttpError(status=409, code="OPEN_TUI_BLOCKED", message="Instance is unhealthy.")
+    return HttpError(status=502, code="COMMAND_FAILED", message=message)
 
 
 def create_server(host: str, port: int, service: "WebManagementService") -> ThreadingHTTPServer:
@@ -341,7 +347,7 @@ class WebManagementService:
         if method == "GET" and path == "/api/health":
             return 200, {"ok": True}
         if method == "GET" and path == "/api/roles":
-            return 200, {"ok": True, "roles": self._list_buddies()}
+            return 200, {"ok": True, "roles": self._list_roles()}
         if method == "GET" and path == "/api/instances":
             return 200, {"ok": True, "instances": self._list_instances()}
         if method == "POST" and path == "/api/instances":
@@ -360,10 +366,6 @@ class WebManagementService:
             raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
         actor_console_id = self._parse_actor_console_path(route)
         if method == "GET" and actor_console_id is not None:
-            try:
-                validate_actor_id(actor_console_id)
-            except ValueError as exc:
-                raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
             return 200, {"ok": True, "console": self._actor_console(actor_console_id)}
         if method == "GET" and route == "/api/tracks":
             return 200, {"ok": True, "tracks": track_read.list_external_tracks()}
@@ -383,11 +385,6 @@ class WebManagementService:
         if instance_action is None:
             raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
         actor_id, action = instance_action
-        try:
-            validate_actor_id(actor_id)
-        except ValueError as exc:
-            raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
-
         if method == "GET" and action == "status":
             return 200, {"ok": True, "instance": self._get_instance_status(actor_id)}
         if method == "POST" and action == "clear":
@@ -478,18 +475,19 @@ class WebManagementService:
         role = payload.get("role")
         if not isinstance(role, str) or not role.strip():
             raise HttpError(status=400, code="INVALID_REQUEST", message="role is required.")
-        buddies = self._list_buddies()
-        roles_by_id = {row["id"]: row for row in buddies}
-        if role not in roles_by_id:
-            raise HttpError(status=400, code="INVALID_REQUEST", message=f"Unknown role: {role}")
-        role_label = str(roles_by_id[role].get("label") or role)
+        role_id = role.strip()
+        roles_by_id = {row["id"]: row for row in self._list_roles()}
+        role_row = roles_by_id.get(role_id)
+        if role_row is None:
+            raise HttpError(status=400, code="INVALID_REQUEST", message=f"Unknown role: {role_id}")
+        role_label = str(role_row.get("label") or role_id)
         return self._start_lifecycle_operation(
             key="start",
             action="start",
             label=f"Starting {role_label}",
             detail="Launcher start command is queued.",
-            target={"actor_id": "", "role": role},
-            command=lambda: self._create_instance_under_lock(role),
+            target={"actor_id": "", "role": role_id},
+            command=lambda: self._create_instance_under_lock(role_id),
         )
 
     def _create_instance_under_lock(self, role: str) -> dict[str, Any]:
@@ -583,15 +581,13 @@ class WebManagementService:
         headers: Mapping[str, str] | None,
     ) -> dict[str, Any]:
         self._validate_open_tui_request(headers, body)
-        instance = self._get_instance_status(actor_id)
-        self._validate_open_tui_instance(instance)
         try:
             descriptor = actor_session.ActorSession(
                 shared_root=self._shared_root(),
                 repo_root=self._repo_root,
             ).resolve_attach(actor_id)
         except actor_session.ActorSessionError as exc:
-            raise HttpError(status=502, code="COMMAND_FAILED", message=str(exc)) from exc
+            raise map_actor_session_failure(exc) from exc
         command = build_open_tui_attach_command(descriptor)
         if self._platform_name != "darwin":
             raise HttpError(
@@ -658,72 +654,11 @@ class WebManagementService:
         if payload:
             raise HttpError(status=400, code="INVALID_REQUEST", message="open-tui does not accept request fields.")
 
-    def _validate_open_tui_instance(self, instance: dict[str, Any]) -> None:
-        if instance.get("status") != "active":
-            raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="Resume this instance first.")
-        app_server = instance.get("app_server")
-        app_server_healthy = isinstance(app_server, dict) and bool(app_server.get("healthy"))
-        if not app_server_healthy:
-            raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="Instance is unhealthy.")
-        thread_id = instance.get("thread_id")
-        if not isinstance(thread_id, str) or not thread_id.strip():
-            raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="No thread to attach.")
-
-    def _list_buddies(self) -> list[dict[str, str]]:
-        roles = self._call_host_control(self._host_control.roles)
-        if not isinstance(roles, list):
-            raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid roles payload from launcher.")
-        rows: list[dict[str, str]] = []
-        for row in roles:
-            if not isinstance(row, dict):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid roles payload from launcher.")
-            role_id = row.get("id")
-            label = row.get("label")
-            scope = row.get("scope")
-            if not isinstance(role_id, str) or not isinstance(label, str) or not isinstance(scope, str):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid roles payload from launcher.")
-            rows.append({"id": role_id, "label": label, "scope": scope})
-        return rows
+    def _list_roles(self) -> list[dict[str, str]]:
+        return self._call_host_control(self._host_control.roles)
 
     def _list_instances(self) -> list[dict[str, Any]]:
-        instances = self._call_host_control(lambda: self._host_control.list_instances())
-        if not isinstance(instances, list):
-            raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-        rows: list[dict[str, Any]] = []
-        for row in instances:
-            if not isinstance(row, dict):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-            actor_id = row.get("actor_id")
-            role = row.get("role")
-            status = row.get("status")
-            app_server_health = row.get("app_server_health")
-            thread_id = row.get("thread_id")
-            browser_port = row.get("browser_port")
-            updated_at = row.get("updated_at")
-            workspace_dir = row.get("workspace_dir")
-            if not isinstance(actor_id, str) or not isinstance(role, str) or not isinstance(status, str):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-            if not isinstance(app_server_health, str):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-            if thread_id is not None and not isinstance(thread_id, str):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-            if browser_port is not None and not isinstance(browser_port, int):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-            if not isinstance(updated_at, str) or not isinstance(workspace_dir, str):
-                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
-            rows.append(
-                {
-                    "actor_id": actor_id,
-                    "role": role,
-                    "status": status,
-                    "app_server_health": app_server_health,
-                    "thread_id": thread_id,
-                    "browser_port": browser_port,
-                    "updated_at": updated_at,
-                    "workspace_dir": workspace_dir,
-                }
-            )
-        return rows
+        return self._call_host_control(lambda: self._host_control.list_instances())
 
     def _runtime_row(self, instance: Mapping[str, Any]) -> dict[str, Any]:
         thread = instance.get("thread")
@@ -767,10 +702,9 @@ class WebManagementService:
         for row in self._list_actor_rows():
             if role_id is not None and row.get("role") != role_id:
                 continue
-            try:
-                identity_id = validate_actor_id(row.get("actor_id"))
-                normalized_role = runtime_files.require_id(row.get("role"), "role_id")
-            except ValueError:
+            identity_id = row.get("actor_id")
+            normalized_role = row.get("role")
+            if not isinstance(identity_id, str) or not isinstance(normalized_role, str):
                 continue
             rows.append(
                 {
@@ -788,11 +722,6 @@ class WebManagementService:
         if not isinstance(role, str) or not role:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status payload for {actor_id}.")
         current_identity = {"id": actor_id, "type": "actor"}
-        instance_payload = dict(instance)
-        workspace_dir = instance_payload.get("workspace_dir")
-        if "instance_root" not in instance_payload and isinstance(workspace_dir, str) and workspace_dir.strip():
-            instance_payload["instance_root"] = str(Path(workspace_dir).expanduser().resolve(strict=False).parent)
-        del instance_payload
         task_projection = task_read.actor_external_task_projection(
             actor_profile=ActorIdentityProfile(
                 identity=IdentityRef(id=actor_id, type="actor"),
@@ -831,22 +760,6 @@ class WebManagementService:
         if isinstance(source_home, str) and source_home.strip():
             return (Path(source_home.strip()).expanduser() / ".codex-buddyswitch").resolve(strict=False)
         return (Path.home() / ".codex-buddyswitch").resolve(strict=False)
-
-    def _instance_json_for_actor(self, actor_id: str) -> Path:
-        try:
-            validate_actor_id(actor_id)
-        except ValueError as exc:
-            raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
-        shared_root = self._shared_root()
-        instances_root = (shared_root / "instances").resolve(strict=False)
-        instance_json = (instances_root / actor_id / "instance.json").resolve(strict=False)
-        try:
-            instance_json.relative_to(instances_root)
-        except ValueError as exc:
-            raise HttpError(status=400, code="INVALID_REQUEST", message="Invalid actor instance path.") from exc
-        if not instance_json.is_file():
-            raise HttpError(status=404, code="NOT_FOUND", message=f"actor instance not found: {actor_id}")
-        return instance_json
 
     def _read_actor_capabilities(self, actor_id: str) -> dict[str, Any]:
         return self._call_host_control(lambda: self._host_control.capabilities_get(actor_id))
@@ -1018,28 +931,6 @@ class WebManagementService:
                 self._lifecycle_running_operation_id = None
             return self._dispatch_next_lifecycle_operation_locked()
 
-    def _update_operation(
-        self,
-        operation_id: str,
-        *,
-        status: str,
-        detail: str,
-        result: dict[str, Any] | None = None,
-        error: dict[str, str] | None = None,
-        target_patch: dict[str, str] | None = None,
-    ) -> None:
-        with self._operation_lock:
-            operation = self._operations.get(operation_id)
-            if operation is None:
-                return
-            operation.status = status
-            operation.detail = detail
-            operation.result = result
-            operation.error = error
-            if target_patch:
-                operation.target.update(target_patch)
-            operation.updated_at = utc_now_iso()
-
     def _parse_json_body(self, body: bytes) -> dict[str, Any]:
         if not body:
             return {}
@@ -1058,14 +949,6 @@ class WebManagementService:
             return action()
         finally:
             self._busy_guard.release(key)
-
-
-def _first_nonempty_line(text: str) -> str | None:
-    for line in text.splitlines():
-        cleaned = line.strip()
-        if cleaned:
-            return cleaned
-    return None
 
 
 def _header_value(headers: Mapping[str, str] | None, name: str) -> str | None:
@@ -1096,6 +979,16 @@ def _normalized_host_netloc(value: str | None) -> str | None:
     if value is None or not value.strip():
         return None
     return value.strip().lower()
+
+
+def _first_nonempty_line(text: str | None) -> str | None:
+    if not text:
+        return None
+    for line in text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return None
 
 
 def build_open_tui_attach_command(descriptor: actor_session.AttachDescriptor) -> str:
