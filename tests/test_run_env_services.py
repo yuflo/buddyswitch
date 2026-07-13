@@ -8,13 +8,15 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from tests.python_runtime import PYTHON
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class RunlessRuntimeCommandTests(unittest.TestCase):
     def _invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(ROOT / "scripts" / "turn_runtime.py"), *args],
+            [PYTHON, str(ROOT / "scripts" / "turn_runtime.py"), *args],
             cwd=ROOT,
             text=True,
             capture_output=True,

@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import env_profiles  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 
 
 class BuddyEnvProfilesTests(unittest.TestCase):
@@ -138,7 +139,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
 
     def test_validate_all_cli(self) -> None:
         completed = subprocess.run(
-            ["python3", str(ROOT / "scripts" / "env_profiles.py"), "validate-all"],
+            [PYTHON, str(ROOT / "scripts" / "env_profiles.py"), "validate-all"],
             cwd=ROOT,
             text=True,
             capture_output=True,

@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_cleanup  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 
 
 class CleanupSystemTests(unittest.TestCase):
@@ -288,7 +289,7 @@ class CleanupSystemTests(unittest.TestCase):
     def test_cleanup_cli_json_reports_active_categories(self) -> None:
         completed = subprocess.run(
             [
-                "python3",
+                PYTHON,
                 str(ROOT / "scripts" / "env_cleanup.py"),
                 "--repo-root",
                 str(self.repo_root),

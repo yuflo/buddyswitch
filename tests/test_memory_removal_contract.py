@@ -21,6 +21,7 @@ import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.domain import source_refs  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -136,7 +137,7 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(any(key.startswith("handoff.") for key in tool_catalog.operation_semantics()))
 
         status = subprocess.run(
-            ["python3", str(ROOT / "scripts" / "turn_runtime.py"), "status"],
+            [PYTHON, str(ROOT / "scripts" / "turn_runtime.py"), "status"],
             cwd=ROOT,
             text=True,
             capture_output=True,

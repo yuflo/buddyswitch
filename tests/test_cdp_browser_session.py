@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from tests.python_runtime import PYTHON
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SESSION_PATH = ROOT / "scripts" / "env" / ("cdp_browser_" + "session.py")
@@ -469,7 +471,7 @@ lifecycle.mark_current_page(
 print("done", flush=True)
 """
             process = subprocess.Popen(
-                [sys.executable, "-c", script, str(ROOT), str(instance_root)],
+                [PYTHON, "-c", script, str(ROOT), str(instance_root)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

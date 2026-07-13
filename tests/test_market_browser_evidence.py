@@ -21,6 +21,7 @@ if str(SCRIPTS) not in sys.path:
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.repos import artifacts as artifact_repo  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -284,7 +285,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_browser_evidence_cli_target_type_is_artifact_only(self) -> None:
         help_result = subprocess.run(
-            ["python3", "scripts/browser_evidence.py", "issue", "--help"],
+            [PYTHON, "scripts/browser_evidence.py", "issue", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -296,7 +297,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         rejected = subprocess.run(
             [
-                "python3",
+                PYTHON,
                 "scripts/browser_evidence.py",
                 "issue",
                 "--target-type",

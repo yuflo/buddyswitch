@@ -22,6 +22,8 @@ from typing import Any
 import unittest
 from unittest.mock import patch
 
+from tests.python_runtime import PYTHON, executable_python_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -107,7 +109,8 @@ class BrowserLazyReleaseIntegrationTests(unittest.TestCase):
     def _write_fake_chrome_server(self, path: Path) -> None:
         self._write_exec(
             path,
-            r'''#!/usr/bin/env python3
+            executable_python_source(
+                r'''
 from __future__ import annotations
 
 import base64
@@ -263,12 +266,14 @@ class Handler(BaseHTTPRequestHandler):
 write_state(read_state())
 HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 ''',
+            ),
         )
 
     def _write_fake_upstream(self, path: Path) -> None:
         self._write_exec(
             path,
-            r'''#!/usr/bin/env python3
+            executable_python_source(
+                r'''
 from __future__ import annotations
 
 import json
@@ -455,12 +460,14 @@ for raw_line in sys.stdin:
     sys.stdout.write(json.dumps(response, ensure_ascii=True) + "\n")
     sys.stdout.flush()
 ''',
+            ),
         )
 
     def _write_ensure_script(self, path: Path) -> None:
         self._write_exec(
             path,
-            r'''#!/usr/bin/env python3
+            executable_python_source(
+                r'''
 from __future__ import annotations
 
 import json
@@ -527,7 +534,7 @@ if pid is None or not pid_alive(pid) or not endpoint_ready(port):
     devnull_out = open(os.devnull, "ab")
     proc = subprocess.Popen(
         [
-            sys.executable,
+            os.environ["BUDDYSWITCH_PYTHON"],
             str(server_script),
             f"--remote-debugging-port={port}",
             f"--user-data-dir={profile_dir}",
@@ -576,6 +583,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
         + "\n"
     )
 ''',
+            ),
         )
 
     def _start_fake_runtime_broker(
@@ -598,7 +606,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
 
         def acquire_browser(request_id: str | None) -> dict[str, Any]:
             completed = subprocess.run(
-                [sys.executable, str(ensure_script), str(instance_root)],
+                [PYTHON, str(ensure_script), str(instance_root)],
                 cwd=ROOT,
                 env=os.environ.copy(),
                 text=True,
@@ -715,10 +723,10 @@ with calls_path.open("a", encoding="utf-8") as handle:
     def _start_proxy(self, *, instance_root: Path, upstream: Path, env: dict[str, str]) -> subprocess.Popen[str]:
         proc = subprocess.Popen(
             [
-                sys.executable,
+                PYTHON,
                 str(PROXY),
                 "--upstream-command",
-                f"{sys.executable} {upstream}",
+                f"{PYTHON} {upstream}",
                 f"--instance-root={instance_root}",
             ],
             cwd=ROOT,
@@ -924,7 +932,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "BUDDYSWITCH_TEST_UPSTREAM_STATE": str(upstream_state),
                     "BUDDYSWITCH_TEST_UPSTREAM_FAIL_NEW_PAGE_AFTER_TARGET": "1",
                     "BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND": " ".join(
-                        shlex.quote(part) for part in (sys.executable, str(fake_upstream))
+                        shlex.quote(part) for part in (PYTHON, str(fake_upstream))
                     ),
                     "NO_PROXY": "127.0.0.1,localhost",
                     "no_proxy": "127.0.0.1,localhost",
@@ -1029,7 +1037,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "BUDDYSWITCH_TEST_UPSTREAM_CALLS": str(upstream_calls),
                     "BUDDYSWITCH_TEST_UPSTREAM_STATE": str(upstream_state),
                     "BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND": " ".join(
-                        shlex.quote(part) for part in (sys.executable, str(fake_upstream))
+                        shlex.quote(part) for part in (PYTHON, str(fake_upstream))
                     ),
                     "NO_PROXY": "127.0.0.1,localhost",
                     "no_proxy": "127.0.0.1,localhost",

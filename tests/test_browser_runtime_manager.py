@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from tests.python_runtime import executable_python_source
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -102,9 +104,9 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
 
     def _write_fake_chrome(self, path: Path, argv_path: Path) -> None:
         path.write_text(
-            textwrap.dedent(
-                f"""\
-                #!/usr/bin/env python3
+            executable_python_source(
+                textwrap.dedent(
+                    f"""\
                 from http.server import BaseHTTPRequestHandler, HTTPServer
                 import json
                 import sys
@@ -145,6 +147,7 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
                 server = HTTPServer(("127.0.0.1", port), Handler)
                 server.serve_forever()
                 """
+                )
             ),
             encoding="utf-8",
         )

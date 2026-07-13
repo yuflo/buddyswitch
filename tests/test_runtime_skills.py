@@ -244,8 +244,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("native buddyswitch env mcp tools", lowered)
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("python3 scripts/turn_runtime.py status", text)
-                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertIn("turn_runtime.py status", text)
+                self.assertNotIn("scripts/env/client.py", text)
                 self.assertNotIn("CLI Payload Rule", text)
                 self.assertNotIn("--payload", text)
 
@@ -271,7 +271,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("search.open_browser", lowered)
                 self.assertNotIn("use native `search__open_browser`", lowered)
                 self.assertNotIn("start discovery from native `search__open_browser`", lowered)
-                self.assertNotIn("python3 scripts/env/client.py", lowered)
+                self.assertNotIn("scripts/env/client.py", lowered)
                 self.assertNotIn("search open-browser --payload", lowered)
                 self.assertNotIn("search open-browser --query", lowered)
                 self.assertNotIn("search open_browser --query", lowered)
@@ -322,7 +322,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 description_line = next((line for line in text.splitlines() if line.startswith("description: ")), "")
                 self.assertTrue(description_line.startswith("description: Use when "), msg=description_line)
                 self.assertLessEqual(len(description_line), 500)
-                self.assertNotIn("python3 scripts/env/client.py", description_line)
+                self.assertNotIn("scripts/env/client.py", description_line)
                 self.assertNotIn("artifact.create_revision", description_line)
                 self.assertNotIn("##", description_line)
                 self.assertNotIn("1.", description_line)
@@ -378,7 +378,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         for tool, path in self.SHARED_TOOL_SKILLS.items():
             text = path.read_text(encoding="utf-8")
             with self.subTest(tool=tool):
-                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertNotIn("scripts/env/client.py", text)
                 self.assertNotIn("CLI Payload Rule", text)
                 self.assertNotIn("--payload", text)
 
@@ -397,8 +397,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("python3 scripts/turn_runtime.py status", text)
-                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertIn("turn_runtime.py status", text)
+                self.assertNotIn("scripts/env/client.py", text)
                 self.assertNotIn("context summarize --payload", lowered)
                 self.assertNotIn("search open-browser --payload", lowered)
                 self.assertNotIn("Runtime tool examples include", text)
@@ -435,12 +435,12 @@ class RuntimeSkillsTests(unittest.TestCase):
     def test_shared_tool_skills_name_only_runtime_discovery_surfaces_for_exact_contracts(self) -> None:
         required_refs = (
             "context.get.tool_catalog",
-            "python3 scripts/turn_runtime.py status",
+            "turn_runtime.py status",
         )
         accepted_contract_refs = (
             "context.get.tool_catalog",
             "context.summarize.tool_affordances",
-            "python3 scripts/turn_runtime.py status",
+            "turn_runtime.py status",
             "runtime response fields",
         )
         forbidden_refs = (
@@ -531,7 +531,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         forbidden_description_tokens = (
             "1.",
             "2.",
-            "python3 scripts/env/client.py",
+            "scripts/env/client.py",
             "track.open",
             "artifact.get",
             "artifact.create_revision",
@@ -570,7 +570,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         )
         required_refs = (
             "context.get.tool_catalog",
-            "python3 scripts/turn_runtime.py status",
+            "turn_runtime.py status",
             "runtime response fields",
         )
         for skill_id in self.PM_PRODUCT_SKILLS:
@@ -623,7 +623,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         forbidden_description_tokens = (
             "1.",
             "2.",
-            "python3 scripts/env/client.py",
+            "scripts/env/client.py",
             "track.open",
             "artifact.get",
             "## ",
@@ -734,8 +734,8 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("write-prd", combined)
         self.assertIn("native buddyswitch env mcp tools", contract)
         self.assertIn("context.get.tool_catalog", contract)
-        self.assertIn("python3 scripts/turn_runtime.py status", contract)
-        self.assertNotIn("python3 scripts/env/client.py", combined)
+        self.assertIn("turn_runtime.py status", contract)
+        self.assertNotIn("scripts/env/client.py", combined)
 
     def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
         skill_paths = self.SHARED_TOOL_SKILLS
@@ -746,7 +746,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotRegex(text, r"(?m)^- operations:")
                 self.assertNotRegex(text, rf"env\.tool\s*[→>\-]+\s*{tool}\.")
                 self.assertIn(f"context.get.tool_catalog['{tool}']", text)
-                self.assertIn("python3 scripts/turn_runtime.py status", text)
+                self.assertIn("turn_runtime.py status", text)
 
     def test_runtime_contract_not_shared_skill_owns_inactive_actions(self) -> None:
         from env.tool_runtime import registry as catalog

@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry as tool_registry  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 
 SHIPPED_TOOLS = {
     "task_sys",
@@ -40,7 +41,7 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
 
     def _run_python(self, script: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", "-c", script],
+            [PYTHON, "-c", script],
             cwd=ROOT,
             text=True,
             capture_output=True,

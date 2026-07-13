@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.python_runtime import PYTHON
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_HELPER = ROOT / "tools" / "launcher" / "workspace.sh"
 CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
@@ -71,6 +73,8 @@ class CleanRuntimeEnvironmentTests(unittest.TestCase):
         )
         cmd = """
 set -euo pipefail
+source tools/launcher/env.sh
+buddyswitch_env_init
 source tools/launcher/workspace.sh
 buddyswitch_workspace_ensure_project_worktree
 buddyswitch_workspace_prepare_execution_worktree
@@ -99,6 +103,8 @@ buddyswitch_workspace_repair_runtime_projects_app_projection
         )
         cmd = """
 set -euo pipefail
+source tools/launcher/env.sh
+buddyswitch_env_init
 source tools/launcher/workspace.sh
 buddyswitch_workspace_cleanup_stale_state_projections
 """
@@ -253,7 +259,7 @@ buddyswitch_workspace_cleanup_stale_state_projections
         config_path = codex_home / "config.toml"
         patch = subprocess.run(
             [
-                "python3",
+                PYTHON,
                 str(CODEX_CONFIG),
                 "--config",
                 str(config_path),

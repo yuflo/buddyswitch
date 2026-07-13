@@ -21,6 +21,7 @@ import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 import runtime_kernel.lifecycle as runtime_lifecycle  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -213,7 +214,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_status_exposes_env_tools_catalog(self) -> None:
         completed = subprocess.run(
-            ["python3", str(ROOT / "scripts" / "turn_runtime.py"), "status"],
+            [PYTHON, str(ROOT / "scripts" / "turn_runtime.py"), "status"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -424,7 +425,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_env_client_help_exposes_runless_resources(self) -> None:
         completed = subprocess.run(
-            ["python3", "scripts/env/client.py", "--help"],
+            [PYTHON, "scripts/env/client.py", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -440,7 +441,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_env_client_actor_private_is_not_registered(self) -> None:
         completed = subprocess.run(
-            ["python3", "scripts/env/client.py", "actor_private", "--help"],
+            [PYTHON, "scripts/env/client.py", "actor_private", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,

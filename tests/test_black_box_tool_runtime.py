@@ -18,6 +18,8 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from tests.python_runtime import PYTHON  # noqa: E402
+
 SHIPPED_TOOLS: dict[str, set[str]] = {
     "artifact": {"attach_file", "create_revision", "get", "get_attachment", "list", "list_attachments", "update_metadata"},
     "context": {"get", "list_sources", "summarize"},
@@ -73,7 +75,7 @@ class BlackBoxToolRuntimeTests(unittest.TestCase):
 
     def _run_python(self, script: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", "-c", script],
+            [PYTHON, "-c", script],
             cwd=ROOT,
             text=True,
             capture_output=True,

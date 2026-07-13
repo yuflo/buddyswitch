@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from tests.python_runtime import PYTHON
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -601,7 +603,7 @@ class BrowserPageExpiredHandlerTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            command = f"{shlex.quote(sys.executable)} {shlex.quote(str(stub_path))}"
+            command = f"{shlex.quote(PYTHON)} {shlex.quote(str(stub_path))}"
 
             self.handler_module.open_mcp_session = self.handler_module.McpToolSession
             with mock.patch.dict(os.environ, {"BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND": command}):

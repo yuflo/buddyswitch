@@ -24,6 +24,7 @@ if str(SCRIPTS) not in sys.path:
 import env_manifest  # noqa: E402
 import env.tools.search._impl as search_impl  # noqa: E402
 from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -290,7 +291,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_search_cli_help_exposes_status_and_request_only(self) -> None:
         resource_help = subprocess.run(
-            ["python3", "scripts/env/client.py", "search", "--help"],
+            [PYTHON, "scripts/env/client.py", "search", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -306,7 +307,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("--engine", resource_help.stdout)
 
         action_help = subprocess.run(
-            ["python3", "scripts/env/client.py", "search", "request", "--help"],
+            [PYTHON, "scripts/env/client.py", "search", "request", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -317,7 +318,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_search_cli_rejects_missing_backend_and_removed_open_browser_command(self) -> None:
         missing_backend = subprocess.run(
-            ["python3", "scripts/env/client.py", "search", "request", "--payload", '{"query":"x"}'],
+            [PYTHON, "scripts/env/client.py", "search", "request", "--payload", '{"query":"x"}'],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -330,7 +331,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         removed_open_browser = subprocess.run(
             [
-                "python3",
+                PYTHON,
                 "scripts/env/client.py",
                 "search",
                 "open-browser",

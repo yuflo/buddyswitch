@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from tests.python_runtime import PYTHON, executable_python_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -181,7 +183,8 @@ class BrowserCockpitProxyTests(unittest.TestCase):
     def _write_fake_upstream(self, path: Path) -> None:
         self._write_exec(
             path,
-            """#!/usr/bin/env python3
+            executable_python_source(
+                """
 from __future__ import annotations
 
 import json
@@ -345,7 +348,8 @@ for raw_line in sys.stdin:
     print(json.dumps(response, ensure_ascii=True), flush=True)
     if method == "tools/call" and os.environ.get("BUDDYSWITCH_TEST_PROXY_EXIT_AFTER_RESPONSE") == "1":
         raise SystemExit(0)
-""",
+"""
+            ),
         )
 
     def _start_cdp_list_server(self, state: dict[str, object]) -> str:
@@ -524,10 +528,10 @@ for raw_line in sys.stdin:
                 calls_path=broker_calls_path,
             )
             command = [
-                sys.executable,
+                PYTHON,
                 str(PROXY),
                 "--upstream-command",
-                f"{sys.executable} {upstream}",
+                f"{PYTHON} {upstream}",
             ]
             if pass_broker_socket_arg:
                 command.extend(["--broker-socket", str(broker_socket_path)])
@@ -628,10 +632,10 @@ for raw_line in sys.stdin:
             env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
             command = [
-                sys.executable,
+                PYTHON,
                 str(PROXY),
                 "--upstream-command",
-                f"{sys.executable} {upstream}",
+                f"{PYTHON} {upstream}",
                 f"--instance-root={instance_root}",
             ]
             proc = subprocess.Popen(
@@ -754,10 +758,10 @@ for raw_line in sys.stdin:
             env["BUDDYSWITCH_TEST_PROXY_CALLS"] = str(calls_path)
             env["BUDDYSWITCH_TEST_PROXY_ARGV"] = str(argv_path)
             command = [
-                sys.executable,
+                PYTHON,
                 str(PROXY),
                 "--upstream-command",
-                f"{sys.executable} {upstream}",
+                f"{PYTHON} {upstream}",
                 f"--instance-root={instance_root}",
             ]
             proc = subprocess.Popen(

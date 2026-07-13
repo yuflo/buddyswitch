@@ -138,7 +138,7 @@ def maybe_capture_prepare_probe() -> dict[str, object] | None:
     if not os.environ.get("BUDDYSWITCH_TEST_PREPARE_TEXT"):
         return None
     prepare_result = subprocess.run(
-        ["python3", "scripts/turn_runtime.py", "status"],
+        [os.environ["BUDDYSWITCH_PYTHON"], "scripts/turn_runtime.py", "status"],
         cwd=os.getcwd(),
         text=True,
         capture_output=True,
@@ -167,7 +167,7 @@ def maybe_capture_broker_probe(entry: dict[str, object]) -> dict[str, object] | 
     instance_json_path = Path(instance_json)
     runtime_dir = instance_json_path.parent / "runtime"
     status_command = [
-        "python3",
+        os.environ["BUDDYSWITCH_PYTHON"],
         "scripts/runtime_kernel/broker.py",
         "status",
         "--socket",
@@ -222,10 +222,10 @@ def maybe_capture_runtime_smoke() -> list[dict[str, object]] | None:
         return None
     rows: list[dict[str, object]] = []
     smoke_commands = (
-        ("turn_runtime.status", ["python3", "scripts/turn_runtime.py", "status"]),
-        ("context.summarize", ["python3", "scripts/env/client.py", "context", "summarize"]),
-        ("actor_private.desc", ["python3", "scripts/env/client.py", "actor_private", "desc"]),
-        ("search.status", ["python3", "scripts/env/client.py", "search", "status"]),
+        ("turn_runtime.status", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/turn_runtime.py", "status"]),
+        ("context.summarize", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/env/client.py", "context", "summarize"]),
+        ("actor_private.desc", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/env/client.py", "actor_private", "desc"]),
+        ("search.status", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/env/client.py", "search", "status"]),
     )
     for name, command in smoke_commands:
         result = subprocess.run(

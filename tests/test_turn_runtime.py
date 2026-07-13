@@ -15,12 +15,13 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 
 
 class TurnRuntimeRunlessTests(unittest.TestCase):
     def _invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(ROOT / "scripts" / "turn_runtime.py"), *args],
+            [PYTHON, str(ROOT / "scripts" / "turn_runtime.py"), *args],
             cwd=ROOT,
             text=True,
             capture_output=True,

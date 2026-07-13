@@ -338,7 +338,7 @@ class WebManagementUnitTests(unittest.TestCase):
         block = source[start:end]
 
         ensure_index = block.index("buddyswitch_central_daemon_ensure || return $?")
-        run_index = block.index('python3 "${WEB_MANAGEMENT_HELPER}" "$@"')
+        run_index = block.index('"${BUDDYSWITCH_PYTHON}" "${WEB_MANAGEMENT_HELPER}" "$@"')
         stop_index = block.index("buddyswitch_central_daemon_stop_if_idle")
         self.assertLess(ensure_index, run_index)
         self.assertLess(run_index, stop_index)

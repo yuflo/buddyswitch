@@ -8,11 +8,12 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+
+from tests.python_runtime import PYTHON
 
 ROOT = Path(__file__).resolve().parents[1]
 CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
@@ -93,7 +94,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
         extra_args: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         args = [
-            sys.executable,
+            PYTHON,
             str(CODEX_CONFIG),
             "--config",
             str(config_path),
@@ -524,7 +525,7 @@ web_search = "cached"
                     PERMISSION_PROFILE,
                     "-C",
                     str(workspace_dir),
-                    sys.executable,
+                    PYTHON,
                     "scripts/env/client.py",
                 ],
                 text=True,
@@ -579,7 +580,7 @@ web_search = "cached"
                     PERMISSION_PROFILE,
                     "-C",
                     str(dev_workspace_dir),
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     (
                         "from pathlib import Path; "
@@ -611,7 +612,7 @@ web_search = "cached"
                         PERMISSION_PROFILE,
                         "-C",
                         str(dev_workspace_dir),
-                        sys.executable,
+                        PYTHON,
                         "-c",
                         (
                             "from pathlib import Path; "
@@ -659,7 +660,7 @@ web_search = "cached"
                     PERMISSION_PROFILE,
                     "-C",
                     str(pm_workspace_dir),
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     f"from pathlib import Path; print(Path({json.dumps(str(source_probe))}).read_text(encoding='utf-8').strip())",
                 ],
@@ -680,7 +681,7 @@ web_search = "cached"
                     PERMISSION_PROFILE,
                     "-C",
                     str(pm_workspace_dir),
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     (
                         "from pathlib import Path; "

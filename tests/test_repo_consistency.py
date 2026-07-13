@@ -20,6 +20,7 @@ import env_store  # noqa: E402
 import env_manifest  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 
 _EXPECTED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "search", "message"}
 _FORBIDDEN_RUNTIME_SURFACES = {
@@ -341,7 +342,7 @@ print(json.dumps({{
 }}))
 """
         completed = subprocess.run(
-            [sys.executable, "-c", script],
+            [PYTHON, "-c", script],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -1387,8 +1388,8 @@ print(json.dumps({{
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(role=role):
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("python3 scripts/turn_runtime.py status", text)
-                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertIn("turn_runtime.py status", text)
+                self.assertNotIn("scripts/env/client.py", text)
                 self.assertNotIn("context summarize --payload", text)
                 self.assertNotIn("search open-browser --payload", text)
                 self.assertNotIn("project.access=", text)
@@ -1485,7 +1486,7 @@ print(json.dumps({{
             "native buddyswitch env context summary tool when runtime context is needed",
             "native buddyswitch env mcp tools for durable runtime state",
             "context.get.tool_catalog",
-            "python3 scripts/turn_runtime.py status",
+            "turn_runtime.py status",
             "buddybox is the active role private file capability",
             "use artifact when content must become product-readable",
             "other roles cannot list/read/write/delete these local files.",
@@ -1506,7 +1507,7 @@ print(json.dumps({{
             "projects/app",
             "project.access=",
             "tool catalog dump",
-                "python3 scripts/env/client.py",
+                "scripts/env/client.py",
                 "context summarize --payload",
                 "search open-browser --payload",
                 "search__open_browser",
@@ -1543,7 +1544,7 @@ print(json.dumps({{
             ROOT / "framework" / "contracts",
             ROOT / "README.md",
         ]
-        pattern = re.compile(r"python3\s+scripts/env/client\.py\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_-]*)")
+        pattern = re.compile(r"scripts/env/client\.py\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_-]*)")
         violations: list[str] = []
 
         for target in targets:
@@ -1591,7 +1592,7 @@ print(json.dumps({{
             [
                 "rg",
                 "-n",
-                r"python3 scripts/env/client\.py\s+capture\b|context\.get\.tool_catalog\[['\"]capture['\"]|\"tool\"\s*:\s*\"capture\"",
+                r"scripts/env/client\.py\s+capture\b|context\.get\.tool_catalog\[['\"]capture['\"]|\"tool\"\s*:\s*\"capture\"",
                 "buddyswitch/skills",
                 "framework/contracts",
                 "tools/launcher/assets/roles",
@@ -1689,7 +1690,7 @@ print(json.dumps({{
                 "-uuu",
                 "-n",
                 "-e",
-                "python3 scripts/env/client.py",
+                "scripts/env/client.py",
                 "-e",
                 "Fallback CLI",
                 "-e",
@@ -1715,12 +1716,12 @@ print(json.dumps({{
 
     def test_invalid_old_env_client_flags_fail(self) -> None:
         old_commands = [
-            ["python3", "scripts/env/client.py", "search", "open-browser", "--query", "x", "--engine", "google"],
-            ["python3", "scripts/env/client.py", "track", "open", "--track-id", "track-alpha"],
-            ["python3", "scripts/env/client.py", "task", "get", "--task-id", "task-alpha"],
-            ["python3", "scripts/env/client.py", "artifact", "get", "--artifact-id", "art-alpha"],
+            [PYTHON, "scripts/env/client.py", "search", "open-browser", "--query", "x", "--engine", "google"],
+            [PYTHON, "scripts/env/client.py", "track", "open", "--track-id", "track-alpha"],
+            [PYTHON, "scripts/env/client.py", "task", "get", "--task-id", "task-alpha"],
+            [PYTHON, "scripts/env/client.py", "artifact", "get", "--artifact-id", "art-alpha"],
             [
-                "python3",
+                PYTHON,
                 "scripts/env/client.py",
                 "comment",
                 "list",
@@ -1951,8 +1952,8 @@ print(json.dumps({{
             with self.subTest(contract=name):
                 self.assertIn("native buddyswitch env mcp tools", text)
                 self.assertIn("context.get.tool_catalog", text)
-                self.assertIn("python3 scripts/turn_runtime.py status", text)
-                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertIn("turn_runtime.py status", text)
+                self.assertNotIn("scripts/env/client.py", text)
 
     def test_instance_private_writable_surface_has_no_legacy_actor_private_roots(self) -> None:
         hyphen_private = "-".join(("actor", "private"))

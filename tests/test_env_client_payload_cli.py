@@ -21,6 +21,7 @@ if str(SCRIPTS) not in sys.path:
 
 from env.tool_runtime import registry as tool_registry  # noqa: E402
 from runtime_kernel.client import RuntimeBrokerError  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 
 
 class EnvClientPayloadCliTests(unittest.TestCase):
@@ -43,7 +44,7 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def _tool_help_actions(self, tool: str) -> set[str]:
         completed = subprocess.run(
-            ["python3", "scripts/env/client.py", tool, "--help"],
+            [PYTHON, "scripts/env/client.py", tool, "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -59,7 +60,7 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def test_cli_help_lists_tools_from_registry(self) -> None:
         completed = subprocess.run(
-            ["python3", "scripts/env/client.py", "--help"],
+            [PYTHON, "scripts/env/client.py", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -143,7 +144,7 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def test_actor_private_cli_resource_is_not_registered(self) -> None:
         completed = subprocess.run(
-            ["python3", str(ROOT / "scripts" / "env" / "client.py"), "actor_private", "write", "--payload", "{}"],
+            [PYTHON, str(ROOT / "scripts" / "env" / "client.py"), "actor_private", "write", "--payload", "{}"],
             cwd=ROOT,
             text=True,
             capture_output=True,

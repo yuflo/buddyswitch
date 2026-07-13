@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -152,7 +153,7 @@ response = dispatch_env_tool_request(
 print(json.dumps(response, sort_keys=True))
 """
         return subprocess.run(
-            ["python3", "-c", script],
+            [PYTHON, "-c", script],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -206,7 +207,7 @@ loaded = sorted(name for name in sys.modules if name.startswith("env.tools.") an
 print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
 """
         return subprocess.run(
-            ["python3", "-c", script],
+            [PYTHON, "-c", script],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -363,7 +364,7 @@ loaded = sorted(name for name in sys.modules if name.startswith("env.tools.") an
 print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
 """
             completed = subprocess.run(
-                ["python3", "-c", script],
+                [PYTHON, "-c", script],
                 cwd=ROOT,
                 text=True,
                 capture_output=True,

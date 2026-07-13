@@ -25,6 +25,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env_manifest import load_manifest  # noqa: E402
+from tests.python_runtime import PYTHON, executable_python_source  # noqa: E402
 
 RUNTIME_LOCK_BUSY_EXIT_CODE = 4
 LOCK_TIMEOUT_SECONDS = "0.2"
@@ -287,10 +288,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             self.assertNotIn(repo_root_resolved, config_text.replace(str(repo_git_common_dir), ""))
 
     def _expected_python_for_env(self, env: dict[str, str]) -> str:
-        expected_python = shutil.which("python", path=env["PATH"])
-        self.assertIsNotNone(expected_python)
-        assert expected_python is not None
-        return expected_python
+        return PYTHON
 
     def _assert_cockpit_proxy_registration(
         self,
@@ -344,19 +342,16 @@ class BuddySwitchLauncherTests(unittest.TestCase):
 
     def _write_fake_codex(self, path: Path) -> None:
         helper_path = ROOT / "tests" / "helpers" / "fake_codex.py"
-        self._write_exec(path, helper_path.read_text(encoding="utf-8"))
-        python3_path = path.with_name("python3")
-        if not python3_path.exists():
-            python3_path.symlink_to(sys.executable)
+        helper_source = helper_path.read_text(encoding="utf-8")
+        if helper_source.startswith("#!"):
+            helper_source = helper_source.split("\n", 1)[1]
+        self._write_exec(path, executable_python_source(helper_source))
 
     def test_python_resolver_uses_only_path_python_and_overwrites_inherited_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             bin_dir = Path(temp_root) / "bin"
             bin_dir.mkdir()
-            current_python = shutil.which("python")
-            self.assertIsNotNone(current_python)
-            assert current_python is not None
-            (bin_dir / "python").symlink_to(current_python)
+            (bin_dir / "python").symlink_to(PYTHON)
 
             command = r'''
 set -euo pipefail
@@ -633,7 +628,7 @@ writable_roots = ["/old"]
             )
 
             command = [
-                sys.executable,
+                PYTHON,
                 str(ROOT / "tools" / "launcher" / "codex_config.py"),
                 "--config",
                 str(config_path),
@@ -689,7 +684,7 @@ writable_roots = ["/old"]
                 config_path = temp_root_path / f"{label}-config.toml"
                 completed = subprocess.run(
                     [
-                        sys.executable,
+                        PYTHON,
                         str(ROOT / "tools" / "launcher" / "codex_config.py"),
                         "--config",
                         str(config_path),
@@ -723,7 +718,7 @@ writable_roots = ["/old"]
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "codex_config.py"),
                     "--config",
                     str(config_path),
@@ -969,7 +964,8 @@ exit 0
     def _write_fake_background_page_tool(self, path: Path) -> None:
         self._write_exec(
             path,
-            """#!/usr/bin/env python3
+            executable_python_source(
+                """
 import json
 import os
 import sys
@@ -1035,7 +1031,8 @@ if not any(
     state_path.write_text(json.dumps(state, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")
 
 print('{"targetId":"target-about-blank"}')
-""",
+"""
+            ),
         )
 
     def _write_fake_git(self, path: Path) -> None:
@@ -1068,7 +1065,7 @@ exec "$real_git" "$@"
     def _spawn_lock_holder(self, lock_path: Path) -> subprocess.Popen[str]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         holder = subprocess.Popen(
-            [sys.executable, "-c", LOCK_HOLDER_SCRIPT, str(lock_path)],
+            [PYTHON, "-c", LOCK_HOLDER_SCRIPT, str(lock_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -1903,9 +1900,9 @@ exec "$real_git" "$@"
 
     def test_cleanup_registered_test_processes_terminates_recorded_process_group(self) -> None:
         script = (
-            "import subprocess, sys, time\n"
+            "import os, subprocess, sys, time\n"
             "from pathlib import Path\n"
-            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "child = subprocess.Popen([os.environ['BUDDYSWITCH_PYTHON'], '-c', 'import time; time.sleep(60)'])\n"
             "Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')\n"
             "time.sleep(60)\n"
         )
@@ -1922,7 +1919,7 @@ exec "$real_git" "$@"
             child_pid_file = temp_root_path / "child.pid"
             registry_path = temp_root_path / "processes.jsonl"
             leader = subprocess.Popen(
-                [sys.executable, "-c", script, str(child_pid_file)],
+                [PYTHON, "-c", script, str(child_pid_file)],
                 start_new_session=True,
             )
             child_pid = 0
@@ -2570,7 +2567,7 @@ exec "$real_git" "$@"
             self.assertNotIn("search.open_browser", completed.stderr)
             self.assertIn("${BUDDYSWITCH_PYTHON} scripts/turn_runtime.py status", completed.stderr)
             self.assertNotIn("Use native BuddySwitch env MCP tool: search__open_browser", completed.stderr)
-            self.assertNotIn("python3 scripts/env/client.py", completed.stderr)
+            self.assertNotIn("${BUDDYSWITCH_PYTHON} scripts/env/client.py", completed.stderr)
             self.assertNotIn("search open-browser --query", completed.stderr)
             self.assertNotIn("search open-browser --payload", completed.stderr)
             self.assertFalse(capture_path.exists(), "rejected native search must not invoke codex")
@@ -2637,7 +2634,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
             prompt_text = agents_md.read_text(encoding="utf-8")
-            self.assertNotIn("python3 scripts/env/client.py", prompt_text)
+            self.assertNotIn("${BUDDYSWITCH_PYTHON} scripts/env/client.py", prompt_text)
             self.assertNotIn("search open-browser --payload", prompt_text)
             self.assertNotIn("project.access=", prompt_text)
             self.assertNotIn("projects/app", prompt_text)
@@ -2857,7 +2854,7 @@ exec "$real_git" "$@"
             self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), role_agents.read_text(encoding="utf-8"))
             self.assertTrue((workspace_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# BuddySwitch Runtime Workspace\n"))
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
-            self.assertNotIn("python3 scripts/env/client.py", copied_agents)
+            self.assertNotIn("${buddyswitch_python} scripts/env/client.py", copied_agents)
             self.assertNotIn("context summarize --payload", copied_agents)
             self.assertNotIn("search open-browser --payload", copied_agents)
             self.assertNotIn("use explicit ids and env tools (`", copied_agents)
@@ -2874,7 +2871,7 @@ exec "$real_git" "$@"
             source_pm_contract = ROOT / "framework" / "contracts" / "pm.md"
             runtime_pm_contract_text = runtime_pm_contract.read_text(encoding="utf-8")
             self.assertEqual(runtime_pm_contract_text, source_pm_contract.read_text(encoding="utf-8"))
-            self.assertNotIn("python3 scripts/env/client.py", runtime_pm_contract_text)
+            self.assertNotIn("${BUDDYSWITCH_PYTHON} scripts/env/client.py", runtime_pm_contract_text)
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "task-management" / "SKILL.md").exists())
             self._assert_pm_runtime_skills(workspace_dir)
@@ -9010,7 +9007,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             direct_start = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
                     str(LAUNCHER),
@@ -9040,7 +9037,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             direct_inactive = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
                     str(LAUNCHER),
@@ -9095,7 +9092,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(runtime_lock),
                     "--shared-root",
                     str(shared_root),
@@ -9129,7 +9126,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(runtime_lock),
                     "--shared-root",
                     str(shared_root),
@@ -9361,7 +9358,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(runtime_lock),
                     "--shared-root",
                     str(shared_root),
@@ -9673,7 +9670,7 @@ exit 1
 
             direct_reset = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
                     str(LAUNCHER),
@@ -9705,7 +9702,7 @@ exit 1
 
             direct_reset = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
                     str(LAUNCHER),
@@ -9750,10 +9747,10 @@ exit 1
             )
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     capture_script,
                 ],
@@ -9789,10 +9786,10 @@ exit 1
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--assert-held",
                 ],
@@ -9818,7 +9815,7 @@ exit 1
             try:
                 completed = subprocess.run(
                     [
-                        sys.executable,
+                        PYTHON,
                         str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                         "--assert-held",
                     ],
@@ -9846,10 +9843,10 @@ exit 1
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             holder = subprocess.Popen(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     "import sys, time; from pathlib import Path; Path(sys.argv[1]).write_text('ready', encoding='utf-8'); time.sleep(30)",
                     str(ready_path),
@@ -9871,13 +9868,13 @@ exit 1
                 forged_runner = (
                     "import os, subprocess, sys\n"
                     "env = os.environ.copy()\n"
-                    "completed = subprocess.run([sys.executable, sys.argv[1], '--assert-held'], env=env, text=True, capture_output=True)\n"
+                    "completed = subprocess.run([os.environ['BUDDYSWITCH_PYTHON'], sys.argv[1], '--assert-held'], env=env, text=True, capture_output=True)\n"
                     "print(completed.returncode)\n"
                     "print(completed.stderr, end='')\n"
                 )
                 completed = subprocess.run(
                     [
-                        sys.executable,
+                        PYTHON,
                         "-c",
                         forged_runner,
                         str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
@@ -9910,7 +9907,7 @@ exit 1
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--assert-held",
                 ],
@@ -9938,7 +9935,7 @@ exit 1
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--assert-held",
                 ],
@@ -9968,7 +9965,7 @@ exit 1
 
             first = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
                     "bash",
@@ -9987,10 +9984,10 @@ exit 1
             try:
                 second = subprocess.run(
                     [
-                        sys.executable,
+                        PYTHON,
                         str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                         "--",
-                        sys.executable,
+                        PYTHON,
                         "-c",
                         "print('lock reacquired')",
                     ],
@@ -10029,10 +10026,10 @@ exit 1
 
             wrapper = subprocess.Popen(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     child_script,
                     str(child_pid_path),
@@ -10075,10 +10072,10 @@ exit 1
 
             completed = subprocess.run(
                 [
-                    sys.executable,
+                    PYTHON,
                     str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
                     "--",
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     "print('should not run')",
                 ],
@@ -10718,7 +10715,7 @@ exit 0
             profile_dir = instance_root / "browser" / "profile"
             chrome_proc = subprocess.Popen(
                 [
-                    sys.executable,
+                    PYTHON,
                     "-c",
                     "import time; time.sleep(60)",
                     "--remote-debugging-port=9333",

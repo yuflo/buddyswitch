@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
@@ -141,7 +142,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         config_path = temp_root / f"{role}-config.toml"
         completed = subprocess.run(
             [
-                sys.executable,
+                PYTHON,
                 str(CODEX_CONFIG),
                 "--config",
                 str(config_path),

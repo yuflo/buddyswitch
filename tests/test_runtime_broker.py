@@ -28,6 +28,7 @@ if str(SCRIPTS) not in sys.path:
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 import runtime_kernel.client as runtime_client  # noqa: E402
+from tests.python_runtime import executable_python_source  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -186,9 +187,9 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _write_fake_chrome(self, path: Path, argv_path: Path) -> None:
         path.write_text(
-            textwrap.dedent(
-                f"""\
-                #!/usr/bin/env python3
+            executable_python_source(
+                textwrap.dedent(
+                    f"""\
                 from http.server import BaseHTTPRequestHandler, HTTPServer
                 import json
                 import sys
@@ -229,6 +230,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 server = HTTPServer(("127.0.0.1", port), Handler)
                 server.serve_forever()
                 """
+                )
             ),
             encoding="utf-8",
         )

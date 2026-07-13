@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry  # noqa: E402
+from tests.python_runtime import PYTHON  # noqa: E402
 
 
 class EnvNativeMcpProjectionTests(unittest.TestCase):
@@ -90,7 +91,7 @@ print(json.dumps({
 }, ensure_ascii=True))
 """
         completed = subprocess.run(
-            [sys.executable, "-c", script],
+            [PYTHON, "-c", script],
             cwd=ROOT,
             text=True,
             capture_output=True,

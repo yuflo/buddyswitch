@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import signal
 import stat
 import subprocess
@@ -15,6 +14,8 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+from tests.python_runtime import PYTHON, executable_python_source
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -425,7 +426,8 @@ exit 0
     def _write_fake_background_page_tool(self, path: Path) -> None:
         self._write_exec(
             path,
-            """#!/usr/bin/env python3
+            executable_python_source(
+                """
 import json
 import os
 import sys
@@ -491,13 +493,15 @@ if not any(
     state_path.write_text(json.dumps(state, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")
 
 print('{"targetId":"target-about-blank"}')
-""",
+"""
+            ),
         )
 
     def _write_fake_codex(self, path: Path) -> None:
         self._write_exec(
             path,
-            """#!/usr/bin/env python3
+            executable_python_source(
+                """
 import json
 import os
 import sys
@@ -511,14 +515,12 @@ payload = {
 }
 with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(payload, ensure_ascii=True) + "\\n")
-""",
+"""
+            ),
         )
 
     def _expected_python_for_env(self, env: dict[str, str]) -> str:
-        expected_python = shutil.which("python", path=env["PATH"])
-        self.assertIsNotNone(expected_python)
-        assert expected_python is not None
-        return expected_python
+        return PYTHON
 
     def _assert_cockpit_proxy_registration(self, argv: list[object], instance_root: Path, *, expected_python: str) -> None:
         self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])

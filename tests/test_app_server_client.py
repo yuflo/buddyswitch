@@ -28,6 +28,7 @@ if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"Unable to load spec for {APP_SERVER_PATH}")
 APP_SERVER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(APP_SERVER)
+from tests.python_runtime import PYTHON  # noqa: E402
 
 
 class FakeUnixWebSocketServer:
@@ -1241,9 +1242,9 @@ class AppServerClientTests(unittest.TestCase):
 
     def test_stop_app_server_terminates_child_processes_in_launch_group(self) -> None:
         script = (
-            "import subprocess, sys, time\n"
+            "import os, subprocess, sys, time\n"
             "from pathlib import Path\n"
-            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "child = subprocess.Popen([os.environ['BUDDYSWITCH_PYTHON'], '-c', 'import time; time.sleep(60)'])\n"
             "Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')\n"
             "time.sleep(60)\n"
         )
@@ -1251,7 +1252,7 @@ class AppServerClientTests(unittest.TestCase):
             root = Path(temp_root)
             child_pid_file = root / "child.pid"
             leader = subprocess.Popen(
-                [sys.executable, "-c", script, str(child_pid_file)],
+                [PYTHON, "-c", script, str(child_pid_file)],
                 start_new_session=True,
             )
             pgid = os.getpgid(leader.pid)
