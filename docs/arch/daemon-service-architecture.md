@@ -105,11 +105,15 @@ Task command, timeout, payload, or error branch.
 
 ## Task read boundary
 
-`env.domain.task_sys.actor_task_projection` is the only actor-visible Task read
-projection. It accepts the current actor identity profile, reads Task records
+`env.domain.task_sys.actor_task_projection` remains the internal Task Sys
+classifier. It accepts the current actor identity profile, reads Task records
 once, and derives canonical task, active-task, and recoverable-task summaries
-from that collection. Task tools, Context tools, runtime gating, and the Web
-actor console all consume this projection.
+for Task tools, Context tools, and runtime gating.
+
+External read surfaces use exact allowlist projections instead. Web and CLI Task
+panels read fresh DTOs from `env.domain.task_read.actor_external_task_projection`
+and do not expose execution, events, runtime instructions, context, handoff, raw
+payloads, or repo paths.
 
 ## Status boundary
 
@@ -117,9 +121,9 @@ Daemon status contains host-control facts only. It does not read product
 storage, classify product records, or return product DTOs.
 
 Web product views compose daemon host facts with public product read models.
-Task panels obtain Task state from the Task Sys actor projection, not daemon
-status. Actor runtime tools likewise use their owning product client or read
-model rather than daemon status.
+Task panels obtain Task state from external Task read projections, not daemon
+status or the internal Task Sys classifier. Actor runtime tools likewise use
+their owning product client or read model rather than daemon status.
 
 ## State boundary
 

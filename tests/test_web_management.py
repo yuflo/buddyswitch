@@ -2381,10 +2381,14 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             },
         )
 
+        source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("task_sys.actor_task_projection", source)
+        self.assertTrue(hasattr(WEB_MANAGEMENT, "task_read"), "Web console should use external Task read projections.")
+        task_read_module = WEB_MANAGEMENT.task_read
         with mock.patch.object(
-            task_sys,
-            "actor_task_projection",
-            wraps=task_sys.actor_task_projection,
+            task_read_module,
+            "actor_external_task_projection",
+            wraps=task_read_module.actor_external_task_projection,
         ) as actor_projection:
             status, payload = service.handle_api("GET", "/api/actors/act-pm-demo/console", b"")
 
@@ -2398,19 +2402,22 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(console["runtime"]["thread_status"], "idle")
         self.assertEqual(console["task_sys"]["active_count"], 1)
         self.assertEqual(console["task_sys"]["recoverable_count"], 1)
-        self.assertEqual(console["task_sys"]["active_tasks"][0]["task_id"], task_result["task_id"])
-        self.assertEqual(console["task_sys"]["active_tasks"][0]["status"], "in_progress")
-        self.assertEqual(console["task_sys"]["active_tasks"][0]["execution"]["processor"], "side")
-        self.assertIn("task_desc", console["task_sys"]["active_tasks"][0])
-        self.assertIn("task_relation", console["task_sys"]["active_tasks"][0])
-        self.assertNotIn("active_processor", console["task_sys"]["active_tasks"][0])
-        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["task_id"], failed_result["task_id"])
-        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["status"], "in_progress")
-        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["execution"]["result"]["type"], "failure")
-        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["execution"]["result"]["reason"], "runtime_failed")
-        self.assertEqual(console["task_sys"]["recoverable_tasks"][0]["execution"]["result"]["stage"], "side_input")
-        self.assertNotIn("active_processor", console["task_sys"]["recoverable_tasks"][0])
-        self.assertNotIn("failure_result", console["task_sys"]["recoverable_tasks"][0])
+        external_task_keys = ("task_id", "source_type", "status", "task_desc", "actor", "relation", "updated_at")
+        active_task = console["task_sys"]["active_tasks"][0]
+        recoverable_task = console["task_sys"]["recoverable_tasks"][0]
+        self.assertEqual(tuple(active_task.keys()), external_task_keys)
+        self.assertEqual(tuple(recoverable_task.keys()), external_task_keys)
+        self.assertEqual(active_task["task_id"], task_result["task_id"])
+        self.assertEqual(active_task["status"], "in_progress")
+        self.assertEqual(active_task["actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
+        self.assertEqual(active_task["relation"], {"kind": "independent", "target_task_id": None})
+        self.assertEqual(recoverable_task["task_id"], failed_result["task_id"])
+        self.assertEqual(recoverable_task["status"], "in_progress")
+        for row in (active_task, recoverable_task):
+            self.assertNotIn("execution", row)
+            self.assertNotIn("task_relation", row)
+            self.assertNotIn("active_processor", row)
+            self.assertNotIn("failure_result", row)
         self.assertEqual(console["im"]["target"]["identity"], {"id": "act-pm-demo", "type": "actor"})
         self.assertEqual(console["im"]["target"]["identity_id"], "act-pm-demo")
         self.assertEqual(console["im"]["target"]["role_id"], "pm")
@@ -2439,6 +2446,21 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertTrue(payload["ok"])
         self.assertEqual([row["id"] for row in payload["tracks"]], ["track-alpha"])
         summary = payload["tracks"][0]
+        self.assertEqual(
+            tuple(summary.keys()),
+            (
+                "id",
+                "title",
+                "outcome",
+                "owner_identity_id",
+                "state",
+                "now",
+                "acceptance_criteria",
+                "non_goals",
+                "updated_at",
+                "comment_summary",
+            ),
+        )
         self.assertEqual(summary["title"], "Actor console")
         self.assertEqual(summary["comment_summary"]["comment_count"], 3)
         self.assertEqual(summary["comment_summary"]["open_thread_count"], 1)
@@ -2451,6 +2473,25 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         self.assertEqual(status, 200)
         track = payload["track"]
+        self.assertEqual(
+            tuple(track.keys()),
+            (
+                "id",
+                "title",
+                "outcome",
+                "owner_identity_id",
+                "state",
+                "now",
+                "acceptance_criteria",
+                "non_goals",
+                "updated_at",
+                "comment_summary",
+                "materials",
+                "proofs",
+                "updates",
+                "comment_threads",
+            ),
+        )
         self.assertEqual(track["id"], "track-alpha")
         self.assertEqual([row["artifact_id"] for row in track["materials"]], ["artifact-material"])
         self.assertEqual([row["artifact_id"] for row in track["proofs"]], ["artifact-proof"])

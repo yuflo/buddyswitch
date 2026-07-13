@@ -146,18 +146,23 @@ Actor:
 Task:
 
 - Actor-driving task state belongs to Task Sys.
-- `actor_task_projection` is the only actor-visible Task read projection. It
-  reads once for the resolved actor identity profile and owns active and
-  recoverable classification.
-- Web reads that projection in `/api/actors/{id}/console` and only shapes the
-  browser DTO; it does not classify Task status or read Task storage.
+- `actor_task_projection` remains the internal Task Sys classifier for actor
+  runtime tools, context reads, and runtime registry decisions.
+- Web and CLI read surfaces use external Task/Track exact allowlist projections,
+  including `actor_external_task_projection` for `/api/actors/{id}/console`.
+  Those projections construct fresh DTOs and do not pass through execution,
+  events, runtime instructions, context, handoff, raw payloads, or repo paths.
+- Web and CLI read surfaces must not mutate Task or Track state. Task mutation
+  stays behind explicit actor runtime actions such as
+  `task_sys.update_task_analysis`.
 - Web should not call actor env tools for general console reads.
 
 Track:
 
 - Track state belongs to track domain/service semantics and track repos.
-- Web should depend on reusable track domain/service reads, not actor runtime
-  tool handlers.
+- Web and CLI read surfaces use `track_read.list_external_tracks` and
+  `track_read.get_external_track` for Track list/detail DTOs. These are
+  external exact allowlists for reads, not Track mutation paths.
 - Actor-track relation and participant derivation may remain inside Web DTO
   shaping while only Web needs it. Move it down only when non-Web callers need
   the same semantics.

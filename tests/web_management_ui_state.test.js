@@ -4944,7 +4944,7 @@ test('IM event processing cannot restore a prior actor conversation after select
   }
 });
 
-test('actor task summary renders task sys execution relation contract', async () => {
+test('actor task summary renders external-safe task relation contract', async () => {
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = function (url) {
@@ -4963,8 +4963,8 @@ test('actor task summary renders task sys execution relation contract', async ()
                 source_type: 'test.ui',
                 status: 'in_progress',
                 task_desc: 'Draft brief',
-                task_relation: { kind: 'after', target_task_id: 'task-ui-prior' },
-                execution: { processor: 'side', handoff: null, result: null },
+                actor: { actor_id: 'act-task', role_id: 'dev' },
+                relation: { kind: 'after', target_task_id: 'task-ui-prior' },
               },
             ],
             recoverable_tasks: [
@@ -4973,12 +4973,8 @@ test('actor task summary renders task sys execution relation contract', async ()
                 source_type: 'test.ui',
                 status: 'in_progress',
                 task_desc: 'Retry brief',
-                task_relation: { kind: 'independent', target_task_id: null },
-                execution: {
-                  processor: null,
-                  handoff: null,
-                  result: { type: 'failure', reason: 'runtime_failed' },
-                },
+                actor: { actor_id: 'act-task', role_id: 'dev' },
+                relation: { kind: 'independent', target_task_id: null },
               },
             ],
           },
@@ -5003,10 +4999,16 @@ test('actor task summary renders task sys execution relation contract', async ()
     await app.selectActor(state, elements, 'act-task');
 
     assert.match(elements.actorTaskSummary.innerHTML, /Draft brief/);
-    assert.match(elements.actorTaskSummary.innerHTML, /side/);
     assert.match(elements.actorTaskSummary.innerHTML, /after/);
     assert.match(elements.actorTaskSummary.innerHTML, /task-ui-prior/);
-    assert.match(elements.actorTaskSummary.innerHTML, /runtime_failed/);
+    assert.match(elements.actorTaskSummary.innerHTML, /Recoverable/);
+    assert.match(elements.actorTaskSummary.innerHTML, /Retry brief/);
+    assert.match(elements.actorTaskSummary.innerHTML, /task-ui-failed/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /Processor/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /side/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /runtime_failed/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /execution/);
+    assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /task_relation/);
     assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /active_processor/);
     assert.doesNotMatch(elements.actorTaskSummary.innerHTML, /failure_result/);
     if (state.actorRefreshTimer) {

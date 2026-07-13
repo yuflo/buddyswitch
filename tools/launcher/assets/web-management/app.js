@@ -1386,19 +1386,21 @@
     const activeTasks = Array.isArray(taskSys.active_tasks) ? taskSys.active_tasks : [];
     const recoverableTasks = Array.isArray(taskSys.recoverable_tasks) ? taskSys.recoverable_tasks : [];
     const active = activeTasks[0] || null;
-    const activeExecution = active && active.execution && typeof active.execution === 'object' ? active.execution : {};
-    const activeRelation = active && active.task_relation && typeof active.task_relation === 'object' ? active.task_relation : {};
+    const activeRelation = active && active.relation && typeof active.relation === 'object' ? active.relation : {};
     const relationTarget = activeRelation.target_task_id ? ' · ' + activeRelation.target_task_id : '';
     const recoverable = recoverableTasks[0] || null;
-    const recoverableExecution = recoverable && recoverable.execution && typeof recoverable.execution === 'object' ? recoverable.execution : {};
-    const recoverableResult = recoverableExecution.result && typeof recoverableExecution.result === 'object' ? recoverableExecution.result : {};
+    const recoverableRelation = recoverable && recoverable.relation && typeof recoverable.relation === 'object' ? recoverable.relation : {};
+    const recoverableRelationTarget = recoverableRelation.target_task_id ? ' · ' + recoverableRelation.target_task_id : '';
     return [
       '<div class="summary-line"><span>Active</span><strong>' + escapeHtml(String(taskSys.active_count || 0)) + '</strong></div>',
       active ? '<div class="task-row"><strong>' + escapeHtml(active.source_type || active.status || 'Task Sys') + '</strong><span class="micro mono">' + escapeHtml(active.task_id || '') + '</span></div>' : '',
       active ? '<div class="summary-line"><span>Description</span><strong>' + escapeHtml(formatValue(active.task_desc)) + '</strong></div>' : '',
       active ? '<div class="summary-line"><span>Relation</span><strong class="mono-value long-value">' + escapeHtml(formatValue(activeRelation.kind) + relationTarget) + '</strong></div>' : '',
-      '<div class="summary-line"><span>Processor</span>' + badge(activeExecution.processor || 'none') + '</div>',
-      recoverable ? '<div class="summary-line"><span>Recoverable</span>' + badge(recoverableResult.reason || recoverable.status || 'failure') + '</div>' : '',
+      '<div class="summary-line"><span>Recoverable</span><strong>' + escapeHtml(String(taskSys.recoverable_count || 0)) + '</strong></div>',
+      recoverable ? '<div class="task-row"><strong>' + escapeHtml(recoverable.source_type || recoverable.status || 'Task Sys') + '</strong><span class="micro mono">' + escapeHtml(recoverable.task_id || '') + '</span></div>' : '',
+      recoverable ? '<div class="summary-line"><span>Status</span>' + badge(recoverable.status || 'unknown') + '</div>' : '',
+      recoverable ? '<div class="summary-line"><span>Description</span><strong>' + escapeHtml(formatValue(recoverable.task_desc)) + '</strong></div>' : '',
+      recoverable ? '<div class="summary-line"><span>Relation</span><strong class="mono-value long-value">' + escapeHtml(formatValue(recoverableRelation.kind) + recoverableRelationTarget) + '</strong></div>' : '',
     ].join('');
   }
 

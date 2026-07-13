@@ -216,13 +216,21 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn(token, daemon_doc)
         for token in (
             "/api/actors/{id}/console",
-            "actor_task_projection",
+            "actor_external_task_projection",
+            "external Task/Track exact allowlist projections",
+            "must not mutate Task or Track state",
             "task_sys.update_task_analysis",
             "host-control facts only",
             "no Task subroute",
         ):
             with self.subTest(document="web", token=token):
                 self.assertIn(token, web_doc)
+        for document_name, document in (("daemon", daemon_doc), ("web", web_doc)):
+            with self.subTest(document=document_name, boundary="task-read-web-consumer"):
+                self.assertNotRegex(document, r"`actor_task_projection`[^.\n]*(Web|external|/api/actors/\{id\}/console)")
+                self.assertNotRegex(document, r"(Web|external|/api/actors/\{id\}/console)[^.\n]*`actor_task_projection`")
+                self.assertNotIn("Web actor console all consume this projection", document)
+                self.assertNotIn("Task panels obtain Task state from the Task Sys actor projection", document)
 
     def test_generic_daemon_modules_have_no_product_dependencies_or_tokens(self) -> None:
         forbidden_import_fragments = (
@@ -289,20 +297,27 @@ class RepoConsistencyTests(unittest.TestCase):
         hits = self._scan_targets("|".join(retired), targets)
         self.assertEqual(hits, [], msg="\n".join(hits))
 
-        consumer_paths = (
+        internal_consumer_paths = (
             ROOT / "scripts/env/tools/task_sys/_impl.py",
             ROOT / "scripts/env/tools/context/_impl.py",
             ROOT / "scripts/env/tool_runtime/registry.py",
-            ROOT / "tools/launcher/web_management.py",
         )
+        web_path = ROOT / "tools/launcher/web_management.py"
         direct_list_calls: list[str] = []
-        for path in consumer_paths:
+        for path in internal_consumer_paths:
             source = path.read_text(encoding="utf-8")
             self.assertIn("actor_task_projection", source, msg=path)
             tree = ast.parse(source, filename=str(path))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "list_tasks":
                     direct_list_calls.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+        web_source = web_path.read_text(encoding="utf-8")
+        self.assertIn("task_read.actor_external_task_projection", web_source)
+        self.assertNotIn("task_sys.actor_task_projection", web_source)
+        web_tree = ast.parse(web_source, filename=str(web_path))
+        for node in ast.walk(web_tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "list_tasks":
+                direct_list_calls.append(f"{web_path.relative_to(ROOT)}:{node.lineno}")
         self.assertEqual(direct_list_calls, [])
 
     def test_daemon_status_and_browser_state_use_final_boundaries(self) -> None:

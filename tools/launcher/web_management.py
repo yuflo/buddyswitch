@@ -29,7 +29,7 @@ import im_http_router
 import imessage_channel
 import host_control as host_control_module
 import actor_session
-from env.domain import task_sys, track_read
+from env.domain import task_read, track_read
 from env.domain.identity import ActorIdentityProfile, IdentityRef
 from env.repos import runtime_files
 from env.tool_runtime import daemon_client
@@ -365,11 +365,11 @@ class WebManagementService:
                 raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
             return 200, {"ok": True, "console": self._actor_console(actor_console_id)}
         if method == "GET" and route == "/api/tracks":
-            return 200, {"ok": True, "tracks": track_read.list_track_summaries()}
+            return 200, {"ok": True, "tracks": track_read.list_external_tracks()}
         track_id = self._parse_track_detail_path(route)
         if method == "GET" and track_id is not None:
             try:
-                detail = track_read.get_track_detail(track_id)
+                detail = track_read.get_external_track(track_id)
             except ValueError as exc:
                 raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
             if detail is None:
@@ -792,25 +792,12 @@ class WebManagementService:
         if "instance_root" not in instance_payload and isinstance(workspace_dir, str) and workspace_dir.strip():
             instance_payload["instance_root"] = str(Path(workspace_dir).expanduser().resolve(strict=False).parent)
         del instance_payload
-        task_projection = task_sys.actor_task_projection(
+        task_projection = task_read.actor_external_task_projection(
             actor_profile=ActorIdentityProfile(
                 identity=IdentityRef(id=actor_id, type="actor"),
                 role_id=role,
             )
         )
-
-        def task_sys_row(row: dict[str, Any]) -> dict[str, Any]:
-            task_relation = row.get("task_relation")
-            execution = row.get("execution")
-            return {
-                "task_id": row.get("id"),
-                "source_type": row.get("source_type"),
-                "status": row.get("status"),
-                "task_desc": row.get("task_desc"),
-                "task_relation": dict(task_relation) if isinstance(task_relation, dict) else None,
-                "execution": dict(execution) if isinstance(execution, dict) else {},
-                "updated_at": row.get("updated_at"),
-            }
 
         return {
             "actor": {"actor_id": actor_id, "role": role},
@@ -818,11 +805,11 @@ class WebManagementService:
             "task_sys": {
                 "active_count": task_projection["active_count"],
                 "recoverable_count": task_projection["recoverable_count"],
-                "active_tasks": [task_sys_row(row) for row in task_projection["active_tasks"][:10]],
-                "recoverable_tasks": [task_sys_row(row) for row in task_projection["recoverable_tasks"][:10]],
+                "active_tasks": task_projection["active_tasks"][:10],
+                "recoverable_tasks": task_projection["recoverable_tasks"][:10],
             },
             "tracks": {
-                "items": track_read.list_track_summaries(owner_identity=current_identity),
+                "items": track_read.list_external_tracks(owner_identity=current_identity),
                 "source": "web-track-summary",
             },
             "im": {

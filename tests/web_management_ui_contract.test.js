@@ -133,11 +133,11 @@ test('production html keeps all real control ids used by the web UI', () => {
   });
 });
 
-test('task sys panel uses execution relation fields only', () => {
-  ['task_desc', 'task_relation', 'execution'].forEach((marker) => {
+test('task sys panel uses external-safe relation fields only', () => {
+  ['task_desc', 'relation'].forEach((marker) => {
     assertIncludes(appJs, marker);
   });
-  ['active_processor', 'failure_result'].forEach((marker) => {
+  ['execution', 'task_relation', 'active_processor', 'failure_result'].forEach((marker) => {
     assertExcludes(appJs, marker);
   });
 });
