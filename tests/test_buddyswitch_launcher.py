@@ -315,6 +315,78 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         helper_path = ROOT / "tests" / "helpers" / "fake_codex.py"
         self._write_exec(path, helper_path.read_text(encoding="utf-8"))
 
+    def test_python_resolver_uses_only_path_python_and_overwrites_inherited_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            bin_dir = Path(temp_root) / "bin"
+            bin_dir.mkdir()
+            current_python = shutil.which("python")
+            self.assertIsNotNone(current_python)
+            assert current_python is not None
+            (bin_dir / "python").symlink_to(current_python)
+
+            command = r'''
+set -euo pipefail
+source tools/launcher/env.sh
+PATH="$1"
+export BUDDYSWITCH_PYTHON="/ignored/inherited/interpreter"
+buddyswitch_resolve_python
+printf '%s\n' "$BUDDYSWITCH_PYTHON"
+'''
+            completed = subprocess.run(
+                ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.stdout.strip(), str(bin_dir / "python"))
+
+    def test_python_resolver_fails_when_path_has_no_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            command = r'''
+set -euo pipefail
+source tools/launcher/env.sh
+PATH="$1"
+buddyswitch_resolve_python
+'''
+            completed = subprocess.run(
+                ["/bin/bash", "-c", command, "resolver-test", temp_root],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("requires an executable 'python' on PATH", completed.stderr)
+
+    def test_python_resolver_rejects_unusable_path_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            bin_dir = Path(temp_root) / "bin"
+            bin_dir.mkdir()
+            fake_python = bin_dir / "python"
+            fake_python.write_text("#!/bin/sh\nexit 64\n", encoding="utf-8")
+            fake_python.chmod(fake_python.stat().st_mode | stat.S_IXUSR)
+
+            command = r'''
+set -euo pipefail
+source tools/launcher/env.sh
+PATH="$1"
+buddyswitch_resolve_python
+'''
+            completed = subprocess.run(
+                ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("could not execute PATH python", completed.stderr)
+
     def test_codex_config_patch_removes_prior_misnested_managed_settings_idempotently(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)

@@ -14,9 +14,34 @@ fi
 
 source "${BUDDYSWITCH_WORKSPACE_HELPER}"
 
+buddyswitch_resolve_python() {
+  local python_path
+
+  python_path="$(type -P python 2>/dev/null || true)"
+  if [[ -z "${python_path}" || ! -x "${python_path}" ]]; then
+    echo "BuddySwitch requires an executable 'python' on PATH." >&2
+    return 1
+  fi
+
+  if [[ "${python_path}" != /* ]]; then
+    case "${python_path}" in
+      */*) python_path="$(cd "${python_path%/*}" && pwd)/${python_path##*/}" ;;
+      *) python_path="$(pwd)/${python_path}" ;;
+    esac
+  fi
+
+  if ! "${python_path}" -c 'import tomllib' >/dev/null 2>&1; then
+    echo "BuddySwitch could not execute PATH python: ${python_path}" >&2
+    return 1
+  fi
+
+  export BUDDYSWITCH_PYTHON="${python_path}"
+}
+
 buddyswitch_env_init() {
   local source_home source_codex_home shared_root
 
+  buddyswitch_resolve_python || return $?
   source_home="${BUDDYSWITCH_SOURCE_HOME:-${HOME}}"
   source_codex_home="${BUDDYSWITCH_SOURCE_CODEX_HOME:-${CODEX_HOME:-${source_home}/.codex}}"
   shared_root="${BUDDYSWITCH_SHARED_ROOT:-${source_home}/.codex-buddyswitch}"
