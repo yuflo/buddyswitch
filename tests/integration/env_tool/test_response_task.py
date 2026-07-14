@@ -1,0 +1,275 @@
+"""Response contract tests for broker-routed env.tool actions."""
+
+from __future__ import annotations
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import os
+import sys
+import threading
+import unittest
+import uuid
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+from urllib.parse import urlparse
+
+from tests.support.paths import REPO_ROOT
+from tests.support.fake_cdp import (
+    read_client_text_frame as _read_client_text_frame,
+    websocket_accept_value as _websocket_accept_value,
+    write_server_text_frame as _write_server_text_frame,
+)
+
+ROOT = REPO_ROOT
+SCRIPTS = ROOT / "scripts"
+
+import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.domain import task_sys  # noqa: E402
+from env.repos import messages as message_repo  # noqa: E402
+from env.services import messages as message_service  # noqa: E402
+from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from env.tool_runtime import results as tool_results  # noqa: E402
+from env.tool_runtime import context as runtime_context  # noqa: E402
+import env.tools.search._impl as search_impl  # noqa: E402
+import turn_runtime  # noqa: E402
+from tests.integration.env_tool._response_case import EnvToolResponseCase
+
+MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
+
+
+class EnvToolTaskResponseTests(EnvToolResponseCase):
+    def test_message_mark_needs_parent_rejects_without_parent_submit(self) -> None:
+        dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
+        pm_actor_id = self._runtime_actor_id(role="pm", label="act-pm-parent-submit-contract")
+        instance_json = self._instance_json(role="dev", actor_id="act-dev-parent-submit-contract")
+        seed_response = message_service.send_im_message(
+            sender_identity={"id": pm_actor_id, "type": "actor"},
+            target_identity={"id": dev_actor_id, "type": "actor"},
+            content="This needs parent handling.",
+        )
+        self.assertTrue(seed_response.get("ok"), msg=seed_response)
+        message_id = seed_response["message"]["id"]
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=AssertionError("message.mark must not execute parent handoff"),
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id="act-dev-parent-submit-contract",
+                role="dev",
+                tool="message",
+                action="mark",
+                args={
+                    "message_id": message_id,
+                    "disposition": "needs_parent",
+                    "reason": "This changes the active parent-thread objective.",
+                },
+            )
+
+        self._assert_rejection_contract(response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+        self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
+        self.assertIn("message.get", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
+        state = message_repo.get_im_message_state(message_id, dev_actor_id)
+        self.assertIsInstance(state, dict, msg=response)
+        assert isinstance(state, dict)
+        self.assertEqual(state["disposition"], "unseen")
+
+    def test_task_sys_close_response_exposes_side_cleanup_contract(self) -> None:
+        actor_label = "act-dev-task-sys-feedback"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        task_id = task_sys.ingest(
+            {
+                "source": {"type": "test.feedback", "ref": {"id": "task-sys-close-feedback"}},
+                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
+                "context": {"fixture": "task sys close feedback"},
+            }
+        )["task_id"]
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
+            autospec=True,
+            return_value={
+                "side_thread_id": "thr-side-response",
+                "lease_unregistered": True,
+                "turn_interrupt_ok": True,
+            },
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="close",
+                args={"task_id": task_id, "summary": "Side completed the feedback fixture."},
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["task_id"], task_id)
+        self.assertEqual(response["task_status"], "completed")
+        self.assertEqual(response["processor"], "side")
+        self.assertEqual(response["side_thread_id"], "thr-side-response")
+        self.assertEqual(response["side_cleanup"]["lease_unregistered"], True)
+        self.assertEqual(response["side_cleanup"]["turn_interrupt_ok"], True)
+        self.assertEqual(response["execution_result"]["type"], "completion")
+        self.assertEqual(response["execution_result"]["processor"], "side")
+        self.assertEqual(response["execution_result"]["side_thread_id"], "thr-side-response")
+        self._assert_no_retired_task_sys_fields(response)
+
+    def test_task_sys_list_and_get_responses_expose_relation_execution_contract(self) -> None:
+        actor_label = "act-dev-task-sys-read-contract"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        task_id = task_sys.ingest(
+            {
+                "source": {"type": "test.read_contract", "ref": {"id": "task-sys-read-contract"}},
+                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
+                "context": {"fixture": "task sys read contract"},
+            }
+        )["task_id"]
+        task_sys.record_task_analysis_update(
+            task_id,
+            {
+                "task_desc": "Read contract",
+                "task_relation": {"kind": "independent", "target_task_id": None},
+            },
+        )
+
+        listed = self._dispatch(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            role="dev",
+            tool="task_sys",
+            action="list",
+            args={"status": "all"},
+        )
+        self._assert_success_contract(listed)
+        rows = listed.get("tasks")
+        self.assertIsInstance(rows, list, msg=listed)
+        assert isinstance(rows, list)
+        task_row = next(row for row in rows if isinstance(row, dict) and row.get("task_id") == task_id)
+        self.assertEqual(task_row["status"], "in_progress")
+        self.assertEqual(task_row["task_desc"], "Read contract")
+        self.assertEqual(task_row["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertEqual(task_row["execution"]["processor"], "side")
+        self._assert_no_retired_task_sys_fields(task_row)
+
+        fetched = self._dispatch(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            role="dev",
+            tool="task_sys",
+            action="get",
+            args={"task_id": task_id},
+        )
+        self._assert_success_contract(fetched)
+        task = fetched.get("task")
+        self.assertIsInstance(task, dict, msg=fetched)
+        assert isinstance(task, dict)
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["task_desc"], "Read contract")
+        self.assertEqual(task["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertEqual(task["execution"]["processor"], "side")
+        self._assert_no_retired_task_sys_fields(task)
+
+    def test_task_sys_update_task_analysis_response_exposes_state_change_contract(self) -> None:
+        actor_label = "act-dev-task-sys-analysis"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        task_id = task_sys.ingest(
+            {
+                "source": {"type": "test.analysis", "ref": {"id": "task-sys-analysis"}},
+                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
+                "context": {"fixture": "task sys analysis"},
+            }
+        )["task_id"]
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            role="dev",
+            tool="task_sys",
+            action="update_task_analysis",
+            args={
+                "task_id": task_id,
+                "task_desc": "Analyze source",
+                "task_relation": {"kind": "independent", "target_task_id": None},
+            },
+        )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["task_id"], task_id)
+        self.assertEqual(response["task_status"], "in_progress")
+        self.assertEqual(response["task_desc"], "Analyze source")
+        self.assertEqual(response["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertEqual(response["execution"]["processor"], "side")
+        self.assertEqual(response["updated_ids"], [task_id])
+        self.assertEqual(response["state_changes"][0]["object"], "task_sys.task")
+        self.assertEqual(response["state_changes"][0]["id"], task_id)
+        self._assert_no_retired_task_sys_fields(response)
+
+    def test_task_sys_need_parent_response_exposes_execution_handoff_contract(self) -> None:
+        actor_label = "act-dev-task-sys-handoff"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        task_id = task_sys.ingest(
+            {
+                "source": {"type": "test.handoff", "ref": {"id": "task-sys-handoff"}},
+                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
+                "context": {"fixture": "task sys handoff"},
+            }
+        )["task_id"]
+        task_sys.record_task_analysis_update(
+            task_id,
+            {
+                "task_desc": "Handoff source",
+                "task_relation": {"kind": "independent", "target_task_id": None},
+            },
+        )
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            return_value={"action": "submit_parent", "task_id": task_id, "turn_id": "turn-parent-response"},
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
+            autospec=True,
+            return_value={
+                "side_thread_id": "thr-side-handoff",
+                "lease_unregistered": True,
+                "turn_interrupt_ok": True,
+            },
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="need_parent",
+                args={
+                    "task_id": task_id,
+                    "params": {
+                        "parent_frame_context": {"next": "Handle in parent."},
+                        "interrupt": False,
+                        "ordering": {"priority": "normal"},
+                    },
+                },
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["task_id"], task_id)
+        self.assertEqual(response["task_status"], "in_progress")
+        self.assertEqual(response["execution_handoff"]["parent_frame_context"], {"next": "Handle in parent."})
+        self.assertEqual(response["execution_handoff"]["side_thread_id"], "thr-side-handoff")
+        self.assertEqual(response["execution_handoff"]["cleanup"]["lease_unregistered"], True)
+        self.assertEqual(response["parent_runtime"]["action"], "submit_parent")
+        self._assert_no_retired_task_sys_fields(response)

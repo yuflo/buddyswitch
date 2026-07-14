@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${ROOT}/tools/launcher/env.sh"
+buddyswitch_env_init
+export PYTHONPATH="${ROOT}:${ROOT}/scripts:${ROOT}/tools/launcher"
+export PYTHONDONTWRITEBYTECODE="1"
+exec "${BUDDYSWITCH_PYTHON}" "${ROOT}/tests/runner.py" "$@"
