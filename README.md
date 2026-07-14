@@ -68,6 +68,18 @@ Private workspace private files are active-instance-local under `$BUDDYSWITCH_AC
 ./buddyswitch-codex instance delete <actor-id>
 ```
 
+## Test
+
+Use the repository supervisor for every test run:
+
+```bash
+./buddyswitch-test focused tests/unit/actor/test_session.py
+./buddyswitch-test full
+```
+
+`focused` accepts explicit files or node IDs. `full` runs the unit, integration,
+process, and system tiers serially, then checks shell syntax and diff hygiene.
+
 ## Canonical Runtime Sources
 
 - `scripts/env/tool_runtime/definition.py` for `ToolDefinition` / `ActionDefinition` protocol and schema validation.

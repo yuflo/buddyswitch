@@ -57,6 +57,17 @@ Do not expand the task after the bottleneck is clear. Do not keep old and new be
 
 No test or verification, no done.
 
+The only public test entry is `./buddyswitch-test`:
+
+```bash
+./buddyswitch-test focused <file-or-nodeid>...
+./buddyswitch-test full
+```
+
+Use `focused` for the shortest relevant proof and `full` for serial acceptance
+across unit, integration, process, and system tiers. Do not publish or add a
+second test entry.
+
 Use the fastest meaningful proof available:
 
 - focused unit test
