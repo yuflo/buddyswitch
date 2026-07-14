@@ -290,25 +290,18 @@
     });
   }
 
-  function computeOpenTuiState(instance, options) {
-    const openTuiPending = Boolean(options && options.openTuiPending);
+  function computeAttachActionState(instance) {
     if (!instance) {
       return {
-        canOpenTui: false,
+        canAttach: false,
         message: '',
-      };
-    }
-    if (openTuiPending) {
-      return {
-        canOpenTui: false,
-        message: 'Opening...',
       };
     }
 
     const status = instance.status || '';
     if (status !== 'active') {
       return {
-        canOpenTui: false,
+        canAttach: false,
         message: 'Resume this actor first.',
       };
     }
@@ -317,7 +310,7 @@
       || Boolean(instance.app_server && instance.app_server.healthy);
     if (!appServerHealthy) {
       return {
-        canOpenTui: false,
+        canAttach: false,
         message: 'Actor runtime is unhealthy.',
       };
     }
@@ -325,13 +318,13 @@
     const threadId = typeof instance.thread_id === 'string' ? instance.thread_id.trim() : '';
     if (!threadId) {
       return {
-        canOpenTui: false,
+        canAttach: false,
         message: 'No thread to attach.',
       };
     }
 
     return {
-      canOpenTui: true,
+      canAttach: true,
       message: '',
     };
   }
@@ -368,6 +361,7 @@
       lifecycleOperationPollDelaysMs: null,
       interruptPending: false,
       openTuiPending: false,
+      copyCommandPending: false,
       appBasicsLoading: false,
       appBasicsError: '',
       rosterLoading: false,
@@ -396,7 +390,7 @@
       deleteConfirmationInput: '',
       deleteConfirmationTrigger: null,
       openTuiMessage: '',
-      openTuiCommand: '',
+      copyCommandMessage: '',
       imSessionReady: false,
       imConversationIdentityId: '',
       imConversation: [],
@@ -552,9 +546,9 @@
     return { event_id: eventId || '' };
   }
 
-  function clearOpenTuiFeedback(state) {
+  function clearAttachToolFeedback(state) {
     state.openTuiMessage = '';
-    state.openTuiCommand = '';
+    state.copyCommandMessage = '';
   }
 
   function selectSection(state, section) {
@@ -2057,20 +2051,21 @@
     await runLifecycleAction(state, elements, 'delete', actorId);
   }
 
-  function renderOpenTui(state, elements) {
+  function renderAttachTools(state, elements) {
     const runtime = selectedActorRuntime(state);
-    const openTuiState = computeOpenTuiState(runtime, {
-      openTuiPending: state.openTuiPending,
-    });
-    elements.openTuiButton.disabled = !openTuiState.canOpenTui;
+    const attachState = computeAttachActionState(runtime);
+    elements.openTuiButton.disabled = !attachState.canAttach || state.openTuiPending;
     elements.openTuiButton.textContent = state.openTuiPending ? 'Opening...' : 'Open TUI';
     elements.openTuiButton.classList.toggle('is-pending', state.openTuiPending);
     elements.openTuiStatus.textContent = state.openTuiPending
       ? 'Opening...'
-      : (openTuiState.canOpenTui ? state.openTuiMessage : openTuiState.message);
-    elements.openTuiCommand.textContent = state.openTuiCommand;
-    elements.openTuiFallback.hidden = !state.openTuiCommand || !openTuiState.canOpenTui;
-    elements.copyTuiCommandButton.disabled = !state.openTuiCommand || !openTuiState.canOpenTui;
+      : (attachState.canAttach ? state.openTuiMessage : attachState.message);
+    elements.copyCommandButton.disabled = !attachState.canAttach || state.copyCommandPending;
+    elements.copyCommandButton.textContent = state.copyCommandPending ? 'Copying...' : 'Copy command';
+    elements.copyCommandButton.classList.toggle('is-pending', state.copyCommandPending);
+    elements.copyCommandStatus.textContent = state.copyCommandPending
+      ? 'Copying...'
+      : (attachState.canAttach ? state.copyCommandMessage : attachState.message);
   }
 
   function renderVisibleRegions(state, elements) {
@@ -2082,7 +2077,7 @@
     renderTrackDetail(state, elements);
     renderTrackStudioRail(state, elements);
     renderActorInteractionRegions(state, elements);
-    renderOpenTui(state, elements);
+    renderAttachTools(state, elements);
     renderImConversation(state, elements);
     renderDeleteConfirmation(state, elements);
   }
@@ -2191,7 +2186,7 @@
     renderActorList(state, elements);
     renderActorDetail(state, elements);
     renderActorInteractionRegions(state, elements);
-    renderOpenTui(state, elements);
+    renderAttachTools(state, elements);
     renderImConversation(state, elements);
   }
 
@@ -2217,7 +2212,8 @@
     state.sendPending = false;
     state.interruptPending = false;
     state.openTuiPending = false;
-    clearOpenTuiFeedback(state);
+    state.copyCommandPending = false;
+    clearAttachToolFeedback(state);
     return {
       actorId: selectedActorId,
       requestId,
@@ -2252,7 +2248,7 @@
       state.actorCardError = '';
       renderActorDetail(state, elements);
       renderActorInteractionRegions(state, elements);
-      renderOpenTui(state, elements);
+      renderAttachTools(state, elements);
       return;
     }
     const consoleRequestId = state.actorConsoleRequestId + 1;
@@ -2261,7 +2257,7 @@
     state.actorCardError = '';
     renderActorDetail(state, elements);
     renderActorInteractionRegions(state, elements);
-    renderOpenTui(state, elements);
+    renderAttachTools(state, elements);
     try {
       const payload = await fetchJson(buildActorConsoleUrl(actorId), options || undefined);
       const consoleActorId = payload
@@ -2282,7 +2278,7 @@
       state.actorCardError = '';
       renderActorDetail(state, elements);
       renderActorInteractionRegions(state, elements);
-      renderOpenTui(state, elements);
+      renderAttachTools(state, elements);
     } catch (error) {
       if (isAbortError(error) || !isCurrentActorConsoleRequest(state, actorId, requestId, consoleRequestId)) {
         return;
@@ -2293,7 +2289,7 @@
       renderShell(state, elements);
       renderActorDetail(state, elements);
       renderActorInteractionRegions(state, elements);
-      renderOpenTui(state, elements);
+      renderAttachTools(state, elements);
       throw error;
     }
   }
@@ -2426,7 +2422,7 @@
       await refreshSelectedActorConsole(state);
       renderActorDetail(state, elements);
       renderActorInteractionRegions(state, elements);
-      renderOpenTui(state, elements);
+      renderAttachTools(state, elements);
     } catch (error) {
       state.message = error.message;
       renderShell(state, elements);
@@ -2568,12 +2564,12 @@
       }
       state.message = lifecycleOperationStatusText(operation);
       if (requestOwnsSelection()) {
-        clearOpenTuiFeedback(state);
+        clearAttachToolFeedback(state);
       }
       renderShell(state, elements);
       renderActorList(state, elements);
       renderActorInteractionRegions(state, elements);
-      renderOpenTui(state, elements);
+      renderAttachTools(state, elements);
       if (operationIsTerminal(operation)) {
         await reconcileLifecycleOperation(state, elements, operation);
       } else {
@@ -2583,7 +2579,7 @@
       state.message = error.message;
       renderShell(state, elements);
       renderActorInteractionRegions(state, elements);
-      renderOpenTui(state, elements);
+      renderAttachTools(state, elements);
     }
   }
 
@@ -2609,7 +2605,7 @@
       state.message = payload && payload.turn_id
         ? 'Interrupted ' + actorId + ' (' + payload.turn_id + ').'
         : 'Interrupt sent.';
-      clearOpenTuiFeedback(state);
+      clearAttachToolFeedback(state);
       await refreshSelectedActorConsole(state);
       if (requestOwnsSelection()) {
         renderActorDetail(state, elements);
@@ -2623,7 +2619,7 @@
         state.interruptPending = false;
         renderShell(state, elements);
         renderActorInteractionRegions(state, elements);
-        renderOpenTui(state, elements);
+        renderAttachTools(state, elements);
       }
     }
   }
@@ -2721,7 +2717,7 @@
         renderShell(state, elements);
         renderActorList(state, elements);
         renderActorInteractionRegions(state, elements);
-        renderOpenTui(state, elements);
+        renderAttachTools(state, elements);
         scheduleLifecycleOperationPolling(state, elements);
       });
     }, delay);
@@ -2751,7 +2747,7 @@
           renderShell(state, elements);
           renderActorList(state, elements);
           renderActorInteractionRegions(state, elements);
-          renderOpenTui(state, elements);
+          renderAttachTools(state, elements);
         }
       }
     } finally {
@@ -2843,7 +2839,7 @@
         renderShell(state, elements);
         renderActorList(state, elements);
         renderActorInteractionRegions(state, elements);
-        renderOpenTui(state, elements);
+        renderAttachTools(state, elements);
         return;
       }
       const roleId = lifecycleOperationRoleId(operation) || state.selectedRole;
@@ -2901,13 +2897,13 @@
     renderShell(state, elements);
     renderActorList(state, elements);
     renderActorInteractionRegions(state, elements);
-    renderOpenTui(state, elements);
+    renderAttachTools(state, elements);
     if (actorId && state.selectedActorId === actorId) {
       try {
         await refreshSelectedActorConsole(state);
         renderActorDetail(state, elements);
         renderActorInteractionRegions(state, elements);
-        renderOpenTui(state, elements);
+        renderAttachTools(state, elements);
       } catch (error) {
         state.message = error.message;
         renderShell(state, elements);
@@ -3085,7 +3081,7 @@
     if (selectedActorMessageProcessed && pollOwnsSelection() && state.selectedSection === 'actors') {
       renderActorDetail(state, elements);
       renderActorInteractionRegions(state, elements);
-      renderOpenTui(state, elements);
+      renderAttachTools(state, elements);
       renderImConversation(state, elements);
     }
   }
@@ -3109,23 +3105,15 @@
     }, 0);
   }
 
-  function commandFromError(error) {
-    return error
-      && error.payload
-      && error.payload.error
-      && typeof error.payload.error.command === 'string'
-      ? error.payload.error.command
-      : '';
-  }
-
   async function openTui(state, elements) {
     const runtime = selectedActorRuntime(state);
-    const openTuiState = computeOpenTuiState(runtime, {
-      openTuiPending: state.openTuiPending,
-    });
-    if (!openTuiState.canOpenTui) {
-      state.openTuiMessage = openTuiState.message;
-      renderOpenTui(state, elements);
+    const attachState = computeAttachActionState(runtime);
+    if (!attachState.canAttach) {
+      state.openTuiMessage = attachState.message;
+      renderAttachTools(state, elements);
+      return;
+    }
+    if (state.openTuiPending) {
       return;
     }
 
@@ -3136,11 +3124,10 @@
     };
     state.openTuiPending = true;
     state.openTuiMessage = 'Opening...';
-    state.openTuiCommand = '';
-    renderOpenTui(state, elements);
+    renderAttachTools(state, elements);
     renderActorInteractionRegions(state, elements);
     try {
-      const payload = await fetchJson('/api/instances/' + encodeURIComponent(actorId) + '/open-tui', {
+      await fetchJson('/api/instances/' + encodeURIComponent(actorId) + '/open-tui', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3149,18 +3136,16 @@
         body: JSON.stringify({}),
       });
       if (requestOwnsSelection()) {
-        state.openTuiCommand = typeof payload.command === 'string' ? payload.command : '';
         state.openTuiMessage = 'Terminal opened.';
       }
-    } catch (error) {
+    } catch (_error) {
       if (requestOwnsSelection()) {
-        state.openTuiCommand = commandFromError(error);
         state.openTuiMessage = 'Could not open Terminal.';
       }
     } finally {
       if (requestOwnsSelection()) {
         state.openTuiPending = false;
-        renderOpenTui(state, elements);
+        renderAttachTools(state, elements);
         renderActorInteractionRegions(state, elements);
       }
     }
@@ -3181,33 +3166,54 @@
     }
   }
 
-  async function copyOpenTuiCommand(state, elements) {
-    if (!state.openTuiCommand) {
+  async function copyAttachCommand(state, elements) {
+    const runtime = selectedActorRuntime(state);
+    const attachState = computeAttachActionState(runtime);
+    if (!attachState.canAttach) {
+      state.copyCommandMessage = attachState.message;
+      renderAttachTools(state, elements);
       return;
     }
+    if (state.copyCommandPending) {
+      return;
+    }
+
     const actorId = state.selectedActorId;
     const requestId = state.actorSelectionRequestId;
-    const command = state.openTuiCommand;
     const requestOwnsSelection = function () {
-      return isCurrentActorRequest(state, actorId, requestId)
-        && state.openTuiCommand === command;
+      return isCurrentActorRequest(state, actorId, requestId);
     };
+    state.copyCommandPending = true;
+    state.copyCommandMessage = 'Copying...';
+    renderAttachTools(state, elements);
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+      const payload = await fetchJson(
+        '/api/instances/' + encodeURIComponent(actorId) + '/attach-command'
+      );
+      if (!requestOwnsSelection()) {
+        return;
+      }
+      const command = payload && typeof payload.command === 'string' ? payload.command.trim() : '';
+      if (!command) {
+        throw new Error('missing attach command');
+      }
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(command);
       } else {
         fallbackCopyText(command);
       }
       if (requestOwnsSelection()) {
-        state.openTuiMessage = 'Command copied.';
+        state.copyCommandMessage = 'Command copied.';
       }
     } catch (_error) {
       if (requestOwnsSelection()) {
-        state.openTuiMessage = 'Copy failed.';
+        state.copyCommandMessage = 'Copy failed.';
       }
-    }
-    if (requestOwnsSelection()) {
-      renderOpenTui(state, elements);
+    } finally {
+      if (requestOwnsSelection()) {
+        state.copyCommandPending = false;
+        renderAttachTools(state, elements);
+      }
     }
   }
 
@@ -3309,9 +3315,8 @@
       resumeButton: document.getElementById('resume-button'),
       openTuiButton: document.getElementById('open-tui-button'),
       openTuiStatus: document.getElementById('open-tui-status'),
-      openTuiFallback: document.getElementById('open-tui-fallback'),
-      openTuiCommand: document.getElementById('open-tui-command'),
-      copyTuiCommandButton: document.getElementById('copy-tui-command-button'),
+      copyCommandButton: document.getElementById('copy-command-button'),
+      copyCommandStatus: document.getElementById('copy-command-status'),
       messageBanner: document.getElementById('message-banner'),
       lifecycleOperationStatus: document.getElementById('lifecycle-operation-status'),
       actionAvailabilityStatus: document.getElementById('action-availability-status'),
@@ -3481,14 +3486,15 @@
       openTui(state, elements).catch(function (error) {
         state.openTuiMessage = error.message;
         state.openTuiPending = false;
-        renderOpenTui(state, elements);
+        renderAttachTools(state, elements);
         renderActorInteractionRegions(state, elements);
       });
     });
-    elements.copyTuiCommandButton.addEventListener('click', function () {
-      copyOpenTuiCommand(state, elements).catch(function (error) {
-        state.openTuiMessage = error.message;
-        renderOpenTui(state, elements);
+    elements.copyCommandButton.addEventListener('click', function () {
+      copyAttachCommand(state, elements).catch(function (error) {
+        state.copyCommandMessage = error.message;
+        state.copyCommandPending = false;
+        renderAttachTools(state, elements);
       });
     });
     elements.deleteButton.addEventListener('click', function () {
@@ -3603,9 +3609,9 @@
     buildTrackDetailUrl,
     computeCreateEnabled,
     computeInstanceActionState,
-    computeOpenTuiState,
+    computeAttachActionState,
     confirmDelete,
-    copyOpenTuiCommand,
+    copyAttachCommand,
     closeDeleteConfirmation,
     createInstance,
     createState,

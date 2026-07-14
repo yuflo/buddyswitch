@@ -105,7 +105,8 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
 
         self.assertNotIn("VALID_INSTANCE_ID_RE", source)
-        self.assertNotIn("validate_actor_id", source)
+        self.assertNotIn("def validate_actor_id", source)
+        self.assertIn("host_control_module.validate_actor_id", source)
 
     def test_web_management_tests_do_not_recreate_public_cli_harness(self) -> None:
         source = Path(__file__).read_text(encoding="utf-8")
@@ -122,6 +123,17 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         for marker in forbidden:
             with self.subTest(marker=marker):
                 self.assertNotIn(marker, source)
+
+    def test_build_copy_attach_command_is_short_shell_safe_and_paste_ready(self) -> None:
+        command = WEB_MANAGEMENT.build_copy_attach_command(
+            Path("/tmp/Buddy Switch"),
+            "act-pm.demo",
+        )
+
+        self.assertEqual(
+            command,
+            "cd '/tmp/Buddy Switch' && ./buddyswitch-codex instance attach act-pm.demo",
+        )
 
     def test_recording_host_control_defaults_match_host_control_schemas(self) -> None:
         host_control = RecordingHostControl()

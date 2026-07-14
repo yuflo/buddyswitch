@@ -167,7 +167,7 @@ def fake_attach_descriptor(actor_id: str = "act-pm-demo", thread_id: str = "thre
     )
 
 
-def assert_open_tui_command_uses_descriptor(test_case: unittest.TestCase, command: str, *, actor_id: str = "act-pm-demo") -> None:
+def assert_terminal_command_uses_descriptor(test_case: unittest.TestCase, command: str, *, actor_id: str = "act-pm-demo") -> None:
     test_case.assertIn("codex resume --remote unix:///tmp/app-server-web.sock thread-1", command)
     test_case.assertIn(f"BUDDYSWITCH_ACTOR_ID={actor_id}", command)
     test_case.assertIn("BUDDYSWITCH_INSTANCE_JSON=/tmp/act-pm-demo/instance.json", command)

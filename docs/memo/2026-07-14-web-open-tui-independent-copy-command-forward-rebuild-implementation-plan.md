@@ -301,10 +301,10 @@ Expected: all pass and the retired dual-track strings are absent.
 
 ```bash
 rg -n "openTuiCommand|commandFromError|copyOpenTuiCommand|open-tui-fallback|open-tui-command|copy-tui-command-button|command-fallback|build_open_tui_attach_command|assert_open_tui_command_uses_descriptor" \
-  tools/launcher tests
+  tools/launcher
 ```
 
-Expected: no matches.
+Expected: no matches in production code. Tests may contain these strings only as explicit negative assertions that prevent their return.
 
 ### Step 2: Run the narrow backend acceptance set
 

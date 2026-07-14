@@ -28,13 +28,20 @@ test('production html keeps all real control ids used by the web UI', () => {
     'action-availability-status',
     'open-tui-button',
     'open-tui-status',
-    'copy-tui-command-button',
-    'open-tui-command',
+    'copy-command-button',
+    'copy-command-status',
     'message-banner',
     'im-conversation',
     'new-reply-chip',
   ].forEach((id) => {
     assertIncludes(indexHtml, `id="${id}"`);
+  });
+  [
+    'open-tui-fallback',
+    'open-tui-command',
+    'copy-tui-command-button',
+  ].forEach((id) => {
+    assertExcludes(indexHtml, `id="${id}"`);
   });
 });
 
@@ -239,6 +246,7 @@ test('Team room binds selected actor actions to a compact thread header', () => 
     'id="actor-task-summary"',
     'id="actor-track-summary"',
     'id="open-tui-button"',
+    'id="copy-command-button"',
     'id="clear-button"',
   ].forEach((marker) => {
     assertIncludes(teammateRail[0], marker);

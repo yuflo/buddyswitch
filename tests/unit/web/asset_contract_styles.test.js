@@ -75,10 +75,7 @@ test('production stylesheet keeps the workspace compact on desktop viewports', (
   assertCssDeclarations('.textarea-field textarea', [
     'resize: none;',
   ]);
-  assertCssDeclarations('.command-fallback', [
-    'grid-template-columns: minmax(0, 1fr) auto;',
-    'align-items: center;',
-  ]);
+  assertExcludes(stylesCss, '.command-fallback');
   assertCssDeclarations('.person-row', [
     'grid-template-columns: 34px minmax(0, 1fr);',
     'align-items: start;',
@@ -161,11 +158,7 @@ test('production stylesheet supports pending and loading feedback states', () =>
   ]);
 });
 
-test('production stylesheet keeps hidden operational fallback frames collapsed', () => {
-  assertIncludes(stylesCss, '.command-fallback[hidden]');
-  assertCssDeclarations('.command-fallback[hidden]', [
-    'display: none;',
-  ]);
+test('production stylesheet keeps the new reply chip collapsed while hidden', () => {
   assertIncludes(stylesCss, '.new-reply-chip[hidden]');
   assertCssDeclarations('.new-reply-chip[hidden]', [
     'display: none;',

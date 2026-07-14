@@ -119,14 +119,12 @@ test('stale open tui response cannot write into a newer actor selection', async 
 
     await app.selectActor(state, elements, 'act-tui-b');
     assert.equal(state.openTuiPending, false);
-    assert.equal(state.openTuiCommand, '');
 
-    openTuiResponse.resolve(okResponse({ command: 'attach-act-tui-a' }));
+    openTuiResponse.resolve(okResponse({ terminal: 'Terminal.app' }));
     await opening;
 
     assert.equal(state.selectedActorId, 'act-tui-b');
     assert.equal(state.openTuiPending, false);
-    assert.equal(state.openTuiCommand, '');
     assert.equal(state.openTuiMessage, '');
     if (state.actorRefreshTimer) {
       clearTimeout(state.actorRefreshTimer);
@@ -137,16 +135,72 @@ test('stale open tui response cannot write into a newer actor selection', async 
   }
 });
 
-test('stale copy completion cannot write tui feedback into a newer actor selection', async () => {
+test('copy command fetches and copies independently from open tui', async () => {
   const originalFetch = globalThis.fetch;
   const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-  const copyResponse = deferred();
+  const copied = [];
+  const requests = [];
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
-    value: { clipboard: { writeText: function () { return copyResponse.promise; } } },
+    value: { clipboard: { writeText: async function (value) { copied.push(value); } } },
+  });
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    requests.push({ url: requestUrl, options: options });
+    if (requestUrl === '/api/instances/act-copy-a/attach-command') {
+      return okResponse({
+        command: "cd '/tmp/Buddy Switch' && ./buddyswitch-codex instance attach act-copy-a",
+      });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-copy-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+    ];
+    state.selectedActorId = 'act-copy-a';
+    state.openTuiPending = true;
+    state.openTuiMessage = 'Opening...';
+
+    await app.copyAttachCommand(state, elements);
+
+    assert.deepEqual(requests, [
+      { url: '/api/instances/act-copy-a/attach-command', options: undefined },
+    ]);
+    assert.deepEqual(copied, [
+      "cd '/tmp/Buddy Switch' && ./buddyswitch-codex instance attach act-copy-a",
+    ]);
+    assert.equal(state.copyCommandPending, false);
+    assert.equal(state.copyCommandMessage, 'Command copied.');
+    assert.equal(state.openTuiPending, true);
+    assert.equal(state.openTuiMessage, 'Opening...');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalNavigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+});
+
+test('stale copy command response cannot copy or write feedback into a newer actor selection', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const attachCommandResponse = deferred();
+  const copied = [];
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: async function (value) { copied.push(value); } } },
   });
   globalThis.fetch = async function (url) {
     const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/instances/act-copy-a/attach-command') {
+      return attachCommandResponse.promise;
+    }
     if (requestUrl === '/api/actors/act-copy-b/console') {
       return okResponse({
         console: {
@@ -168,19 +222,22 @@ test('stale copy completion cannot write tui feedback into a newer actor selecti
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-copy-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-copy-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-copy-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+      { actor_id: 'act-copy-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b' } },
     ];
     state.selectedActorId = 'act-copy-a';
-    state.openTuiCommand = 'attach-act-copy-a';
 
-    const copying = app.copyOpenTuiCommand(state, elements);
+    const copying = app.copyAttachCommand(state, elements);
+    assert.equal(state.copyCommandPending, true);
     await app.selectActor(state, elements, 'act-copy-b');
-    copyResponse.resolve();
+    attachCommandResponse.resolve(okResponse({
+      command: './buddyswitch-codex instance attach act-copy-a',
+    }));
     await copying;
 
-    assert.equal(state.openTuiCommand, '');
-    assert.equal(state.openTuiMessage, '');
+    assert.deepEqual(copied, []);
+    assert.equal(state.copyCommandPending, false);
+    assert.equal(state.copyCommandMessage, '');
     if (state.actorRefreshTimer) {
       clearTimeout(state.actorRefreshTimer);
       state.actorRefreshTimer = null;

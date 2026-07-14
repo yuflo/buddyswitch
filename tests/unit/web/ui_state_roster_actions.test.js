@@ -26,7 +26,7 @@ test('actor roster payload exposes fallback facts without changing selection int
   const state = app.createState();
   state.selectedActorId = 'act-missing';
   state.openTuiMessage = 'Terminal opened.';
-  state.openTuiCommand = 'attach command';
+  state.copyCommandMessage = 'Command copied.';
   app.recordImProjectedMessage(state, imMessage({
     id: 'msg-stale',
     sender: 'act-missing',
@@ -43,7 +43,7 @@ test('actor roster payload exposes fallback facts without changing selection int
 
   assert.equal(state.selectedActorId, 'act-missing');
   assert.equal(state.openTuiMessage, 'Terminal opened.');
-  assert.equal(state.openTuiCommand, 'attach command');
+  assert.equal(state.copyCommandMessage, 'Command copied.');
   assert.equal(state.imConversationIdentityId, '');
   assert.equal(result.selectedActorPresent, false);
   assert.equal(result.preferredActorId, 'act-pm-demo');
@@ -373,80 +373,68 @@ test('send pending disables only send while preserving independent actor control
   );
 });
 
-test('open tui is disabled without a selected instance', () => {
+test('attach action state is disabled without a selected instance', () => {
   assert.deepEqual(
-    app.computeOpenTuiState(null, { openTuiPending: false }),
+    app.computeAttachActionState(null),
     {
-      canOpenTui: false,
+      canAttach: false,
       message: '',
     }
   );
 });
 
-test('active healthy instance with a thread enables open tui', () => {
+test('attach action state enables an active healthy instance with a thread', () => {
   assert.deepEqual(
-    app.computeOpenTuiState(
-      {
-        status: 'active',
-        app_server_health: 'healthy',
-        thread_id: 'thread-main',
-      },
-      { openTuiPending: false }
-    ),
+    app.computeAttachActionState({
+      status: 'active',
+      app_server_health: 'healthy',
+      thread_id: 'thread-main',
+    }),
     {
-      canOpenTui: true,
+      canAttach: true,
       message: '',
     }
   );
 });
 
-test('unhealthy instance blocks open tui', () => {
+test('attach action state blocks an unhealthy instance', () => {
   assert.deepEqual(
-    app.computeOpenTuiState(
-      {
-        status: 'active',
-        app_server_health: 'unhealthy',
-        thread_id: 'thread-main',
-      },
-      { openTuiPending: false }
-    ),
+    app.computeAttachActionState({
+      status: 'active',
+      app_server_health: 'unhealthy',
+      thread_id: 'thread-main',
+    }),
     {
-      canOpenTui: false,
+      canAttach: false,
       message: 'Actor runtime is unhealthy.',
     }
   );
 });
 
-test('missing thread blocks open tui', () => {
+test('attach action state blocks an instance without a thread', () => {
   assert.deepEqual(
-    app.computeOpenTuiState(
-      {
-        status: 'active',
-        app_server_health: 'healthy',
-        thread_id: null,
-      },
-      { openTuiPending: false }
-    ),
+    app.computeAttachActionState({
+      status: 'active',
+      app_server_health: 'healthy',
+      thread_id: null,
+    }),
     {
-      canOpenTui: false,
+      canAttach: false,
       message: 'No thread to attach.',
     }
   );
 });
 
-test('open tui pending disables only open tui', () => {
+test('attach action state blocks an inactive instance', () => {
   assert.deepEqual(
-    app.computeOpenTuiState(
-      {
-        status: 'active',
-        app_server_health: 'healthy',
-        thread_id: 'thread-main',
-      },
-      { openTuiPending: true }
-    ),
+    app.computeAttachActionState({
+      status: 'inactive',
+      app_server_health: 'healthy',
+      thread_id: 'thread-main',
+    }),
     {
-      canOpenTui: false,
-      message: 'Opening...',
+      canAttach: false,
+      message: 'Resume this actor first.',
     }
   );
 });

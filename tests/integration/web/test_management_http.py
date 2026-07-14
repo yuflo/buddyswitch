@@ -1,3 +1,5 @@
+import shlex
+
 from tests.integration.web.management_harness import *  # noqa: F401,F403
 
 
@@ -358,6 +360,61 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 self.assertEqual(runner.calls, [])
                 self.assertEqual(opener.commands, [])
 
+    def test_attach_command_route_returns_short_public_cli_without_opening_terminal(self) -> None:
+        runner = RecordingHostControl()
+        opener = FakeTerminalOpener()
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            host_control=runner,
+            terminal_opener=opener.open,
+            platform_name="darwin",
+        )
+
+        with mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach") as resolve_attach:
+            status, payload = service.handle_api(
+                "GET",
+                "/api/instances/act-pm-demo/attach-command",
+                b"",
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload,
+            {
+                "ok": True,
+                "actor_id": "act-pm-demo",
+                "command": (
+                    f"cd {shlex.quote(str(ROOT))} "
+                    "&& ./buddyswitch-codex instance attach act-pm-demo"
+                ),
+            },
+        )
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(opener.commands, [])
+        resolve_attach.assert_not_called()
+
+    def test_attach_command_route_rejects_invalid_actor_id_without_side_effects(self) -> None:
+        runner = RecordingHostControl()
+        opener = FakeTerminalOpener()
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            host_control=runner,
+            terminal_opener=opener.open,
+            platform_name="darwin",
+        )
+
+        with (
+            mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach") as resolve_attach,
+            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
+        ):
+            service.handle_api("GET", "/api/instances/demo/attach-command", b"")
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(opener.commands, [])
+        resolve_attach.assert_not_called()
+
     def test_open_tui_route_rejects_bad_host_or_origin_before_status_lookup(self) -> None:
         for headers in (
             {**OPEN_TUI_HEADERS, "Host": "evil.example"},
@@ -495,7 +552,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(raised.exception.code, "RUNTIME_MISMATCH")
         self.assertEqual(opener.commands, [])
 
-    def test_open_tui_route_rejects_unsupported_os_with_copy_command(self) -> None:
+    def test_open_tui_route_rejects_unsupported_os_without_copy_command(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
@@ -515,12 +572,12 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.code, "UNSUPPORTED_PLATFORM")
         self.assertEqual(raised.exception.message, "Could not open Terminal.")
-        assert_open_tui_command_uses_descriptor(self, raised.exception.details["command"])
+        self.assertIsNone(raised.exception.details)
         self.assertEqual(opener.commands, [])
         self.assertEqual(runner.calls, [])
         resolve_attach.assert_called_once_with("act-pm-demo")
 
-    def test_open_tui_route_delegates_to_fake_terminal_opener(self) -> None:
+    def test_open_tui_route_delegates_private_descriptor_to_terminal_only(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         _, base_url = self._start_server(runner, terminal_opener=opener.open, platform_name="darwin")
@@ -536,21 +593,20 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             )
 
         self.assertEqual(status, 200)
-        assert_open_tui_command_uses_descriptor(self, payload["command"])
         self.assertEqual(
             payload,
             {
                 "ok": True,
                 "actor_id": "act-pm-demo",
-                "command": payload["command"],
                 "terminal": "Terminal.app",
             },
         )
-        self.assertEqual(opener.commands, [payload["command"]])
+        self.assertEqual(len(opener.commands), 1)
+        assert_terminal_command_uses_descriptor(self, opener.commands[0])
         self.assertEqual(runner.calls, [])
         resolve_attach.assert_called_once_with("act-pm-demo")
 
-    def test_open_tui_route_returns_copy_command_when_terminal_open_fails(self) -> None:
+    def test_open_tui_route_does_not_return_command_when_terminal_open_fails(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener(WEB_MANAGEMENT.TerminalOpenError("automation denied"))
         service = WEB_MANAGEMENT.WebManagementService(
@@ -570,8 +626,9 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(raised.exception.status, 502)
         self.assertEqual(raised.exception.code, "TERMINAL_OPEN_FAILED")
         self.assertEqual(raised.exception.message, "Could not open Terminal.")
-        assert_open_tui_command_uses_descriptor(self, raised.exception.details["command"])
-        self.assertEqual(opener.commands, [raised.exception.details["command"]])
+        self.assertIsNone(raised.exception.details)
+        self.assertEqual(len(opener.commands), 1)
+        assert_terminal_command_uses_descriptor(self, opener.commands[0])
         self.assertEqual(runner.calls, [])
         resolve_attach.assert_called_once_with("act-pm-demo")
 
@@ -734,17 +791,19 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             )
 
         self.assertEqual(status, 200)
-        assert_open_tui_command_uses_descriptor(self, payload["command"])
-        self.assertEqual(opener.commands, [payload["command"]])
+        self.assertEqual(len(opener.commands), 1)
+        assert_terminal_command_uses_descriptor(self, opener.commands[0])
+        self.assertNotIn("command", payload)
         resolve_attach.assert_called_once_with("act-pm-demo")
         self.assertEqual(host_control.calls, [])
 
-    def test_web_management_source_uses_host_control_not_public_cli(self) -> None:
+    def test_web_management_source_does_not_execute_public_cli(self) -> None:
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
 
         self.assertNotIn("Launcher" + "CommandRunner", source)
-        self.assertNotIn("buddyswitch" + "-codex", source)
         self.assertNotIn("--" + "json", source)
+        self.assertNotIn('subprocess.run(["./buddyswitch-codex"', source)
+        self.assertNotIn('subprocess.Popen(["./buddyswitch-codex"', source)
 
     def test_web_management_product_api_does_not_split_first_cut_subpanel_routes(self) -> None:
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=RecordingHostControl())

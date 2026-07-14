@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -396,6 +397,8 @@ class WebManagementService:
         actor_id, action = instance_action
         if method == "GET" and action == "status":
             return 200, {"ok": True, "instance": self._get_instance_status(actor_id)}
+        if method == "GET" and action == "attach-command":
+            return 200, self._attach_command(actor_id)
         if method == "POST" and action == "clear":
             return 202, self._clear(actor_id)
         if method == "POST" and action == "interrupt":
@@ -440,6 +443,8 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/stop")], "stop"
         if path.startswith(status_prefix) and path.endswith("/open-tui"):
             return path[len(status_prefix) : -len("/open-tui")], "open-tui"
+        if path.startswith(status_prefix) and path.endswith("/attach-command"):
+            return path[len(status_prefix) : -len("/attach-command")], "attach-command"
         if path.startswith(status_prefix):
             actor_id = path[len(status_prefix) :]
             if "/" in actor_id:
@@ -599,13 +604,12 @@ class WebManagementService:
             raise map_actor_session_failure(exc) from exc
         except codex_runtime.CodexRuntimeError as exc:
             raise map_codex_runtime_failure(exc) from exc
-        command = build_open_tui_attach_command(descriptor)
+        command = build_terminal_attach_command(descriptor)
         if self._platform_name != "darwin":
             raise HttpError(
                 status=400,
                 code="UNSUPPORTED_PLATFORM",
                 message="Could not open Terminal.",
-                details={"command": command},
             )
         try:
             self._terminal_opener(command)
@@ -614,20 +618,28 @@ class WebManagementService:
                 status=502,
                 code="TERMINAL_OPEN_FAILED",
                 message="Could not open Terminal.",
-                details={"command": command},
             ) from exc
         except Exception as exc:
             raise HttpError(
                 status=502,
                 code="TERMINAL_OPEN_FAILED",
                 message="Could not open Terminal.",
-                details={"command": command},
             ) from exc
         return {
             "ok": True,
             "actor_id": actor_id,
-            "command": command,
             "terminal": "Terminal.app",
+        }
+
+    def _attach_command(self, actor_id: str) -> dict[str, Any]:
+        try:
+            normalized_actor_id = host_control_module.validate_actor_id(actor_id)
+        except host_control_module.HostControlError as exc:
+            raise map_host_control_failure(exc) from exc
+        return {
+            "ok": True,
+            "actor_id": normalized_actor_id,
+            "command": build_copy_attach_command(self._repo_root, normalized_actor_id),
         }
 
     def _validate_open_tui_request(self, headers: Mapping[str, str] | None, body: bytes) -> None:
@@ -1002,8 +1014,15 @@ def _first_nonempty_line(text: str | None) -> str | None:
     return None
 
 
-def build_open_tui_attach_command(descriptor: actor_session.AttachDescriptor) -> str:
+def build_terminal_attach_command(descriptor: actor_session.AttachDescriptor) -> str:
     return actor_session.terminal_command_from_descriptor(descriptor)
+
+
+def build_copy_attach_command(repo_root: Path, actor_id: str) -> str:
+    return (
+        f"cd {shlex.quote(str(repo_root))} && "
+        f"./buddyswitch-codex instance attach {shlex.quote(actor_id)}"
+    )
 
 
 def _quote_applescript_string(value: str) -> str:

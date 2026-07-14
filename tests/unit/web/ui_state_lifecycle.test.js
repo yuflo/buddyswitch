@@ -426,7 +426,7 @@ test('delete lifecycle operation removes actor after terminal operation result',
   }
 });
 
-test('stale lifecycle submission cannot clear tui feedback for a newer actor selection', async () => {
+test('stale lifecycle submission cannot clear attach tool feedback for a newer actor selection', async () => {
   const originalFetch = globalThis.fetch;
   const stopResponse = deferred();
   globalThis.fetch = async function (url) {
@@ -467,8 +467,8 @@ test('stale lifecycle submission cannot clear tui feedback for a newer actor sel
 
     const stop = app.runLifecycleAction(state, elements, 'stop', 'act-lifecycle-a');
     await app.selectActor(state, elements, 'act-lifecycle-b');
-    state.openTuiCommand = 'attach-act-lifecycle-b';
     state.openTuiMessage = 'Terminal opened.';
+    state.copyCommandMessage = 'Command copied.';
 
     stopResponse.resolve(okResponse({
       operation: lifecycleOperation({
@@ -482,8 +482,8 @@ test('stale lifecycle submission cannot clear tui feedback for a newer actor sel
     await stop;
 
     assert.equal(state.selectedActorId, 'act-lifecycle-b');
-    assert.equal(state.openTuiCommand, 'attach-act-lifecycle-b');
     assert.equal(state.openTuiMessage, 'Terminal opened.');
+    assert.equal(state.copyCommandMessage, 'Command copied.');
     assert.ok(state.lifecycleOperations['op-stop-lifecycle-a']);
     if (state.actorRefreshTimer) {
       clearTimeout(state.actorRefreshTimer);
@@ -1287,18 +1287,15 @@ test('active in-progress instance disables clear while allowing interrupt', () =
   );
 });
 
-test('inactive instance tells user to resume before opening tui', () => {
+test('inactive instance tells user to resume before attach tools are available', () => {
   assert.deepEqual(
-    app.computeOpenTuiState(
-      {
-        status: 'inactive',
-        app_server_health: 'unhealthy',
-        thread_id: 'thread-main',
-      },
-      { openTuiPending: false }
-    ),
+    app.computeAttachActionState({
+      status: 'inactive',
+      app_server_health: 'unhealthy',
+      thread_id: 'thread-main',
+    }),
     {
-      canOpenTui: false,
+      canAttach: false,
       message: 'Resume this actor first.',
     }
   );

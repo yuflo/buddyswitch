@@ -115,13 +115,14 @@ CANONICAL_LAUNCHER_STATEMENTS = (
 
 
 class ExternalControlArchitectureTests(unittest.TestCase):
-    def test_web_uses_private_owners_without_public_cli_or_side_routes(self) -> None:
+    def test_web_uses_private_owners_without_cli_execution_or_side_routes(self) -> None:
         source = _source("tools/launcher/web_management.py")
         forbidden = (
             "Launcher" + "CommandRunner",
-            "buddy" + "switch-codex",
             "--" + "json",
             "/" + "side",
+            'subprocess.run(["./buddy' + 'switch-codex"',
+            'subprocess.Popen(["./buddy' + 'switch-codex"',
         )
         for token in forbidden:
             with self.subTest(token=token):

@@ -1260,27 +1260,6 @@ button.track-row {
   display: none;
 }
 
-.command-fallback {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #fafaf7;
-}
-
-.command-fallback[hidden] {
-  display: none;
-}
-
-.command-fallback .mini-button {
-  justify-self: end;
-  width: auto;
-}
-
 .modal-backdrop {
   position: fixed;
   z-index: 50;

@@ -145,6 +145,7 @@ test('production javascript keeps the real api surface', () => {
     "'clear'",
     "'resume'",
     '/open-tui',
+    '/attach-command',
     'X-BuddySwitch-Web',
   ].forEach((apiPath) => {
     assertIncludes(appJs, apiPath);
@@ -171,6 +172,17 @@ test('production javascript keeps the real api surface', () => {
   assertExcludes(appJs, "selectedActorId) + '/messages'");
   assertExcludes(appJs, 'JSON.stringify({ text: state.draftText })');
   assertIncludes(combinedAssets, 'Copy command');
+  [
+    'openTuiCommand',
+    'commandFromError',
+    'copyOpenTuiCommand',
+    'open-tui-fallback',
+    'open-tui-command',
+    'copy-tui-command-button',
+    'command-fallback',
+  ].forEach((retiredMarker) => {
+    assertExcludes(combinedAssets, retiredMarker);
+  });
   assertExcludes(appJs, "selectedActorId) + '/input'");
   assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tasks'");
   assertExcludes(appJs, "/api/actors/' + encodeURIComponent(state.selectedActorId) + '/tracks'");
