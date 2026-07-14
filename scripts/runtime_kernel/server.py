@@ -10,7 +10,7 @@ import socket
 import threading
 from typing import Any, Callable
 
-from runtime_kernel import coordinator, dispatcher, protocol
+from runtime_kernel import coordinator, dispatcher, process_identity, protocol
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,7 @@ class RuntimeBrokerConfig:
     instance_json_path: Path
     manifest_path: Path
     repo_root_path: Path | None = None
+    marker_file: Path | None = None
     max_workers: int = 4
     request_body_limit_bytes: int = 1048576
     response_margin_ms: int = 1000
@@ -57,11 +58,11 @@ class RuntimeBrokerServer:
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             self._server = server
-            server.bind(str(self.config.socket_path))
-            server.listen(64)
-            os.chmod(self.config.socket_path, 0o600)
-            self.config.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
             try:
+                server.bind(str(self.config.socket_path))
+                server.listen(64)
+                os.chmod(self.config.socket_path, 0o600)
+                process_identity.write_record(self.config.pid_file, os.getpid())
                 while not self._stop_event.is_set():
                     try:
                         conn, _ = server.accept()
@@ -77,6 +78,9 @@ class RuntimeBrokerServer:
                     self.config.socket_path.unlink(missing_ok=True)
                 except OSError:
                     pass
+                process_identity.remove_record(self.config.pid_file)
+                if self.config.marker_file is not None:
+                    self.config.marker_file.unlink(missing_ok=True)
 
     def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         if self._dispatch_wants_session:

@@ -14,7 +14,6 @@ from typing import Any, Callable, Mapping
 RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
-_RUNTIME_ROOT_OVERRIDE: Path | None = None
 _RUNTIME_ROOT_LISTENERS: list[Callable[[], None]] = []
 
 
@@ -43,12 +42,8 @@ def _recompute_runtime_roots() -> None:
     global LOCAL_ROOT
     global ACTOR_PRIVATE_DIR
 
-    if _RUNTIME_ROOT_OVERRIDE is None:
-        ROOT = _default_repo_root()
-        STATE_ROOT = _runtime_root_from_env(ROOT)
-    else:
-        ROOT = _RUNTIME_ROOT_OVERRIDE
-        STATE_ROOT = ROOT
+    ROOT = _default_repo_root()
+    STATE_ROOT = _runtime_root_from_env(ROOT)
     WORKSPACE_ROOT = ROOT
 
     OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
@@ -75,20 +70,6 @@ def register_runtime_root_listener(listener: Callable[[], None], *, call_immedia
         listener()
 
 
-def set_runtime_root_override(root: Path) -> Path:
-    """Force runtime roots to a specific workspace path (test-only override)."""
-    global _RUNTIME_ROOT_OVERRIDE
-    _RUNTIME_ROOT_OVERRIDE = Path(root).expanduser().resolve(strict=False)
-    _recompute_runtime_roots()
-    return ROOT
-
-
-def reset_runtime_root_override() -> None:
-    global _RUNTIME_ROOT_OVERRIDE
-    _RUNTIME_ROOT_OVERRIDE = None
-    _recompute_runtime_roots()
-
-
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -98,8 +79,6 @@ def runtime_workspace_root(instance_payload: dict[str, Any] | None = None) -> Pa
         candidate = instance_payload.get("workspace_dir")
         if isinstance(candidate, str) and candidate.strip():
             return Path(candidate.strip()).expanduser().resolve(strict=False)
-    if _RUNTIME_ROOT_OVERRIDE is not None:
-        return ROOT
     for env_key in ("BUDDYSWITCH_WORKSPACE_DIR", "BUDDYSWITCH_RUNTIME_WORKSPACE_ROOT"):
         raw = os.environ.get(env_key)
         if isinstance(raw, str) and raw.strip():

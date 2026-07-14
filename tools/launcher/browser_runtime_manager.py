@@ -19,8 +19,11 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS_DIR = ROOT / "scripts"
 SCRIPTS_ENV = ROOT / "scripts" / "env"
 LAUNCHER_DIR = ROOT / "tools" / "launcher"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 if str(SCRIPTS_ENV) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ENV))
 if str(LAUNCHER_DIR) not in sys.path:
@@ -29,6 +32,7 @@ if str(LAUNCHER_DIR) not in sys.path:
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 import cdp_background_page  # noqa: E402
 import daemon_state  # noqa: E402
+from runtime_kernel import process_identity  # noqa: E402
 
 
 PORT_START = 9222
@@ -61,8 +65,10 @@ class BrowserResourceSnapshot:
         "instance_root",
         "profile_dir",
         "recorded_port",
+        "marker_record",
         "marker_pid",
         "marker_pgid",
+        "upstream_record",
         "upstream_pid",
         "upstream_pgid",
         "port_listener_pids",
@@ -77,8 +83,10 @@ class BrowserResourceSnapshot:
         instance_root: Path,
         profile_dir: Path,
         recorded_port: int | None,
+        marker_record: process_identity.RecordedProcess | None,
         marker_pid: int | None,
         marker_pgid: int | None,
+        upstream_record: process_identity.RecordedProcess | None,
         upstream_pid: int | None,
         upstream_pgid: int | None,
         port_listener_pids: tuple[int, ...],
@@ -89,8 +97,10 @@ class BrowserResourceSnapshot:
         self.instance_root = instance_root
         self.profile_dir = profile_dir
         self.recorded_port = recorded_port
+        self.marker_record = marker_record
         self.marker_pid = marker_pid
         self.marker_pgid = marker_pgid
+        self.upstream_record = upstream_record
         self.upstream_pid = upstream_pid
         self.upstream_pgid = upstream_pgid
         self.port_listener_pids = port_listener_pids
@@ -312,17 +322,6 @@ def _pid_is_zombie(pid: int) -> bool:
     return stat.startswith("Z")
 
 
-def _wait_pid_gone(pid: int, timeout_seconds: float = 1.0) -> bool:
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        if _reap_child_pid(pid):
-            return True
-        if not _pid_alive(pid):
-            return True
-        time.sleep(0.05)
-    return not _pid_alive(pid)
-
-
 def _pgid_alive(pgid: int | None) -> bool:
     if pgid is None:
         return False
@@ -362,50 +361,6 @@ def _wait_pgid_gone(pgid: int, timeout_seconds: float = 1.0) -> bool:
     return not _pgid_alive(pgid)
 
 
-def _terminate_pid(pid: int | None) -> None:
-    if not _pid_alive(pid):
-        return
-    assert pid is not None
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    if not _wait_pid_gone(pid):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-        _wait_pid_gone(pid)
-
-
-def _terminate_pgid(pgid: int | None) -> bool:
-    if pgid is None:
-        return False
-    try:
-        current_pgid = os.getpgid(os.getpid())
-    except OSError:
-        current_pgid = None
-    if current_pgid == pgid:
-        return False
-    if not _pgid_alive(pgid):
-        return True
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return True
-    except PermissionError:
-        return False
-    if not _wait_pgid_gone(pgid):
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            return True
-        except PermissionError:
-            return False
-        _wait_pgid_gone(pgid)
-    return True
-
-
 def _process_command_line(pid: int) -> str:
     completed = subprocess.run(
         ["ps", "-ww", "-p", str(pid), "-o", "command="],
@@ -427,28 +382,6 @@ def _process_pgid(pid: int | None) -> int | None:
         return None
     except PermissionError:
         return None
-
-
-def _all_processes() -> list[ProcessInfo]:
-    completed = subprocess.run(
-        ["ps", "-axo", "pid=,pgid=,command="],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return []
-    processes: list[ProcessInfo] = []
-    for raw_line in completed.stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 2)
-        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].lstrip("-").isdigit():
-            continue
-        command_line = parts[2] if len(parts) > 2 else ""
-        processes.append(ProcessInfo(pid=int(parts[0]), pgid=int(parts[1]), command_line=command_line))
-    return processes
 
 
 def _user_data_dir_arg(profile_dir: Path) -> str:
@@ -482,14 +415,6 @@ def _is_profile_owned_process(command_line: str, profile_dir: Path) -> bool:
             return True
     return False
 
-
-
-def _profile_owned_processes(profile_dir: Path) -> list[ProcessInfo]:
-    return [
-        process
-        for process in _all_processes()
-        if process.pid != os.getpid() and _pid_alive(process.pid) and _is_profile_owned_process(process.command_line, profile_dir)
-    ]
 
 
 def _port_listener_pids(port: int) -> list[int]:
@@ -532,8 +457,6 @@ def _classify_snapshot(
         found_foreign = False
         for pid in port_listener_pids:
             command_line = _process_command_line(pid)
-            if _is_profile_owned_process(command_line, profile_dir):
-                return "owned"
             if _has_user_data_dir(command_line):
                 found_foreign = True
         if found_foreign:
@@ -553,13 +476,37 @@ def _discover_resources(
     _read_instance_payload(instance_root, actor_id)
     effective_profile_dir = profile_dir if profile_dir is not None else _default_profile_dir(instance_root)
     recorded_port = _recorded_port(instance_root, actor_id)
-    marker_pid = _read_numeric_file(_pid_file(instance_root))
-    marker_pgid = _process_pgid(marker_pid)
+    marker_file = _pid_file(instance_root)
+    marker_pid = _read_numeric_file(marker_file)
+    recorded_marker = process_identity.read_record(marker_file)
+    marker_record = (
+        recorded_marker
+        if recorded_marker is not None and process_identity.is_running(recorded_marker)
+        else None
+    )
+    marker_pgid = _process_pgid(marker_record.pid) if marker_record is not None else None
     runtime_dir = _runtime_browser_dir(instance_root)
-    upstream_pid = _read_numeric_file(runtime_dir / "cockpit-upstream.pid")
-    upstream_pgid = _read_numeric_file(runtime_dir / "cockpit-upstream.pgid")
+    upstream_file = runtime_dir / "cockpit-upstream.pid"
+    upstream_pid = _read_numeric_file(upstream_file)
+    recorded_upstream = process_identity.read_record(upstream_file)
+    upstream_record = (
+        recorded_upstream
+        if recorded_upstream is not None and process_identity.is_running(recorded_upstream)
+        else None
+    )
+    upstream_pgid = _process_pgid(upstream_record.pid) if upstream_record is not None else None
     port_listener_pids = _port_listener_pids(recorded_port) if recorded_port is not None else []
-    profile_processes = _profile_owned_processes(effective_profile_dir)
+    profile_processes: list[ProcessInfo] = []
+    if marker_record is not None:
+        command_line = _process_command_line(marker_record.pid)
+        if _is_profile_owned_process(command_line, effective_profile_dir):
+            profile_processes.append(
+                ProcessInfo(
+                    pid=marker_record.pid,
+                    pgid=marker_pgid,
+                    command_line=command_line,
+                )
+            )
     ownership = _classify_snapshot(
         recorded_port=recorded_port,
         marker_pid=marker_pid,
@@ -572,8 +519,10 @@ def _discover_resources(
         instance_root=instance_root,
         profile_dir=effective_profile_dir,
         recorded_port=recorded_port,
+        marker_record=marker_record,
         marker_pid=marker_pid,
         marker_pgid=marker_pgid,
+        upstream_record=upstream_record,
         upstream_pid=upstream_pid,
         upstream_pgid=upstream_pgid,
         port_listener_pids=tuple(port_listener_pids),
@@ -692,7 +641,7 @@ def acquire(
                 text=True,
                 start_new_session=True,
             )
-            marker_file.write_text(f"{proc.pid}\n", encoding="utf-8")
+            process_identity.write_record(marker_file, proc.pid)
         finally:
             log_handle.close()
 
@@ -719,8 +668,10 @@ def acquire(
             time.sleep(DEFAULT_READY_DELAY_SECONDS)
 
         if proc is not None:
-            _terminate_pid(proc.pid)
-        marker_file.unlink(missing_ok=True)
+            record = process_identity.read_record(marker_file)
+            if record is not None:
+                _terminate_owned_record(record)
+        process_identity.remove_record(marker_file)
         raise BrowserRuntimeManagerError(f"Browser cockpit not ready: {browser_url}")
     except Exception as exc:
         return _failure(exc)
@@ -785,76 +736,83 @@ def _release_mode(reason: str | None, *, force: bool = False) -> str:
 
 
 def _stop_upstream_processes(snapshot: BrowserResourceSnapshot) -> list[int]:
-    terminated: list[int] = []
-    if snapshot.upstream_pgid is not None:
-        _terminate_pgid(snapshot.upstream_pgid)
-    if snapshot.upstream_pid is not None:
-        _terminate_pid(snapshot.upstream_pid)
-        terminated.append(snapshot.upstream_pid)
-    return terminated
+    if snapshot.upstream_record is None:
+        return []
+    if not _terminate_owned_record(snapshot.upstream_record):
+        return []
+    return [snapshot.upstream_record.pid]
 
 
 def _marker_matches_profile(snapshot: BrowserResourceSnapshot) -> bool:
-    if snapshot.marker_pid is None or not _pid_alive(snapshot.marker_pid):
+    if snapshot.marker_record is None:
         return False
-    command_line = _process_command_line(snapshot.marker_pid)
+    if not process_identity.is_running(snapshot.marker_record):
+        return False
+    command_line = _process_command_line(snapshot.marker_record.pid)
     return _is_profile_owned_process(command_line, snapshot.profile_dir)
 
 
+def _terminate_owned_record(record: process_identity.RecordedProcess) -> bool:
+    if not process_identity.is_running(record):
+        _reap_child_pid(record.pid)
+        return False
+    try:
+        pgid = os.getpgid(record.pid)
+        current_pgid = os.getpgid(os.getpid())
+    except (ProcessLookupError, PermissionError):
+        return False
+    if pgid == current_pgid or not process_identity.is_running(record):
+        return False
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return False
+    if not _wait_pgid_gone(pgid):
+        if not process_identity.is_running(record) and not _pgid_alive(pgid):
+            return True
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            return not _pgid_alive(pgid)
+        _wait_pgid_gone(pgid)
+    _reap_child_pid(record.pid)
+    return True
+
+
 def _stop_owned_chrome_processes(snapshot: BrowserResourceSnapshot) -> list[int]:
-    terminated: list[int] = []
-    attempted_pids: set[int] = set()
-    if _marker_matches_profile(snapshot):
-        if snapshot.marker_pgid is not None:
-            _terminate_pgid(snapshot.marker_pgid)
-        assert snapshot.marker_pid is not None
-        _terminate_pid(snapshot.marker_pid)
-        attempted_pids.add(snapshot.marker_pid)
-        terminated.append(snapshot.marker_pid)
-    attempted_pgids: set[int] = {snapshot.marker_pgid} if snapshot.marker_pgid is not None else set()
-    for process in snapshot.profile_owned_processes:
-        if process.pid in attempted_pids:
-            continue
-        if process.pgid is not None and process.pgid not in attempted_pgids:
-            _terminate_pgid(process.pgid)
-            attempted_pgids.add(process.pgid)
-        if _pid_alive(process.pid):
-            _terminate_pid(process.pid)
-        attempted_pids.add(process.pid)
-        terminated.append(process.pid)
-    return terminated
-
-
-def _owned_listener_pids(port: int | None, profile_dir: Path) -> list[int]:
-    if port is None:
+    if not _marker_matches_profile(snapshot):
         return []
-    owned: list[int] = []
-    for pid in _port_listener_pids(port):
-        if _is_profile_owned_process(_process_command_line(pid), profile_dir):
-            owned.append(pid)
-    return owned
+    assert snapshot.marker_record is not None
+    if not _terminate_owned_record(snapshot.marker_record):
+        return []
+    return [snapshot.marker_record.pid]
 
 
 def _verify_owned_chrome_gone(snapshot: BrowserResourceSnapshot) -> tuple[bool, list[int]]:
-    owned_processes = _profile_owned_processes(snapshot.profile_dir)
-    owned_listener_pids = _owned_listener_pids(snapshot.recorded_port, snapshot.profile_dir)
-    remaining = sorted({process.pid for process in owned_processes}.union(owned_listener_pids))
+    remaining: list[int] = []
+    if snapshot.marker_record is not None and process_identity.is_running(snapshot.marker_record):
+        remaining.append(snapshot.marker_record.pid)
     return not remaining, remaining
 
 
 def _verify_upstream_gone(snapshot: BrowserResourceSnapshot) -> tuple[bool, list[int]]:
     remaining: list[int] = []
-    if snapshot.upstream_pid is not None and _pid_alive(snapshot.upstream_pid):
-        remaining.append(snapshot.upstream_pid)
+    if snapshot.upstream_record is not None and process_identity.is_running(snapshot.upstream_record):
+        remaining.append(snapshot.upstream_record.pid)
     return not remaining, remaining
 
 
 def _clear_release_state(instance_root: Path, actor_id: str) -> bool:
     runtime_dir = _runtime_browser_dir(instance_root)
     changed = False
-    for path in (
+    for pid_file in (
         _pid_file(instance_root),
         runtime_dir / "cockpit-upstream.pid",
+    ):
+        if pid_file.exists() or process_identity.identity_file(pid_file).exists():
+            changed = True
+        process_identity.remove_record(pid_file)
+    for path in (
         runtime_dir / "cockpit-upstream.pgid",
         runtime_dir / "page_idle.json",
         runtime_dir / "page_idle.lock",

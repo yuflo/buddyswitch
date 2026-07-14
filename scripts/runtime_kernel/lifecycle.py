@@ -14,7 +14,7 @@ import subprocess
 import time
 from typing import Any
 
-from runtime_kernel import protocol
+from runtime_kernel import process_identity, protocol
 
 
 @dataclass(frozen=True)
@@ -80,8 +80,9 @@ def resolve_socket_path(actor_id: str, instance_root: Path, marker_file: Path) -
     if len(str(default_socket)) < 100:
         return default_socket
 
-    digest = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()[:12]
-    return Path(f"/tmp/buddyswitch-runtime-{digest}.sock")
+    socket_identity = f"{actor_id}\0{instance_root.expanduser().resolve(strict=False)}"
+    digest = hashlib.sha1(socket_identity.encode("utf-8")).hexdigest()[:12]
+    return Path(os.path.realpath("/tmp")) / f"buddyswitch-runtime-{digest}.sock"
 
 
 def read_pid(pid_file: Path) -> int | None:
@@ -253,7 +254,41 @@ def _path_within_or_equal(candidate: Path, root: Path) -> bool:
     return root_resolved in candidate_resolved.parents
 
 
-def _cleanup_failed_startup_artifacts(paths: BrokerPaths) -> None:
+def _terminate_recorded_process(
+    recorded: process_identity.RecordedProcess,
+    *,
+    timeout_seconds: float = 1.0,
+) -> bool:
+    if not process_identity.is_running(recorded):
+        process_identity.reap_if_child(recorded.pid)
+        return False
+    try:
+        if process_identity.matches(recorded):
+            os.kill(recorded.pid, 15)
+    except OSError:
+        pass
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline and process_identity.is_running(recorded):
+        time.sleep(0.05)
+    if process_identity.is_running(recorded):
+        try:
+            if process_identity.matches(recorded):
+                os.kill(recorded.pid, 9)
+        except OSError:
+            pass
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline and process_identity.is_running(recorded):
+            time.sleep(0.05)
+    process_identity.reap_if_child(recorded.pid)
+    return True
+
+
+def _cleanup_failed_startup_artifacts(
+    paths: BrokerPaths,
+    started_process: process_identity.RecordedProcess | None = None,
+) -> None:
+    if started_process is not None:
+        _terminate_recorded_process(started_process)
     for path in (paths.marker_file, paths.socket_path):
         try:
             if path.exists() or path.is_symlink():
@@ -261,11 +296,12 @@ def _cleanup_failed_startup_artifacts(paths: BrokerPaths) -> None:
         except OSError:
             pass
 
-    pid = read_pid(paths.pid_file)
-    if not pid_is_live(pid):
+    recorded = process_identity.read_record(paths.pid_file)
+    if recorded is None or not process_identity.is_running(recorded):
         try:
             if paths.pid_file.exists() or paths.pid_file.is_symlink():
                 paths.pid_file.unlink()
+            process_identity.identity_file(paths.pid_file).unlink(missing_ok=True)
         except OSError:
             pass
 
@@ -278,7 +314,9 @@ def broker_status(
     expected_workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
-    pid_live = pid_is_live(pid)
+    recorded = process_identity.read_record(paths.pid_file)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
+    pid_live = recorded is not None and process_identity.is_running(recorded)
     marker_value: str | None = None
     if paths.marker_file.exists():
         marker_value = paths.marker_file.read_text(encoding="utf-8").strip() or None
@@ -288,6 +326,7 @@ def broker_status(
         "protocol": protocol.PROTOCOL,
         "pid": pid,
         "pid_live": pid_live,
+        "identity_matches": identity_matches,
         "socket_path": str(paths.socket_path),
         "marker_path": str(paths.marker_file),
         "marker_value": marker_value,
@@ -452,7 +491,12 @@ def broker_status(
 
 
 def cleanup_stale_broker_state(paths: BrokerPaths) -> None:
-    for path in (paths.pid_file, paths.marker_file, paths.socket_path):
+    for path in (
+        paths.pid_file,
+        process_identity.identity_file(paths.pid_file),
+        paths.marker_file,
+        paths.socket_path,
+    ):
         try:
             if path.exists() or path.is_symlink():
                 path.unlink()
@@ -476,6 +520,10 @@ def start_broker_process(
         str(paths.socket_path),
         "--pid-file",
         str(paths.pid_file),
+        "--marker-file",
+        str(paths.marker_file),
+        "--log-file",
+        str(paths.log_file),
         "--instance-json",
         str(instance_json_path),
         "--manifest",
@@ -531,7 +579,11 @@ def ensure_broker(
             "status": status,
         }
 
-    cleanup_stale_broker_state(paths)
+    recorded = process_identity.read_record(paths.pid_file)
+    if recorded is not None and process_identity.is_running(recorded):
+        stop_broker(paths)
+    else:
+        cleanup_stale_broker_state(paths)
     _append_runtime_broker_event(
         paths,
         "runtime_broker_start_requested",
@@ -560,6 +612,16 @@ def ensure_broker(
                 },
             },
         }
+
+    started_process: process_identity.RecordedProcess | None = None
+    started_pid = started.get("pid")
+    if isinstance(started_pid, int):
+        started_identity = process_identity.start_identity(started_pid)
+        if started_identity is not None:
+            started_process = process_identity.RecordedProcess(
+                started_pid,
+                started_identity,
+            )
 
     deadline = time.monotonic() + max(0.05, startup_timeout_seconds)
     latest_status: dict[str, Any] | None = None
@@ -597,7 +659,7 @@ def ensure_broker(
             }
         time.sleep(0.1)
 
-    _cleanup_failed_startup_artifacts(paths)
+    _cleanup_failed_startup_artifacts(paths, started_process)
 
     broker_status_payload: dict[str, Any] = {
         "log_file": str(paths.log_file),
@@ -625,24 +687,15 @@ def stop_broker(paths: BrokerPaths) -> dict[str, Any]:
         socket_path=str(paths.socket_path),
     )
     pid = read_pid(paths.pid_file)
+    recorded = process_identity.read_record(paths.pid_file)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
     stopped = False
-    if pid is not None and pid > 0 and pid_is_live(pid):
-        try:
-            os.kill(pid, 15)
-        except OSError:
-            pass
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline and pid_is_live(pid):
-            time.sleep(0.05)
-        if pid_is_live(pid):
-            try:
-                os.kill(pid, 9)
-            except OSError:
-                pass
-        stopped = True
+    if recorded is not None and process_identity.is_running(recorded):
+        stopped = _terminate_recorded_process(recorded)
     cleanup_stale_broker_state(paths)
     return {
         "ok": True,
         "stopped": stopped,
+        "identity_mismatch": bool(pid is not None and not identity_matches),
         "socket_path": str(paths.socket_path),
     }

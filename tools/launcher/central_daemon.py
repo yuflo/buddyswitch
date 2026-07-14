@@ -21,6 +21,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import central_daemon_core  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
+from runtime_kernel import process_identity  # noqa: E402
 
 
 STOP_GRACE_SECONDS = 2.0
@@ -50,47 +51,29 @@ def pid_is_live(pid: int) -> bool:
     return True
 
 
-def terminate_pid(pid: int) -> bool:
-    if not pid_is_live(pid):
+def terminate_record(record: process_identity.RecordedProcess) -> bool:
+    if not process_identity.is_running(record):
+        process_identity.reap_if_child(record.pid)
         return True
-    os.kill(pid, signal.SIGTERM)
+    os.kill(record.pid, signal.SIGTERM)
     deadline = time.monotonic() + STOP_GRACE_SECONDS
     while time.monotonic() < deadline:
-        if not pid_is_live(pid):
+        if not process_identity.is_running(record):
+            process_identity.reap_if_child(record.pid)
             return True
         time.sleep(POLL_SECONDS)
-    if pid_is_live(pid):
-        os.kill(pid, signal.SIGKILL)
-    return True
+    if process_identity.is_running(record):
+        os.kill(record.pid, signal.SIGKILL)
+    process_identity.reap_if_child(record.pid)
+    return not process_identity.is_running(record)
 
 
 def cleanup_runtime_files(paths: central_daemon_core.CentralDaemonPaths) -> None:
-    for path in (paths.pid_file, paths.socket_path):
+    for path in (paths.pid_file, paths.pid_identity_file, paths.socket_path):
         try:
             path.unlink()
         except OSError:
             pass
-
-
-def register_test_process(paths: central_daemon_core.CentralDaemonPaths, *, pid: int) -> None:
-    registry_raw = os.environ.get("BUDDYSWITCH_TEST_PROCESS_REGISTRY")
-    if not isinstance(registry_raw, str) or not registry_raw.strip():
-        return
-    payload: dict[str, Any] = {
-        "kind": "central_daemon",
-        "pid": pid,
-        "shared_root": str(paths.shared_root),
-        "pid_file": str(paths.pid_file),
-        "socket_path": str(paths.socket_path),
-    }
-    try:
-        payload["pgid"] = os.getpgid(pid)
-    except OSError:
-        pass
-    registry_path = Path(registry_raw).expanduser().resolve(strict=False)
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-    with registry_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
 def ping_central_daemon(*, socket_path: Path) -> dict[str, Any]:
@@ -110,7 +93,9 @@ def ping_central_daemon(*, socket_path: Path) -> dict[str, Any]:
 
 def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
-    if pid is not None and pid_is_live(pid):
+    recorded = process_identity.read_record(paths.pid_file)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
+    if pid is not None and identity_matches:
         try:
             ping = ping_central_daemon(socket_path=paths.socket_path)
             return {
@@ -121,8 +106,11 @@ def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[
                 "ping": ping,
             }
         except Exception:
-            terminate_pid(pid)
+            assert recorded is not None
+            terminate_record(recorded)
             cleanup_runtime_files(paths)
+    elif pid is not None:
+        cleanup_runtime_files(paths)
 
     paths.run_dir.mkdir(parents=True, exist_ok=True)
     paths.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -142,8 +130,7 @@ def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[
             start_new_session=True,
             cwd=str(ROOT),
         )
-    paths.pid_file.write_text(f"{process.pid}\n", encoding="utf-8")
-    register_test_process(paths, pid=process.pid)
+    process_identity.write_record(paths.pid_file, process.pid)
 
     deadline = time.monotonic() + 5.0
     ping: dict[str, Any] = {}
@@ -157,7 +144,9 @@ def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[
         except Exception:
             time.sleep(POLL_SECONDS)
     else:
-        terminate_pid(process.pid)
+        recorded_process = process_identity.read_record(paths.pid_file)
+        if recorded_process is not None:
+            terminate_record(recorded_process)
         cleanup_runtime_files(paths)
         raise RuntimeError(f"central daemon did not become ready; see {paths.log_file}")
 
@@ -172,7 +161,9 @@ def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[
 
 def status_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
-    pid_live = pid is not None and pid_is_live(pid)
+    recorded = process_identity.read_record(paths.pid_file)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
+    pid_live = pid is not None and identity_matches
     ping: dict[str, Any] | None = None
     healthy = False
     if pid_live:
@@ -185,6 +176,7 @@ def status_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict
         "healthy": healthy,
         "pid": pid,
         "pid_live": bool(pid_live),
+        "identity_matches": bool(identity_matches),
         "socket_path": str(paths.socket_path),
         "pid_file": str(paths.pid_file),
         "log_file": str(paths.log_file),
@@ -195,14 +187,18 @@ def status_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict
 
 def stop_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
-    terminated = True
-    if pid is not None and pid_is_live(pid):
-        terminated = terminate_pid(pid)
+    recorded = process_identity.read_record(paths.pid_file)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
+    terminated = False
+    if pid is not None and identity_matches:
+        assert recorded is not None
+        terminated = terminate_record(recorded)
     cleanup_runtime_files(paths)
     return {
         "ok": True,
         "pid": pid,
         "terminated": bool(terminated),
+        "identity_mismatch": bool(pid is not None and not identity_matches),
         "socket_path": str(paths.socket_path),
     }
 
@@ -230,7 +226,13 @@ def stop_if_idle(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any
 def serve(paths: central_daemon_core.CentralDaemonPaths) -> int:
     service = central_daemon_core.CentralDaemonService(paths=paths)
     server = central_daemon_core.CentralDaemonSocketServer(service=service)
-    server.serve_forever()
+    previous_sigint = signal.signal(signal.SIGINT, lambda _signum, _frame: server.close())
+    previous_sigterm = signal.signal(signal.SIGTERM, lambda _signum, _frame: server.close())
+    try:
+        server.serve_forever()
+    finally:
+        signal.signal(signal.SIGINT, previous_sigint)
+        signal.signal(signal.SIGTERM, previous_sigterm)
     return 0
 
 

@@ -414,18 +414,30 @@ buddyswitch_browser_ensure_cockpit_mcp() {
 
 buddyswitch_browser_pid_marker_is_active() {
   local marker_file="$1"
-  local marker_pid
 
   if [[ ! -f "${marker_file}" ]]; then
     return 1
   fi
 
-  marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
-  if [[ -n "${marker_pid}" ]] && kill -0 "${marker_pid}" 2>/dev/null; then
+  if "${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_REPO_ROOT}" "${marker_file}" <<'PY'
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+scripts = repo_root / "scripts"
+if str(scripts) not in sys.path:
+    sys.path.insert(0, str(scripts))
+
+from runtime_kernel import process_identity
+
+record = process_identity.read_record(Path(sys.argv[2]))
+raise SystemExit(0 if record is not None and process_identity.is_running(record) else 1)
+PY
+  then
     return 0
   fi
 
-  rm -f "${marker_file}"
+  rm -f "${marker_file}" "${marker_file}.identity"
   return 1
 }
 

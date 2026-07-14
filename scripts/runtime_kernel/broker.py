@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import signal
 import sys
 from typing import Any
 
@@ -167,6 +168,8 @@ def _parse_args() -> argparse.Namespace:
     serve = sub.add_parser("serve", help="Serve runtime broker socket")
     serve.add_argument("--socket", required=True, type=Path)
     serve.add_argument("--pid-file", required=True, type=Path)
+    serve.add_argument("--marker-file", required=True, type=Path)
+    serve.add_argument("--log-file", required=True, type=Path)
     serve.add_argument("--instance-json", required=True, type=Path)
     serve.add_argument("--manifest", required=True, type=Path)
     serve.add_argument("--repo-root", type=Path)
@@ -218,12 +221,25 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             instance_json_path=args.instance_json,
             manifest_path=args.manifest,
             repo_root_path=args.repo_root,
+            marker_file=args.marker_file,
         )
         broker_server = server.RuntimeBrokerServer(
             config=cfg,
             dispatch_fn=lambda req, sess: dispatcher.dispatch_runtime_request(req, sess),
         )
-        broker_server.serve_forever()
+        previous_sigint = signal.signal(
+            signal.SIGINT,
+            lambda _signum, _frame: broker_server.close(),
+        )
+        previous_sigterm = signal.signal(
+            signal.SIGTERM,
+            lambda _signum, _frame: broker_server.close(),
+        )
+        try:
+            broker_server.serve_forever()
+        finally:
+            signal.signal(signal.SIGINT, previous_sigint)
+            signal.signal(signal.SIGTERM, previous_sigterm)
         return 0, {"ok": True}
 
     paths = _paths_from_args(args)

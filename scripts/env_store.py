@@ -67,8 +67,6 @@ require_runtime_workspace_write_root = runtime_files.require_runtime_workspace_w
 ensure_runtime_dirs = runtime_files.ensure_runtime_dirs
 require_id = runtime_files.require_id
 slugify = runtime_files.slugify
-set_runtime_root_override = runtime_files.set_runtime_root_override
-reset_runtime_root_override = runtime_files.reset_runtime_root_override
 
 _RETIRED_TASK_APIS = frozenset(
     {
@@ -175,6 +173,4 @@ __all__ = [
     "ensure_runtime_dirs",
     "require_id",
     "slugify",
-    "set_runtime_root_override",
-    "reset_runtime_root_override",
 ]

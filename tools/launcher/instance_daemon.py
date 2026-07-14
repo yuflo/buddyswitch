@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import signal
 import sys
 from pathlib import Path
 
@@ -63,12 +64,24 @@ def main(argv: list[str] | None = None) -> int:
     instance_json = Path(args.instance_json)
     try:
         if args.command == "run":
-            return daemon_core.run_daemon(
-                instance_json,
-                handlers=default_daemon_handlers(),
-                notify_subscriptions=default_notify_subscriptions(),
-                application_command_factories=default_application_command_factories(),
+            previous_sigint = signal.signal(
+                signal.SIGINT,
+                lambda signum, _frame: (_ for _ in ()).throw(SystemExit(128 + signum)),
             )
+            previous_sigterm = signal.signal(
+                signal.SIGTERM,
+                lambda signum, _frame: (_ for _ in ()).throw(SystemExit(128 + signum)),
+            )
+            try:
+                return daemon_core.run_daemon(
+                    instance_json,
+                    handlers=default_daemon_handlers(),
+                    notify_subscriptions=default_notify_subscriptions(),
+                    application_command_factories=default_application_command_factories(),
+                )
+            finally:
+                signal.signal(signal.SIGINT, previous_sigint)
+                signal.signal(signal.SIGTERM, previous_sigterm)
         if args.command == "start":
             print(
                 json.dumps(

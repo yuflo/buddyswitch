@@ -32,6 +32,7 @@ from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from env.repos import identities as identity_repo  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
+from runtime_kernel import process_identity  # noqa: E402
 
 
 DAEMON_CLIENT_NAME = "buddyswitch_daemon"
@@ -50,6 +51,10 @@ def daemon_runtime_dir(instance_root: Path) -> Path:
 
 def daemon_pid_file(instance_root: Path) -> Path:
     return daemon_runtime_dir(instance_root) / "daemon.pid"
+
+
+def daemon_pid_identity_file(instance_root: Path) -> Path:
+    return process_identity.identity_file(daemon_pid_file(instance_root))
 
 
 def daemon_log_file(instance_root: Path) -> Path:
@@ -105,18 +110,21 @@ def _remove_path(path: Path) -> None:
         return
 
 
-def _terminate_pid(pid: int) -> bool:
-    if not _pid_is_live(pid):
+def _terminate_record(record: process_identity.RecordedProcess) -> bool:
+    if not process_identity.is_running(record):
+        process_identity.reap_if_child(record.pid)
         return True
-    os.kill(pid, signal.SIGTERM)
+    os.kill(record.pid, signal.SIGTERM)
     deadline = time.monotonic() + DAEMON_STOP_GRACE_SECONDS
     while time.monotonic() < deadline:
-        if not _pid_is_live(pid):
+        if not process_identity.is_running(record):
+            process_identity.reap_if_child(record.pid)
             return True
         time.sleep(DAEMON_POLL_SECONDS)
-    if _pid_is_live(pid):
-        os.kill(pid, signal.SIGKILL)
-    return True
+    if process_identity.is_running(record) and process_identity.matches(record):
+        os.kill(record.pid, signal.SIGKILL)
+    process_identity.reap_if_child(record.pid)
+    return not process_identity.is_running(record)
 
 
 def _utc_now() -> str:
@@ -729,9 +737,11 @@ def daemon_status(
     log_path = daemon_log_file(context.instance_root)
     state_path = daemon_state.daemon_state_file(context.instance_root)
     pid = _read_pid(pid_path)
-    pid_live = pid is not None and _pid_is_live(pid)
+    recorded = process_identity.read_record(pid_path)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
+    pid_live = recorded is not None and process_identity.is_running(recorded)
     if pid is not None and not pid_live:
-        _remove_path(pid_path)
+        process_identity.remove_record(pid_path)
         pid = None
     state = daemon_state.DaemonState.load(
         instance_root=context.instance_root,
@@ -745,6 +755,7 @@ def daemon_status(
         "live": bool(pid_live),
         "pid": pid,
         "pid_live": bool(pid_live),
+        "identity_matches": bool(identity_matches),
         "ready": ready,
         "ready_main_thread_id": ready_main_thread_id,
         "runtime_dir": str(runtime),
@@ -780,15 +791,16 @@ def start_daemon(
     state.save()
 
     pid = _read_pid(pid_path)
-    if pid is not None and _pid_is_live(pid):
+    recorded = process_identity.read_record(pid_path)
+    if recorded is not None and process_identity.is_running(recorded):
         if state.ready_for(pid, context.main_thread_id):
             status = daemon_status(instance_json, handlers=handlers, notify_subscriptions=notify_subscriptions)
             status["started"] = False
             return status
-        _terminate_pid(pid)
-        _remove_path(pid_path)
+        _terminate_record(recorded)
+        process_identity.remove_record(pid_path)
     if pid is not None:
-        _remove_path(pid_path)
+        process_identity.remove_record(pid_path)
     state.payload["ready"] = None
     state.save()
 
@@ -811,7 +823,7 @@ def start_daemon(
             cwd=str(context.instance_root),
             env=child_env,
         )
-    _write_text_file(pid_path, str(process.pid))
+    process_identity.write_record(pid_path, process.pid)
     _append_daemon_event(context, "daemon_started", pid=process.pid, main_thread_id=context.main_thread_id)
     deadline = time.monotonic() + DAEMON_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -828,11 +840,13 @@ def start_daemon(
             status["live"] = bool(status["pid_live"])
             return status
         if process.poll() is not None:
-            _remove_path(pid_path)
+            process_identity.remove_record(pid_path)
             raise RuntimeError(f"daemon exited before ready for {context.actor_id}; see {log_path}")
         time.sleep(DAEMON_READY_POLL_SECONDS)
-    _terminate_pid(process.pid)
-    _remove_path(pid_path)
+    recorded = process_identity.read_record(pid_path)
+    if recorded is not None:
+        _terminate_record(recorded)
+    process_identity.remove_record(pid_path)
     raise RuntimeError(f"daemon did not become ready for {context.actor_id}; see {log_path}")
 
 
@@ -846,16 +860,19 @@ def stop_daemon(instance_json: Path) -> dict[str, Any]:
     )
     pid_path = daemon_pid_file(context.instance_root)
     pid = _read_pid(pid_path)
-    terminated = True
-    if pid is not None and _pid_is_live(pid):
-        terminated = _terminate_pid(pid)
-    _remove_path(pid_path)
+    recorded = process_identity.read_record(pid_path)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
+    terminated = False
+    if recorded is not None and process_identity.is_running(recorded):
+        terminated = _terminate_record(recorded)
+    process_identity.remove_record(pid_path)
     unregister = safe_unregister_daemon_actor(context, identity_route, state=state)
     _append_daemon_event(context, "daemon_stopped", pid=pid, terminated=bool(terminated))
     payload = {
         "ok": True,
         "pid": pid,
         "terminated": bool(terminated),
+        "identity_mismatch": bool(pid is not None and not identity_matches),
         "pid_file": str(pid_path),
     }
     payload.update(unregister)
@@ -872,6 +889,8 @@ def run_daemon(
     | None = None,
 ) -> int:
     context = load_daemon_context(instance_json)
+    pid_path = daemon_pid_file(context.instance_root)
+    process_identity.write_record(pid_path, os.getpid())
     os.environ.update(derive_daemon_runtime_env(context))
     runtime_files.refresh_runtime_roots_from_env()
     identity_route = identity_route_for_context(context)
@@ -938,4 +957,5 @@ def run_daemon(
             safe_unregister_daemon_actor(context, identity_route, state=state)
         if mailbox_server is not None:
             mailbox_server.close()
+        process_identity.remove_record(pid_path)
     return 0

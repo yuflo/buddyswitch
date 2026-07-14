@@ -18,10 +18,13 @@ from pathlib import Path
 from typing import Any
 
 HELPER_DIR = Path(__file__).resolve().parent
-if str(HELPER_DIR) not in sys.path:
-    sys.path.insert(0, str(HELPER_DIR))
+SCRIPTS = HELPER_DIR.parents[1] / "scripts"
+for candidate in (HELPER_DIR, SCRIPTS):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
 import runtime_event_log  # noqa: E402
+from runtime_kernel import process_identity  # noqa: E402
 
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WEBSOCKET_VERSION = "13"
@@ -135,7 +138,8 @@ def effective_socket_path(actor_id: str, instance_root: Path, marker_path: Path)
     default_path = default_socket_path(instance_root)
     if len(str(default_path).encode("utf-8")) < MAX_UNIX_SOCKET_BYTES:
         return default_path
-    digest = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()[:12]
+    socket_identity = f"{actor_id}\0{instance_root.expanduser().resolve(strict=False)}"
+    digest = hashlib.sha1(socket_identity.encode("utf-8")).hexdigest()[:12]
     return fallback_socket_dir() / f"buddyswitch-app-server-{digest}.sock"
 
 
@@ -220,6 +224,7 @@ def _read_pid(pid_path: Path) -> int | None:
 
 def _cleanup_runtime_files(socket_path: Path, pid_path: Path, marker_path: Path) -> None:
     _remove_path(pid_path)
+    _remove_path(process_identity.identity_file(pid_path))
     _remove_path(marker_path)
     _remove_path(socket_path)
 
@@ -582,9 +587,11 @@ class AppServerClient:
 
 def app_server_status(socket_path: Path, pid_path: Path, marker_path: Path, log_path: Path) -> dict[str, Any]:
     pid = _read_pid(pid_path)
+    recorded = process_identity.read_record(pid_path)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
     socket_exists = socket_path.exists()
     marker_socket = _read_text_file(marker_path)
-    pid_live = pid is not None and _pid_is_live(pid)
+    pid_live = recorded is not None and process_identity.is_running(recorded)
     healthy = False
     probe: dict[str, Any] | None = None
 
@@ -604,6 +611,7 @@ def app_server_status(socket_path: Path, pid_path: Path, marker_path: Path, log_
         "healthy": healthy,
         "pid": pid,
         "pid_live": pid_live,
+        "identity_matches": identity_matches,
         "socket_path": str(socket_path),
         "socket_exists": socket_exists,
         "marker_file": str(marker_path),
@@ -655,7 +663,7 @@ def ensure_app_server(
             start_new_session=True,
             cwd=str(launch_cwd if launch_cwd.exists() else instance_root),
         )
-    _write_text_file(pid_path, str(process.pid))
+    process_identity.write_record(pid_path, process.pid)
     _write_text_file(marker_path, str(socket_path))
 
     deadline = time.monotonic() + startup_timeout_seconds
@@ -690,22 +698,24 @@ def stop_app_server(socket_path: Path, pid_path: Path, marker_path: Path, log_pa
         socket_path=str(socket_path),
     )
     pid = _read_pid(pid_path)
+    recorded = process_identity.read_record(pid_path)
+    identity_matches = recorded is not None and process_identity.matches(recorded)
     terminated = False
-    if pid is not None and _pid_is_live(pid):
+    if recorded is not None and process_identity.is_running(recorded):
         pgid: int | None = None
         try:
-            candidate_pgid = os.getpgid(pid)
+            candidate_pgid = os.getpgid(recorded.pid)
         except OSError:
             candidate_pgid = None
         if candidate_pgid is not None and candidate_pgid != os.getpgrp():
             pgid = candidate_pgid
 
         def target_is_live() -> bool:
-            if pgid is not None:
-                return _process_group_is_live(pgid)
-            return _pid_is_live(pid)
+            return process_identity.is_running(recorded)
 
         def send_signal(signum: int) -> None:
+            if not process_identity.matches(recorded):
+                return
             try:
                 if pgid is not None:
                     os.killpg(pgid, signum)
@@ -729,6 +739,7 @@ def stop_app_server(socket_path: Path, pid_path: Path, marker_path: Path, log_pa
         "ok": True,
         "pid": pid,
         "terminated": terminated or pid is None,
+        "identity_mismatch": bool(pid is not None and not identity_matches),
         "socket_path": str(socket_path),
     }
 

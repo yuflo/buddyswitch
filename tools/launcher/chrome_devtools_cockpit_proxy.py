@@ -23,6 +23,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from env import cdp_background_page  # noqa: E402
 from env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
 from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
+from runtime_kernel import process_identity  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1000,7 +1001,7 @@ class UpstreamManager:
             return
         pid_path, pgid_path = paths
         pid_path.parent.mkdir(parents=True, exist_ok=True)
-        pid_path.write_text(f"{upstream.pid}\n", encoding="ascii")
+        process_identity.write_record(pid_path, upstream.pid)
         try:
             pgid = os.getpgid(upstream.pid)
         except OSError:
@@ -1011,7 +1012,9 @@ class UpstreamManager:
         paths = self._marker_paths()
         if paths is None:
             return
-        for path in paths:
+        pid_path, pgid_path = paths
+        process_identity.remove_record(pid_path)
+        for path in (pgid_path,):
             try:
                 path.unlink()
             except FileNotFoundError:

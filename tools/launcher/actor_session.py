@@ -203,7 +203,6 @@ def _attach_env(context: _ActorContext, *, repo_root: Path) -> dict[str, str]:
         if (
             key in {"PATH", "TERM", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE", "BUDDYSWITCH_PYTHON"}
             or key.startswith("LC_")
-            or key.startswith("BUDDYSWITCH_TEST_")
         ):
             env[key] = value
     env.update(

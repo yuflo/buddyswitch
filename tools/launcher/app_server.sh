@@ -35,13 +35,14 @@ _buddyswitch_app_server_effective_socket() {
     printf '%s\n' "${default_socket}"
     return 0
   fi
-  fallback_socket="$("${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_ACTOR_ID}" <<'PY'
+  fallback_socket="$("${BUDDYSWITCH_PYTHON}" - "${BUDDYSWITCH_ACTOR_ID}" "${BUDDYSWITCH_INSTANCE_ROOT}" <<'PY'
 import hashlib
 import os
 import sys
 
 actor_id = sys.argv[1]
-digest = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()[:12]
+instance_root = os.path.realpath(sys.argv[2])
+digest = hashlib.sha1(f"{actor_id}\0{instance_root}".encode("utf-8")).hexdigest()[:12]
 tmp_root = os.path.realpath("/tmp") if os.path.exists("/tmp") else os.path.realpath(os.getenv("TMPDIR", "/tmp"))
 print(os.path.join(tmp_root, "buddyswitch-app-server", f"buddyswitch-app-server-{digest}.sock"))
 PY

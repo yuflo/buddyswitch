@@ -22,6 +22,7 @@ import daemon_mailbox  # noqa: E402
 from env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from env.tool_runtime import daemon_client  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
+from runtime_kernel import process_identity  # noqa: E402
 
 
 class CentralDaemonError(ValueError):
@@ -38,6 +39,7 @@ class CentralDaemonPaths:
         self.run_dir = self.shared_root / "run" / "central-daemon"
         self.socket_path = daemon_client.central_daemon_socket_path_for_shared_root(self.shared_root)
         self.pid_file = self.run_dir / "central-daemon.pid"
+        self.pid_identity_file = process_identity.identity_file(self.pid_file)
         self.log_file = self.run_dir / "central-daemon.log"
         self.registry_path = self.shared_root / "state" / "runtime" / "central-daemon" / "registry.json"
 
@@ -73,13 +75,6 @@ def _require_role_id(value: Any) -> str:
     if not isinstance(value, str) or ROLE_ID_PATTERN.fullmatch(value.strip()) is None:
         raise CentralDaemonError("invalid_role_id", "role_id must match /^[a-z][a-z0-9-]*$/")
     return value.strip()
-
-
-def _test_runtime_cleanup_in_progress(paths: CentralDaemonPaths) -> bool:
-    registry_raw = os.environ.get("BUDDYSWITCH_TEST_PROCESS_REGISTRY")
-    if not isinstance(registry_raw, str) or not registry_raw.strip():
-        return False
-    return paths.shared_root.exists() and not paths.pid_file.exists()
 
 
 def _normalize_row(row: Any) -> dict[str, Any] | None:
@@ -128,12 +123,6 @@ class CentralDaemonService:
         return {"actors": actors}
 
     def _save_registry(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if _test_runtime_cleanup_in_progress(self.paths):
-            raise CentralDaemonError(
-                "test_runtime_cleanup_in_progress",
-                "central daemon shared root is being removed by test cleanup",
-                retriable=True,
-            )
         rows = payload.get("actors") if isinstance(payload, dict) else []
         normalized_rows = []
         if isinstance(rows, list):
@@ -403,11 +392,9 @@ class CentralDaemonSocketServer:
             server.listen(64)
             server.settimeout(0.05)
             os.chmod(paths.socket_path, 0o600)
-            paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+            process_identity.write_record(paths.pid_file, os.getpid())
             try:
                 while not self._stop_event.is_set():
-                    if _test_runtime_cleanup_in_progress(paths):
-                        break
                     try:
                         conn, _ = server.accept()
                     except socket.timeout:
@@ -419,7 +406,11 @@ class CentralDaemonSocketServer:
                     self._handle_connection(conn)
             finally:
                 self._server = None
-                for path in (paths.socket_path, paths.pid_file):
+                for path in (
+                    paths.socket_path,
+                    paths.pid_file,
+                    paths.pid_identity_file,
+                ):
                     try:
                         path.unlink()
                     except OSError:
