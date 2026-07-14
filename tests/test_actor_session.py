@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 import sys
@@ -69,6 +70,10 @@ class ActorSessionTests(unittest.TestCase):
         project_workspace_dir.mkdir(parents=True, exist_ok=True)
         runtime_dir = instance_root / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
+        codex_bin = self.root / "bin" / "codex-test"
+        codex_bin.parent.mkdir(parents=True, exist_ok=True)
+        codex_bin.write_text("#!/bin/sh\nprintf '%s\\n' 'codex-cli test-runtime'\n", encoding="utf-8")
+        codex_bin.chmod(0o755)
         socket_path = app_server_socket or str(runtime_dir / "app-server.sock")
         instance_json = instance_root / "instance.json"
         instance_json.write_text(
@@ -82,6 +87,10 @@ class ActorSessionTests(unittest.TestCase):
                     "project_workspace_dir": str(project_workspace_dir),
                     "thread_id": thread_id,
                     "app_server_socket": socket_path,
+                    "codex_runtime": {
+                        "executable": str(codex_bin.resolve(strict=False)),
+                        "version": "codex-cli test-runtime",
+                    },
                     "updated_at": "2026-07-13T00:00:00Z",
                 },
                 ensure_ascii=True,
@@ -92,6 +101,12 @@ class ActorSessionTests(unittest.TestCase):
         )
         actor_capability.seed_actor_capabilities(instance_json)
         return instance_json
+
+    def test_actor_session_constructor_has_no_runtime_override(self) -> None:
+        self.assertEqual(
+            list(inspect.signature(self.actor_session.ActorSession).parameters),
+            ["shared_root", "repo_root"],
+        )
 
     def test_input_actor_turn_updates_capability_then_uses_shared_input_turn_for_start_and_steer(self) -> None:
         instance_json = self._write_instance()
@@ -231,7 +246,7 @@ class ActorSessionTests(unittest.TestCase):
         self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
         self.actor_session.app_server.thread_resume = fake_resume
 
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT, codex_bin="codex-test")
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
         descriptor = session.resolve_attach("act-pm-session")
         expected_instance_root = instance_json.parent.resolve(strict=False)
         expected_workspace = expected_instance_root / "workspace"
@@ -239,8 +254,18 @@ class ActorSessionTests(unittest.TestCase):
         self.assertEqual(descriptor.actor_id, "act-pm-session")
         self.assertEqual(descriptor.thread_id, "thr-attach")
         self.assertEqual(descriptor.cwd, expected_workspace)
-        self.assertEqual(descriptor.argv, ("codex-test", "resume", "--remote", "unix:///tmp/app-server-attach.sock", "thr-attach"))
+        self.assertEqual(
+            descriptor.argv,
+            (
+                str((self.root / "bin" / "codex-test").resolve(strict=False)),
+                "resume",
+                "--remote",
+                "unix:///tmp/app-server-attach.sock",
+                "thr-attach",
+            ),
+        )
         self.assertEqual(descriptor.env["BUDDYSWITCH_ACTOR_ID"], "act-pm-session")
+        self.assertEqual(descriptor.env["BUDDYSWITCH_SHARED_ROOT"], str(instance_json.parents[2].resolve(strict=False)))
         self.assertEqual(descriptor.env["BUDDYSWITCH_INSTANCE_JSON"], str(expected_instance_root / "instance.json"))
         self.assertEqual(descriptor.env["BUDDYSWITCH_ROLE_ID"], "pm")
         self.assertEqual(descriptor.env["HOME"], str(expected_instance_root / "home"))
@@ -251,6 +276,50 @@ class ActorSessionTests(unittest.TestCase):
         self.assertEqual(calls[0]["shared_project_workspace_dir"], instance_json.parents[2].resolve(strict=False) / "project" / "workspace")
         self.assertEqual(descriptor.env["BUDDYSWITCH_PROJECT_WORKSPACE_DIR"], str(instance_json.parents[2].resolve(strict=False) / "project" / "workspace"))
         self.assertEqual(calls[0]["permissions"], "buddyswitch-runtime")
+
+    def test_resolve_attach_requires_recorded_codex_runtime_before_app_server_call(self) -> None:
+        instance_json = self._write_instance(thread_id="thr-attach")
+        payload = json.loads(instance_json.read_text(encoding="utf-8"))
+        payload.pop("codex_runtime")
+        instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        calls: list[bool] = []
+        original_resume = self.actor_session.app_server.thread_resume
+
+        def fake_resume(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            calls.append(True)
+            return {"thread": {"id": "thr-attach"}}
+
+        self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
+        self.actor_session.app_server.thread_resume = fake_resume
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+
+        with self.assertRaises(self.actor_session.codex_runtime.CodexRuntimeError) as raised:
+            session.resolve_attach("act-pm-session")
+
+        self.assertEqual(raised.exception.code, "INVALID_RUNTIME_RECORD")
+        self.assertEqual(calls, [])
+
+    def test_resolve_attach_rejects_changed_codex_runtime_before_app_server_call(self) -> None:
+        instance_json = self._write_instance(thread_id="thr-attach")
+        codex_bin = self.root / "bin" / "codex-test"
+        codex_bin.write_text("#!/bin/sh\nprintf '%s\\n' 'codex-cli changed-runtime'\n", encoding="utf-8")
+        codex_bin.chmod(0o755)
+        calls: list[bool] = []
+        original_resume = self.actor_session.app_server.thread_resume
+
+        def fake_resume(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            calls.append(True)
+            return {"thread": {"id": "thr-attach"}}
+
+        self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
+        self.actor_session.app_server.thread_resume = fake_resume
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+
+        with self.assertRaises(self.actor_session.codex_runtime.CodexRuntimeError) as raised:
+            session.resolve_attach("act-pm-session")
+
+        self.assertEqual(raised.exception.code, "RUNTIME_MISMATCH")
+        self.assertEqual(calls, [])
 
     def test_resolve_attach_rejects_tampered_absolute_instance_root_and_workspace_dir(self) -> None:
         instance_json = self._write_instance(thread_id="thr-attach", app_server_socket="/tmp/app-server-attach.sock")
@@ -345,12 +414,12 @@ class ActorSessionTests(unittest.TestCase):
         self.addCleanup(setattr, self.actor_session.os, "execvpe", original_execvpe)
         self.actor_session.app_server.thread_resume = fake_resume
         self.actor_session.os.execvpe = fake_execvpe
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT, codex_bin="codex-test")
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
 
         with self.assertRaisesRegex(RuntimeError, "execvpe called"):
             session.exec_attach("act-pm-session")
 
-        self.assertEqual(exec_calls[0]["file"], "codex-test")
+        self.assertEqual(exec_calls[0]["file"], str((self.root / "bin" / "codex-test").resolve(strict=False)))
         self.assertEqual(exec_calls[0]["argv"][-1], "thr-exec")
         self.assertEqual(exec_calls[0]["env"]["BUDDYSWITCH_ACTOR_ID"], "act-pm-session")
 

@@ -95,6 +95,10 @@ buddyswitch_app_server_is_active() {
 
 buddyswitch_app_server_ensure() {
   local output socket_path app_server_pid app_server_log active_role tmp_prefix
+  if [[ "${BUDDYSWITCH_CODEX_BIN:-}" != /* || ! -x "${BUDDYSWITCH_CODEX_BIN}" ]]; then
+    echo "A valid absolute BUDDYSWITCH_CODEX_BIN is required." >&2
+    return 2
+  fi
   active_role="${BUDDYSWITCH_ROLE_ID:-${BUDDYSWITCH_START_ROLE:-}}"
   if [[ -n "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
     tmp_prefix="${BUDDYSWITCH_INSTANCE_TMP}/zsh"
@@ -118,7 +122,8 @@ buddyswitch_app_server_ensure() {
     BUDDYSWITCH_RUNTIME_BROKER_SOCKET="${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" \
     "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_APP_SERVER_HELPER}" ensure \
       --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
-      --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}"
+      --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}" \
+      --codex-bin "${BUDDYSWITCH_CODEX_BIN}"
   )" || {
     if [[ -n "${output:-}" ]]; then
       echo "${output}" >&2

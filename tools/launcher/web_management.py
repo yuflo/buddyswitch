@@ -29,6 +29,7 @@ import imessage_channel
 import host_control as host_control_module
 import actor_session
 import cli_contract
+import codex_runtime
 from env.domain import task_read, track_read
 from env.domain.identity import ActorIdentityProfile, IdentityRef
 from env.repos import runtime_files
@@ -150,6 +151,10 @@ def map_host_control_failure(error: host_control_module.HostControlError) -> Htt
         return HttpError(status=400, code="INVALID_REQUEST", message=error.message)
     if error.code == "NOT_FOUND":
         return HttpError(status=404, code="NOT_FOUND", message=error.message)
+    if error.code == "RUNTIME_MISMATCH":
+        return HttpError(status=409, code="RUNTIME_MISMATCH", message=error.message)
+    if error.code == "RUNTIME_UNAVAILABLE":
+        return HttpError(status=503, code="RUNTIME_UNAVAILABLE", message=error.message)
     if error.code in {"LIFECYCLE_BLOCKED", "LOCK_BUSY"} or error.returncode in {3, 4}:
         return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=error.message)
     return HttpError(status=502, code="COMMAND_FAILED", message=error.message)
@@ -167,6 +172,10 @@ def map_actor_session_failure(error: actor_session.ActorSessionError) -> HttpErr
     if message.startswith("actor app server unhealthy"):
         return HttpError(status=409, code="OPEN_TUI_BLOCKED", message="Instance is unhealthy.")
     return HttpError(status=502, code="COMMAND_FAILED", message=message)
+
+
+def map_codex_runtime_failure(error: codex_runtime.CodexRuntimeError) -> HttpError:
+    return HttpError(status=409, code="RUNTIME_MISMATCH", message=str(error))
 
 
 def create_server(host: str, port: int, service: "WebManagementService") -> ThreadingHTTPServer:
@@ -588,6 +597,8 @@ class WebManagementService:
             ).resolve_attach(actor_id)
         except actor_session.ActorSessionError as exc:
             raise map_actor_session_failure(exc) from exc
+        except codex_runtime.CodexRuntimeError as exc:
+            raise map_codex_runtime_failure(exc) from exc
         command = build_open_tui_attach_command(descriptor)
         if self._platform_name != "darwin":
             raise HttpError(

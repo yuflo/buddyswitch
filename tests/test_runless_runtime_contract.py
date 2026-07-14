@@ -152,6 +152,8 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             shell = (
                 f"BUDDYSWITCH_SHARED_ROOT={tmp}/shared "
                 f"BUDDYSWITCH_SOURCE_HOME={tmp}/home "
+                "BUDDYSWITCH_CODEX_BIN=/bin/sh "
+                "BUDDYSWITCH_CODEX_VERSION=codex-cli-test-runtime "
                 "bash -lc '"
                 "source tools/launcher/env.sh; "
                 "buddyswitch_env_init; "
@@ -177,8 +179,13 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "instance_root",
                 "workspace_dir",
                 "browser_port",
+                "codex_runtime",
                 "updated_at",
             },
+        )
+        self.assertEqual(
+            payload["codex_runtime"],
+            {"executable": "/bin/sh", "version": "codex-cli-test-runtime"},
         )
 
     def test_context_discovery_writes_no_run_reservation_or_run_content(self) -> None:

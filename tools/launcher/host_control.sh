@@ -31,6 +31,9 @@ host_control_error_code_for_status() {
     4)
       printf '%s\n' "LOCK_BUSY"
       ;;
+    5)
+      printf '%s\n' "RUNTIME_MISMATCH"
+      ;;
     *)
       printf '%s\n' "COMMAND_FAILED"
       ;;
@@ -302,12 +305,13 @@ buddyswitch_instance_require_safe_delete_root() {
 }
 
 start_codex() {
-  local role="${1:-}" actor_id instance_json bootstrap_stdout bootstrap_status diagnostics_file
+  local role="${1:-}" codex_bin="${2:-}" codex_version="${3:-}"
+  local actor_id instance_json bootstrap_stdout bootstrap_status diagnostics_file
 
   actor_id=""
   instance_json=""
-  if [[ $# -ne 1 ]]; then
-    echo "start requires <role-id>" >&2
+  if [[ $# -ne 3 ]]; then
+    echo "start requires <role-id> <codex-executable> <codex-version>" >&2
     return 2
   fi
   if [[ -z "${role}" || "${role}" == -* ]]; then
@@ -316,6 +320,10 @@ start_codex() {
   fi
 
   buddyswitch_validate_role_id "${role}" || return $?
+  if [[ "${codex_bin}" != /* || ! -x "${codex_bin}" || -z "${codex_version}" ]]; then
+    echo "start requires a valid Codex runtime descriptor" >&2
+    return 2
+  fi
   actor_id="$(buddyswitch_generate_actor_id "${role}")"
   buddyswitch_env_bind_instance "${actor_id}" || return $?
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
@@ -329,6 +337,8 @@ start_codex() {
       unset BUDDYSWITCH_INSTANCE_JSON
       BUDDYSWITCH_START_ROLE="${role}" \
       BUDDYSWITCH_START_ACTOR_ID="${actor_id}" \
+      BUDDYSWITCH_START_CODEX_BIN="${codex_bin}" \
+      BUDDYSWITCH_START_CODEX_VERSION="${codex_version}" \
       BUDDYSWITCH_START_DIAGNOSTICS_FILE="${diagnostics_file}" \
       BUDDYSWITCH_HOST_CONTROL_INTERNAL=1 \
         buddyswitch_with_runtime_lock "${HOST_CONTROL_SELF}" "start-bootstrap-locked"
@@ -419,10 +429,13 @@ buddyswitch_start_thread_bootstrap_with_retry() {
 }
 
 start_locked_bootstrap() {
-  local requested_role requested_actor_id app_server_json thread_json thread_id browser_output
+  local requested_role requested_actor_id requested_codex_bin requested_codex_version
+  local app_server_json thread_json thread_id browser_output
   buddyswitch_require_runtime_lock || return $?
   requested_role="${BUDDYSWITCH_START_ROLE:-}"
   requested_actor_id="${BUDDYSWITCH_START_ACTOR_ID:-}"
+  requested_codex_bin="${BUDDYSWITCH_START_CODEX_BIN:-}"
+  requested_codex_version="${BUDDYSWITCH_START_CODEX_VERSION:-}"
 
   if [[ -z "${requested_role}" ]]; then
     echo "BUDDYSWITCH_START_ROLE is required for product instance bootstrap." >&2
@@ -432,6 +445,12 @@ start_locked_bootstrap() {
     echo "BUDDYSWITCH_START_ACTOR_ID is required for product instance bootstrap." >&2
     return 2
   fi
+  if [[ "${requested_codex_bin}" != /* || ! -x "${requested_codex_bin}" || -z "${requested_codex_version}" ]]; then
+    echo "A valid Codex runtime descriptor is required for product instance bootstrap." >&2
+    return 2
+  fi
+  export BUDDYSWITCH_CODEX_BIN="${requested_codex_bin}"
+  export BUDDYSWITCH_CODEX_VERSION="${requested_codex_version}"
   buddyswitch_validate_role_id "${requested_role}" || return $?
   buddyswitch_validate_actor_id "${requested_actor_id}" || return $?
   buddyswitch_require_env_profile "${requested_role}" || return $?
@@ -667,14 +686,46 @@ print(json.dumps(payload, ensure_ascii=True))
 PY
 }
 
+host_control_validate_recorded_codex_runtime() {
+  local actor_id="$1" codex_bin="$2" codex_version="$3"
+  if ! "${BUDDYSWITCH_PYTHON}" - \
+    "$(buddyswitch_instance_json_path "${actor_id}")" \
+    "${codex_bin}" \
+    "${codex_version}" \
+    "${HOST_CONTROL_DIR}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[4])
+import codex_runtime
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    runtime = codex_runtime.runtime_from_instance(payload)
+    if str(runtime.executable) != sys.argv[2] or runtime.version != sys.argv[3]:
+        raise codex_runtime.CodexRuntimeError(
+            "RUNTIME_MISMATCH",
+            "Supplied Codex runtime does not match the actor record.",
+        )
+    codex_runtime.validate_codex_runtime(runtime)
+except (OSError, ValueError, codex_runtime.CodexRuntimeError) as exc:
+    print(str(exc), file=sys.stderr)
+    raise SystemExit(5) from None
+PY
+  then
+    return 5
+  fi
+}
+
 instance_resume() {
-  local actor_id="${1:-}" payload resume_status
+  local actor_id="${1:-}" codex_bin="${2:-}" codex_version="${3:-}" payload resume_status
   if [[ -z "${actor_id}" ]]; then
     echo "actor id is required" >&2
     return 2
   fi
-  if [[ $# -ne 1 ]]; then
-    echo "resume requires <actor-id>" >&2
+  if [[ $# -ne 3 || "${codex_bin}" != /* || ! -x "${codex_bin}" || -z "${codex_version}" ]]; then
+    echo "resume requires <actor-id> <absolute-codex-executable> <codex-version>" >&2
     return 2
   fi
 
@@ -683,7 +734,9 @@ instance_resume() {
       buddyswitch_with_runtime_lock \
       "${HOST_CONTROL_SELF}" \
       "instance-resume-locked" \
-      "${actor_id}"
+      "${actor_id}" \
+      "${codex_bin}" \
+      "${codex_version}"
   )"
   resume_status=$?
   if [[ "${resume_status}" -ne 0 ]]; then
@@ -696,7 +749,7 @@ instance_resume() {
 }
 
 instance_resume_locked() {
-  local actor_id="${1:-}" role thread_id app_server_json
+  local actor_id="${1:-}" codex_bin="${2:-}" codex_version="${3:-}" role thread_id app_server_json
   local browser_output="" resume_json="" resumed_thread_id
 
   buddyswitch_require_runtime_lock || return $?
@@ -708,6 +761,9 @@ instance_resume_locked() {
   buddyswitch_validate_actor_id "${actor_id}" || return $?
   role="$(buddyswitch_instance_validate_record "${actor_id}")" || return $?
   buddyswitch_env_bind_instance "${actor_id}" || return $?
+  host_control_validate_recorded_codex_runtime "${actor_id}" "${codex_bin}" "${codex_version}" || return $?
+  export BUDDYSWITCH_CODEX_BIN="${codex_bin}"
+  export BUDDYSWITCH_CODEX_VERSION="${codex_version}"
   thread_id="$(buddyswitch_instance_record_field "${actor_id}" "thread_id" || true)"
   if [[ -z "${thread_id}" ]]; then
     echo "Instance resume blocked: ${actor_id} has no thread id; delete it and start a new instance." >&2
@@ -899,6 +955,7 @@ payload = {
     "browser_port": instance_payload.get("browser_port"),
     "updated_at": instance_payload.get("updated_at"),
     "thread_id": instance_payload.get("thread_id"),
+    "codex_runtime": instance_payload.get("codex_runtime"),
     "app_server": app_server,
     "daemon": daemon,
     "runtime_broker": runtime_broker,
@@ -1049,11 +1106,11 @@ host_control_roles() {
 }
 
 host_control_start() {
-  if [[ $# -ne 1 ]]; then
-    echo "start requires <role-id>" >&2
+  if [[ $# -ne 3 ]]; then
+    echo "start requires <role-id> <codex-executable> <codex-version>" >&2
     return 2
   fi
-  start_codex "$1"
+  start_codex "$1" "$2" "$3"
 }
 
 host_control_list() {
@@ -1088,11 +1145,11 @@ host_control_clear() {
 }
 
 host_control_resume() {
-  if [[ $# -ne 1 ]]; then
-    echo "resume requires <actor-id>" >&2
+  if [[ $# -ne 3 ]]; then
+    echo "resume requires <actor-id> <absolute-codex-executable> <codex-version>" >&2
     return 2
   fi
-  instance_resume "$1"
+  instance_resume "$1" "$2" "$3"
 }
 
 host_control_stop() {

@@ -9,7 +9,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 HELPER_DIR = Path(__file__).resolve().parent
@@ -19,9 +19,10 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 try:  # pragma: no cover - import mode depends on caller
-    from . import actor_capability
+    from . import actor_capability, codex_runtime
 except ImportError:  # pragma: no cover
     import actor_capability  # type: ignore[no-redef]
+    import codex_runtime  # type: ignore[no-redef]
 
 
 REPO_ROOT = HELPER_DIR.parents[1]
@@ -105,9 +106,11 @@ class HostControl:
         *,
         repo_root: Path = REPO_ROOT,
         runner: _HostControlScriptRunner | Any | None = None,
+        runtime_resolver: Callable[[], codex_runtime.CodexRuntime] | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._runner = runner or _HostControlScriptRunner(repo_root=repo_root)
+        self._runtime_resolver = runtime_resolver or self._resolve_runtime
 
     def roles(self) -> list[dict[str, object]]:
         payload = self._run("roles", [], timeout_seconds=10)
@@ -115,7 +118,15 @@ class HostControl:
 
     def start(self, role_id: str) -> dict[str, object]:
         role = validate_role_id(role_id)
-        payload = self._run("start", [role], timeout_seconds=120)
+        try:
+            runtime = self._runtime_resolver()
+        except codex_runtime.CodexRuntimeError as exc:
+            raise HostControlError(exc.code, str(exc), returncode=5) from exc
+        payload = self._run(
+            "start",
+            [role, str(runtime.executable), runtime.version],
+            timeout_seconds=120,
+        )
         _require_str_fields(payload, "start", ("actor_id", "role", "workspace_dir", "project_workspace_dir", "instance_record"))
         diagnostics = payload.get("diagnostics")
         if diagnostics is not None and (
@@ -136,6 +147,7 @@ class HostControl:
         _require_str_fields(payload, "status", ("actor_id", "role", "status", "workspace_dir", "updated_at"))
         _require_nullable_str(payload, "status", "thread_id")
         _require_nullable_int(payload, "status", "browser_port")
+        _require_nullable_dict(payload, "status", "codex_runtime")
         _require_dict_fields(payload, "status", ("app_server", "daemon", "runtime_broker", "thread"))
         return payload
 
@@ -145,7 +157,13 @@ class HostControl:
         return payload
 
     def resume(self, actor_id: str) -> dict[str, object]:
-        payload = self._run("resume", [validate_actor_id(actor_id)], timeout_seconds=60)
+        normalized = validate_actor_id(actor_id)
+        runtime = self._recorded_runtime(normalized)
+        payload = self._run(
+            "resume",
+            [normalized, str(runtime.executable), runtime.version],
+            timeout_seconds=60,
+        )
         _require_str_fields(payload, "resume", ("actor_id", "thread_id", "status"))
         return payload
 
@@ -205,6 +223,11 @@ class HostControl:
     def _run(self, operation: str, args: list[str], *, timeout_seconds: float) -> dict[str, object]:
         return self._runner.run(operation, args, timeout_seconds=timeout_seconds)
 
+    @staticmethod
+    def _resolve_runtime() -> codex_runtime.CodexRuntime:
+        candidate = os.environ.get("BUDDYSWITCH_CODEX_BIN")
+        return codex_runtime.resolve_codex_runtime(candidate)
+
     def _shared_root(self) -> Path:
         raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
         if isinstance(raw_shared_root, str) and raw_shared_root.strip():
@@ -225,6 +248,21 @@ class HostControl:
         if not instance_json.is_file():
             raise HostControlError("NOT_FOUND", f"actor instance not found: {actor_id}", returncode=1)
         return instance_json
+
+    def _recorded_runtime(self, actor_id: str) -> codex_runtime.CodexRuntime:
+        instance_json = self._instance_json_for_actor(actor_id)
+        try:
+            payload = json.loads(instance_json.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("record must be an object")
+            runtime = codex_runtime.runtime_from_instance(payload)
+            return codex_runtime.validate_codex_runtime(runtime)
+        except (OSError, json.JSONDecodeError, ValueError, codex_runtime.CodexRuntimeError) as exc:
+            raise HostControlError(
+                "RUNTIME_MISMATCH",
+                f"Actor Codex runtime is invalid for {actor_id}: {exc}. Stop/delete and recreate the instance.",
+                returncode=5,
+            ) from exc
 
 
 def validate_actor_id(actor_id: str) -> str:
@@ -284,6 +322,15 @@ def _require_nullable_int(payload: dict[str, object], operation: str, field_name
         raise HostControlError(
             "COMMAND_FAILED",
             f"Invalid Host Control {operation} payload: {field_name} must be an integer or null.",
+            returncode=1,
+        )
+
+
+def _require_nullable_dict(payload: dict[str, object], operation: str, field_name: str) -> None:
+    if field_name not in payload or (payload[field_name] is not None and not isinstance(payload[field_name], dict)):
+        raise HostControlError(
+            "COMMAND_FAILED",
+            f"Invalid Host Control {operation} payload: {field_name} must be an object or null.",
             returncode=1,
         )
 

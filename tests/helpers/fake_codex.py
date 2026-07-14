@@ -20,6 +20,25 @@ RUNNING = True
 MEMORY_STATE: dict[str, object] = {}
 
 
+def _shared_root_is_temporary() -> bool:
+    raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+    raw_registry = os.environ.get("BUDDYSWITCH_TEST_PROCESS_REGISTRY")
+    if not raw_shared_root or not raw_registry:
+        return False
+    shared_root = Path(raw_shared_root).expanduser().resolve(strict=False)
+    registry_path = Path(raw_registry).expanduser().resolve(strict=False)
+    temporary_roots = (
+        Path("/tmp").resolve(strict=False),
+        Path("/var/tmp").resolve(strict=False),
+        Path("/private/var/folders").resolve(strict=False),
+        Path("/var/folders").resolve(strict=False),
+    )
+    return any(
+        shared_root.is_relative_to(temporary_root) and registry_path.is_relative_to(temporary_root)
+        for temporary_root in temporary_roots
+    )
+
+
 def _handle_exit(_signum: int, _frame: object) -> None:
     global RUNNING
     RUNNING = False
@@ -1081,6 +1100,12 @@ def run_fake_app_server(socket_url: str, entry: dict[str, object]) -> int:
 
 
 def main(argv: list[str]) -> int:
+    if argv == ["--version"]:
+        print("codex-cli fake-test")
+        return 0
+    if not _shared_root_is_temporary():
+        print("fake Codex requires a temporary BUDDYSWITCH_SHARED_ROOT", file=sys.stderr)
+        return 2
     codex_home = Path(os.environ["CODEX_HOME"])
     entry: dict[str, object] = {
         "argv": argv,

@@ -12,10 +12,15 @@ from pathlib import Path
 from unittest import mock
 
 from tools.launcher import actor_capability
+from tools.launcher import codex_runtime
 from tools.launcher import host_control as HOST_CONTROL
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_RUNTIME = codex_runtime.CodexRuntime(
+    executable=Path("/opt/buddyswitch/codex"),
+    version="codex-cli test-runtime",
+)
 
 
 def valid_role_row() -> dict[str, object]:
@@ -43,6 +48,10 @@ def write_instance(
 ) -> Path:
     instance_root = shared_root / "instances" / actor_id
     instance_root.mkdir(parents=True, exist_ok=True)
+    codex_bin = shared_root / "test-runtime" / "codex"
+    codex_bin.parent.mkdir(parents=True, exist_ok=True)
+    codex_bin.write_text("#!/bin/sh\nprintf '%s\\n' 'codex-cli test-runtime'\n", encoding="utf-8")
+    codex_bin.chmod(0o755)
     instance_json = instance_root / "instance.json"
     instance_json.write_text(
         json.dumps(
@@ -54,6 +63,10 @@ def write_instance(
                 "workspace_dir": str(instance_root / "workspace"),
                 "thread_id": "thread-main",
                 "browser_port": 9222,
+                "codex_runtime": {
+                    "executable": str(codex_bin.resolve(strict=False)),
+                    "version": "codex-cli test-runtime",
+                },
                 "updated_at": "2026-07-13T00:00:00Z",
             },
             ensure_ascii=True,
@@ -83,6 +96,129 @@ class FakePrivateRunner:
 
 
 class HostControlTests(unittest.TestCase):
+    def test_start_resolves_runtime_once_and_passes_descriptor_to_private_owner(self) -> None:
+        runner = FakePrivateRunner()
+        runtime = codex_runtime.CodexRuntime(
+            executable=Path("/opt/buddyswitch/codex"),
+            version="codex-cli test-runtime",
+        )
+        runner.add(
+            "start",
+            ["pm", str(runtime.executable), runtime.version],
+            {
+                "actor_id": "act-pm-demo",
+                "role": "pm",
+                "workspace_dir": "/tmp/workspace",
+                "project_workspace_dir": "/tmp/project/workspace",
+                "instance_record": "/tmp/instances/act-pm-demo/instance.json",
+            },
+        )
+        resolutions: list[bool] = []
+
+        def resolve_runtime() -> codex_runtime.CodexRuntime:
+            resolutions.append(True)
+            return runtime
+
+        control = HOST_CONTROL.HostControl(
+            repo_root=ROOT,
+            runner=runner,
+            runtime_resolver=resolve_runtime,
+        )
+
+        payload = control.start("pm")
+
+        self.assertEqual(payload["actor_id"], "act-pm-demo")
+        self.assertEqual(resolutions, [True])
+        self.assertEqual(
+            [(operation, args) for operation, args, _timeout in runner.calls],
+            [("start", ("pm", "/opt/buddyswitch/codex", "codex-cli test-runtime"))],
+        )
+
+    def test_resume_uses_recorded_runtime_and_ignores_current_selection(self) -> None:
+        runner = FakePrivateRunner()
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / "shared"
+            instance_json = write_instance(shared_root)
+            record = json.loads(instance_json.read_text(encoding="utf-8"))["codex_runtime"]
+            runner.add(
+                "resume",
+                ["act-pm-demo", record["executable"], record["version"]],
+                {"actor_id": "act-pm-demo", "thread_id": "thread-main", "status": "active"},
+            )
+            previous_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+            previous_codex_bin = os.environ.get("BUDDYSWITCH_CODEX_BIN")
+            os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            os.environ["BUDDYSWITCH_CODEX_BIN"] = "/current/path/must-not-win"
+            try:
+                control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
+                payload = control.resume("act-pm-demo")
+            finally:
+                self._restore_env_value("BUDDYSWITCH_SHARED_ROOT", previous_shared_root)
+                self._restore_env_value("BUDDYSWITCH_CODEX_BIN", previous_codex_bin)
+
+        self.assertEqual(payload["status"], "active")
+        self.assertEqual(runner.calls[0][1], ("act-pm-demo", record["executable"], record["version"]))
+
+    def test_resume_rejects_missing_or_changed_recorded_runtime_without_private_call(self) -> None:
+        for invalid_state in ("missing", "changed"):
+            with self.subTest(invalid_state=invalid_state), tempfile.TemporaryDirectory() as temp_root:
+                shared_root = Path(temp_root) / "shared"
+                instance_json = write_instance(shared_root)
+                record = json.loads(instance_json.read_text(encoding="utf-8"))
+                if invalid_state == "missing":
+                    record.pop("codex_runtime")
+                else:
+                    codex_bin = Path(record["codex_runtime"]["executable"])
+                    codex_bin.write_text("#!/bin/sh\nprintf '%s\\n' 'codex-cli changed-runtime'\n", encoding="utf-8")
+                    codex_bin.chmod(0o755)
+                instance_json.write_text(json.dumps(record, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+                previous_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+                os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+                runner = FakePrivateRunner()
+                try:
+                    control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
+                    with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+                        control.resume("act-pm-demo")
+                finally:
+                    self._restore_env_value("BUDDYSWITCH_SHARED_ROOT", previous_shared_root)
+
+                self.assertEqual(raised.exception.code, "RUNTIME_MISMATCH")
+                self.assertEqual(runner.calls, [])
+
+    def test_stop_and_delete_do_not_require_recorded_runtime(self) -> None:
+        runner = FakePrivateRunner()
+        runner.add("stop", ["act-pm-demo"], {"actor_id": "act-pm-demo", "status": "inactive"})
+        runner.add("delete", ["act-pm-demo"], {"actor_id": "act-pm-demo", "deleted": True})
+        control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
+
+        self.assertEqual(control.stop("act-pm-demo")["status"], "inactive")
+        self.assertTrue(control.delete("act-pm-demo")["deleted"])
+        self.assertEqual([call[0] for call in runner.calls], ["stop", "delete"])
+
+    def test_private_status_reports_missing_recorded_runtime_as_null(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            shared_root = root / "shared"
+            instance_json = write_instance(shared_root)
+            record = json.loads(instance_json.read_text(encoding="utf-8"))
+            record.pop("codex_runtime")
+            instance_json.write_text(json.dumps(record, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_SOURCE_HOME"] = str(root / "home")
+
+            completed = subprocess.run(
+                [str(ROOT / "tools" / "launcher" / "host_control.sh"), "status", "act-pm-demo"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertIsNone(json.loads(completed.stdout)["codex_runtime"])
+
     def test_public_facade_exposes_exact_host_control_operations(self) -> None:
         expected = {
             "roles": ["self"],
@@ -110,7 +246,7 @@ class HostControlTests(unittest.TestCase):
         runner.add("roles", [], {"roles": [role_row]})
         runner.add(
             "start",
-            ["pm"],
+            ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version],
             {
                 "actor_id": "act-pm-demo",
                 "role": "pm",
@@ -132,6 +268,7 @@ class HostControlTests(unittest.TestCase):
                 "browser_port": None,
                 "updated_at": "2026-07-13T00:00:00Z",
                 "thread_id": "thread-main",
+                "codex_runtime": TEST_RUNTIME.to_record(),
                 "app_server": {},
                 "daemon": {},
                 "runtime_broker": {},
@@ -143,27 +280,32 @@ class HostControlTests(unittest.TestCase):
             ["act-pm-demo"],
             {"actor_id": "act-pm-demo", "previous_thread_id": "thread-old", "thread_id": "thread-new"},
         )
-        runner.add("resume", ["act-pm-demo"], {"actor_id": "act-pm-demo", "thread_id": "thread-main", "status": "active"})
+        runner.add(
+            "resume",
+            ["act-pm-demo", str(TEST_RUNTIME.executable), TEST_RUNTIME.version],
+            {"actor_id": "act-pm-demo", "thread_id": "thread-main", "status": "active"},
+        )
         runner.add("stop", ["act-pm-demo"], {"actor_id": "act-pm-demo", "status": "inactive"})
         runner.add("delete", ["act-pm-demo"], {"actor_id": "act-pm-demo", "deleted": True})
         runner.add("interrupt", ["act-pm-demo"], {"actor_id": "act-pm-demo", "thread_id": "thread-main", "turn_id": "turn-1"})
         runner.add("compact", ["act-pm-demo"], {"actor_id": "act-pm-demo", "thread_id": "thread-main", "started": True})
-        control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
+        control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner, runtime_resolver=lambda: TEST_RUNTIME)
 
-        roles = control.roles()
-        started = control.start("pm")
-        instances = control.list_instances()
-        self.assertEqual(roles, [role_row])
-        self.assertEqual(started["actor_id"], "act-pm-demo")
-        self.assertEqual(instances, [instance_row])
-        self.assertEqual(control.list_instances("pm"), [instance_row])
-        self.assertEqual(control.status("act-pm-demo")["status"], "active")
-        self.assertEqual(control.clear("act-pm-demo")["thread_id"], "thread-new")
-        self.assertEqual(control.resume("act-pm-demo")["status"], "active")
-        self.assertEqual(control.stop("act-pm-demo")["status"], "inactive")
-        self.assertEqual(control.delete("act-pm-demo")["deleted"], True)
-        self.assertEqual(control.interrupt("act-pm-demo")["turn_id"], "turn-1")
-        self.assertEqual(control.compact("act-pm-demo")["started"], True)
+        with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
+            roles = control.roles()
+            started = control.start("pm")
+            instances = control.list_instances()
+            self.assertEqual(roles, [role_row])
+            self.assertEqual(started["actor_id"], "act-pm-demo")
+            self.assertEqual(instances, [instance_row])
+            self.assertEqual(control.list_instances("pm"), [instance_row])
+            self.assertEqual(control.status("act-pm-demo")["status"], "active")
+            self.assertEqual(control.clear("act-pm-demo")["thread_id"], "thread-new")
+            self.assertEqual(control.resume("act-pm-demo")["status"], "active")
+            self.assertEqual(control.stop("act-pm-demo")["status"], "inactive")
+            self.assertEqual(control.delete("act-pm-demo")["deleted"], True)
+            self.assertEqual(control.interrupt("act-pm-demo")["turn_id"], "turn-1")
+            self.assertEqual(control.compact("act-pm-demo")["started"], True)
         self.assertIsNot(roles[0], role_row)
         self.assertIsNot(instances[0], instance_row)
 
@@ -171,12 +313,12 @@ class HostControlTests(unittest.TestCase):
             [(operation, args) for operation, args, _timeout in runner.calls],
             [
                 ("roles", ()),
-                ("start", ("pm",)),
+                ("start", ("pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version)),
                 ("list", ()),
                 ("list", ("pm",)),
                 ("status", ("act-pm-demo",)),
                 ("clear", ("act-pm-demo",)),
-                ("resume", ("act-pm-demo",)),
+                ("resume", ("act-pm-demo", str(TEST_RUNTIME.executable), TEST_RUNTIME.version)),
                 ("stop", ("act-pm-demo",)),
                 ("delete", ("act-pm-demo",)),
                 ("interrupt", ("act-pm-demo",)),
@@ -264,7 +406,7 @@ class HostControlTests(unittest.TestCase):
         valid_payloads = {
             "start": (
                 lambda control: control.start("pm"),
-                ["pm"],
+                ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version],
                 {
                     "actor_id": "act-pm-demo",
                     "role": "pm",
@@ -286,6 +428,7 @@ class HostControlTests(unittest.TestCase):
                     "browser_port": None,
                     "updated_at": "2026-07-13T00:00:00Z",
                     "thread_id": "thread-main",
+                    "codex_runtime": TEST_RUNTIME.to_record(),
                     "app_server": {},
                     "daemon": {},
                     "runtime_broker": {},
@@ -303,7 +446,7 @@ class HostControlTests(unittest.TestCase):
             ),
             "resume": (
                 lambda control: control.resume("act-pm-demo"),
-                ["act-pm-demo"],
+                ["act-pm-demo", str(TEST_RUNTIME.executable), TEST_RUNTIME.version],
                 {"actor_id": "act-pm-demo", "thread_id": "thread-main", "status": "active"},
                 "thread_id",
                 [],
@@ -343,8 +486,15 @@ class HostControlTests(unittest.TestCase):
                 with self.subTest(operation=operation, payload=payload):
                     runner = FakePrivateRunner()
                     runner.add(operation, args, payload)
-                    control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
-                    with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+                    control = HOST_CONTROL.HostControl(
+                        repo_root=ROOT,
+                        runner=runner,
+                        runtime_resolver=lambda: TEST_RUNTIME,
+                    )
+                    with (
+                        mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME),
+                        self.assertRaises(HOST_CONTROL.HostControlError) as raised,
+                    ):
                         call(control)
                     self.assertEqual(raised.exception.code, "COMMAND_FAILED")
                     self.assertIn(field_name, raised.exception.message)
@@ -523,7 +673,7 @@ host_control_emit_error_for_output "$2" "$3"
 
     def test_host_control_script_start_uses_positional_private_role(self) -> None:
         completed = subprocess.run(
-            [str(ROOT / "tools" / "launcher" / "host_control.sh"), "start", "--bad"],
+            [str(ROOT / "tools" / "launcher" / "host_control.sh"), "start", "--bad", "/bin/sh", "test-version"],
             cwd=ROOT,
             text=True,
             capture_output=True,

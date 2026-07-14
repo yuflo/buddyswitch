@@ -17,6 +17,7 @@ if str(HELPER_DIR) not in sys.path:
 
 import actor_capability  # noqa: E402
 import app_server  # noqa: E402
+import codex_runtime  # noqa: E402
 
 
 VALID_ACTOR_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
@@ -46,6 +47,8 @@ class _ActorContext:
     instance_root: Path
     workspace_dir: Path
     project_workspace_dir: Path
+    shared_root: Path
+    runtime: codex_runtime.CodexRuntime
 
 
 def input_actor_turn(
@@ -86,10 +89,9 @@ def input_actor_turn(
 
 
 class ActorSession:
-    def __init__(self, *, shared_root: Path, repo_root: Path, codex_bin: str = "codex") -> None:
+    def __init__(self, *, shared_root: Path, repo_root: Path) -> None:
         self._shared_root = Path(shared_root).expanduser().resolve(strict=False)
         self._repo_root = Path(repo_root).expanduser().resolve(strict=False)
-        self._codex_bin = _require_text(codex_bin, "codex bin")
 
     def input(self, actor_id: str, text: str) -> dict[str, object]:
         context = self._context(actor_id)
@@ -126,7 +128,7 @@ class ActorSession:
             raise ActorSessionError(f"thread/resume returned unexpected thread id: {resumed_thread_id or ''}")
         env = _attach_env(context, repo_root=self._repo_root)
         argv = (
-            self._codex_bin,
+            str(context.runtime.executable),
             "resume",
             "--remote",
             f"unix://{context.socket_path}",
@@ -159,6 +161,7 @@ class ActorSession:
         payload = _read_instance(instance_json)
         if payload.get("actor_id") != normalized_actor_id:
             raise ActorSessionError(f"actor record mismatch: {normalized_actor_id}")
+        runtime = codex_runtime.validate_codex_runtime(codex_runtime.runtime_from_instance(payload))
         role = _require_text(payload.get("role"), "actor role")
         thread_id = _thread_id_from_record(payload)
         workspace_dir = instance_root / "workspace"
@@ -176,6 +179,8 @@ class ActorSession:
             instance_root=instance_root,
             workspace_dir=workspace_dir,
             project_workspace_dir=project_workspace_dir,
+            shared_root=self._shared_root,
+            runtime=runtime,
         )
 
 
@@ -207,6 +212,7 @@ def _attach_env(context: _ActorContext, *, repo_root: Path) -> dict[str, str]:
             "CODEX_HOME": str(context.instance_root / "codex-home"),
             "XDG_CONFIG_HOME": str(context.instance_root / "xdg-config"),
             "BUDDYSWITCH_REPO_ROOT": str(repo_root),
+            "BUDDYSWITCH_SHARED_ROOT": str(context.shared_root),
             "BUDDYSWITCH_ACTOR_ID": context.actor_id,
             "BUDDYSWITCH_ROLE_ID": context.role,
             "BUDDYSWITCH_INSTANCE_JSON": str(context.instance_json),

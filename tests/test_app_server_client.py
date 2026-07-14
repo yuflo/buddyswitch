@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import queue
@@ -1134,6 +1135,39 @@ class AppServerClientTests(unittest.TestCase):
             ]
         )
         self.assertEqual(args.permissions, "buddyswitch-runtime")
+
+    def test_ensure_command_requires_explicit_absolute_codex_runtime(self) -> None:
+        parser = APP_SERVER.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                [
+                    "ensure",
+                    "--actor-id",
+                    "act-pm-runtime",
+                    "--instance-root",
+                    "/tmp/act-pm-runtime",
+                ]
+            )
+
+        args = parser.parse_args(
+            [
+                "ensure",
+                "--actor-id",
+                "act-pm-runtime",
+                "--instance-root",
+                "/tmp/act-pm-runtime",
+                "--codex-bin",
+                "/opt/buddyswitch/codex",
+            ]
+        )
+        self.assertEqual(args.codex_bin, "/opt/buddyswitch/codex")
+        self.assertIs(
+            inspect.signature(APP_SERVER.ensure_app_server).parameters["codex_bin"].default,
+            inspect.Parameter.empty,
+        )
+
+        with self.assertRaisesRegex(APP_SERVER.AppServerError, "absolute path"):
+            APP_SERVER.ensure_app_server("act-pm-runtime", Path("/tmp/act-pm-runtime"), "codex")
 
     def test_input_command_rejects_legacy_instance_json_argument(self) -> None:
         parser = APP_SERVER.build_parser()

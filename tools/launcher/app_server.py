@@ -618,9 +618,15 @@ def app_server_status(socket_path: Path, pid_path: Path, marker_path: Path, log_
 def ensure_app_server(
     actor_id: str,
     instance_root: Path,
-    codex_bin: str = "codex",
+    codex_bin: str,
     startup_timeout_seconds: float = 10.0,
 ) -> dict[str, Any]:
+    codex_path = Path(codex_bin)
+    if not codex_path.is_absolute():
+        raise AppServerError("Codex executable must be an absolute path.")
+    codex_path = codex_path.resolve(strict=False)
+    if not codex_path.is_file() or not os.access(codex_path, os.X_OK):
+        raise AppServerError(f"Codex executable is unavailable: {codex_path}")
     socket_path = effective_socket_path(actor_id, instance_root, marker_file(instance_root))
     pid_path = pid_file(instance_root)
     marker_path = marker_file(instance_root)
@@ -642,7 +648,7 @@ def ensure_app_server(
     with log_path.open("ab") as handle:
         launch_cwd = instance_root / "workspace"
         process = subprocess.Popen(
-            [codex_bin, "app-server", "--listen", f"unix://{socket_path}"],
+            [str(codex_path), "app-server", "--listen", f"unix://{socket_path}"],
             stdin=subprocess.DEVNULL,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -1170,7 +1176,7 @@ def build_parser() -> argparse.ArgumentParser:
     ensure = subparsers.add_parser("ensure")
     ensure.add_argument("--actor-id", required=True)
     ensure.add_argument("--instance-root", required=True)
-    ensure.add_argument("--codex-bin", default="codex")
+    ensure.add_argument("--codex-bin", required=True)
     ensure.add_argument("--startup-timeout-seconds", type=float, default=10.0)
     ensure.set_defaults(func=_command_ensure)
 

@@ -525,6 +525,7 @@ codex_home="$3"
 source tools/launcher/env.sh
 export BUDDYSWITCH_SOURCE_HOME="${source_home}"
 export BUDDYSWITCH_CODEX_HOME="${codex_home}"
+export BUDDYSWITCH_CODEX_BIN="${temp_root}/bin/codex"
 export BUDDYSWITCH_HOME="${temp_root}/home"
 export BUDDYSWITCH_XDG_CONFIG_HOME="${temp_root}/xdg-config"
 buddyswitch_env_init
@@ -2638,11 +2639,13 @@ exec "$real_git" "$@"
                 "BUDDYSWITCH_HOME=\"$1\"\n"
                 "BUDDYSWITCH_CODEX_HOME=\"$2\"\n"
                 "BUDDYSWITCH_XDG_CONFIG_HOME=\"$3\"\n"
+                "BUDDYSWITCH_CODEX_BIN=\"$4/codex\"\n"
                 "buddyswitch_run_codex --search\n"
             )
             env = os.environ.copy()
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(temp_root_path / "shared")
             env.pop("BUDDYSWITCH_ROLE_ID", None)
             env.pop("BUDDYSWITCH_ACTOR_ID", None)
 
@@ -2669,6 +2672,42 @@ exec "$real_git" "$@"
             self.assertEqual(payload["argv"], ["--search"])
             self.assertIsNone(payload["active_role"])
             self.assertIsNone(payload["actor_id"])
+
+    def test_run_codex_uses_explicit_runtime_instead_of_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            path_bin = root / "path-bin"
+            runtime_bin = root / "runtime-bin"
+            path_bin.mkdir()
+            runtime_bin.mkdir()
+            capture_path = root / "selected.txt"
+            self._write_exec(
+                path_bin / "codex",
+                "#!/bin/sh\nprintf '%s\\n' path > \"$BUDDYSWITCH_TEST_CAPTURE\"\n",
+            )
+            self._write_exec(
+                runtime_bin / "codex",
+                "#!/bin/sh\nprintf '%s\\n' runtime > \"$BUDDYSWITCH_TEST_CAPTURE\"\n",
+            )
+            env = os.environ.copy()
+            env["PATH"] = f"{path_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_CODEX_BIN"] = str(runtime_bin / "codex")
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_HOME"] = str(root / "home")
+            env["BUDDYSWITCH_CODEX_HOME"] = str(root / "codex-home")
+            env["BUDDYSWITCH_XDG_CONFIG_HOME"] = str(root / "xdg-config")
+
+            completed = subprocess.run(
+                ["bash", "-c", "source tools/launcher/env.sh; buddyswitch_run_codex --version"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            self.assertEqual(capture_path.read_text(encoding="utf-8").strip(), "runtime")
 
     def test_product_mode_run_codex_rejects_native_search_with_native_env_tool_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -2974,6 +3013,13 @@ exec "$real_git" "$@"
             self.assertTrue(payload["actor_id"])
             self.assertIsNotNone(payload["instance_json"])
             self.assertIsInstance(instance_snapshot, dict)
+            self.assertEqual(
+                instance_snapshot["codex_runtime"],
+                {
+                    "executable": str((fake_bin / "codex").resolve()),
+                    "version": "codex-cli fake-test",
+                },
+            )
 
             instance_json_path = Path(payload["instance_json"])
             instance_root = shared_root / "instances" / payload["actor_id"]

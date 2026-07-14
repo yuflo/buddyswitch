@@ -33,7 +33,7 @@ os.environ.setdefault("BUDDYSWITCH_REPO_ROOT", str(REPO_ROOT))
 os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_shared_root_from_env() / "state"))
 
 from env.domain import task_read, track_read  # noqa: E402
-from tools.launcher import actor_session, central_daemon, central_daemon_core, cli_contract, host_control  # noqa: E402
+from tools.launcher import actor_session, central_daemon, central_daemon_core, cli_contract, codex_runtime, host_control  # noqa: E402
 
 
 DASH = "--"
@@ -342,7 +342,6 @@ def _actor_session() -> actor_session.ActorSession:
     return actor_session.ActorSession(
         shared_root=_shared_root_from_env(),
         repo_root=REPO_ROOT,
-        codex_bin=os.environ.get("BUDDYSWITCH_CODEX_BIN", "codex"),
     )
 
 
@@ -771,6 +770,9 @@ def _map_exception(exc: BaseException) -> cli_contract.CliError:
         return _map_host_control_error(exc)
     if isinstance(exc, actor_session.ActorSessionError):
         return _map_actor_session_error(exc)
+    if isinstance(exc, codex_runtime.CodexRuntimeError):
+        public_code = "RUNTIME_UNAVAILABLE" if exc.code == "RUNTIME_UNAVAILABLE" else "RUNTIME_MISMATCH"
+        return cli_contract.CliError(public_code, str(exc))
     return cli_contract.normalize_error(exc)
 
 
@@ -787,6 +789,8 @@ def _map_host_control_error(exc: host_control.HostControlError) -> cli_contract.
         return cli_contract.CliError("CONFLICT", exc.message)
     if exc.code in {"COMMAND_FAILED", "CAPABILITY_CONFIG_WRITE_FAILED"}:
         return cli_contract.CliError("EXECUTION_FAILED", exc.message)
+    if exc.code in {"RUNTIME_UNAVAILABLE", "RUNTIME_MISMATCH"}:
+        return cli_contract.CliError(exc.code, exc.message)
     return cli_contract.CliError("INTERNAL_ERROR", "Unexpected internal error")
 
 

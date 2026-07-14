@@ -657,6 +657,24 @@ class WebManagementUnitTests(unittest.TestCase):
                 502,
                 "COMMAND_FAILED",
             ),
+            (
+                WEB_MANAGEMENT.host_control_module.HostControlError(
+                    "RUNTIME_MISMATCH",
+                    "recorded runtime changed",
+                    returncode=5,
+                ),
+                409,
+                "RUNTIME_MISMATCH",
+            ),
+            (
+                WEB_MANAGEMENT.host_control_module.HostControlError(
+                    "RUNTIME_UNAVAILABLE",
+                    "runtime not found",
+                    returncode=5,
+                ),
+                503,
+                "RUNTIME_UNAVAILABLE",
+            ),
         ]
         for host_error, expected_status, expected_code in cases:
             with self.subTest(host_error=host_error):
@@ -1179,6 +1197,34 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 resolve_attach.assert_called_once_with("act-pm-demo")
                 self.assertEqual(runner.calls, [])
                 self.assertEqual(opener.commands, [])
+
+    def test_open_tui_route_maps_recorded_runtime_failure_before_opener(self) -> None:
+        runner = RecordingHostControl()
+        opener = FakeTerminalOpener()
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            host_control=runner,
+            terminal_opener=opener.open,
+            platform_name="darwin",
+        )
+        runtime_error = WEB_MANAGEMENT.codex_runtime.CodexRuntimeError(
+            "RUNTIME_MISMATCH",
+            "Codex runtime version mismatch.",
+        )
+
+        with (
+            mock.patch.object(
+                WEB_MANAGEMENT.actor_session.ActorSession,
+                "resolve_attach",
+                side_effect=runtime_error,
+            ),
+            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
+        ):
+            service.handle_api("POST", "/api/instances/act-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.code, "RUNTIME_MISMATCH")
+        self.assertEqual(opener.commands, [])
 
     def test_open_tui_route_rejects_unsupported_os_with_copy_command(self) -> None:
         runner = RecordingHostControl()

@@ -6,7 +6,7 @@ import io
 import json
 import unittest
 
-from tools.launcher import actor_session, cli, cli_contract, host_control
+from tools.launcher import actor_session, cli, cli_contract, codex_runtime, host_control
 
 
 class CliContractTests(unittest.TestCase):
@@ -76,6 +76,7 @@ class CliContractTests(unittest.TestCase):
             "PRECONDITION_FAILED": 4,
             "CONFIRMATION_REQUIRED": 4,
             "RUNTIME_UNAVAILABLE": 5,
+            "RUNTIME_MISMATCH": 5,
             "TIMEOUT": 5,
         }
 
@@ -120,6 +121,8 @@ class CliContractTests(unittest.TestCase):
             (host_control.HostControlError("CAPABILITY_CONFIG_INVALID", "bad capability", returncode=3), "PRECONDITION_FAILED"),
             (host_control.HostControlError("COMMAND_FAILED", "bad payload", returncode=1), "EXECUTION_FAILED"),
             (host_control.HostControlError("CAPABILITY_CONFIG_WRITE_FAILED", "write failed", returncode=2), "EXECUTION_FAILED"),
+            (host_control.HostControlError("RUNTIME_UNAVAILABLE", "missing runtime", returncode=5), "RUNTIME_UNAVAILABLE"),
+            (host_control.HostControlError("RUNTIME_MISMATCH", "changed runtime", returncode=5), "RUNTIME_MISMATCH"),
             (host_control.HostControlError("NEW_LOWER_LAYER_CODE", "typed but unknown", returncode=1), "INTERNAL_ERROR"),
         )
 
@@ -130,6 +133,14 @@ class CliContractTests(unittest.TestCase):
 
                 self.assertEqual(expected_code, mapped.code)
                 self.assertEqual(expected_code, payload["error"]["code"])
+
+    def test_cli_maps_codex_runtime_failures_without_reselecting_runtime(self) -> None:
+        for lower_code in ("INVALID_RUNTIME_RECORD", "RUNTIME_MISMATCH"):
+            with self.subTest(lower_code=lower_code):
+                mapped = cli._map_exception(codex_runtime.CodexRuntimeError(lower_code, "recorded runtime invalid"))
+
+                self.assertEqual(mapped.code, "RUNTIME_MISMATCH")
+                self.assertEqual(cli_contract.exit_code(mapped), 5)
 
     def test_cli_maps_actor_session_errors_without_hiding_known_runtime_failures(self) -> None:
         cases = (

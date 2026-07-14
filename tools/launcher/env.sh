@@ -397,11 +397,16 @@ buddyswitch_instance_activate() {
   local status="${3:-active}"
   local instance_json instance_dir
 
+  if [[ "${BUDDYSWITCH_CODEX_BIN:-}" != /* || ! -x "${BUDDYSWITCH_CODEX_BIN}" || -z "${BUDDYSWITCH_CODEX_VERSION:-}" ]]; then
+    echo "A valid Codex runtime descriptor is required to activate an instance." >&2
+    return 2
+  fi
+
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
   instance_dir="$(dirname "${instance_json}")"
   mkdir -p "${instance_dir}"
 
-  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${role}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_INSTANCE_ROOT}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${instance_json}" "${actor_id}" "${role}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_INSTANCE_ROOT}" "${BUDDYSWITCH_CODEX_BIN}" "${BUDDYSWITCH_CODEX_VERSION}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -413,6 +418,8 @@ role = sys.argv[3]
 status = sys.argv[4]
 workspace_dir = sys.argv[5]
 instance_root = sys.argv[6]
+codex_bin = sys.argv[7]
+codex_version = sys.argv[8]
 now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 payload = {
     "actor_id": actor_id,
@@ -421,6 +428,10 @@ payload = {
     "instance_root": instance_root,
     "workspace_dir": workspace_dir,
     "browser_port": None,
+    "codex_runtime": {
+        "executable": codex_bin,
+        "version": codex_version,
+    },
     "updated_at": now,
 }
 temp_path = instance_json.with_suffix(".tmp")
@@ -830,6 +841,10 @@ buddyswitch_run_codex() {
   if [[ -n "${BUDDYSWITCH_ROLE_ID:-}" || -n "${BUDDYSWITCH_ACTOR_ID:-}" ]]; then
     buddyswitch_reject_native_search_args "$@" || return $?
   fi
+  if [[ "${BUDDYSWITCH_CODEX_BIN:-}" != /* || ! -x "${BUDDYSWITCH_CODEX_BIN}" ]]; then
+    echo "A valid absolute BUDDYSWITCH_CODEX_BIN is required." >&2
+    return 2
+  fi
   if [[ -n "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
     mkdir -p "${BUDDYSWITCH_INSTANCE_TMP}"
     TMPDIR="${BUDDYSWITCH_INSTANCE_TMP}" \
@@ -840,13 +855,13 @@ buddyswitch_run_codex() {
     HOME="${BUDDYSWITCH_HOME}" \
     CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
     XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \
-    codex "$@"
+    "${BUDDYSWITCH_CODEX_BIN}" "$@"
     return $?
   fi
   HOME="${BUDDYSWITCH_HOME}" \
   CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
   XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \
-  codex "$@"
+  "${BUDDYSWITCH_CODEX_BIN}" "$@"
 }
 
 buddyswitch_validate_reset_root() {
