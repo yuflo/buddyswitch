@@ -48,5 +48,3 @@ class RunlessRuntimeCommandTests(unittest.TestCase):
         self.assertIn("env_tools", payload)
         self.assertNotIn("run", payload["env_tools"])
         self.assertNotIn("binding", payload["env_tools"])
-
-

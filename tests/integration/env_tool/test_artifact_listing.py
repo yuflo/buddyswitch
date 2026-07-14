@@ -703,4 +703,3 @@ class ArtifactListingTests(ArtifactEnvToolCase):
         self.assertFalse(track_filtered.get("ok"), msg=track_filtered)
         self.assertEqual(track_filtered.get("state_changed"), False, msg=track_filtered)
         self.assertEqual(track_filtered.get("durability"), "none", msg=track_filtered)
-

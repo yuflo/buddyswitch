@@ -525,5 +525,3 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             self.assertTrue(pid_alive(foreign_proc.pid), "foreign endpoint process must not be killed")
             instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
             self.assertIsNone(instance_payload["browser_port"])
-
-

@@ -248,4 +248,3 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         for token in forbidden:
             with self.subTest(token=token):
                 self.assertNotIn(token, source)
-

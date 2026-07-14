@@ -202,4 +202,3 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertIn("buddyswitch_central_daemon_ensure", shell_source)
         self.assertIn("buddyswitch_central_daemon_stop_if_idle", shell_source)
         self.assertTrue(CENTRAL_DAEMON_PATH.exists())
-

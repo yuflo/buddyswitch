@@ -712,4 +712,3 @@ class DaemonMailboxTests(unittest.TestCase):
             saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["scheduled_triggers"]["schedule-1"]["schedule_key"], "browser.page.idle:target-1")
             self.assertFalse(thread.is_alive())
-

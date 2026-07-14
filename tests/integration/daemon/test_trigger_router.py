@@ -563,4 +563,3 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             row = saved["scheduled_triggers"]["schedule-1"]
             self.assertEqual(row["status"], "canceled")
             self.assertEqual(row["canceled_at"], "2026-06-24T00:00:01Z")
-

@@ -51,4 +51,3 @@ class CodexRuntimeTests(unittest.TestCase):
                 with self.assertRaises(codex_runtime.CodexRuntimeError) as raised:
                     codex_runtime.runtime_from_instance(payload)
                 self.assertEqual(raised.exception.code, "INVALID_RUNTIME_RECORD")
-

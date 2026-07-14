@@ -253,5 +253,3 @@ class EnvClientPayloadCliTests(unittest.TestCase):
         for key, value in receipt.items():
             with self.subTest(key=key):
                 self.assertEqual(output.get(key), value, msg=output)
-
-

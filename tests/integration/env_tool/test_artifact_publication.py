@@ -720,4 +720,3 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertTrue(r2_read.get("ok"), msg=r2_read)
         self.assertEqual((r2_read.get("artifact") or {}).get("body"), "v2")
         self.assertEqual((r2_read.get("artifact") or {}).get("currentness"), "current")
-

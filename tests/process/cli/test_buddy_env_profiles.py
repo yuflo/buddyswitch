@@ -222,4 +222,3 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 manifest=manifest,
                 repo_root=ROOT,
             )
-

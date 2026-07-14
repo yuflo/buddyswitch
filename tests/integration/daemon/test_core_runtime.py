@@ -939,4 +939,3 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 )
 
             self.assertEqual(seen, [("one", "turn-user-1"), ("two", "turn-user-1")])
-

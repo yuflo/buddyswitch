@@ -405,4 +405,3 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertEqual(first["reachability_status"], "online")
             self.assertEqual(second["reachability_status"], "online")
             self.assertNotIn("ambiguous_online_actor", json.dumps([first, second], ensure_ascii=True))
-

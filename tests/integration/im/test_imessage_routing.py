@@ -385,4 +385,3 @@ class ImessageRoutingTests(unittest.TestCase):
             contact["active_identity_expires_at"],
             _format_test_utc(current[0] + timedelta(seconds=imessage_channel.ACTIVE_ACTOR_IDLE_SECONDS)),
         )
-

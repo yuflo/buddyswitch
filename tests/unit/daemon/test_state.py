@@ -283,4 +283,3 @@ class DaemonStateTests(unittest.TestCase):
         }
         self.assertNotIn("DaemonState", class_names)
         self.assertNotIn("DaemonState", assignments)
-

@@ -120,5 +120,3 @@ class ArtifactEnvToolCase(RuntimeWorkspaceTestCase):
                 "now": {"next": "seed", "blocker": None},
             },
         )
-
-

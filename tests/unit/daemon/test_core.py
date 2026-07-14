@@ -272,4 +272,3 @@ class DaemonCoreBindingTests(DaemonCoreTestCase):
                     "BUDDYSWITCH_ROLE_ID": "dev",
                 },
             )
-

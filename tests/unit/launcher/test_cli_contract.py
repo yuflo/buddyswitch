@@ -164,5 +164,3 @@ class CliContractTests(unittest.TestCase):
 
                 self.assertEqual(expected_code, mapped.code)
                 self.assertEqual(expected_code, payload["error"]["code"])
-
-

@@ -277,6 +277,3 @@ def _schema_v4_state() -> dict[str, Any]:
             }
         },
     }
-
-
-

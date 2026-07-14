@@ -1303,4 +1303,3 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     pid = event.get("pid")
                     if isinstance(pid, int):
                         self.assertTrue(wait_until(lambda pid=pid: not pid_alive(pid)), msg=f"fake Chrome pid still alive: {pid}")
-

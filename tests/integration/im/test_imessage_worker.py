@@ -220,4 +220,3 @@ class ImessageWorkerTests(unittest.TestCase):
         self.assertTrue(imsg.stopped)
         threads = getattr(worker, "_threads", [getattr(worker, "_thread", None)])
         self.assertTrue(all(thread is None or not thread.is_alive() for thread in threads))
-

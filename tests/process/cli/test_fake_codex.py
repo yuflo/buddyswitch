@@ -97,4 +97,3 @@ class FakeCodexTests(unittest.TestCase):
             )
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-

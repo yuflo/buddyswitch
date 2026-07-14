@@ -358,5 +358,3 @@ buddyswitch_workspace_cleanup_stale_state_projections
         self.assertIn("state=1", sandboxed.stdout)
         stderr_lower = sandboxed.stderr.lower()
         self.assertNotIn("retry without sandbox", stderr_lower)
-
-

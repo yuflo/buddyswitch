@@ -469,4 +469,3 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                 daemon_core.run_daemon(instance["instance_json"], handlers=[])
 
             self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume"])
-

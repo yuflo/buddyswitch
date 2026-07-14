@@ -174,4 +174,3 @@ class ImessageStateTests(unittest.TestCase):
         self.assertEqual(contact["external_identity_id"], "ext-existing")
         self.assertEqual(contact["pending_actor_choices"], {})
         self.assertNotIn("active_identity_id", contact)
-

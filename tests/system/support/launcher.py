@@ -394,4 +394,3 @@ class SystemLauncherHarness(LauncherTestSupport):
         self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
         self.assertFalse((runtime_skills / "write-prd").exists())
         self.assertFalse((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
-

@@ -292,4 +292,3 @@ print(json.dumps({{
             self.assertEqual(payload["probe_fields"], ["message"])
             self.assertTrue(payload["response"].get("ok"), msg=payload)
             self.assertEqual(payload["response"].get("echo"), "hello")
-

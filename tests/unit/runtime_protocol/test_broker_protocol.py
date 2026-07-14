@@ -234,4 +234,3 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
         self.assertFalse(response["ok"], msg=response)
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_DEADLINE_EXCEEDED")
         self.assertIs(response["error"]["retriable"], True)
-

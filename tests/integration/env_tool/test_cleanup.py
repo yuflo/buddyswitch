@@ -322,4 +322,3 @@ class CleanupRepositoryTests(unittest.TestCase):
         all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
         self.assertTrue(all_data_result["ok"], msg=all_data_result)
         self.assertFalse(dev_owned.exists())
-

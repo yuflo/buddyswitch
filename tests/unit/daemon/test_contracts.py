@@ -147,4 +147,3 @@ class DaemonContractsTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 self.assertIn("daemon_contracts", imports)
                 self.assertNotIn("daemon_core", imports)
-

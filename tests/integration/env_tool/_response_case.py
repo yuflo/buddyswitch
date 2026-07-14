@@ -327,5 +327,3 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
         if semantics["mutates"] == "broker_token":
             self.assertFalse(payload.get("mutates_product_state"), msg=payload)
             self.assertIn("token", json.dumps(payload.get("state_changes", [])), msg=payload)
-
-

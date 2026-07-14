@@ -289,4 +289,3 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
                     self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
                     self.assertEqual(rejected.get("durability"), "none")
                     self.assertFalse(env_store.artifact_file(artifact_id).exists())
-

@@ -460,4 +460,3 @@ class DaemonServiceContractTests(unittest.TestCase):
             "submit_" + "side_triage_prompt",
         ):
             self.assertFalse(hasattr(daemon_runtime.DaemonRuntime, old_name), old_name)
-

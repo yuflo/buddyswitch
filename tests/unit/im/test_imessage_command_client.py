@@ -196,4 +196,3 @@ class CommandImsgClientTests(unittest.TestCase):
             client.send(route={"chat_id": "3212", "sender": "hblouis@icloud.com"}, text="hello")
 
         self.assertEqual(poll_count, 1)
-

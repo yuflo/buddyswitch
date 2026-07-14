@@ -296,4 +296,3 @@ class ImessageOutboundTests(unittest.TestCase):
         self.assertEqual(imsg.sent, [])
         self.assertEqual(api.fetched_message_ids, ["msg-missing"])
         self.assertEqual(api.ack_calls, [])
-

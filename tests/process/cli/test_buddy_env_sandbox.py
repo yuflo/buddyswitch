@@ -724,5 +724,3 @@ web_search = "cached"
             self.assertEqual(completed.returncode, 2)
             self.assertIn("Env profile invalid:", completed.stderr)
             self.assertEqual(config_path.read_text(encoding="utf-8"), initial)
-
-

@@ -297,4 +297,3 @@ class ArtifactRelationTests(ArtifactEnvToolCase):
         self.assertIn(update_id, update_ids)
 
         self.assertNotIn("comment_ids", incoming_refs)
-

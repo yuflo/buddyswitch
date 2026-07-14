@@ -71,4 +71,3 @@ class SearchCliTests(unittest.TestCase):
         self.assertEqual(removed_open_browser.stdout, "")
         self.assertIn("invalid choice", removed_open_browser.stderr)
         self.assertIn("open-browser", removed_open_browser.stderr)
-

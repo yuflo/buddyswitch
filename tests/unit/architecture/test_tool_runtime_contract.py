@@ -316,4 +316,3 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
             package_dir = self._tool_dir(tool)
             for file_name in sorted(LEGACY_TOOL_PUBLIC_FILES):
                 self.assertFalse((package_dir / file_name).exists(), msg=f"legacy file still exists: {package_dir / file_name}")
-

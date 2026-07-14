@@ -816,4 +816,3 @@ class BrowserReleaseHandlerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("wrong target identity", result.message)
-
