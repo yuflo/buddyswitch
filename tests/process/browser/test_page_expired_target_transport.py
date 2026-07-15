@@ -4,11 +4,23 @@ from tests.integration.browser.cdp_lifecycle_harness import *  # noqa: F401,F403
 
 
 class TestPageExpiredTargetTransport(CdpBrowserLifecycleHarness):
-    def test_handler_child_closes_exact_target_without_mcp_session(self) -> None:
+    def test_handler_child_closes_exact_tab_target_when_page_target_id_differs(self) -> None:
         cdp_state: dict[str, object] = {
             "targets": [
-                {"targetId": "target-expired", "type": "page", "url": "https://example.com/expired"},
-                {"targetId": "target-survivor", "type": "page", "url": "https://example.com/survivor"},
+                {"targetId": "tab-expired", "type": "tab", "url": "https://example.com/expired"},
+                {
+                    "targetId": "page-expired",
+                    "tabTargetId": "tab-expired",
+                    "type": "page",
+                    "url": "https://example.com/expired",
+                },
+                {"targetId": "tab-survivor", "type": "tab", "url": "https://example.com/survivor"},
+                {
+                    "targetId": "page-survivor",
+                    "tabTargetId": "tab-survivor",
+                    "type": "page",
+                    "url": "https://example.com/survivor",
+                },
             ]
         }
         browser_url = _start_cdp_browser_server(self, cdp_state)
@@ -27,13 +39,13 @@ class TestPageExpiredTargetTransport(CdpBrowserLifecycleHarness):
                 instance_root,
                 {
                     "targets": {
-                        "target-expired": {
-                            "tab_target_id": "target-expired",
+                        "tab-expired": {
+                            "tab_target_id": "tab-expired",
                             "last_used_at": "2026-07-15T00:00:00Z",
                             "idle_seconds": 40,
                         },
-                        "target-survivor": {
-                            "tab_target_id": "target-survivor",
+                        "tab-survivor": {
+                            "tab_target_id": "tab-survivor",
                             "last_used_at": "2026-07-15T00:00:00Z",
                             "idle_seconds": 40,
                         },
@@ -63,7 +75,7 @@ trigger = SimpleNamespace(
     type="browser.page.expired",
     target_identity_id="act-browser",
     target_role_id="dev",
-    payload={"tab_target_id": "target-expired", "idle_seconds": 40},
+    payload={"tab_target_id": "tab-expired", "idle_seconds": 40},
     source_context={"due_at": "2026-07-15T00:01:00Z"},
 )
 runtime = SimpleNamespace(parent_activity=lambda: {"status": "idle"})
@@ -81,8 +93,12 @@ print(json.dumps({"status": result.status, "message": result.message}))
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             self.assertEqual(json.loads(completed.stdout)["status"], "handled")
             state = json.loads(self.lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(list(state["targets"]), ["target-survivor"])
+            self.assertEqual(list(state["targets"]), ["tab-survivor"])
             self.assertEqual(
                 [request["method"] for request in cdp_state.get("rpc_requests", [])],
-                ["Target.getTargets", "Target.closeTarget", "Target.getTargets"],
+                ["Target.getTargetInfo", "Target.closeTarget", "Target.getTargetInfo"],
+            )
+            self.assertEqual(
+                [target["targetId"] for target in cdp_state["targets"]],
+                ["tab-survivor", "page-survivor"],
             )

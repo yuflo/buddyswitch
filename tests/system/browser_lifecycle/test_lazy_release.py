@@ -180,7 +180,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps(read_state().get("targets", []), ensure_ascii=True).encode("utf-8"))
+            targets = read_state().get("targets", [])
+            page_targets = [
+                target
+                for target in targets
+                if isinstance(targets, list) and isinstance(target, dict) and target.get("type") == "page"
+            ]
+            self.wfile.write(json.dumps(page_targets, ensure_ascii=True).encode("utf-8"))
             return
         if parsed.path == "/devtools/browser/test":
             key = self.headers.get("Sec-WebSocket-Key")
@@ -214,15 +220,47 @@ class Handler(BaseHTTPRequestHandler):
                 write_state(state)
                 response = {"id": message.get("id"), "result": {"targetId": target_id}}
             elif method == "Target.getTargets":
-                response = {"id": message.get("id"), "result": {"targetInfos": targets}}
+                page_targets = [
+                    target
+                    for target in targets
+                    if isinstance(target, dict) and target.get("type") == "page"
+                ]
+                response = {"id": message.get("id"), "result": {"targetInfos": page_targets}}
+            elif method == "Target.getTargetInfo":
+                params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                target_id = params.get("targetId")
+                target = next(
+                    (
+                        target
+                        for target in targets
+                        if isinstance(target, dict) and target.get("targetId") == target_id
+                    ),
+                    None,
+                )
+                if target is None:
+                    response = {"id": message.get("id"), "error": {"message": "No target with given id found"}}
+                else:
+                    response = {"id": message.get("id"), "result": {"targetInfo": target}}
             elif method == "Target.closeTarget":
                 params = message.get("params") if isinstance(message.get("params"), dict) else {}
                 target_id = params.get("targetId")
                 before_count = len(targets)
+                closing_ids = {target_id}
+                for target in targets:
+                    if isinstance(target, dict) and target.get("targetId") == target_id:
+                        tab_target_id = target.get("tabTargetId")
+                        if isinstance(tab_target_id, str):
+                            closing_ids.add(tab_target_id)
                 state["targets"] = [
                     target
                     for target in targets
-                    if not (isinstance(target, dict) and target.get("targetId") == target_id)
+                    if not (
+                        isinstance(target, dict)
+                        and (
+                            target.get("targetId") in closing_ids
+                            or target.get("tabTargetId") in closing_ids
+                        )
+                    )
                 ]
                 write_state(state)
                 upstream_state_path = os.environ.get("BUDDYSWITCH_TEST_UPSTREAM_STATE")
@@ -236,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
                         upstream_state["pages"] = [
                             page
                             for page in upstream_state["pages"]
-                            if not (isinstance(page, dict) and page.get("tabTargetId") == target_id)
+                            if not (isinstance(page, dict) and page.get("tabTargetId") in closing_ids)
                         ]
                         path.write_text(json.dumps(upstream_state, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
                 response = {"id": message.get("id"), "result": {"success": len(state["targets"]) < before_count}}
@@ -339,11 +377,18 @@ def append_fake_chrome_target(url: str) -> str:
     if not isinstance(targets, list):
         targets = []
         chrome_state["targets"] = targets
-    target_id = f"target-{len(targets) + 1}"
-    targets.append({"targetId": target_id, "type": "page", "url": url})
+    tab_count = sum(1 for target in targets if isinstance(target, dict) and target.get("type") == "tab")
+    tab_target_id = f"tab-{tab_count + 1}"
+    page_target_id = f"page-{tab_count + 1}"
+    targets.extend(
+        [
+            {"targetId": tab_target_id, "type": "tab", "url": url},
+            {"targetId": page_target_id, "tabTargetId": tab_target_id, "type": "page", "url": url},
+        ]
+    )
     chrome_state_path.parent.mkdir(parents=True, exist_ok=True)
     chrome_state_path.write_text(json.dumps(chrome_state, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-    return target_id
+    return tab_target_id
 
 
 def update_fake_chrome_target(target_id: str, url: str) -> None:
@@ -353,7 +398,9 @@ def update_fake_chrome_target(target_id: str, url: str) -> None:
     if not isinstance(targets, list):
         return
     for target in targets:
-        if isinstance(target, dict) and target.get("targetId") == target_id:
+        if isinstance(target, dict) and (
+            target.get("targetId") == target_id or target.get("tabTargetId") == target_id
+        ):
             target["url"] = url
     chrome_state_path.write_text(json.dumps(chrome_state, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
@@ -1242,8 +1289,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertIn("Pages:", listed_text)
                 self.assertIn("1: Lazy Release Smoke", listed_text)
                 self.assertIn("BuddySwitch browser tab resource projection", listed_text)
-                self.assertIn("active_tab_target_id: target-1", listed_text)
-                self.assertIn("tab_target_id: target-1", listed_text)
+                self.assertIn("active_tab_target_id: tab-1", listed_text)
+                self.assertIn("tab_target_id: tab-1", listed_text)
 
                 selected_response = self._send_proxy_tool_call(
                     proxy,
@@ -1264,8 +1311,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 )
                 self.assertFalse(listed_after_select_response.get("result", {}).get("isError"), msg=listed_after_select_response)
                 listed_after_select_text = json.dumps(listed_after_select_response, ensure_ascii=True)
-                self.assertIn("active_tab_target_id: target-1", listed_after_select_text)
-                self.assertIn("tab_target_id: target-1", listed_after_select_text)
+                self.assertIn("active_tab_target_id: tab-1", listed_after_select_text)
+                self.assertIn("tab_target_id: tab-1", listed_after_select_text)
                 self.assertIn("active: true", listed_after_select_text)
 
                 navigate_response = self._send_proxy_tool_call(
@@ -1277,8 +1324,13 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 self.assertFalse(navigate_response.get("result", {}).get("isError"), msg=navigate_response)
                 self.assertIn("Navigated selected page", json.dumps(navigate_response, ensure_ascii=True))
                 navigated_chrome_state = json.loads(fake_chrome_state.read_text(encoding="utf-8"))
-                self.assertEqual(navigated_chrome_state["targets"][0]["targetId"], "target-1")
-                self.assertEqual(navigated_chrome_state["targets"][0]["url"], "https://example.com/after-navigation")
+                navigated_targets = {
+                    target["targetId"]: target
+                    for target in navigated_chrome_state["targets"]
+                    if isinstance(target, dict)
+                }
+                self.assertEqual(navigated_targets["tab-1"]["url"], "https://example.com/after-navigation")
+                self.assertEqual(navigated_targets["page-1"]["url"], "https://example.com/after-navigation")
 
                 snapshot_response = self._send_proxy_tool_call(
                     proxy,
@@ -1298,14 +1350,14 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     msg=saved_daemon_state["scheduled_triggers"],
                 )
                 self.assertTrue(
-                    any(row.get("schedule_key") == "browser.page.idle:target-1" for row in scheduled_rows),
+                    any(row.get("schedule_key") == "browser.page.idle:tab-1" for row in scheduled_rows),
                     msg=saved_daemon_state["scheduled_triggers"],
                 )
                 page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
                 targets = page_idle.get("targets")
                 self.assertIsInstance(targets, dict, msg=page_idle)
                 assert isinstance(targets, dict)
-                self.assertEqual(list(targets), ["target-1"])
+                self.assertEqual(list(targets), ["tab-1"])
                 mailbox_server.close()
                 mailbox_thread.join(timeout=2)
 
@@ -1323,7 +1375,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     context,
                     state=object(),
                     runtime=FakeRuntime(),
-                    trigger=self._page_trigger(triggers, actor_id=actor_id, role=role, tab_target_id="target-1"),
+                    trigger=self._page_trigger(triggers, actor_id=actor_id, role=role, tab_target_id="tab-1"),
                 )
                 self.assertEqual(page_result.status, "handled", msg=getattr(page_result, "message", None))
                 self.assertEqual(release_schedules[-1]["trigger_type"], "browser.cockpit.release")

@@ -195,6 +195,33 @@ def list_page_targets(browser_url: str, timeout_seconds: float = 3.0) -> list[di
     return [dict(target) for target in target_infos if isinstance(target, dict) and target.get("type") == "page"]
 
 
+def get_target_info(
+    browser_url: str,
+    target_id: str,
+    timeout_seconds: float = 3.0,
+) -> dict[str, Any] | None:
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise CdpTargetError("target_id must be a non-empty string")
+    normalized_target_id = target_id.strip()
+    try:
+        result = _send_browser_command(
+            browser_url,
+            "Target.getTargetInfo",
+            {"targetId": normalized_target_id},
+            timeout_seconds=timeout_seconds,
+        )
+    except CdpTargetError as exc:
+        if "No target with given id found" in str(exc):
+            return None
+        raise
+    target_info = result.get("targetInfo")
+    if not isinstance(target_info, dict):
+        raise CdpTargetError("Target.getTargetInfo response missing result.targetInfo")
+    if target_info.get("targetId") != normalized_target_id:
+        raise CdpTargetError("Target.getTargetInfo returned an unexpected targetId")
+    return dict(target_info)
+
+
 def create_background_target(browser_url: str, target_url: str, timeout_seconds: float) -> dict[str, Any]:
     result = _send_browser_command(
         browser_url,

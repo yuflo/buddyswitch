@@ -47,11 +47,11 @@ class TestBrowserPageExpiredHandler(unittest.TestCase):
     def setUp(self) -> None:
         self.handler_module = importlib.reload(importlib.import_module("browser_page_expired_handler"))
         self.inbound_module = importlib.reload(importlib.import_module("browser_inbound"))
-        original_list_page_targets = self.handler_module.cdp_target.list_page_targets
+        original_get_target_info = self.handler_module.cdp_target.get_target_info
         original_close_target = self.handler_module.cdp_target.close_target
         original_schedule_release = self.handler_module.browser_lifecycle.schedule_browser_cockpit_release
         original_refresh = self.handler_module.browser_lifecycle.refresh_tab_idle
-        self.addCleanup(setattr, self.handler_module.cdp_target, "list_page_targets", original_list_page_targets)
+        self.addCleanup(setattr, self.handler_module.cdp_target, "get_target_info", original_get_target_info)
         self.addCleanup(setattr, self.handler_module.cdp_target, "close_target", original_close_target)
         self.addCleanup(
             setattr,
@@ -68,11 +68,18 @@ class TestBrowserPageExpiredHandler(unittest.TestCase):
         self.release_calls: list[dict[str, Any]] = []
         self.refresh_calls: list[dict[str, Any]] = []
 
-        def list_page_targets(browser_url: str, timeout_seconds: float = 3.0) -> list[dict[str, Any]]:
+        def get_target_info(
+            browser_url: str,
+            target_id: str,
+            timeout_seconds: float = 3.0,
+        ) -> dict[str, Any] | None:
             del browser_url, timeout_seconds
             if self.list_error is not None:
                 raise self.list_error
-            return [dict(target) for target in self.targets]
+            return next(
+                (dict(target) for target in self.targets if target.get("targetId") == target_id),
+                None,
+            )
 
         def close_target(browser_url: str, target_id: str, timeout_seconds: float = 3.0) -> dict[str, Any]:
             del timeout_seconds
@@ -91,7 +98,7 @@ class TestBrowserPageExpiredHandler(unittest.TestCase):
             self.refresh_calls.append(kwargs)
             return {"idle_refreshed": True, "idle_seconds": 40}
 
-        self.handler_module.cdp_target.list_page_targets = list_page_targets
+        self.handler_module.cdp_target.get_target_info = get_target_info
         self.handler_module.cdp_target.close_target = close_target
         self.handler_module.browser_lifecycle.schedule_browser_cockpit_release = schedule_release
         self.handler_module.browser_lifecycle.refresh_tab_idle = refresh

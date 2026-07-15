@@ -48,6 +48,31 @@ class TestCdpPageLifecycle(CdpBrowserLifecycleHarness):
         )
         self.assertEqual(cdp_state["targets"], [])
 
+    def test_get_target_info_reads_exact_outer_tab_target(self) -> None:
+        target = load_target_transport()
+        cdp_state: dict[str, object] = {
+            "targets": [
+                {"targetId": "outer-tab", "type": "tab", "url": "https://example.com"},
+                {"targetId": "inner-page", "type": "page", "url": "https://example.com"},
+            ]
+        }
+        browser_url = _start_cdp_browser_server(self, cdp_state)
+
+        result = target.get_target_info(browser_url, "outer-tab", timeout_seconds=1.0)
+
+        self.assertEqual(result, {"targetId": "outer-tab", "type": "tab", "url": "https://example.com"})
+        self.assertEqual(
+            cdp_state["rpc_requests"],
+            [{"id": 1, "method": "Target.getTargetInfo", "params": {"targetId": "outer-tab"}}],
+        )
+
+    def test_get_target_info_returns_none_only_for_missing_exact_target(self) -> None:
+        target = load_target_transport()
+        cdp_state: dict[str, object] = {"targets": []}
+        browser_url = _start_cdp_browser_server(self, cdp_state)
+
+        self.assertIsNone(target.get_target_info(browser_url, "missing-tab", timeout_seconds=1.0))
+
     def test_close_target_raises_clear_error_on_cdp_error(self) -> None:
         target = load_target_transport()
         cdp_state: dict[str, object] = {"rpc_requests": [], "close_error": "No target with given id found"}

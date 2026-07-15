@@ -80,13 +80,34 @@ def _make_cdp_browser_handler(state: dict[str, object]) -> type[BaseHTTPRequestH
                 state.setdefault("rpc_requests", []).append(message)
                 if message.get("method") == "Target.getTargets":
                     response = {"id": message.get("id"), "result": {"targetInfos": state.get("targets", [])}}
+                elif message.get("method") == "Target.getTargetInfo":
+                    target_id = message.get("params", {}).get("targetId")
+                    targets = state.get("targets")
+                    target = None
+                    if isinstance(targets, list):
+                        target = next(
+                            (
+                                target
+                                for target in targets
+                                if isinstance(target, dict) and target.get("targetId") == target_id
+                            ),
+                            None,
+                        )
+                    if target is None:
+                        response = {"id": message.get("id"), "error": {"message": "No target with given id found"}}
+                    else:
+                        response = {"id": message.get("id"), "result": {"targetInfo": target}}
                 elif message.get("method") == "Target.closeTarget" and state.get("close_error"):
                     response = {"id": message.get("id"), "error": {"message": str(state["close_error"])}}
                 elif message.get("method") == "Target.closeTarget":
                     target_id = message.get("params", {}).get("targetId")
                     targets = state.get("targets")
                     if isinstance(targets, list):
-                        state["targets"] = [target for target in targets if target.get("targetId") != target_id]
+                        state["targets"] = [
+                            target
+                            for target in targets
+                            if target.get("targetId") != target_id and target.get("tabTargetId") != target_id
+                        ]
                     response = {"id": message.get("id"), "result": {"success": True}}
                 else:
                     response = {"id": message.get("id"), "result": {"success": True}}

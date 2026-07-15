@@ -176,12 +176,11 @@ class BrowserPageExpiredHandler:
             if endpoint is None:
                 _forget_and_release_if_empty(root, target_id)
                 return daemon_contracts.HandlerResult.handled()
-            targets = cdp_target.list_page_targets(endpoint)
-            if not _target_present(targets, target_id):
+            if cdp_target.get_target_info(endpoint, target_id) is None:
                 _forget_and_release_if_empty(root, target_id)
                 return daemon_contracts.HandlerResult.handled()
             cdp_target.close_target(endpoint, target_id)
-            if _target_present(cdp_target.list_page_targets(endpoint), target_id):
+            if cdp_target.get_target_info(endpoint, target_id) is not None:
                 return daemon_contracts.HandlerResult.failed(
                     f"browser target still present after exact close: {target_id}"
                 )
