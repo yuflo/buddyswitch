@@ -2,18 +2,10 @@
 set -euo pipefail
 
 BUDDYSWITCH_LAUNCHER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUDDYSWITCH_WORKSPACE_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/workspace.sh"
 BUDDYSWITCH_RUNTIME_LOCK_HELPER_DEFAULT="${BUDDYSWITCH_LAUNCHER_DIR}/runtime_lock.py"
 BUDDYSWITCH_CODEX_CONFIG_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/codex_config.py"
 BUDDYSWITCH_ENV_PROFILES_HELPER_REL="scripts/env_profiles.py"
 BUDDYSWITCH_BROWSER_TTL_CONFIG_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/../../scripts/env/browser_ttl_config.py"
-
-if [[ ! -f "${BUDDYSWITCH_WORKSPACE_HELPER}" ]]; then
-  echo "Workspace helper is missing under tools/launcher." >&2
-  exit 1
-fi
-
-source "${BUDDYSWITCH_WORKSPACE_HELPER}"
 
 buddyswitch_resolve_python() {
   local python_path
@@ -60,8 +52,32 @@ buddyswitch_env_init() {
   export BUDDYSWITCH_REPO_ROOT="${BUDDYSWITCH_REPO_ROOT:-${REPO_ROOT:-$(cd "${BUDDYSWITCH_LAUNCHER_DIR}/../.." && pwd)}}"
   export BUDDYSWITCH_ENV_MCP_NAME="${BUDDYSWITCH_ENV_MCP_NAME:-buddyswitch-env}"
   export BUDDYSWITCH_ENV_MCP_SERVER="${BUDDYSWITCH_ENV_MCP_SERVER:-${BUDDYSWITCH_REPO_ROOT}/tools/launcher/env_tool_mcp_server.py}"
+  export BUDDYSWITCH_WORKSPACE_DIR="${BUDDYSWITCH_WORKSPACE_DIR:-${shared_root}/workspace}"
+  export BUDDYSWITCH_PROJECT_WORKSPACE_DIR="${shared_root}/project/workspace"
+}
 
-  buddyswitch_workspace_init_defaults
+buddyswitch_canonical_path() {
+  "${BUDDYSWITCH_PYTHON}" -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve(strict=False))' "$1"
+}
+
+buddyswitch_remove_owned_path() {
+  local target="$1"
+  if [[ -z "${target}" ]]; then
+    return 0
+  fi
+  if [[ -L "${target}" ]]; then
+    echo "Owned path removal blocked: target is a symlink (${target})." >&2
+    return 3
+  fi
+  if [[ -f "${target}" ]]; then
+    rm -f "${target}"
+    return 0
+  fi
+  if [[ -d "${target}" ]]; then
+    chmod -R u+w "${target}" 2>/dev/null || true
+    find "${target}" -type d -exec chmod u+rwx {} + 2>/dev/null || true
+    rm -rf "${target}"
+  fi
 }
 
 buddyswitch_with_runtime_lock() {
@@ -133,7 +149,10 @@ buddyswitch_ensure_browser_ttl_config() {
 buddyswitch_ensure_shared_env() {
   local shared_codex_home
 
-  buddyswitch_workspace_validate_workspace_dir
+  if [[ -n "${BUDDYSWITCH_ACTOR_ID:-}" ]]; then
+    echo "Actor environments must be materialized by ActorEnvironmentBuilder." >&2
+    return 2
+  fi
 
   mkdir -p \
     "${BUDDYSWITCH_HOME}" \
@@ -384,15 +403,6 @@ buddyswitch_env_bind_instance() {
   export BUDDYSWITCH_HOME="${instance_root}/home"
   export BUDDYSWITCH_CODEX_HOME="${instance_root}/codex-home"
   export BUDDYSWITCH_XDG_CONFIG_HOME="${instance_root}/xdg-config"
-}
-
-buddyswitch_instance_ensure_private_writable_surface() {
-  if [[ -z "${BUDDYSWITCH_ACTOR_PRIVATE_DIR:-}" || -z "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
-    echo "buddyswitch: actor private workspace and tmp must be bound" >&2
-    return 2
-  fi
-  mkdir -p "${BUDDYSWITCH_ACTOR_PRIVATE_DIR}"
-  mkdir -p "${BUDDYSWITCH_INSTANCE_TMP}"
 }
 
 buddyswitch_generate_actor_id() {
@@ -881,6 +891,16 @@ buddyswitch_validate_reset_root() {
 
   if [[ -z "${normalized_root}" || "${normalized_root}" == "/" ]]; then
     echo "Reset blocked: unsafe shared root '${shared_root}'." >&2
+    return 1
+  fi
+
+  if [[ -L "${normalized_root}" ]]; then
+    echo "Reset blocked: shared root is a symlink (${normalized_root})." >&2
+    return 1
+  fi
+
+  if [[ -e "${normalized_root}" && ! -d "${normalized_root}" ]]; then
+    echo "Reset blocked: shared root is not a directory (${normalized_root})." >&2
     return 1
   fi
 

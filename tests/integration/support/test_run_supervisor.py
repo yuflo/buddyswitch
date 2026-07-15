@@ -914,7 +914,7 @@ def test_signal_runner_cleans_pytest_child_detached_service_and_run_paths(
                 pass
 
 
-def test_sigterm_runner_cleans_public_instance_start_detached_services_and_worktrees() -> None:
+def test_sigterm_runner_cleans_public_instance_start_detached_services_and_environment() -> None:
     runner = ResourceLedger.from_environment().start_process(
         [
             str(REPO_ROOT / "buddyswitch-test"),
@@ -972,6 +972,10 @@ def test_sigterm_runner_cleans_public_instance_start_detached_services_and_workt
             "instance_daemon",
         }
         assert Path(str(ready["browser_ttl_config"])).read_text(encoding="utf-8") == ready["browser_ttl_config_text"]
+        for environment_root in ready["environment_roots"]:
+            root = Path(str(environment_root))
+            assert root.is_dir()
+            assert not any(root.rglob(".git"))
 
         os.kill(runner.pid, signal.SIGTERM)
         remaining, _ = runner.communicate(timeout=20)
@@ -982,14 +986,6 @@ def test_sigterm_runner_cleans_public_instance_start_detached_services_and_workt
         for pid in pids.values():
             with pytest.raises(ProcessLookupError):
                 os.kill(int(pid), 0)
-        worktree_listing = run_process(
-            ["git", "-C", str(REPO_ROOT), "worktree", "list", "--porcelain"],
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-        ).stdout
-        for worktree in ready["worktrees"]:
-            assert str(worktree) not in worktree_listing
     finally:
         if runner.poll() is None:
             runner.terminate()

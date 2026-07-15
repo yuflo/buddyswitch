@@ -5,14 +5,12 @@ HOST_CONTROL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HOST_CONTROL_DIR}/../.." && pwd)"
 HOST_CONTROL_SELF="${HOST_CONTROL_DIR}/host_control.sh"
 ENV_HELPER="${HOST_CONTROL_DIR}/env.sh"
-WORKSPACE_HELPER="${HOST_CONTROL_DIR}/workspace.sh"
 BROWSER_HELPER="${HOST_CONTROL_DIR}/browser_cockpit.sh"
 APP_SERVER_HELPER="${HOST_CONTROL_DIR}/app_server.sh"
 DAEMON_HELPER="${HOST_CONTROL_DIR}/daemon.sh"
 RUNTIME_BROKER_HELPER="${HOST_CONTROL_DIR}/runtime_broker.sh"
 
 source "${ENV_HELPER}"
-source "${WORKSPACE_HELPER}"
 source "${BROWSER_HELPER}"
 source "${APP_SERVER_HELPER}"
 source "${DAEMON_HELPER}"
@@ -289,8 +287,8 @@ buddyswitch_instance_require_safe_delete_root() {
     return 3
   fi
   if [[ -d "${instance_root}" ]]; then
-    normalized_instances_root="$(buddyswitch_workspace_canonical_path "${instances_root}")"
-    normalized_instance_root="$(buddyswitch_workspace_canonical_path "${instance_root}")"
+    normalized_instances_root="$(buddyswitch_canonical_path "${instances_root}")"
+    normalized_instance_root="$(buddyswitch_canonical_path "${instance_root}")"
     case "${normalized_instance_root}" in
       "${normalized_instances_root}/"*)
         ;;
@@ -430,7 +428,7 @@ buddyswitch_start_thread_bootstrap_with_retry() {
 
 start_locked_bootstrap() {
   local requested_role requested_actor_id requested_codex_bin requested_codex_version
-  local app_server_json thread_json thread_id browser_output
+  local app_server_json thread_json thread_id browser_output build_json
   buddyswitch_require_runtime_lock || return $?
   requested_role="${BUDDYSWITCH_START_ROLE:-}"
   requested_actor_id="${BUDDYSWITCH_START_ACTOR_ID:-}"
@@ -457,12 +455,29 @@ start_locked_bootstrap() {
   buddyswitch_require_role_agents_template "${requested_role}" || return $?
   buddyswitch_env_bind_instance "${requested_actor_id}" || return $?
 
-  buddyswitch_ensure_shared_env || return $?
-  buddyswitch_workspace_prepare_execution_worktree || return $?
+  build_json="$(
+    "${BUDDYSWITCH_PYTHON}" "${HOST_CONTROL_DIR}/actor_environment.py" \
+      --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
+      --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
+      --actor-id "${requested_actor_id}" \
+      --role-id "${requested_role}" \
+      --source-codex-home "${BUDDYSWITCH_SOURCE_CODEX_HOME}"
+  )" || return $?
+  "${BUDDYSWITCH_PYTHON}" - "${build_json}" "${BUDDYSWITCH_INSTANCE_ROOT}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" <<'PY'
+import json
+import sys
 
-  buddyswitch_workspace_ensure_project_worktree || return $?
-  buddyswitch_workspace_repair_runtime_projects_app_projection || return $?
-  buddyswitch_instance_ensure_private_writable_surface || return $?
+payload = json.loads(sys.argv[1])
+expected = {
+    "actor_root": sys.argv[2],
+    "workspace_dir": sys.argv[3],
+    "project_workspace_dir": sys.argv[4],
+}
+for field, value in expected.items():
+    if payload.get(field) != value:
+        print(f"Actor environment result mismatch for {field}.", file=sys.stderr)
+        raise SystemExit(1)
+PY
   buddyswitch_instance_activate "${requested_actor_id}" "${requested_role}" "inactive" >/dev/null || return $?
   host_control_seed_actor_capabilities "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null || return $?
   buddyswitch_runtime_broker_ensure || return $?
@@ -750,7 +765,7 @@ instance_resume() {
 
 instance_resume_locked() {
   local actor_id="${1:-}" codex_bin="${2:-}" codex_version="${3:-}" role thread_id app_server_json
-  local browser_output="" resume_json="" resumed_thread_id
+  local resume_json="" resumed_thread_id
 
   buddyswitch_require_runtime_lock || return $?
   if [[ -z "${actor_id}" ]]; then
@@ -788,21 +803,8 @@ PY
     return 0
   fi
 
-  buddyswitch_require_env_profile "${role}" || return $?
-  buddyswitch_require_role_agents_template "${role}" || return $?
-  buddyswitch_ensure_shared_env || return $?
-  buddyswitch_workspace_ensure_project_worktree || return $?
-  buddyswitch_workspace_repair_runtime_projects_app_projection || return $?
-  buddyswitch_instance_ensure_private_writable_surface || return $?
   buddyswitch_runtime_broker_ensure || return $?
   export BUDDYSWITCH_ROLE_ID="${role}"
-  buddyswitch_patch_codex_config || return $?
-
-  browser_output="$(buddyswitch_browser_register_cockpit_mcp 2>&1)" || {
-    [[ -n "${browser_output}" ]] && echo "${browser_output}" >&2
-    buddyswitch_runtime_broker_stop
-    return 1
-  }
 
   app_server_json="$(buddyswitch_app_server_ensure)" || {
     buddyswitch_runtime_broker_stop
@@ -1093,8 +1095,7 @@ instance_delete_locked() {
   fi
 
   buddyswitch_runtime_broker_stop || return $?
-  buddyswitch_workspace_remove_registered_worktrees_under_strict "${instance_root}" || return $?
-  buddyswitch_workspace_force_remove_path "${instance_root}" || return $?
+  buddyswitch_remove_owned_path "${instance_root}" || return $?
 }
 
 host_control_roles() {

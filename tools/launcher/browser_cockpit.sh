@@ -774,7 +774,11 @@ buddyswitch_browser_preflight_static() {
 buddyswitch_browser_register_cockpit_mcp() {
   local require_browser=1
   buddyswitch_browser_init_defaults
-  buddyswitch_ensure_shared_env
+  if buddyswitch_browser_is_instance_mode; then
+    buddyswitch_ensure_browser_ttl_config
+  else
+    buddyswitch_ensure_shared_env
+  fi
 
   if ! buddyswitch_browser_requires_cockpit_for_active_role; then
     require_browser=0

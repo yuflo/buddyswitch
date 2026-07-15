@@ -149,6 +149,40 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertNotIn(token, source)
 
+    def test_actor_environment_build_is_private_to_host_control(self) -> None:
+        cli_source = _source("tools/launcher/cli.py")
+        web_source = _source("tools/launcher/web_management.py")
+        host_source = _source("tools/launcher/host_control.sh")
+        env_source = _source("tools/launcher/env.sh")
+        browser_source = _source("tools/launcher/browser_cockpit.sh")
+        start_block = host_source.split("start_locked_bootstrap() {", 1)[1].split(
+            "instance_set_inactive_locked() {",
+            1,
+        )[0]
+        resume_block = host_source.split("instance_resume_locked() {", 1)[1].split(
+            "instance_stop() {",
+            1,
+        )[0]
+
+        self.assertIn("host_control.HostControl", cli_source)
+        self.assertIn("host_control_module.HostControl", web_source)
+        self.assertNotIn("actor_environment", cli_source)
+        self.assertNotIn("actor_environment", web_source)
+        self.assertEqual(start_block.count("actor_environment.py"), 1)
+        self.assertEqual(host_source.count("actor_environment.py"), 1)
+        for forbidden in (
+            "actor_environment.py",
+            "--validate-existing",
+            "buddyswitch_require_env_profile",
+            "buddyswitch_require_role_agents_template",
+        ):
+            with self.subTest(resume_forbidden=forbidden):
+                self.assertNotIn(forbidden, resume_block)
+        self.assertNotIn("buddyswitch_workspace_", host_source)
+        self.assertNotIn("buddyswitch_instance_ensure_private_writable_surface", env_source)
+        self.assertNotIn("buddyswitch_prepare_actor_runtime_env", env_source)
+        self.assertNotIn("buddyswitch_prepare_actor_runtime_env", browser_source)
+
     def test_public_launcher_is_only_the_canonical_python_bootstrap(self) -> None:
         source = _source("buddyswitch-codex")
         self.assertEqual(_stripped_statements(source), CANONICAL_LAUNCHER_STATEMENTS)
@@ -169,12 +203,14 @@ class ExternalControlArchitectureTests(unittest.TestCase):
     def test_replaced_helper_entrypoints_and_dedicated_tests_are_absent(self) -> None:
         deleted = (
             "tools/launcher/" + "instance.sh",
+            "tools/launcher/" + "workspace.sh",
             "tools/launcher/" + "submit_turn.py",
             "tools/launcher/" + "parent_thread_" + "submit.py",
             "tools/launcher/" + "actor_capability_" + "cli.py",
             "tests/test_" + "submit_turn.py",
             "tests/test_parent_thread_" + "submit.py",
             "tests/test_actor_capability_" + "cli.py",
+            "tests/system/instance_lifecycle/test_" + "worktree_safety.py",
         )
         self.assertEqual([path for path in deleted if (ROOT / path).exists()], [])
 

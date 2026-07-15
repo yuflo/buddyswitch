@@ -62,6 +62,14 @@ class TestInstanceMainFlow(SystemLauncherHarness, unittest.TestCase):
             self.assertFalse((shared_root / "workspace").exists())
             self._assert_pm_runtime_shape(workspace_dir, shared_root)
             self._assert_runtime_workspace_excludes_source_surfaces(workspace_dir)
+            project_workspace = shared_root / "project" / "workspace"
+            self.assertEqual(list(instance_root.rglob(".git")), [])
+            self.assertEqual(list(project_workspace.rglob(".git")), [])
+            self.assertTrue((workspace_dir / "projects" / "app").is_symlink())
+            self.assertEqual(
+                (workspace_dir / "projects" / "app").resolve(),
+                (project_workspace / "projects" / "app").resolve(),
+            )
 
             capability_config = json.loads(
                 (instance_root / "capability-config.json").read_text(encoding="utf-8")
@@ -121,6 +129,29 @@ class TestInstanceMainFlow(SystemLauncherHarness, unittest.TestCase):
             self.assertFalse(
                 (instance_root / "runtime" / "daemon" / "daemon.pid").exists()
             )
+
+            resume_result = run_process(
+                [str(LAUNCHER), "instance", "resume", actor_id],
+                cwd=REPO_ROOT,
+                env=command_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(resume_result.returncode, 0, msg=self._output_error_text(resume_result))
+            resumed = self._cli_success_data(resume_result, kind="instance.resume")
+            self.assertEqual(resumed["actor_id"], actor_id)
+            self.assertEqual(resumed["status"], "active")
+
+            second_stop = run_process(
+                [str(LAUNCHER), "instance", "stop", actor_id],
+                cwd=REPO_ROOT,
+                env=command_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(second_stop.returncode, 0, msg=self._output_error_text(second_stop))
 
             delete_result = run_process(
                 [str(LAUNCHER), "instance", "delete", actor_id, "--yes"],

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import os
 import platform
 import shutil
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +15,7 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-WORKSPACE_HELPER = ROOT / "tools" / "launcher" / "workspace.sh"
+ACTOR_ENVIRONMENT = ROOT / "tools" / "launcher" / "actor_environment.py"
 CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
@@ -28,96 +26,40 @@ class CleanRuntimeEnvironmentTests(unittest.TestCase):
         self.addCleanup(holder.cleanup)
         return Path(holder.name)
 
-    def _git_remove_worktree(self, path: Path) -> None:
-        run_process(
-            ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(path)],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-    def _git_prune_worktrees(self) -> None:
-        run_process(
-            ["git", "-C", str(ROOT), "worktree", "prune"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-    def _runtime_env(self, *, shared_root: Path, workspace_dir: Path, project_workspace_dir: Path, role: str) -> dict[str, str]:
-        env = dict()
-        env.update(
-            {
-                "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
-                "BUDDYSWITCH_WORKSPACE_DIR": str(workspace_dir),
-                "BUDDYSWITCH_PROJECT_WORKSPACE_DIR": str(project_workspace_dir),
-                "BUDDYSWITCH_ACTOR_ID": "act-clean-runtime",
-                "BUDDYSWITCH_ROLE_ID": role,
-                "BUDDYSWITCH_START_ROLE": role,
-                "BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE": str(
-                    ROOT / "tools" / "launcher" / "assets" / "roles" / role / "AGENTS.md"
-                ),
-                "BUDDYSWITCH_REPO_ROOT": str(ROOT),
-            }
-        )
-        return env
-
     def _prepare_runtime_workspace(self, *, role: str = "pm") -> tuple[Path, Path, Path]:
         temp_root = self._new_temp_root()
         shared_root = temp_root / "shared"
-        workspace_dir = shared_root / "instances" / "act-clean-runtime" / "workspace"
+        actor_id = "act-clean-runtime"
+        workspace_dir = shared_root / "instances" / actor_id / "workspace"
         project_workspace_dir = shared_root / "project" / "workspace"
-        env = self._runtime_env(
-            shared_root=shared_root,
-            workspace_dir=workspace_dir,
-            project_workspace_dir=project_workspace_dir,
-            role=role,
+        source_codex_home = temp_root / "source-codex-home"
+        source_codex_home.mkdir(parents=True)
+        (source_codex_home / "auth.json").write_text(
+            '{"auth_mode":"apikey","openai_api_key":"test-key"}\n',
+            encoding="utf-8",
         )
-        cmd = """
-set -euo pipefail
-source tools/launcher/env.sh
-buddyswitch_env_init
-source tools/launcher/workspace.sh
-buddyswitch_workspace_ensure_project_worktree
-buddyswitch_workspace_prepare_execution_worktree
-buddyswitch_workspace_repair_runtime_projects_app_projection
-"""
         completed = run_process(
-            ["bash", "-lc", cmd],
+            [
+                PYTHON,
+                str(ACTOR_ENVIRONMENT),
+                "--repo-root",
+                str(ROOT),
+                "--shared-root",
+                str(shared_root),
+                "--actor-id",
+                actor_id,
+                "--role-id",
+                role,
+                "--source-codex-home",
+                str(source_codex_home),
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
             check=False,
-            env={**os.environ, **env},
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        self.addCleanup(self._git_prune_worktrees)
-        self.addCleanup(self._git_remove_worktree, workspace_dir)
-        self.addCleanup(self._git_remove_worktree, project_workspace_dir)
         return shared_root, workspace_dir, project_workspace_dir
-
-    def _run_cleanup(self, *, shared_root: Path, workspace_dir: Path, project_workspace_dir: Path, role: str) -> subprocess.CompletedProcess[str]:
-        env = self._runtime_env(
-            shared_root=shared_root,
-            workspace_dir=workspace_dir,
-            project_workspace_dir=project_workspace_dir,
-            role=role,
-        )
-        cmd = """
-set -euo pipefail
-source tools/launcher/env.sh
-buddyswitch_env_init
-source tools/launcher/workspace.sh
-buddyswitch_workspace_cleanup_stale_state_projections
-"""
-        return run_process(
-            ["bash", "-lc", cmd],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            env={**os.environ, **env},
-        )
 
     def test_fresh_runtime_workspace_is_clean_and_host_visible(self) -> None:
         shared_root, workspace_dir, project_workspace_dir = self._prepare_runtime_workspace(role="pm")
@@ -142,6 +84,8 @@ buddyswitch_workspace_cleanup_stale_state_projections
             (workspace_dir / "projects" / "app").resolve(strict=True),
             (project_workspace_dir / "projects" / "app").resolve(strict=True),
         )
+        self.assertEqual(list((shared_root / "instances" / "act-clean-runtime").rglob(".git")), [])
+        self.assertEqual(list(project_workspace_dir.rglob(".git")), [])
 
     def test_host_exploration_commands_are_quiet_in_runtime_workspace(self) -> None:
         _, workspace_dir, _ = self._prepare_runtime_workspace(role="pm")
@@ -161,73 +105,15 @@ buddyswitch_workspace_cleanup_stale_state_projections
                 )
                 if command[:2] == ["rg", "-n"]:
                     self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+                elif command[:2] == ["git", "status"]:
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("not a git repository", completed.stderr.lower())
                 else:
                     self.assertEqual(completed.returncode, 0, msg=completed.stderr)
                 stderr_lower = completed.stderr.lower()
                 self.assertNotIn("operation not permitted", stderr_lower)
                 self.assertNotIn("permission denied", stderr_lower)
                 self.assertNotIn("retry without sandbox", stderr_lower)
-
-    def test_stale_projection_cleanup_is_data_safe(self) -> None:
-        shared_root, workspace_dir, project_workspace_dir = self._prepare_runtime_workspace(role="pm")
-
-        state_track = shared_root / "state" / "buddyswitch" / "objects" / "tracks" / "track-old.json"
-        state_track.parent.mkdir(parents=True, exist_ok=True)
-        state_track.write_text('{"id":"track-old","ok":true}\n', encoding="utf-8")
-
-        stale_objects = workspace_dir / "buddyswitch" / "objects"
-        stale_objects.parent.mkdir(parents=True, exist_ok=True)
-        stale_objects.symlink_to(shared_root / "state" / "buddyswitch" / "objects", target_is_directory=True)
-
-        cleanup = self._run_cleanup(
-            shared_root=shared_root,
-            workspace_dir=workspace_dir,
-            project_workspace_dir=project_workspace_dir,
-            role="pm",
-        )
-        self.assertEqual(cleanup.returncode, 0, msg=cleanup.stderr)
-        self.assertFalse(stale_objects.exists())
-        self.assertTrue(state_track.exists())
-        self.assertEqual(state_track.read_text(encoding="utf-8"), '{"id":"track-old","ok":true}\n')
-
-    def test_stale_object_projection_is_migrated_to_state_root(self) -> None:
-        shared_root, workspace_dir, project_workspace_dir = self._prepare_runtime_workspace(role="pm")
-
-        local_track = workspace_dir / "buddyswitch" / "objects" / "tracks" / "track-local.json"
-        local_track.parent.mkdir(parents=True, exist_ok=True)
-        local_track.write_text('{"id":"track-local","from":"workspace"}\n', encoding="utf-8")
-
-        cleanup = self._run_cleanup(
-            shared_root=shared_root,
-            workspace_dir=workspace_dir,
-            project_workspace_dir=project_workspace_dir,
-            role="pm",
-        )
-        self.assertEqual(cleanup.returncode, 0, msg=cleanup.stderr)
-
-        migrated_track = shared_root / "state" / "buddyswitch" / "objects" / "tracks" / "track-local.json"
-        self.assertTrue(migrated_track.exists())
-        self.assertEqual(migrated_track.read_text(encoding="utf-8"), '{"id":"track-local","from":"workspace"}\n')
-
-        self.assertFalse((workspace_dir / "buddyswitch" / "objects").exists())
-
-    def test_stale_actor_private_projection_is_removed_without_migration(self) -> None:
-        shared_root, workspace_dir, project_workspace_dir = self._prepare_runtime_workspace(role="pm")
-
-        local_box = workspace_dir / "buddyswitch" / "local" / "private" / "pm" / "coordination" / "a-log.md"
-        local_box.parent.mkdir(parents=True, exist_ok=True)
-        local_box.write_text("hello\n", encoding="utf-8")
-
-        cleanup = self._run_cleanup(
-            shared_root=shared_root,
-            workspace_dir=workspace_dir,
-            project_workspace_dir=project_workspace_dir,
-            role="pm",
-        )
-        self.assertEqual(cleanup.returncode, 0, msg=cleanup.stderr)
-        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "private").exists())
-        self.assertFalse((shared_root / "state" / "buddyswitch" / "local" / "private" / "pm" / "coordination" / "a-log.md").exists())
-        self.assertFalse((workspace_dir / "private" / "coordination" / "a-log.md").exists())
 
     def test_no_prompt_side_command_blacklist_workaround_text(self) -> None:
         completed = run_process(
