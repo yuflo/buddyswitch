@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import shlex
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -182,19 +181,6 @@ class ActorSession:
             shared_root=self._shared_root,
             runtime=runtime,
         )
-
-
-def terminal_command_from_descriptor(descriptor: AttachDescriptor) -> str:
-    assignments = " ".join(
-        f"{key}={shlex.quote(value)}"
-        for key, value in sorted(descriptor.env.items())
-        if key != "PATH"
-    )
-    path_prefix = f"PATH={shlex.quote(descriptor.env['PATH'])} " if descriptor.env.get("PATH") else ""
-    command = " ".join(shlex.quote(part) for part in descriptor.argv)
-    env_parts = f"{path_prefix}{assignments}".strip()
-    env_command = f"env {env_parts} {command}" if env_parts else command
-    return f"cd {shlex.quote(str(descriptor.cwd))} && {env_command}"
 
 
 def _attach_env(context: _ActorContext, *, repo_root: Path) -> dict[str, str]:

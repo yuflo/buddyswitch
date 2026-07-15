@@ -370,12 +370,11 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             platform_name="darwin",
         )
 
-        with mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach") as resolve_attach:
-            status, payload = service.handle_api(
-                "GET",
-                "/api/instances/act-pm-demo/attach-command",
-                b"",
-            )
+        status, payload = service.handle_api(
+            "GET",
+            "/api/instances/act-pm-demo/attach-command",
+            b"",
+        )
 
         self.assertEqual(status, 200)
         self.assertEqual(
@@ -391,7 +390,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         )
         self.assertEqual(runner.calls, [])
         self.assertEqual(opener.commands, [])
-        resolve_attach.assert_not_called()
 
     def test_attach_command_route_rejects_invalid_actor_id_without_side_effects(self) -> None:
         runner = RecordingHostControl()
@@ -403,17 +401,13 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             platform_name="darwin",
         )
 
-        with (
-            mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach") as resolve_attach,
-            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
-        ):
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/instances/demo/attach-command", b"")
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.code, "INVALID_REQUEST")
         self.assertEqual(runner.calls, [])
         self.assertEqual(opener.commands, [])
-        resolve_attach.assert_not_called()
 
     def test_open_tui_route_rejects_bad_host_or_origin_before_status_lookup(self) -> None:
         for headers in (
@@ -463,7 +457,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(runner.calls, [])
         self.assertEqual(opener.commands, [])
 
-    def test_open_tui_route_rejects_invalid_actor_id_before_status_lookup(self) -> None:
+    def test_open_tui_route_rejects_invalid_actor_id_before_terminal_handoff(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
@@ -481,77 +475,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(runner.calls, [])
         self.assertEqual(opener.commands, [])
 
-    def test_open_tui_route_maps_actor_session_blockers_before_opener(self) -> None:
-        cases = [
-            (
-                WEB_MANAGEMENT.actor_session.ActorSessionError(
-                    "actor app server unhealthy for act-pm-demo: connection failed"
-                ),
-                "Instance is unhealthy.",
-            ),
-            (
-                WEB_MANAGEMENT.actor_session.ActorSessionError(
-                    "actor has no thread id; stop/delete and recreate the instance"
-                ),
-                "No thread to attach.",
-            ),
-        ]
-        for actor_session_error, expected_message in cases:
-            with self.subTest(expected_message=expected_message):
-                runner = RecordingHostControl()
-                opener = FakeTerminalOpener()
-                service = WEB_MANAGEMENT.WebManagementService(
-                    repo_root=ROOT,
-                    host_control=runner,
-                    terminal_opener=opener.open,
-                    platform_name="darwin",
-                )
-
-                with (
-                    mock.patch.object(
-                        WEB_MANAGEMENT.actor_session.ActorSession,
-                        "resolve_attach",
-                        side_effect=actor_session_error,
-                    ) as resolve_attach,
-                    self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
-                ):
-                    service.handle_api("POST", "/api/instances/act-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
-
-                self.assertEqual(raised.exception.status, 409)
-                self.assertEqual(raised.exception.code, "OPEN_TUI_BLOCKED")
-                self.assertEqual(raised.exception.message, expected_message)
-                resolve_attach.assert_called_once_with("act-pm-demo")
-                self.assertEqual(runner.calls, [])
-                self.assertEqual(opener.commands, [])
-
-    def test_open_tui_route_maps_recorded_runtime_failure_before_opener(self) -> None:
-        runner = RecordingHostControl()
-        opener = FakeTerminalOpener()
-        service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
-            host_control=runner,
-            terminal_opener=opener.open,
-            platform_name="darwin",
-        )
-        runtime_error = WEB_MANAGEMENT.codex_runtime.CodexRuntimeError(
-            "RUNTIME_MISMATCH",
-            "Codex runtime version mismatch.",
-        )
-
-        with (
-            mock.patch.object(
-                WEB_MANAGEMENT.actor_session.ActorSession,
-                "resolve_attach",
-                side_effect=runtime_error,
-            ),
-            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
-        ):
-            service.handle_api("POST", "/api/instances/act-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
-
-        self.assertEqual(raised.exception.status, 409)
-        self.assertEqual(raised.exception.code, "RUNTIME_MISMATCH")
-        self.assertEqual(opener.commands, [])
-
     def test_open_tui_route_rejects_unsupported_os_without_copy_command(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
@@ -562,51 +485,46 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             platform_name="linux",
         )
 
-        descriptor = fake_attach_descriptor()
-        with (
-            mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach", return_value=descriptor) as resolve_attach,
-            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
-        ):
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("POST", "/api/instances/act-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.code, "UNSUPPORTED_PLATFORM")
-        self.assertEqual(raised.exception.message, "Could not open Terminal.")
+        self.assertEqual(raised.exception.message, "Could not launch Terminal.")
         self.assertIsNone(raised.exception.details)
         self.assertEqual(opener.commands, [])
         self.assertEqual(runner.calls, [])
-        resolve_attach.assert_called_once_with("act-pm-demo")
 
-    def test_open_tui_route_delegates_private_descriptor_to_terminal_only(self) -> None:
+    def test_open_tui_route_hands_short_cli_command_to_terminal_and_returns_accepted(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         _, base_url = self._start_server(runner, terminal_opener=opener.open, platform_name="darwin")
 
-        descriptor = fake_attach_descriptor()
-        with mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach", return_value=descriptor) as resolve_attach:
-            status, payload = self._request_json(
-                base_url,
-                method="POST",
-                path="/api/instances/act-pm-demo/open-tui",
-                payload={},
-                headers={"X-BuddySwitch-Web": "1", "Origin": base_url},
-            )
+        status, payload = self._request_json(
+            base_url,
+            method="POST",
+            path="/api/instances/act-pm-demo/open-tui",
+            payload={},
+            headers={"X-BuddySwitch-Web": "1", "Origin": base_url},
+        )
 
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 202)
         self.assertEqual(
             payload,
             {
                 "ok": True,
                 "actor_id": "act-pm-demo",
                 "terminal": "Terminal.app",
+                "status": "accepted",
             },
         )
-        self.assertEqual(len(opener.commands), 1)
-        assert_terminal_command_uses_descriptor(self, opener.commands[0])
+        self.assertEqual(
+            opener.commands,
+            [f"cd {shlex.quote(str(ROOT))} && ./buddyswitch-codex instance attach act-pm-demo"],
+        )
         self.assertEqual(runner.calls, [])
-        resolve_attach.assert_called_once_with("act-pm-demo")
 
-    def test_open_tui_route_does_not_return_command_when_terminal_open_fails(self) -> None:
+    def test_open_tui_route_maps_terminal_launch_failure(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener(WEB_MANAGEMENT.TerminalOpenError("automation denied"))
         service = WEB_MANAGEMENT.WebManagementService(
@@ -616,21 +534,18 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             platform_name="darwin",
         )
 
-        descriptor = fake_attach_descriptor()
-        with (
-            mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach", return_value=descriptor) as resolve_attach,
-            self.assertRaises(WEB_MANAGEMENT.HttpError) as raised,
-        ):
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("POST", "/api/instances/act-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
 
         self.assertEqual(raised.exception.status, 502)
-        self.assertEqual(raised.exception.code, "TERMINAL_OPEN_FAILED")
-        self.assertEqual(raised.exception.message, "Could not open Terminal.")
+        self.assertEqual(raised.exception.code, "TERMINAL_LAUNCH_FAILED")
+        self.assertEqual(raised.exception.message, "Could not launch Terminal.")
         self.assertIsNone(raised.exception.details)
-        self.assertEqual(len(opener.commands), 1)
-        assert_terminal_command_uses_descriptor(self, opener.commands[0])
+        self.assertEqual(
+            opener.commands,
+            [f"cd {shlex.quote(str(ROOT))} && ./buddyswitch-codex instance attach act-pm-demo"],
+        )
         self.assertEqual(runner.calls, [])
-        resolve_attach.assert_called_once_with("act-pm-demo")
 
     def test_input_route_returns_404_without_launcher_call(self) -> None:
         runner, base_url = self._start_server()
@@ -770,32 +685,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.code, "INVALID_REQUEST")
         self.assertEqual(host_control.calls, [("status", ("not-an-actor",))])
-
-    def test_open_tui_route_uses_actor_session_descriptor_without_host_control(self) -> None:
-        host_control = RecordingHostControl()
-        opener = FakeTerminalOpener()
-        service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
-            host_control=host_control,
-            terminal_opener=opener.open,
-            platform_name="darwin",
-        )
-        descriptor = fake_attach_descriptor()
-
-        with mock.patch.object(WEB_MANAGEMENT.actor_session.ActorSession, "resolve_attach", return_value=descriptor) as resolve_attach:
-            status, payload = service.handle_api(
-                "POST",
-                "/api/instances/act-pm-demo/open-tui",
-                b"{}",
-                OPEN_TUI_HEADERS,
-            )
-
-        self.assertEqual(status, 200)
-        self.assertEqual(len(opener.commands), 1)
-        assert_terminal_command_uses_descriptor(self, opener.commands[0])
-        self.assertNotIn("command", payload)
-        resolve_attach.assert_called_once_with("act-pm-demo")
-        self.assertEqual(host_control.calls, [])
 
     def test_web_management_source_does_not_execute_public_cli(self) -> None:
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")

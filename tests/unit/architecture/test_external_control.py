@@ -115,7 +115,7 @@ CANONICAL_LAUNCHER_STATEMENTS = (
 
 
 class ExternalControlArchitectureTests(unittest.TestCase):
-    def test_web_uses_private_owners_without_cli_execution_or_side_routes(self) -> None:
+    def test_web_uses_private_owners_and_terminal_handoff_without_cli_execution(self) -> None:
         source = _source("tools/launcher/web_management.py")
         forbidden = (
             "Launcher" + "CommandRunner",
@@ -123,12 +123,15 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             "/" + "side",
             'subprocess.run(["./buddy' + 'switch-codex"',
             'subprocess.Popen(["./buddy' + 'switch-codex"',
+            "resolve_" + "attach",
+            "terminal_command_from_" + "descriptor",
+            "actor_session." + "ActorSession",
         )
         for token in forbidden:
             with self.subTest(token=token):
                 self.assertNotIn(token, source)
         self.assertIn("host_control_module.HostControl", source)
-        self.assertIn("actor_session.ActorSession", source)
+        self.assertIn("build_attach_cli_command", source)
 
     def test_actor_session_has_no_task_runtime_or_standalone_cli_entrypoint(self) -> None:
         source = _source("tools/launcher/actor_session.py")
@@ -406,6 +409,8 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             "public CLI is a peer adapter",
             "private Host Control",
             "Actor Session Input/Attach",
+            "Terminal handoff",
+            "Browser -> Web Open-TUI route -> Terminal handoff -> public CLI instance attach -> Actor Session",
             "Web Message belongs to the IM API",
             "external-safe Task/Track projections",
             "Side/Goal mutations are not exposed",
