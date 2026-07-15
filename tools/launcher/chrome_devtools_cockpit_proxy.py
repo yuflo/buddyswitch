@@ -13,6 +13,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 from typing import Any
 from urllib.parse import urlencode
 
@@ -20,8 +21,8 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from env import cdp_background_page  # noqa: E402
 from env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
+from env import cdp_target  # noqa: E402
 from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 from runtime_kernel import process_identity  # noqa: E402
 
@@ -43,9 +44,9 @@ PAGE_SCOPED_USE_TOOLS = {
     "press_key",
 }
 BROWSER_SESSION_TOOL_DESCRIPTIONS = {
-    "new_page": "BuddySwitch chrome-devtools-cockpit forwards page creation to upstream Chrome DevTools MCP new_page with background=true and records the returned selected MCP pageId as BuddySwitch current/selected projection.",
-    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect upstream MCP pageId values, selected-page state, URLs, titles, and BuddySwitch current/selected projection.",
-    "select_page": "BuddySwitch selects the requested upstream MCP pageId without foreground activation and records it as the selected upstream MCP pageId lifecycle projection.",
+    "new_page": "BuddySwitch chrome-devtools-cockpit forwards page creation to upstream Chrome DevTools MCP new_page with background=true and tracks the opened Chrome tab for idle cleanup.",
+    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect upstream MCP pageId values, selected-page state, URLs, titles, and BuddySwitch stable tab resource projection.",
+    "select_page": "BuddySwitch selects the requested upstream MCP pageId without foreground activation and tracks its Chrome tab for idle cleanup.",
     "take_snapshot": "Use after list_pages/select_page to inspect the selected upstream MCP pageId content.",
     "take_screenshot": "Use after list_pages/select_page to capture the selected upstream MCP pageId.",
     "navigate_page": "Page-scoped upstream MCP action; navigation refreshes BuddySwitch selected upstream MCP pageId projection.",
@@ -62,7 +63,7 @@ SEARCH_PAGE_TOOL = {
     "description": (
         "BuddySwitch chrome-devtools-cockpit.search_page builds a supported search URL and forwards it "
         "to upstream Chrome DevTools MCP new_page with background=true, then records the returned "
-        "selected MCP pageId as BuddySwitch current/selected projection."
+        "selected Chrome tab as the active idle-tracked resource."
     ),
     "inputSchema": {
         "type": "object",
@@ -111,7 +112,11 @@ def build_upstream_argv(args: argparse.Namespace, passthrough_args: list[str], b
     upstream = shlex.split(args.upstream_command)
     if not upstream:
         raise ValueError("--upstream-command must not be empty")
-    return upstream + passthrough_args + [f"--browser-url={browser_url}"]
+    argv = upstream + passthrough_args
+    for required_flag in ("--experimental-interop-tools", "--experimental-structured-content"):
+        if required_flag not in argv:
+            argv.append(required_flag)
+    return argv + [f"--browser-url={browser_url}"]
 
 
 def is_jsonrpc_request(message: dict[str, Any]) -> bool:
@@ -258,15 +263,15 @@ def _idle_hint_from_result(result: dict[str, Any] | None) -> str:
     return "Browser page idle refreshed."
 
 
-def _refresh_current_idle_hint(
+def _refresh_active_idle_hint(
     *,
     root: Path,
-    page_id: object,
+    tab_target_id: object,
     target_url: str | None = None,
 ) -> str:
-    result = browser_lifecycle.refresh_current_page_idle(
+    result = browser_lifecycle.refresh_active_tab_idle(
         instance_root=root,
-        page_id=page_id,
+        tab_target_id=tab_target_id,
         target_url=target_url,
     )
     return _idle_hint_from_result(result)
@@ -340,7 +345,7 @@ def _target_map(targets: object) -> dict[str, dict[str, Any]]:
 
 def _open_cleanup_metadata(browser_url: str) -> dict[str, Any]:
     try:
-        targets = browser_lifecycle.read_page_targets(browser_url)
+        targets = cdp_target.list_page_targets(browser_url)
     except Exception as exc:
         return {"pre_open_page_targets_error": str(exc)}
     return {"pre_open_page_targets": targets}
@@ -374,39 +379,37 @@ def _browser_session_state_text(*, browser_url: str, instance_root: str | None) 
         idle_state = browser_lifecycle._read_page_idle_state(root)
     except Exception as exc:
         return f"BuddySwitch browser page resource projection:\n- unavailable: {exc}"
-    current_page_id = idle_state.get("current_page_id")
-    current_page_id = current_page_id.strip() if isinstance(current_page_id, str) and current_page_id.strip() else None
-    selected_page_id = idle_state.get("selected_page_id")
-    selected_page_id = selected_page_id.strip() if isinstance(selected_page_id, str) and selected_page_id.strip() else None
-    idle_pages = idle_state.get("pages")
-    idle_pages = idle_pages if isinstance(idle_pages, dict) else {}
+    active_target_id = idle_state.get("active_tab_target_id")
+    active_target_id = active_target_id.strip() if isinstance(active_target_id, str) and active_target_id.strip() else None
+    idle_targets = idle_state.get("targets")
+    idle_targets = idle_targets if isinstance(idle_targets, dict) else {}
 
     lines = [
-        "BuddySwitch browser page resource projection:",
-        f"- current_page_id: {current_page_id or '<none>'}",
-        f"- selected_page_id: {selected_page_id or '<none>'}",
-        "- pages:",
+        "BuddySwitch browser tab resource projection:",
+        f"- active_tab_target_id: {active_target_id or '<none>'}",
+        "- targets:",
     ]
-    if not idle_pages:
+    if not idle_targets:
         lines.append("  - <none>")
         return "\n".join(lines)
-    for page_id, page_state in sorted(idle_pages.items()):
-        if not isinstance(page_state, dict):
+    for target_id, target_state in sorted(idle_targets.items()):
+        if not isinstance(target_state, dict):
             continue
-        title = page_state.get("title")
-        url = page_state.get("url")
-        last_used_at = page_state.get("last_used_at")
+        title = target_state.get("title")
+        url = target_state.get("url")
+        last_used_at = target_state.get("last_used_at")
+        idle_seconds = target_state.get("idle_seconds")
         expires_at = None
         parsed_last_used = _parse_utc(last_used_at) if isinstance(last_used_at, str) else None
         if parsed_last_used is not None:
-            expires_at = _format_utc(parsed_last_used + timedelta(seconds=browser_lifecycle.BROWSER_PAGE_IDLE_SECONDS))
+            if isinstance(idle_seconds, int) and not isinstance(idle_seconds, bool) and idle_seconds > 0:
+                expires_at = _format_utc(parsed_last_used + timedelta(seconds=idle_seconds))
         lines.extend(
             [
-                f"  - page_id: {page_id}",
+                f"  - tab_target_id: {target_id}",
                 f"    title: {title if isinstance(title, str) and title else '<untitled>'}",
                 f"    url: {url if isinstance(url, str) and url else '<unknown>'}",
-                f"    current: {'true' if page_id == current_page_id else 'false'}",
-                f"    selected: {'true' if page_id == selected_page_id else 'false'}",
+                f"    active: {'true' if target_id == active_target_id else 'false'}",
                 "    idle_tracked: true",
             ]
         )
@@ -420,8 +423,8 @@ def _browser_session_state_text(*, browser_url: str, instance_root: str | None) 
 def _schedule_release_if_no_tracked_pages(root: Path) -> str | None:
     try:
         state = browser_lifecycle._read_page_idle_state(root)
-        pages = state.get("pages")
-        if isinstance(pages, dict) and pages:
+        targets = state.get("targets")
+        if isinstance(targets, dict) and targets:
             return None
         browser_lifecycle.schedule_browser_cockpit_release(
             instance_root=root,
@@ -432,16 +435,18 @@ def _schedule_release_if_no_tracked_pages(root: Path) -> str | None:
         return f"{LIFECYCLE_WARNING_PREFIX} list_pages idle release was not scheduled: {exc}"
 
 
-def _refresh_page_idle_hint(
+def _refresh_tab_idle_hint(
     *,
     root: Path,
-    page_id: object,
+    tab_target_id: object,
     target_url: str | None = None,
+    active: bool = False,
 ) -> str:
-    result = browser_lifecycle.refresh_page_idle(
+    result = browser_lifecycle.refresh_tab_idle(
         instance_root=root,
-        page_id=page_id,
+        tab_target_id=tab_target_id,
         target_url=target_url,
+        active=active,
     )
     return _idle_hint_from_result(result)
 
@@ -509,6 +514,9 @@ def mutate_tool_call(
         rewritten_arguments["bringToFront"] = False
         rewritten_params["arguments"] = rewritten_arguments
         return rewritten, None, {"kind": "select_page", "page_id": arguments.get("pageId")}
+
+    if name == "close_page":
+        return message, None, {"kind": "close_page", "page_id": arguments.get("pageId")}
 
     if name in PAGE_SCOPED_USE_TOOLS:
         return message, None, {"kind": "current_page"}
@@ -643,12 +651,40 @@ def _tool_response_succeeded(message: dict[str, Any]) -> bool:
     return isinstance(result, dict) and result.get("isError") is not True
 
 
+def _tab_target_id_from_response(message: dict[str, Any]) -> str | None:
+    result = message.get("result")
+    if not isinstance(result, dict) or result.get("isError") is True:
+        return None
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict):
+        return None
+    tab_id = structured.get("tabId")
+    return tab_id.strip() if isinstance(tab_id, str) and tab_id.strip() else None
+
+
+def _without_structured_content(message: dict[str, Any]) -> dict[str, Any]:
+    result = message.get("result")
+    if not isinstance(result, dict) or "structuredContent" not in result:
+        return message
+    patched = copy.deepcopy(message)
+    patched_result = patched.get("result")
+    if isinstance(patched_result, dict):
+        patched_result.pop("structuredContent", None)
+    return patched
+
+
+def _coerce_mcp_page_id(page_id: object) -> object:
+    if isinstance(page_id, str) and page_id.isdigit():
+        return int(page_id)
+    return page_id
+
+
 def _new_failed_open_targets(metadata: dict[str, Any], *, browser_url: str) -> list[dict[str, Any]]:
     pre_targets = metadata.get("pre_open_page_targets")
     if not isinstance(pre_targets, list):
         return []
     pre_by_id = _target_map(pre_targets)
-    post_targets = browser_lifecycle.read_page_targets(browser_url)
+    post_targets = cdp_target.list_page_targets(browser_url)
     post_by_id = _target_map(post_targets)
     return [post_by_id[target_id] for target_id in sorted(post_by_id) if target_id not in pre_by_id]
 
@@ -689,7 +725,7 @@ def _cleanup_failed_open_targets(
             )
             continue
         try:
-            cdp_background_page.close_target(browser_url, target_id)
+            cdp_target.close_target(browser_url, target_id)
         except Exception as exc:
             if root is None:
                 patched = patch_tool_response_hint(
@@ -757,12 +793,18 @@ def patch_tool_response_page_use_metadata(
                 root=root,
                 not_deliverable_reason="opened page id was not readable from upstream new_page response and the result is not deliverable",
             )
+        tab_target_id = metadata.get("tab_target_id")
+        if not isinstance(tab_target_id, str) or not tab_target_id.strip():
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened Chrome tab identity was not available; the page remains usable but idle tracking was not refreshed.",
+            )
         if root is None:
             return patched
         try:
-            hint = _refresh_current_idle_hint(
+            hint = _refresh_active_idle_hint(
                 root=root,
-                page_id=selected_page["page_id"],
+                tab_target_id=tab_target_id,
                 target_url=selected_page.get("url"),
             )
         except Exception as exc:
@@ -782,17 +824,17 @@ def patch_tool_response_page_use_metadata(
             patched = patch_tool_response_hint(patched, warning)
         return patched
     if kind == "select_page":
-        page_id = metadata.get("page_id")
-        if page_id is None:
+        tab_target_id = metadata.get("tab_target_id")
+        if not isinstance(tab_target_id, str) or not tab_target_id.strip():
             return patch_tool_response_hint(
                 patched,
-                f"{LIFECYCLE_WARNING_PREFIX} selected page id is missing; browser idle was not refreshed.",
+                f"{LIFECYCLE_WARNING_PREFIX} selected Chrome tab identity is missing; browser idle was not refreshed.",
             )
         target_url = selected_url_from_response(message)
         try:
-            hint = _refresh_current_idle_hint(
+            hint = _refresh_active_idle_hint(
                 root=root,
-                page_id=page_id,
+                tab_target_id=tab_target_id,
                 target_url=target_url,
             )
         except Exception as exc:
@@ -802,26 +844,28 @@ def patch_tool_response_page_use_metadata(
             )
         return patch_tool_response_hint(patched, hint)
     if kind == "current_page":
+        return patched
+    if kind == "close_page":
+        tab_target_id = metadata.get("tab_target_id")
+        if not isinstance(tab_target_id, str) or not tab_target_id.strip():
+            return patched
         try:
-            page_id = browser_lifecycle.selected_page_id(root)
+            state = browser_lifecycle.forget_tab_idle_target(
+                instance_root=root,
+                tab_target_id=tab_target_id,
+            )
+            targets = state.get("targets")
+            if isinstance(targets, dict) and not targets:
+                browser_lifecycle.schedule_browser_cockpit_release(
+                    instance_root=root,
+                    reason="page_idle_empty",
+                )
         except Exception as exc:
             return patch_tool_response_hint(
                 patched,
-                f"{LIFECYCLE_WARNING_PREFIX} selected page was not readable; browser idle was not refreshed: {exc}",
+                f"{LIFECYCLE_WARNING_PREFIX} closed tab lifecycle state was not reconciled: {exc}",
             )
-        if page_id is None:
-            return patch_tool_response_hint(
-                patched,
-                f"{LIFECYCLE_WARNING_PREFIX} selected page is unknown; browser idle was not refreshed.",
-            )
-        try:
-            hint = _refresh_page_idle_hint(root=root, page_id=page_id)
-        except Exception as exc:
-            return patch_tool_response_hint(
-                patched,
-                f"{LIFECYCLE_WARNING_PREFIX} current page idle was not refreshed: {exc}",
-            )
-        return patch_tool_response_hint(patched, hint)
+        return patched
     return patched
 
 
@@ -872,6 +916,8 @@ class UpstreamManager:
         self.output_lock = output_lock
         self.client_initialize_params = copy.deepcopy(client_initialize_params)
         self.ids_lock = threading.Lock()
+        self.pending_condition = threading.Condition(self.ids_lock)
+        self.upstream_write_lock = threading.Lock()
         self.upstream: subprocess.Popen[str] | None = None
         self.relay: threading.Thread | None = None
         self.browser_url: str | None = None
@@ -880,6 +926,9 @@ class UpstreamManager:
         self.drop_response_ids: set[Any] = set()
         self.pending_requests: dict[Any, tuple[dict[str, Any], subprocess.Popen[str]]] = {}
         self.pending_hints: dict[Any, tuple[Any, str, subprocess.Popen[str]]] = {}
+        self.internal_requests: dict[Any, dict[str, Any]] = {}
+        self.internal_sequence = 0
+        self.selected_tab_target_id: str | None = None
 
     def set_client_initialize_params(self, params: Any) -> None:
         self.client_initialize_params = copy.deepcopy(params) if isinstance(params, dict) else {}
@@ -908,6 +957,7 @@ class UpstreamManager:
         self.browser_url = browser_url
         self.initialized = False
         self.generation += 1
+        self.selected_tab_target_id = None
         self.write_pid_markers(upstream)
         self.relay = threading.Thread(target=self._relay, args=(upstream, browser_url), daemon=True)
         self.relay.start()
@@ -932,21 +982,120 @@ class UpstreamManager:
 
     def send_request(self, message: dict[str, Any], response_hint: Any | None) -> None:
         upstream = self._active_upstream()
+        metadata = copy.deepcopy(response_hint) if isinstance(response_hint, dict) else response_hint
+        root = _instance_root_path(self.instance_root)
+        if isinstance(metadata, dict) and root is not None and metadata.get("kind") == "current_page":
+            if self.selected_tab_target_id is None:
+                self._delay_for_tab_identity(upstream, message, metadata, page_id=None)
+                return
+            try:
+                metadata["page_hint"] = _refresh_tab_idle_hint(
+                    root=root,
+                    tab_target_id=self.selected_tab_target_id,
+                    active=True,
+                )
+            except Exception as exc:
+                metadata["page_hint"] = f"{LIFECYCLE_WARNING_PREFIX} current tab idle was not refreshed: {exc}"
+        if isinstance(metadata, dict) and root is not None and metadata.get("kind") == "close_page":
+            self._delay_for_tab_identity(upstream, message, metadata, page_id=metadata.get("page_id"))
+            return
+        self._send_client_request(upstream, message, metadata)
+
+    def _send_client_request(
+        self,
+        upstream: subprocess.Popen[str],
+        message: dict[str, Any],
+        response_hint: Any | None,
+    ) -> None:
         message_id = message.get("id")
         if is_jsonrpc_request(message):
-            with self.ids_lock:
+            with self.pending_condition:
                 self.pending_requests[message_id] = (copy.deepcopy(message), upstream)
                 if response_hint:
-                    browser_url = self.browser_url or ""
-                    self.pending_hints[message_id] = (response_hint, browser_url, upstream)
+                    self.pending_hints[message_id] = (response_hint, self.browser_url or "", upstream)
+                self.pending_condition.notify_all()
         try:
             self._write_to_upstream(upstream, message)
         except RuntimeError:
             if is_jsonrpc_request(message):
-                with self.ids_lock:
+                with self.pending_condition:
                     self.pending_requests.pop(message_id, None)
                     self.pending_hints.pop(message_id, None)
+                    self.pending_condition.notify_all()
             raise
+
+    def _delay_for_tab_identity(
+        self,
+        upstream: subprocess.Popen[str],
+        message: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        page_id: object,
+    ) -> None:
+        client_id = message.get("id")
+        with self.pending_condition:
+            self.pending_requests[client_id] = (copy.deepcopy(message), upstream)
+            self.pending_hints[client_id] = (metadata, self.browser_url or "", upstream)
+            self.pending_condition.notify_all()
+        try:
+            self._request_tab_identity(
+                upstream,
+                page_id=page_id,
+                action={
+                    "phase": "before",
+                    "client_id": client_id,
+                    "message": copy.deepcopy(message),
+                    "metadata": metadata,
+                    "upstream": upstream,
+                },
+            )
+        except RuntimeError:
+            with self.pending_condition:
+                self.pending_requests.pop(client_id, None)
+                self.pending_hints.pop(client_id, None)
+                self.pending_condition.notify_all()
+            raise
+
+    def _request_tab_identity(
+        self,
+        upstream: subprocess.Popen[str],
+        *,
+        page_id: object,
+        action: dict[str, Any],
+    ) -> None:
+        with self.pending_condition:
+            self.internal_sequence += 1
+            internal_id = f"buddyswitch.internal.get_tab_id.{self.generation}.{self.internal_sequence}"
+            self.internal_requests[internal_id] = action
+            self.pending_condition.notify_all()
+        arguments: dict[str, Any] = {}
+        if page_id is not None:
+            arguments["pageId"] = _coerce_mcp_page_id(page_id)
+        try:
+            self._write_to_upstream(
+                upstream,
+                {
+                    "jsonrpc": "2.0",
+                    "id": internal_id,
+                    "method": "tools/call",
+                    "params": {"name": "get_tab_id", "arguments": arguments},
+                },
+            )
+        except RuntimeError:
+            with self.pending_condition:
+                self.internal_requests.pop(internal_id, None)
+                self.pending_condition.notify_all()
+            raise
+
+    def wait_for_idle(self, timeout_seconds: float) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        with self.pending_condition:
+            while self.pending_requests or self.internal_requests:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self.pending_condition.wait(timeout=remaining)
+        return True
 
     def forward_raw_if_started(self, raw_line: str) -> None:
         if not self.is_started():
@@ -954,8 +1103,9 @@ class UpstreamManager:
         upstream = self._active_upstream()
         assert upstream.stdin is not None
         try:
-            upstream.stdin.write(raw_line)
-            upstream.stdin.flush()
+            with self.upstream_write_lock:
+                upstream.stdin.write(raw_line)
+                upstream.stdin.flush()
         except OSError as exc:
             raise RuntimeError(f"failed to write raw message to upstream chrome-devtools-mcp: {exc}") from exc
 
@@ -970,11 +1120,12 @@ class UpstreamManager:
         self.relay = None
         self.browser_url = None
         self.initialized = False
+        self.selected_tab_target_id = None
         self.clear_pid_markers()
 
     def note_exited(self, upstream: subprocess.Popen[str]) -> None:
         pending: list[dict[str, Any]] = []
-        with self.ids_lock:
+        with self.pending_condition:
             for message_id, (request, request_upstream) in list(self.pending_requests.items()):
                 if request_upstream is upstream:
                     pending.append(request)
@@ -983,6 +1134,10 @@ class UpstreamManager:
             for message_id, (_hint, _browser_url, hint_upstream) in list(self.pending_hints.items()):
                 if hint_upstream is upstream:
                     self.pending_hints.pop(message_id, None)
+            for internal_id, action in list(self.internal_requests.items()):
+                if action.get("upstream") is upstream:
+                    self.internal_requests.pop(internal_id, None)
+            self.pending_condition.notify_all()
         for request in pending:
             write_json_line(
                 tool_error_response(request, "Upstream chrome-devtools-mcp exited before completing this browser tool call."),
@@ -993,6 +1148,7 @@ class UpstreamManager:
             self.relay = None
             self.browser_url = None
             self.initialized = False
+            self.selected_tab_target_id = None
             self.clear_pid_markers()
 
     def write_pid_markers(self, upstream: subprocess.Popen[str]) -> None:
@@ -1036,10 +1192,148 @@ class UpstreamManager:
         if upstream.stdin is None:
             raise RuntimeError("upstream chrome-devtools-mcp stdin is unavailable")
         try:
-            upstream.stdin.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
-            upstream.stdin.flush()
+            with self.upstream_write_lock:
+                upstream.stdin.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
+                upstream.stdin.flush()
         except OSError as exc:
             raise RuntimeError(f"failed to write to upstream chrome-devtools-mcp: {exc}") from exc
+
+    def _finish_client_response(
+        self,
+        message_id: Any,
+        message: dict[str, Any],
+        response_hint: Any | None,
+        browser_url: str,
+    ) -> None:
+        if (
+            isinstance(response_hint, dict)
+            and response_hint.get("kind") == "close_page"
+            and _tool_response_succeeded(message)
+            and response_hint.get("tab_target_id") == self.selected_tab_target_id
+        ):
+            self.selected_tab_target_id = None
+        if isinstance(response_hint, dict):
+            message = patch_tool_response_page_use_metadata(
+                message,
+                response_hint,
+                browser_url=browser_url,
+                instance_root=self.instance_root,
+            )
+        elif response_hint:
+            message = patch_tool_response_hint(message, response_hint)
+        with self.pending_condition:
+            self.pending_requests.pop(message_id, None)
+            self.pending_hints.pop(message_id, None)
+            self.pending_condition.notify_all()
+        write_json_line(_without_structured_content(message), self.output_lock)
+
+    def _process_client_response(
+        self,
+        upstream: subprocess.Popen[str],
+        message: dict[str, Any],
+        browser_url: str,
+    ) -> None:
+        message_id = message.get("id")
+        with self.pending_condition:
+            pending = self.pending_hints.get(message_id)
+        response_hint: Any | None = None
+        hint_browser_url = browser_url
+        if pending is not None:
+            response_hint, hint_browser_url, _hint_upstream = pending
+        root = _instance_root_path(self.instance_root)
+        if (
+            isinstance(response_hint, dict)
+            and root is not None
+            and response_hint.get("kind") in {"new_page", "select_page"}
+            and _tool_response_succeeded(message)
+        ):
+            page_id: object | None
+            if response_hint.get("kind") == "new_page":
+                selected_page = selected_page_from_new_page_response(message)
+                page_id = selected_page.get("page_id") if isinstance(selected_page, dict) else None
+            else:
+                page_id = response_hint.get("page_id")
+            if page_id is not None:
+                try:
+                    self._request_tab_identity(
+                        upstream,
+                        page_id=page_id,
+                        action={
+                            "phase": "after",
+                            "client_id": message_id,
+                            "response": copy.deepcopy(message),
+                            "metadata": copy.deepcopy(response_hint),
+                            "browser_url": hint_browser_url,
+                            "upstream": upstream,
+                        },
+                    )
+                    return
+                except RuntimeError as exc:
+                    response_hint = copy.deepcopy(response_hint)
+                    response_hint["page_hint"] = f"{LIFECYCLE_WARNING_PREFIX} Chrome tab identity lookup failed: {exc}"
+        self._finish_client_response(message_id, message, response_hint, hint_browser_url)
+
+    def _handle_internal_response(
+        self,
+        action: dict[str, Any],
+        message: dict[str, Any],
+    ) -> None:
+        target_id = _tab_target_id_from_response(message)
+        metadata = copy.deepcopy(action.get("metadata"))
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if target_id is None:
+            metadata["page_hint"] = (
+                f"{LIFECYCLE_WARNING_PREFIX} stable Chrome tab identity was unavailable; "
+                "the browser operation still ran normally."
+            )
+        phase = action.get("phase")
+        if phase == "before":
+            client_message = action.get("message")
+            upstream = action.get("upstream")
+            if not isinstance(client_message, dict) or not isinstance(upstream, subprocess.Popen):
+                return
+            kind = metadata.get("kind")
+            root = _instance_root_path(self.instance_root)
+            if target_id is not None:
+                if kind == "close_page":
+                    metadata["tab_target_id"] = target_id
+                elif kind == "current_page":
+                    self.selected_tab_target_id = target_id
+                    if root is not None:
+                        try:
+                            metadata["page_hint"] = _refresh_tab_idle_hint(
+                                root=root,
+                                tab_target_id=target_id,
+                                active=True,
+                            )
+                        except Exception as exc:
+                            metadata["page_hint"] = f"{LIFECYCLE_WARNING_PREFIX} current tab idle was not refreshed: {exc}"
+            try:
+                self._send_client_request(upstream, client_message, metadata)
+            except RuntimeError as exc:
+                request_id = client_message.get("id")
+                self._finish_client_response(
+                    request_id,
+                    tool_error_response(client_message, str(exc)),
+                    None,
+                    self.browser_url or "",
+                )
+            return
+        if phase == "after":
+            client_id = action.get("client_id")
+            response = action.get("response")
+            if not isinstance(response, dict):
+                return
+            if target_id is not None:
+                metadata["tab_target_id"] = target_id
+                self.selected_tab_target_id = target_id
+            self._finish_client_response(
+                client_id,
+                response,
+                metadata,
+                str(action.get("browser_url") or self.browser_url or ""),
+            )
 
     def _relay(self, upstream: subprocess.Popen[str], browser_url: str) -> None:
         assert upstream.stdout is not None
@@ -1057,26 +1351,17 @@ class UpstreamManager:
                     write_raw_line(raw_line, self.output_lock)
                     continue
                 message_id = message.get("id")
-                response_hint: Any | None = None
-                hint_browser_url = browser_url
-                with self.ids_lock:
+                with self.pending_condition:
                     if message_id in self.drop_response_ids:
                         self.drop_response_ids.discard(message_id)
                         continue
-                    self.pending_requests.pop(message_id, None)
-                    pending = self.pending_hints.pop(message_id, None)
-                    if pending is not None:
-                        response_hint, hint_browser_url, _hint_upstream = pending
-                if isinstance(response_hint, dict):
-                    message = patch_tool_response_page_use_metadata(
-                        message,
-                        response_hint,
-                        browser_url=hint_browser_url,
-                        instance_root=self.instance_root,
-                    )
-                elif response_hint:
-                    message = patch_tool_response_hint(message, response_hint)
-                write_json_line(message, self.output_lock)
+                    internal_action = self.internal_requests.pop(message_id, None)
+                    if internal_action is not None:
+                        self.pending_condition.notify_all()
+                if internal_action is not None:
+                    self._handle_internal_response(internal_action, message)
+                    continue
+                self._process_client_response(upstream, message, browser_url)
         finally:
             self.note_exited(upstream)
 
@@ -1157,6 +1442,7 @@ def run_proxy(args: argparse.Namespace, passthrough_args: list[str], instance_ro
     except BrokenPipeError:
         return 1
     finally:
+        manager.wait_for_idle(5.0)
         manager.stop()
     return 0
 

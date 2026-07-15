@@ -596,7 +596,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
-            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
+            env["BUDDYSWITCH_BROWSER_TARGET_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
             env["BUDDYSWITCH_TEST_CHROME_ARGV_FILE"] = str(chrome_argv_path)
             env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
@@ -862,7 +862,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_TEST_CDP_CALLS_FILE"] = str(calls_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
-            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
+            env["BUDDYSWITCH_BROWSER_TARGET_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
             env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
@@ -956,7 +956,7 @@ sleep 60
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
-            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
+            env["BUDDYSWITCH_BROWSER_TARGET_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CHROME_PID_FILE"] = str(chrome_pid_file)
 
             ensure = run_process(
@@ -1026,7 +1026,7 @@ sleep 60
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_TEST_CDP_CALLS_FILE"] = str(calls_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
-            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
+            env["BUDDYSWITCH_BROWSER_TARGET_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
             env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
@@ -1085,7 +1085,7 @@ sleep 60
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_TEST_CDP_CALLS_FILE"] = str(calls_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
-            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
+            env["BUDDYSWITCH_BROWSER_TARGET_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
             env["BUDDYSWITCH_TEST_FAKE_CHROME_SERVE_CDP"] = "1"
 
@@ -1250,8 +1250,8 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
         text = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8")
         self.assertIn("chrome-devtools-cockpit", text)
         self.assertIn("chrome_devtools_cockpit_proxy.py", text)
-        self.assertIn("scripts/env/cdp_background_page.py", text)
-        self.assertNotIn("tools" + "/launcher/cdp_background_page.py", text)
+        self.assertIn("scripts/env/cdp_target.py", text)
+        self.assertNotIn("scripts/env/cdp_background_page.py", text)
         self.assertNotIn("/json/new?about:blank", text)
         self.assertNotIn("chrome-devtools-mcp@latest", text)
         self.assertNotIn("chrome/shared-browser", text)

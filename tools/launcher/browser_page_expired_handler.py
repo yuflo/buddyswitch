@@ -1,17 +1,10 @@
-"""Browser-owned daemon handler for expired browser page TTL schedules."""
+"""Browser-owned daemon handlers for exact Chrome target cleanup."""
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-import re
-import select
-import shlex
-import signal
-import subprocess
 import sys
-import time
 from typing import Any
 
 
@@ -24,14 +17,12 @@ for candidate in (HELPER_DIR, SCRIPTS, SCRIPTS_ENV):
         sys.path.insert(0, str(candidate))
 
 import daemon_contracts  # noqa: E402
-import cdp_background_page  # noqa: E402
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
+import cdp_target  # noqa: E402
 
 
 BROWSER_PAGE_EXPIRED_EVENT_TYPE = "browser.page.expired"
 BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE = "browser.failed_open_page.cleanup"
-DEFAULT_UPSTREAM_COMMAND = "npx chrome-devtools-mcp@1.1.1"
-MCP_TOOL_TIMEOUT_SECONDS = 20.0
 
 
 def _context_identity_route(context: Any) -> dict[str, str]:
@@ -41,22 +32,26 @@ def _context_identity_route(context: Any) -> dict[str, str]:
     }
 
 
+def _require_target_route(context: Any, trigger: Any) -> None:
+    target_route = {
+        "identity_id": str(getattr(trigger, "target_identity_id", "")).strip(),
+        "role_id": str(getattr(trigger, "target_role_id", "")).strip(),
+    }
+    if target_route != _context_identity_route(context):
+        raise PermissionError("wrong target identity for browser cleanup trigger")
+
+
 def _payload(trigger: Any) -> dict[str, Any]:
     payload = getattr(trigger, "payload", None)
     if not isinstance(payload, dict):
         raise ValueError("browser page expiry trigger payload must be an object")
-    page_id = payload.get("page_id")
-    if isinstance(page_id, bool) or page_id is None:
-        raise ValueError("page_id is required")
-    if isinstance(page_id, str):
-        page_id = page_id.strip()
-        if not page_id:
-            raise ValueError("page_id is required")
-    elif not isinstance(page_id, int):
-        raise ValueError("page_id must be a string or integer")
-    return {
-        "page_id": page_id,
-    }
+    tab_target_id = payload.get("tab_target_id")
+    if not isinstance(tab_target_id, str) or not tab_target_id.strip():
+        raise ValueError("tab_target_id is required")
+    idle_seconds = payload.get("idle_seconds")
+    if isinstance(idle_seconds, bool) or not isinstance(idle_seconds, int) or idle_seconds <= 0:
+        raise ValueError("idle_seconds must be a positive integer")
+    return {"tab_target_id": tab_target_id.strip(), "idle_seconds": idle_seconds}
 
 
 def _failed_open_cleanup_payload(trigger: Any) -> dict[str, Any]:
@@ -70,14 +65,12 @@ def _failed_open_cleanup_payload(trigger: Any) -> dict[str, Any]:
     if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
         attempts = 1
     first_seen_at = payload.get("first_seen_at")
-    first_seen_at = first_seen_at.strip() if isinstance(first_seen_at, str) and first_seen_at.strip() else None
     url = payload.get("url")
-    url = url.strip() if isinstance(url, str) and url.strip() else None
     return {
         "target_id": target_id.strip(),
-        "url": url,
         "attempts": attempts,
-        "first_seen_at": first_seen_at,
+        "first_seen_at": first_seen_at.strip() if isinstance(first_seen_at, str) and first_seen_at.strip() else None,
+        "url": url.strip() if isinstance(url, str) and url.strip() else None,
     }
 
 
@@ -86,22 +79,7 @@ def _trigger_due_at(trigger: Any) -> str | None:
     if not isinstance(source_context, dict):
         return None
     due_at = source_context.get("due_at")
-    if isinstance(due_at, str) and due_at.strip():
-        return due_at.strip()
-    return None
-
-
-def _browser_endpoint(context: Any) -> str | None:
-    payload = _fresh_instance_payload(context)
-    if payload is None:
-        cached_payload = getattr(context, "instance_payload", None)
-        if not isinstance(cached_payload, dict):
-            return None
-        payload = cached_payload
-    port = payload.get("browser_port")
-    if isinstance(port, bool) or not isinstance(port, int) or port < 1 or port > 65535:
-        return None
-    return f"http://127.0.0.1:{port}"
+    return due_at.strip() if isinstance(due_at, str) and due_at.strip() else None
 
 
 def _fresh_instance_payload(context: Any) -> dict[str, Any] | None:
@@ -115,11 +93,21 @@ def _fresh_instance_payload(context: Any) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _browser_endpoint(context: Any) -> str | None:
+    payload = _fresh_instance_payload(context)
+    if payload is None:
+        payload = getattr(context, "instance_payload", None)
+    if not isinstance(payload, dict):
+        return None
+    port = payload.get("browser_port")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        return None
+    return f"http://127.0.0.1:{port}"
+
+
 def _instance_root(context: Any) -> Path | None:
     value = getattr(context, "instance_root", None)
-    if value is None:
-        return None
-    return Path(value)
+    return Path(value) if value is not None else None
 
 
 def _parent_turn_is_running(runtime: Any) -> bool:
@@ -127,348 +115,28 @@ def _parent_turn_is_running(runtime: Any) -> bool:
     return isinstance(activity, dict) and activity.get("status") == "running"
 
 
-def _is_stale_browser_error(message: str) -> bool:
-    return (
-        "failed to read Chrome DevTools /json/list" in message
-        or "Chrome DevTools returned HTTP" in message
-        or "connection refused" in message
-        or "timed out" in message
-    )
-
-
-def _schedule_release_if_empty(instance_root: Path, state: dict[str, Any]) -> None:
-    pages = state.get("pages")
-    if isinstance(pages, dict) and not pages:
-        browser_lifecycle.schedule_browser_cockpit_release(instance_root=instance_root, reason="page_idle_empty")
-
-
-def _forget_tracked_page(instance_root: Path, page_id: object) -> dict[str, Any] | None:
-    before = browser_lifecycle._read_page_idle_state(instance_root)
-    pages = before.get("pages")
-    normalized_page_id = str(page_id).strip() if not isinstance(page_id, bool) else ""
-    if not isinstance(pages, dict) or normalized_page_id not in pages:
-        return None
-    return browser_lifecycle.forget_page_idle_page(instance_root=instance_root, page_id=normalized_page_id)
-
-
-def _tool_response_text(message: dict[str, Any]) -> str:
-    result = message.get("result")
-    if not isinstance(result, dict):
-        return ""
-    content = result.get("content")
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for item in content:
-        if isinstance(item, dict) and isinstance(item.get("text"), str):
-            parts.append(item["text"])
-    return "\n".join(parts)
-
-
-def _write_mcp_message(proc: subprocess.Popen[str], message: dict[str, Any]) -> None:
-    if proc.stdin is None:
-        raise browser_lifecycle.BrowserLifecycleError("upstream chrome-devtools-mcp stdin is unavailable")
-    try:
-        proc.stdin.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
-        proc.stdin.flush()
-    except OSError as exc:
-        raise browser_lifecycle.BrowserLifecycleError(f"failed to write to upstream chrome-devtools-mcp: {exc}") from exc
-
-
-def _read_mcp_response(
-    proc: subprocess.Popen[str],
-    response_id: str,
-    *,
-    operation: str,
-    deadline: float,
-) -> dict[str, Any]:
-    if proc.stdout is None:
-        raise browser_lifecycle.BrowserLifecycleError("upstream chrome-devtools-mcp stdout is unavailable")
-    while time.monotonic() < deadline:
-        remaining = max(0.0, min(0.25, deadline - time.monotonic()))
-        ready, _, _ = select.select([proc.stdout], [], [], remaining)
-        if not ready:
-            if proc.poll() is not None:
-                break
-            continue
-        raw_line = proc.stdout.readline()
-        if not raw_line:
-            if proc.poll() is not None:
-                break
-            continue
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(message, dict) and message.get("id") == response_id:
-            return message
-    if time.monotonic() >= deadline:
-        raise browser_lifecycle.BrowserLifecycleError(f"upstream chrome-devtools-mcp timed out during {operation}")
-    raise browser_lifecycle.BrowserLifecycleError(f"upstream chrome-devtools-mcp returned no {operation} response")
-
-
-def _stop_mcp_process(proc: subprocess.Popen[str]) -> None:
-    try:
-        if proc.stdin is not None and not proc.stdin.closed:
-            proc.stdin.close()
-    except OSError:
-        pass
-    try:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except OSError:
-                    proc.kill()
-                proc.wait(timeout=2.0)
-    finally:
-        for stream in (proc.stdout, proc.stderr):
-            try:
-                if stream is not None and not stream.closed:
-                    stream.close()
-            except OSError:
-                pass
-
-
-class McpToolSession:
-    def __init__(self, browser_endpoint: str) -> None:
-        upstream = shlex.split(os.environ.get("BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND", DEFAULT_UPSTREAM_COMMAND))
-        if not upstream:
-            raise browser_lifecycle.BrowserLifecycleError("upstream chrome-devtools-mcp command is empty")
-        argv = upstream + [f"--browser-url={browser_endpoint}"]
-        self._proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            start_new_session=True,
-        )
-        self._closed = False
-        self._call_count = 0
-        try:
-            self._initialize()
-        except Exception:
-            self.close()
-            raise
-
-    def __enter__(self) -> "McpToolSession":
-        return self
-
-    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
-        self.close()
-
-    def _deadline(self) -> float:
-        return time.monotonic() + MCP_TOOL_TIMEOUT_SECONDS
-
-    def _initialize(self) -> None:
-        initialize_id = "buddyswitch.browser_page_expired.initialize"
-        _write_mcp_message(
-            self._proc,
-            {
-                "jsonrpc": "2.0",
-                "id": initialize_id,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "buddyswitch-browser-page-expired", "version": "1.0.0"},
-                },
-            },
-        )
-        initialize_response = _read_mcp_response(
-            self._proc,
-            initialize_id,
-            operation="initialize",
-            deadline=self._deadline(),
-        )
-        if isinstance(initialize_response.get("error"), dict):
-            raise browser_lifecycle.BrowserLifecycleError(f"upstream chrome-devtools-mcp initialize failed: {initialize_response['error']}")
-        _write_mcp_message(self._proc, {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
-
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self._call_count += 1
-        call_id = f"buddyswitch.browser_page_expired.tool.{self._call_count}"
-        _write_mcp_message(
-            self._proc,
-            {
-                "jsonrpc": "2.0",
-                "id": call_id,
-                "method": "tools/call",
-                "params": {"name": name, "arguments": arguments},
-            },
-        )
-        message = _read_mcp_response(self._proc, call_id, operation=name, deadline=self._deadline())
-        if isinstance(message.get("error"), dict):
-            raise browser_lifecycle.BrowserLifecycleError(f"{name} failed: {message['error']}")
-        result = message.get("result")
-        if isinstance(result, dict) and result.get("isError") is True:
-            raise browser_lifecycle.BrowserLifecycleError(_tool_response_text(message) or f"{name} failed")
-        return message
-
-    def list_pages(self) -> list[dict[str, Any]]:
-        return _pages_from_mcp_response(self.call_tool("list_pages", {}))
-
-    def close_page(self, page_id: object) -> dict[str, Any]:
-        self.call_tool("close_page", {"pageId": _coerce_close_page_id(page_id)})
-        return {"status": "closed", "page_id": page_id}
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        _stop_mcp_process(self._proc)
-
-
-def open_mcp_session(browser_endpoint: str) -> McpToolSession:
-    return McpToolSession(browser_endpoint)
-
-
-def _run_mcp_tool(browser_endpoint: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    with open_mcp_session(browser_endpoint) as session:
-        return session.call_tool(name, arguments)
-
-
-def _coerce_close_page_id(page_id: object) -> object:
-    if isinstance(page_id, str) and page_id.isdigit():
-        return int(page_id)
-    return page_id
-
-
-def _page_id_value(page: dict[str, Any]) -> object:
-    for key in ("pageId", "page_id", "id"):
-        value = page.get(key)
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, (str, int)) and str(value).strip():
-            return value
-    return None
-
-
-def _page_field(page: dict[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = page.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _pages_from_structured(value: Any) -> list[dict[str, Any]]:
-    if isinstance(value, list):
-        return [dict(item) for item in value if isinstance(item, dict)]
-    if isinstance(value, dict):
-        for key in ("pages", "pageList", "items"):
-            pages = _pages_from_structured(value.get(key))
-            if pages:
-                return pages
-    return []
-
-
-def _pages_from_text(text: str) -> list[dict[str, Any]]:
-    pages: list[dict[str, Any]] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.lower().startswith(("pages", "# pages")):
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            payload = None
-        structured_pages = _pages_from_structured(payload)
-        if structured_pages:
-            pages.extend(structured_pages)
-            continue
-        match = re.match(r"^(?:[-*]\s*)?(?P<page_id>[A-Za-z0-9_.:-]+)\s*[:.)-]\s*(?P<body>.+)$", line)
-        if not match:
-            continue
-        body = match.group("body").replace("[selected]", "").strip()
-        url_match = re.search(r"(https?://\S+|about:blank)", body)
-        url = url_match.group(1).rstrip(".,;") if url_match else None
-        title = body
-        if url:
-            title = title.replace(url, "").strip(" -")
-        page_id: object = match.group("page_id")
-        if isinstance(page_id, str) and page_id.isdigit():
-            page_id = int(page_id)
-        page: dict[str, Any] = {"pageId": page_id}
-        if url:
-            page["url"] = url
-        if title:
-            page["title"] = title
-        pages.append(page)
-    return pages
-
-
-def _pages_from_mcp_response(message: dict[str, Any]) -> list[dict[str, Any]]:
-    result = message.get("result")
-    pages = _pages_from_structured(result)
-    if pages:
-        return pages
-    return _pages_from_text(_tool_response_text(message))
-
-
-def _recorded_page_state(instance_root: Path, page_id: object) -> dict[str, Any] | None:
-    state = browser_lifecycle._read_page_idle_state(instance_root)
-    pages = state.get("pages")
-    if not isinstance(pages, dict):
-        return None
-    value = pages.get(str(page_id))
-    return value if isinstance(value, dict) else None
-
-
-def _recorded_identity_candidates(recorded: dict[str, Any], pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    recorded_url = _page_field(recorded, "url", "target_url")
-    if recorded_url is None:
-        return []
-    recorded_title = _page_field(recorded, "title")
-    candidates: list[dict[str, Any]] = []
-    for page in pages:
-        observed_url = _page_field(page, "url", "target_url")
-        if observed_url != recorded_url:
-            continue
-        observed_title = _page_field(page, "title")
-        if recorded_title and observed_title and observed_title != recorded_title:
-            continue
-        candidates.append(page)
-    return candidates
-
-
-def _resolve_recorded_page(recorded: dict[str, Any], pages: list[dict[str, Any]]) -> dict[str, Any] | None:
-    recorded_url = _page_field(recorded, "url", "target_url")
-    if recorded_url is None:
-        raise browser_lifecycle.BrowserLifecycleError("recorded browser page URL is missing; cannot safely resolve MCP page")
-    candidates = _recorded_identity_candidates(recorded, pages)
-    if not candidates:
-        return None
-    if len(candidates) > 1:
-        raise browser_lifecycle.BrowserLifecycleError(f"multiple MCP pages match recorded browser page URL: {recorded_url}")
-    return candidates[0]
-
-
-def _recorded_page_visible(recorded: dict[str, Any], pages: list[dict[str, Any]]) -> bool:
-    return bool(_recorded_identity_candidates(recorded, pages))
-
-
 def _target_id(target: dict[str, Any]) -> str | None:
-    for key in ("id", "targetId"):
-        value = target.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    value = target.get("targetId")
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _find_page_target(targets: list[dict[str, Any]], target_id: str) -> dict[str, Any] | None:
-    for target in targets:
-        if _target_id(target) == target_id:
-            return target
-    return None
+def _target_present(targets: list[dict[str, Any]], target_id: str) -> bool:
+    return any(_target_id(target) == target_id for target in targets)
+
+
+def _tracked_target(instance_root: Path, target_id: str) -> bool:
+    targets = browser_lifecycle._read_page_idle_state(instance_root).get("targets")
+    return isinstance(targets, dict) and target_id in targets
+
+
+def _forget_and_release_if_empty(instance_root: Path, target_id: str) -> None:
+    state = browser_lifecycle.forget_tab_idle_target(instance_root=instance_root, tab_target_id=target_id)
+    targets = state.get("targets")
+    if isinstance(targets, dict) and not targets:
+        browser_lifecycle.schedule_browser_cockpit_release(
+            instance_root=instance_root,
+            reason="page_idle_empty",
+        )
 
 
 class BrowserPageExpiredHandler:
@@ -477,99 +145,50 @@ class BrowserPageExpiredHandler:
     def handles(self, trigger: Any) -> bool:
         return getattr(trigger, "type", None) == BROWSER_PAGE_EXPIRED_EVENT_TYPE
 
-    def handle(
-        self,
-        context: Any,
-        state: Any,
-        runtime: Any,
-        trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    def handle(self, context: Any, state: Any, runtime: Any, trigger: Any) -> daemon_contracts.HandlerResult:
         del state
-        if getattr(trigger, "type", None) != BROWSER_PAGE_EXPIRED_EVENT_TYPE:
+        if not self.handles(trigger):
             return daemon_contracts.HandlerResult.ignored()
         try:
-            local_route = _context_identity_route(context)
-            target_route = {
-                "identity_id": str(getattr(trigger, "target_identity_id", "")).strip(),
-                "role_id": str(getattr(trigger, "target_role_id", "")).strip(),
-            }
-            if target_route != local_route:
-                raise PermissionError("wrong target identity for browser page expiry trigger")
+            _require_target_route(context, trigger)
             payload = _payload(trigger)
-            return self._handle_expiry(context, runtime, payload, due_at=_trigger_due_at(trigger))
-        except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
-
-    def _handle_expiry(
-        self,
-        context: Any,
-        runtime: Any,
-        payload: dict[str, Any],
-        *,
-        due_at: str | None = None,
-    ) -> daemon_contracts.HandlerResult:
-        root = _instance_root(context)
-        page_id = payload["page_id"]
-        if root is not None:
-            current_page_id = browser_lifecycle.current_page_id(root)
-            selected_page_id = browser_lifecycle.selected_page_id(root)
-            if page_id in {current_page_id, selected_page_id} and _parent_turn_is_running(runtime):
-                browser_lifecycle.refresh_page_idle(instance_root=root, page_id=page_id)
+            root = _instance_root(context)
+            if root is None:
+                raise browser_lifecycle.BrowserLifecycleError("instance_root is required for browser target expiry")
+            target_id = payload["tab_target_id"]
+            if not _tracked_target(root, target_id):
                 return daemon_contracts.HandlerResult.handled()
-            if browser_lifecycle.page_idle_expiry_after_due_at(
+            if browser_lifecycle.active_tab_target_id(root) == target_id and _parent_turn_is_running(runtime):
+                browser_lifecycle.refresh_tab_idle(
+                    instance_root=root,
+                    tab_target_id=target_id,
+                    active=True,
+                )
+                return daemon_contracts.HandlerResult.handled()
+            if browser_lifecycle.tab_idle_expiry_after_due_at(
                 instance_root=root,
-                page_id=page_id,
-                due_at=due_at,
+                tab_target_id=target_id,
+                due_at=_trigger_due_at(trigger),
+                idle_seconds=payload["idle_seconds"],
             ):
                 return daemon_contracts.HandlerResult.handled()
-        return self._auto_close(context, payload)
-
-    def _auto_close(self, context: Any, payload: dict[str, Any]) -> daemon_contracts.HandlerResult:
-        browser_endpoint = _browser_endpoint(context)
-        root = _instance_root(context)
-        if browser_endpoint is None:
-            if root is not None:
-                state = _forget_tracked_page(root, payload["page_id"])
-                if state is not None:
-                    _schedule_release_if_empty(root, state)
-            return daemon_contracts.HandlerResult.handled()
-        page_id = payload["page_id"]
-        if root is None:
-            return daemon_contracts.HandlerResult.failed("instance_root is required for browser page expiry cleanup")
-        recorded_page = _recorded_page_state(root, page_id)
-        if recorded_page is None:
-            return daemon_contracts.HandlerResult.handled()
-        try:
-            with open_mcp_session(browser_endpoint) as session:
-                mcp_pages = session.list_pages()
-                resolved_page = _resolve_recorded_page(recorded_page, mcp_pages)
-                if resolved_page is None:
-                    state = _forget_tracked_page(root, page_id)
-                    if state is not None:
-                        _schedule_release_if_empty(root, state)
-                    return daemon_contracts.HandlerResult.handled()
-                close_page_id = _page_id_value(resolved_page)
-                if close_page_id is None:
-                    raise browser_lifecycle.BrowserLifecycleError("resolved MCP page is missing pageId")
-                session.close_page(close_page_id)
-                verified_pages = session.list_pages()
-                if _recorded_page_visible(recorded_page, verified_pages):
-                    recorded_url = _page_field(recorded_page, "url", "target_url") or "<unknown>"
-                    return daemon_contracts.HandlerResult.failed(f"browser page still visible after MCP close: {recorded_url}")
-        except browser_lifecycle.BrowserLifecycleError as exc:
-            message = str(exc)
-            if _is_stale_browser_error(message):
-                if root is not None:
-                    state = _forget_tracked_page(root, page_id)
-                    if state is not None:
-                        _schedule_release_if_empty(root, state)
+            endpoint = _browser_endpoint(context)
+            if endpoint is None:
+                _forget_and_release_if_empty(root, target_id)
                 return daemon_contracts.HandlerResult.handled()
-            return daemon_contracts.HandlerResult.failed(message)
-        if root is not None:
-            state = _forget_tracked_page(root, page_id)
-            if state is not None:
-                _schedule_release_if_empty(root, state)
-        return daemon_contracts.HandlerResult.handled()
+            targets = cdp_target.list_page_targets(endpoint)
+            if not _target_present(targets, target_id):
+                _forget_and_release_if_empty(root, target_id)
+                return daemon_contracts.HandlerResult.handled()
+            cdp_target.close_target(endpoint, target_id)
+            if _target_present(cdp_target.list_page_targets(endpoint), target_id):
+                return daemon_contracts.HandlerResult.failed(
+                    f"browser target still present after exact close: {target_id}"
+                )
+            _forget_and_release_if_empty(root, target_id)
+            return daemon_contracts.HandlerResult.handled()
+        except Exception as exc:
+            return daemon_contracts.HandlerResult.failed(str(exc))
 
 
 class BrowserFailedOpenPageCleanupHandler:
@@ -578,56 +197,48 @@ class BrowserFailedOpenPageCleanupHandler:
     def handles(self, trigger: Any) -> bool:
         return getattr(trigger, "type", None) == BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE
 
-    def handle(
-        self,
-        context: Any,
-        state: Any,
-        runtime: Any,
-        trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    def handle(self, context: Any, state: Any, runtime: Any, trigger: Any) -> daemon_contracts.HandlerResult:
         del state, runtime
-        if getattr(trigger, "type", None) != BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE:
+        if not self.handles(trigger):
             return daemon_contracts.HandlerResult.ignored()
         try:
-            local_route = _context_identity_route(context)
-            target_route = {
-                "identity_id": str(getattr(trigger, "target_identity_id", "")).strip(),
-                "role_id": str(getattr(trigger, "target_role_id", "")).strip(),
-            }
-            if target_route != local_route:
-                raise PermissionError("wrong target identity for browser failed-open cleanup trigger")
-            payload = _failed_open_cleanup_payload(trigger)
-            return self._handle_failed_open_cleanup(context, payload)
+            _require_target_route(context, trigger)
+            return self._cleanup(context, _failed_open_cleanup_payload(trigger))
         except Exception as exc:
             return daemon_contracts.HandlerResult.failed(str(exc))
 
-    def _handle_failed_open_cleanup(self, context: Any, payload: dict[str, Any]) -> daemon_contracts.HandlerResult:
-        browser_endpoint = _browser_endpoint(context)
-        if browser_endpoint is None:
-            return daemon_contracts.HandlerResult.handled()
-        root = _instance_root(context)
-        target_id = payload["target_id"]
-        try:
-            target = _find_page_target(browser_lifecycle.read_page_targets(browser_endpoint), target_id)
-        except browser_lifecycle.BrowserLifecycleError as exc:
-            return self._reschedule_or_escalate(context, payload, reason=str(exc))
-        if target is None:
+    def _cleanup(self, context: Any, payload: dict[str, Any]) -> daemon_contracts.HandlerResult:
+        endpoint = _browser_endpoint(context)
+        if endpoint is None:
             return daemon_contracts.HandlerResult.handled()
         try:
-            cdp_background_page.close_target(browser_endpoint, target_id)
+            targets = cdp_target.list_page_targets(endpoint)
         except Exception as exc:
             return self._reschedule_or_escalate(context, payload, reason=str(exc))
+        if not _target_present(targets, payload["target_id"]):
+            return daemon_contracts.HandlerResult.handled()
+        try:
+            cdp_target.close_target(endpoint, payload["target_id"])
+        except Exception as exc:
+            return self._reschedule_or_escalate(context, payload, reason=str(exc))
+        try:
+            remaining_targets = cdp_target.list_page_targets(endpoint)
+        except Exception as exc:
+            return self._reschedule_or_escalate(context, payload, reason=str(exc))
+        if _target_present(remaining_targets, payload["target_id"]):
+            return self._reschedule_or_escalate(
+                context,
+                payload,
+                reason=f"browser target still present after exact close: {payload['target_id']}",
+            )
+        root = _instance_root(context)
         if root is not None:
-            try:
-                state_payload = browser_lifecycle._read_page_idle_state(root)
-                pages = state_payload.get("pages")
-                if isinstance(pages, dict) and not pages:
-                    browser_lifecycle.schedule_browser_cockpit_release(
-                        instance_root=root,
-                        reason="failed_open_page_cleanup_complete",
-                    )
-            except Exception:
-                pass
+            targets = browser_lifecycle._read_page_idle_state(root).get("targets")
+            if isinstance(targets, dict) and not targets:
+                browser_lifecycle.schedule_browser_cockpit_release(
+                    instance_root=root,
+                    reason="failed_open_page_cleanup_complete",
+                )
         return daemon_contracts.HandlerResult.handled()
 
     def _reschedule_or_escalate(
@@ -639,7 +250,9 @@ class BrowserFailedOpenPageCleanupHandler:
     ) -> daemon_contracts.HandlerResult:
         root = _instance_root(context)
         if root is None:
-            return daemon_contracts.HandlerResult.failed(f"instance_root is required for browser failed-open cleanup: {reason}")
+            return daemon_contracts.HandlerResult.failed(
+                f"instance_root is required for browser failed-open cleanup: {reason}"
+            )
         attempts = payload["attempts"]
         if attempts < browser_lifecycle.BROWSER_FAILED_OPEN_PAGE_CLEANUP_MAX_ATTEMPTS:
             browser_lifecycle.schedule_failed_open_page_cleanup(

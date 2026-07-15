@@ -30,7 +30,7 @@ if str(LAUNCHER_DIR) not in sys.path:
     sys.path.insert(0, str(LAUNCHER_DIR))
 
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-import cdp_background_page  # noqa: E402
+import cdp_target  # noqa: E402
 import daemon_state  # noqa: E402
 from runtime_kernel import process_identity  # noqa: E402
 
@@ -73,7 +73,7 @@ class BrowserResourceSnapshot:
         "upstream_pgid",
         "port_listener_pids",
         "profile_owned_processes",
-        "page_idle_page_count",
+        "tab_idle_target_count",
         "ownership",
     )
 
@@ -91,7 +91,7 @@ class BrowserResourceSnapshot:
         upstream_pgid: int | None,
         port_listener_pids: tuple[int, ...],
         profile_owned_processes: tuple[ProcessInfo, ...],
-        page_idle_page_count: int,
+        tab_idle_target_count: int,
         ownership: str,
     ) -> None:
         self.instance_root = instance_root
@@ -105,7 +105,7 @@ class BrowserResourceSnapshot:
         self.upstream_pgid = upstream_pgid
         self.port_listener_pids = port_listener_pids
         self.profile_owned_processes = profile_owned_processes
-        self.page_idle_page_count = page_idle_page_count
+        self.tab_idle_target_count = tab_idle_target_count
         self.ownership = ownership
 
 
@@ -264,7 +264,7 @@ def _has_usable_page(port: int) -> bool:
 def _ensure_usable_page(port: int) -> None:
     if _has_usable_page(port):
         return
-    cdp_background_page.create_background_target(_browser_url(port), "about:blank", timeout_seconds=5.0)
+    cdp_target.create_background_target(_browser_url(port), "about:blank", timeout_seconds=5.0)
     if not _has_usable_page(port):
         raise BrowserRuntimeManagerError("browser endpoint reachable but no usable page target")
 
@@ -434,10 +434,10 @@ def _port_listener_pids(port: int) -> list[int]:
     return pids
 
 
-def _page_idle_page_count(instance_root: Path) -> int:
+def _tab_idle_target_count(instance_root: Path) -> int:
     state = browser_lifecycle._read_page_idle_state(instance_root)
-    pages = state.get("pages")
-    return len(pages) if isinstance(pages, dict) else 0
+    targets = state.get("targets")
+    return len(targets) if isinstance(targets, dict) else 0
 
 
 def _classify_snapshot(
@@ -527,7 +527,7 @@ def _discover_resources(
         upstream_pgid=upstream_pgid,
         port_listener_pids=tuple(port_listener_pids),
         profile_owned_processes=tuple(profile_processes),
-        page_idle_page_count=_page_idle_page_count(instance_root),
+        tab_idle_target_count=_tab_idle_target_count(instance_root),
         ownership=ownership,
     )
 
@@ -697,7 +697,7 @@ def status(
                 profile_dir=str(effective_profile_dir),
                 ownership=snapshot.ownership,
                 profile_owned_pids=[process.pid for process in snapshot.profile_owned_processes],
-                page_idle_page_count=snapshot.page_idle_page_count,
+                tab_idle_target_count=snapshot.tab_idle_target_count,
                 state_changed=False,
                 durability="none",
                 message="Browser cockpit not ready: no browser port recorded",
@@ -711,7 +711,7 @@ def status(
             ownership=snapshot.ownership,
             profile_owned_pids=[process.pid for process in snapshot.profile_owned_processes],
             port_listener_pids=list(snapshot.port_listener_pids),
-            page_idle_page_count=snapshot.page_idle_page_count,
+            tab_idle_target_count=snapshot.tab_idle_target_count,
             state_changed=False,
             durability="runtime" if ready else "none",
             message=(
@@ -769,6 +769,7 @@ def _terminate_owned_record(record: process_identity.RecordedProcess) -> bool:
         return False
     if not _wait_pgid_gone(pgid):
         if not process_identity.is_running(record) and not _pgid_alive(pgid):
+            _reap_child_pid(record.pid)
             return True
         try:
             os.killpg(pgid, signal.SIGKILL)

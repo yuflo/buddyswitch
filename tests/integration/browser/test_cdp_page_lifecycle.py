@@ -2,48 +2,68 @@ from tests.integration.browser.cdp_lifecycle_harness import *  # noqa: F401,F403
 
 
 class TestCdpPageLifecycle(CdpBrowserLifecycleHarness):
-    def test_close_target_sends_target_close_target_for_exact_id(self) -> None:
-        background = load_background_page()
-        self.assertTrue(hasattr(background, "close_target"), "close_target primitive is required")
-        cdp_state: dict[str, object] = {"rpc_requests": []}
+    def _write_ttl_config(self, instance_root: Path, *, page: int = 40, release: int = 10) -> Path:
+        shared_root = instance_root.parent.parent
+        path = shared_root / "config" / "browser.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"schema_version = 1\n\n[ttl]\npage_idle_seconds = {page}\nrelease_delay_seconds = {release}\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_target_transport_lists_only_page_targets(self) -> None:
+        target = load_target_transport()
+        cdp_state: dict[str, object] = {
+            "rpc_requests": [],
+            "targets": [
+                {"targetId": "tab-one", "type": "page", "url": "https://example.com/one"},
+                {"targetId": "worker-one", "type": "service_worker", "url": "https://example.com/sw.js"},
+            ],
+        }
         browser_url = _start_cdp_browser_server(self, cdp_state)
 
-        result = background.close_target(browser_url, "target-close-exact", timeout_seconds=1.0)
+        result = target.list_page_targets(browser_url, timeout_seconds=1.0)
+
+        self.assertEqual(result, [{"targetId": "tab-one", "type": "page", "url": "https://example.com/one"}])
+        self.assertEqual(
+            cdp_state["rpc_requests"],
+            [{"id": 1, "method": "Target.getTargets", "params": {}}],
+        )
+
+    def test_close_target_sends_target_close_target_for_exact_id(self) -> None:
+        target = load_target_transport()
+        cdp_state: dict[str, object] = {
+            "rpc_requests": [],
+            "targets": [{"targetId": "target-close-exact", "type": "page"}],
+        }
+        browser_url = _start_cdp_browser_server(self, cdp_state)
+
+        result = target.close_target(browser_url, "target-close-exact", timeout_seconds=1.0)
 
         self.assertEqual(result, {"success": True})
         self.assertEqual(
             cdp_state["rpc_requests"],
             [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-close-exact"}}],
         )
+        self.assertEqual(cdp_state["targets"], [])
+
     def test_close_target_raises_clear_error_on_cdp_error(self) -> None:
-        background = load_background_page()
-        self.assertTrue(hasattr(background, "close_target"), "close_target primitive is required")
+        target = load_target_transport()
         cdp_state: dict[str, object] = {"rpc_requests": [], "close_error": "No target with given id found"}
         browser_url = _start_cdp_browser_server(self, cdp_state)
 
-        with self.assertRaisesRegex(background.CdpTargetError, "No target with given id found"):
-            background.close_target(browser_url, "target-missing", timeout_seconds=1.0)
+        with self.assertRaisesRegex(target.CdpTargetError, "No target with given id found"):
+            target.close_target(browser_url, "target-missing", timeout_seconds=1.0)
 
-        self.assertEqual(
-            cdp_state["rpc_requests"],
-            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-missing"}}],
-        )
     def test_schedule_failed_open_page_cleanup_uses_exact_target_key(self) -> None:
         calls: list[dict[str, object]] = []
-
-        def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
-            calls.append(kwargs)
-            return {"schedule": {"schedule_id": "schedule-failed-open"}}
-
-        self.lifecycle.daemon_client.schedule_trigger = fake_schedule_trigger
-        self.assertTrue(
-            hasattr(self.lifecycle, "schedule_failed_open_page_cleanup"),
-            "schedule_failed_open_page_cleanup helper is required",
-        )
+        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs) or {
+            "schedule": {"schedule_id": "schedule-failed-open"}
+        }
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-browser"
-
             result = self.lifecycle.schedule_failed_open_page_cleanup(
                 instance_root=instance_root,
                 target_id="target-cleanup",
@@ -53,222 +73,175 @@ class TestCdpPageLifecycle(CdpBrowserLifecycleHarness):
             )
 
         self.assertEqual(result, {"schedule": {"schedule_id": "schedule-failed-open"}})
+        self.assertEqual(calls[0]["schedule_key"], "browser.failed_open_page.cleanup:target-cleanup")
+        self.assertEqual(calls[0]["payload"]["target_id"], "target-cleanup")
+
+    def test_refresh_tab_idle_uses_stable_target_payload_config_and_state(self) -> None:
+        calls: list[dict[str, object]] = []
+        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs) or {
+            "schedule": {"schedule_id": "schedule-1"}
+        }
+        self.lifecycle._utc_now = lambda: datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "shared" / "instances" / "act-browser"
+            self._write_ttl_config(instance_root, page=3)
+
+            result = self.lifecycle.refresh_tab_idle(
+                instance_root=instance_root,
+                tab_target_id="stable-tab-1",
+                target_url="https://example.com/background",
+                active=True,
+            )
+
+            state = json.loads(self.lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            result,
+            {
+                "idle_refreshed": True,
+                "idle_seconds": 3,
+                "idle_expires_at": "2026-06-24T00:00:03Z",
+                "tab_target_id": "stable-tab-1",
+            },
+        )
         self.assertEqual(
             calls,
             [
                 {
                     "instance_root": instance_root,
-                    "delay_seconds": 5,
-                    "trigger_type": "browser.failed_open_page.cleanup",
-                    "payload": {
-                        "target_id": "target-cleanup",
-                        "url": "https://example.com/failed-open",
-                        "attempts": 1,
-                        "first_seen_at": "2026-07-07T00:00:00Z",
-                        "reason": "failed_open_page",
-                    },
+                    "delay_seconds": 3,
+                    "trigger_type": "browser.page.expired",
+                    "payload": {"tab_target_id": "stable-tab-1", "idle_seconds": 3},
                     "source_context": {"owner": "browser"},
-                    "schedule_key": "browser.failed_open_page.cleanup:target-cleanup",
+                    "schedule_key": "browser.page.idle:stable-tab-1",
                 }
             ],
         )
-    def test_refresh_page_idle_uses_page_id_payload_and_state(self) -> None:
+        self.assertEqual(state["active_tab_target_id"], "stable-tab-1")
+        self.assertEqual(
+            state["targets"]["stable-tab-1"],
+            {
+                "tab_target_id": "stable-tab-1",
+                "url": "https://example.com/background",
+                "last_used_at": "2026-06-24T00:00:00Z",
+                "idle_seconds": 3,
+            },
+        )
+        self.assertNotIn("pages", state)
+        self.assertNotIn("current_page_id", state)
+        self.assertNotIn("selected_page_id", state)
+
+    def test_config_edit_applies_only_to_next_target_refresh(self) -> None:
         calls: list[dict[str, object]] = []
-
-        def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
-            calls.append(kwargs)
-            return {"schedule": {"schedule_id": "schedule-1"}}
-
-        self.lifecycle.daemon_client.schedule_trigger = fake_schedule_trigger
+        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs) or {}
         self.lifecycle._utc_now = lambda: datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
 
         with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-browser"
-
-            result = self.lifecycle.refresh_page_idle(
-                instance_root=instance_root,
-                page_id="page-idle-1",
-                target_url="https://example.com/background",
+            instance_root = Path(temp_root) / "shared" / "instances" / "act-browser"
+            path = self._write_ttl_config(instance_root, page=2)
+            self.lifecycle.refresh_tab_idle(instance_root=instance_root, tab_target_id="stable-tab-1")
+            path.write_text(
+                "schema_version = 1\n\n[ttl]\npage_idle_seconds = 7\nrelease_delay_seconds = 1\n",
+                encoding="utf-8",
             )
+            self.lifecycle.refresh_tab_idle(instance_root=instance_root, tab_target_id="stable-tab-1")
 
-            self.assertEqual(
-                result,
+            state = self.lifecycle._read_page_idle_state(instance_root)
+
+        self.assertEqual([call["delay_seconds"] for call in calls], [2, 7])
+        self.assertEqual([call["payload"]["idle_seconds"] for call in calls], [2, 7])
+        self.assertEqual(state["targets"]["stable-tab-1"]["idle_seconds"], 7)
+
+    def test_stale_due_check_uses_effective_ttl_from_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "shared" / "instances" / "act-browser"
+            self.lifecycle._write_page_idle_state(
+                instance_root,
                 {
-                    "idle_refreshed": True,
-                    "idle_seconds": 40,
-                    "idle_expires_at": "2026-06-24T00:00:40Z",
+                    "active_tab_target_id": "stable-tab-1",
+                    "targets": {
+                        "stable-tab-1": {
+                            "tab_target_id": "stable-tab-1",
+                            "last_used_at": "2026-06-24T00:00:05Z",
+                            "idle_seconds": 7,
+                        }
+                    },
                 },
             )
-            self.assertEqual(
-                calls,
-                [
-                    {
-                        "instance_root": instance_root,
-                        "delay_seconds": 40,
-                        "trigger_type": "browser.page.expired",
-                        "payload": {"page_id": "page-idle-1"},
-                        "source_context": {"owner": "browser"},
-                        "schedule_key": "browser.page.idle:page-idle-1",
-                    }
-                ],
-            )
-            state_path = instance_root / "runtime" / "browser" / "page_idle.json"
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertNotIn(LEGACY_CURRENT_TARGET_FIELD, state)
-            self.assertNotIn(LEGACY_PAGE_TARGET_MAP_FIELD, state)
-            self.assertNotIn(LEGACY_TARGETS_FIELD, state)
-            self.assertNotIn("current_page_updated_at", state)
-            self.assertEqual(state["pages"]["page-idle-1"]["url"], "https://example.com/background")
-            self.assertEqual(state["pages"]["page-idle-1"]["last_used_at"], "2026-06-24T00:00:00Z")
-    def test_mark_current_page_does_not_schedule_idle(self) -> None:
-        calls: list[dict[str, object]] = []
-        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs)
-        self.lifecycle._utc_now = lambda: datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
 
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-browser"
-
-            state = self.lifecycle.mark_current_page(
+            stale = self.lifecycle.tab_idle_expiry_after_due_at(
                 instance_root=instance_root,
-                page_id="page-current-1",
-                target_url="https://example.com/current",
+                tab_target_id="stable-tab-1",
+                due_at="2026-06-24T00:00:07Z",
+                idle_seconds=7,
             )
 
-            self.assertEqual(calls, [])
-            self.assertEqual(state["current_page_id"], "page-current-1")
-            self.assertEqual(state["selected_page_id"], "page-current-1")
-            self.assertEqual(state["current_page_updated_at"], "2026-06-24T00:00:00Z")
-            self.assertEqual(state["pages"]["page-current-1"]["url"], "https://example.com/current")
-            self.assertNotIn(LEGACY_CURRENT_TARGET_FIELD, state)
-            self.assertNotIn(LEGACY_PAGE_TARGET_MAP_FIELD, state)
-    def test_refresh_current_page_idle_sets_current_and_schedules(self) -> None:
+        self.assertTrue(stale)
+
+    def test_schedule_browser_release_uses_current_config(self) -> None:
         calls: list[dict[str, object]] = []
-
-        def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
-            calls.append(kwargs)
-            return {"schedule": {"schedule_id": "schedule-1"}}
-
-        self.lifecycle.daemon_client.schedule_trigger = fake_schedule_trigger
-        self.lifecycle._utc_now = lambda: datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs) or {
+            "schedule": {"schedule_id": "schedule-release"}
+        }
 
         with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-browser"
-
-            result = self.lifecycle.refresh_current_page_idle(
-                instance_root=instance_root,
-                page_id="page-current-idle",
-                target_url="https://example.com/current",
-            )
-
-            self.assertTrue(result["idle_refreshed"])
-            self.assertEqual(calls[0]["schedule_key"], "browser.page.idle:page-current-idle")
-            self.assertEqual(calls[0]["payload"], {"page_id": "page-current-idle"})
-            state = json.loads(self.lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(state["current_page_id"], "page-current-idle")
-            self.assertEqual(state["selected_page_id"], "page-current-idle")
-            self.assertEqual(state["pages"]["page-current-idle"]["url"], "https://example.com/current")
-    def test_schedule_browser_cockpit_release_uses_keyed_browser_release_trigger(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        def fake_schedule_trigger(**kwargs: object) -> dict[str, object]:
-            calls.append(kwargs)
-            return {"schedule": {"schedule_id": "schedule-release"}}
-
-        self.lifecycle.daemon_client.schedule_trigger = fake_schedule_trigger
-
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-browser"
-
+            instance_root = Path(temp_root) / "shared" / "instances" / "act-browser"
+            self._write_ttl_config(instance_root, release=0)
             result = self.lifecycle.schedule_browser_cockpit_release(instance_root=instance_root)
 
         self.assertEqual(result, {"schedule": {"schedule_id": "schedule-release"}})
-        self.assertEqual(
-            calls,
-            [
-                {
-                    "instance_root": instance_root,
-                    "delay_seconds": 10,
-                    "trigger_type": "browser.cockpit.release",
-                    "payload": {"reason": "page_idle_empty"},
-                    "source_context": {"owner": "browser"},
-                    "schedule_key": "browser.cockpit.release",
-                }
-            ],
-        )
-    def test_refresh_page_idle_schedule_failure_leaves_no_idle_state(self) -> None:
-        def failing_schedule_trigger(**_kwargs: object) -> dict[str, object]:
-            raise RuntimeError("daemon unavailable")
+        self.assertEqual(calls[0]["delay_seconds"], 0)
+        self.assertEqual(calls[0]["schedule_key"], "browser.cockpit.release")
 
-        self.lifecycle.daemon_client.schedule_trigger = failing_schedule_trigger
+    def test_refresh_schedule_failure_leaves_no_target_state(self) -> None:
+        self.lifecycle.daemon_client.schedule_trigger = lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("daemon unavailable")
+        )
 
         with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-browser"
-
+            instance_root = Path(temp_root) / "shared" / "instances" / "act-browser"
+            self._write_ttl_config(instance_root)
             with self.assertRaisesRegex(RuntimeError, "daemon unavailable"):
-                self.lifecycle.refresh_page_idle(
-                    instance_root=instance_root,
-                    page_id="page-unmanaged",
-                    target_url="https://example.com/unmanaged",
-                )
+                self.lifecycle.refresh_tab_idle(instance_root=instance_root, tab_target_id="unmanaged-tab")
 
             self.assertFalse(self.lifecycle.page_idle_state_file(instance_root).exists())
-    def test_forget_page_idle_page_removes_page_and_current(self) -> None:
+
+    def test_forget_target_removes_active_identity_only_after_explicit_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-browser"
+            instance_root = Path(temp_root) / "shared" / "instances" / "act-browser"
             self.lifecycle._write_page_idle_state(
                 instance_root,
                 {
-                    "current_page_id": "page-forget",
-                    "selected_page_id": "page-forget",
-                    "current_page_updated_at": "2026-06-24T00:00:00Z",
-                    "pages": {
-                        "page-forget": {
-                            "page_id": "page-forget",
-                            "url": "https://example.com/forget",
-                            "last_used_at": "2026-06-24T00:00:00Z",
-                        },
-                        "page-keep": {"page_id": "page-keep", "last_used_at": "2026-06-24T00:00:00Z"},
+                    "active_tab_target_id": "tab-forget",
+                    "targets": {
+                        "tab-forget": {"tab_target_id": "tab-forget", "last_used_at": "2026-06-24T00:00:00Z", "idle_seconds": 40},
+                        "tab-keep": {"tab_target_id": "tab-keep", "last_used_at": "2026-06-24T00:00:00Z", "idle_seconds": 40},
                     },
                 },
             )
 
-            state = self.lifecycle.forget_page_idle_page(instance_root=instance_root, page_id="page-forget")
+            state = self.lifecycle.forget_tab_idle_target(
+                instance_root=instance_root,
+                tab_target_id="tab-forget",
+            )
 
-            self.assertNotIn("page-forget", state["pages"])
-            self.assertIn("page-keep", state["pages"])
-            self.assertNotIn("current_page_id", state)
-            self.assertNotIn("selected_page_id", state)
-            persisted = json.loads(self.lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(persisted, state)
-    def test_refresh_page_idle_rejects_blank_page_id_before_scheduling(self) -> None:
-        calls: list[dict[str, object]] = []
-        self.lifecycle.daemon_client.schedule_trigger = lambda **kwargs: calls.append(kwargs)
+        self.assertNotIn("tab-forget", state["targets"])
+        self.assertIn("tab-keep", state["targets"])
+        self.assertNotIn("active_tab_target_id", state)
 
+    def test_old_page_identity_state_is_not_read_as_target_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
-            with self.assertRaisesRegex(self.lifecycle.BrowserLifecycleError, "page_id"):
-                self.lifecycle.refresh_page_idle(instance_root=Path(temp_root), page_id=" ")
-
-        self.assertEqual(calls, [])
-    def test_page_idle_state_ignores_unknown_legacy_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root:
-            instance_root = Path(temp_root) / "instances" / "act-browser"
+            instance_root = Path(temp_root) / "shared" / "instances" / "act-browser"
             self.lifecycle._write_page_idle_state(
                 instance_root,
                 {
-                    "legacy_current": "legacy-cdp-1",
-                    "legacy_map": {"7": "legacy-cdp-1"},
-                    "legacy_pages": {"legacy-cdp-1": {"legacy_id": "legacy-cdp-1"}},
-                    "current_page_id": "page-7",
-                    "selected_page_id": "page-7",
-                    "pages": {"page-7": {"page_id": "page-7", "last_used_at": "2026-06-24T00:00:00Z"}},
+                    "current_page_id": "7",
+                    "selected_page_id": "7",
+                    "pages": {"7": {"page_id": "7", "url": "https://example.com/old"}},
                 },
             )
 
             state = self.lifecycle._read_page_idle_state(instance_root)
 
-            self.assertEqual(state["current_page_id"], "page-7")
-            self.assertEqual(state["selected_page_id"], "page-7")
-            self.assertEqual(state["pages"], {"page-7": {"page_id": "page-7", "last_used_at": "2026-06-24T00:00:00Z"}})
-            self.assertNotIn("legacy_current", state)
-            self.assertNotIn("legacy_map", state)
-            self.assertNotIn("legacy_pages", state)
+        self.assertEqual(state, {"targets": {}})

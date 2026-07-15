@@ -19,6 +19,7 @@ for candidate in (HELPER_DIR, SCRIPTS, SCRIPTS_ENV):
 import daemon_contracts  # noqa: E402
 import browser_runtime_manager  # noqa: E402
 import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
+import cdp_target  # noqa: E402
 
 
 BROWSER_COCKPIT_RELEASE_EVENT_TYPE = "browser.cockpit.release"
@@ -66,10 +67,10 @@ def _browser_endpoint(payload: dict[str, Any]) -> str | None:
     return f"http://127.0.0.1:{port}"
 
 
-def _page_idle_pages(instance_root: Path) -> dict[str, Any]:
+def _page_idle_targets(instance_root: Path) -> dict[str, Any]:
     state = browser_lifecycle._read_page_idle_state(instance_root)
-    pages = state.get("pages")
-    return dict(pages) if isinstance(pages, dict) else {}
+    targets = state.get("targets")
+    return dict(targets) if isinstance(targets, dict) else {}
 
 
 def _parent_turn_is_running(runtime: Any) -> bool:
@@ -85,10 +86,7 @@ def _is_internal_page_url(url: object) -> bool:
 
 
 def _has_real_user_page(browser_url: str) -> bool:
-    try:
-        targets = browser_lifecycle.read_page_targets(browser_url)
-    except browser_lifecycle.BrowserLifecycleError:
-        return False
+    targets = cdp_target.list_page_targets(browser_url)
     for target in targets:
         if not isinstance(target, dict) or target.get("type") != "page":
             continue
@@ -132,8 +130,8 @@ class BrowserReleaseHandler:
             root = _instance_root(context)
             if root is None:
                 return _skip("instance_root_missing")
-            if _page_idle_pages(root):
-                return _skip("page_idle_pages_remain")
+            if _page_idle_targets(root):
+                return _skip("tracked_tab_targets_remain")
             instance_payload = _fresh_instance_payload(context)
             actor_id = instance_payload.get("actor_id")
             if not isinstance(actor_id, str) or not actor_id.strip():

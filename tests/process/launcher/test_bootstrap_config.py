@@ -20,6 +20,59 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 
 class TestLauncherBootstrapConfig(ProcessLauncherHarness, unittest.TestCase):
+    def test_shared_environment_bootstrap_creates_browser_ttl_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / ".codex-buddyswitch"
+            command = r'''
+set -euo pipefail
+source tools/launcher/env.sh
+export BUDDYSWITCH_SHARED_ROOT="$1"
+buddyswitch_env_init
+buddyswitch_ensure_browser_ttl_config
+'''
+
+            completed = run_process(
+                ["/bin/bash", "-c", command, "browser-ttl-bootstrap", str(shared_root)],
+                cwd=ROOT,
+                env=os.environ.copy(),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            self.assertEqual(
+                (shared_root / "config" / "browser.toml").read_text(encoding="utf-8"),
+                "schema_version = 1\n\n[ttl]\npage_idle_seconds = 40\nrelease_delay_seconds = 10\n",
+            )
+
+    def test_shared_environment_bootstrap_rejects_invalid_existing_browser_ttl_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / ".codex-buddyswitch"
+            config_path = shared_root / "config" / "browser.toml"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text("schema_version = 2\n", encoding="utf-8")
+            command = r'''
+set -euo pipefail
+source tools/launcher/env.sh
+export BUDDYSWITCH_SHARED_ROOT="$1"
+buddyswitch_env_init
+buddyswitch_ensure_browser_ttl_config
+'''
+
+            completed = run_process(
+                ["/bin/bash", "-c", command, "browser-ttl-bootstrap", str(shared_root)],
+                cwd=ROOT,
+                env=os.environ.copy(),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(str(config_path), self._output_error_text(completed))
+            self.assertEqual(config_path.read_text(encoding="utf-8"), "schema_version = 2\n")
+
     def test_public_launcher_bootstrap_python_resolution_failure_emits_contract_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             bin_dir = Path(temp_root) / "bin"

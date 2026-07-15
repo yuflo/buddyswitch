@@ -971,6 +971,7 @@ def test_sigterm_runner_cleans_public_instance_start_detached_services_and_workt
             "runtime_broker",
             "instance_daemon",
         }
+        assert Path(str(ready["browser_ttl_config"])).read_text(encoding="utf-8") == ready["browser_ttl_config_text"]
 
         os.kill(runner.pid, signal.SIGTERM)
         remaining, _ = runner.communicate(timeout=20)

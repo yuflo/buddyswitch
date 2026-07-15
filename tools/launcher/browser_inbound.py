@@ -20,7 +20,7 @@ import notification_center  # noqa: E402
 
 BROWSER_PAGE_EXPIRED_EVENT_TYPE = "browser.page.expired"
 BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT = {
-    "required_fields": ("page_id",),
+    "required_fields": ("tab_target_id", "idle_seconds"),
 }
 BROWSER_COCKPIT_RELEASE_EVENT_TYPE = "browser.cockpit.release"
 BROWSER_COCKPIT_RELEASE_PAYLOAD_CONTRACT = {

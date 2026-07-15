@@ -536,7 +536,7 @@ exit 0
             )
             (runtime_browser_dir / "cockpit-upstream.pgid").write_text(f"{upstream_pgid}\n", encoding="utf-8")
             (runtime_browser_dir / "page_idle.json").write_text(
-                json.dumps({"pages": {}}, ensure_ascii=True) + "\n",
+                json.dumps({"targets": {}}, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             (runtime_browser_dir / "page_idle.lock").write_text("", encoding="utf-8")
