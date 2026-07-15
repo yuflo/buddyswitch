@@ -6,6 +6,7 @@ BUDDYSWITCH_WORKSPACE_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/workspace.sh"
 BUDDYSWITCH_RUNTIME_LOCK_HELPER_DEFAULT="${BUDDYSWITCH_LAUNCHER_DIR}/runtime_lock.py"
 BUDDYSWITCH_CODEX_CONFIG_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/codex_config.py"
 BUDDYSWITCH_ENV_PROFILES_HELPER_REL="scripts/env_profiles.py"
+BUDDYSWITCH_BROWSER_TTL_CONFIG_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/../../scripts/env/browser_ttl_config.py"
 
 if [[ ! -f "${BUDDYSWITCH_WORKSPACE_HELPER}" ]]; then
   echo "Workspace helper is missing under tools/launcher." >&2
@@ -123,6 +124,12 @@ buddyswitch_patch_codex_config() {
     "${temp_root_args[@]}"
 }
 
+buddyswitch_ensure_browser_ttl_config() {
+  "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_BROWSER_TTL_CONFIG_HELPER}" \
+    ensure \
+    --shared-root "${BUDDYSWITCH_SHARED_ROOT}" >/dev/null
+}
+
 buddyswitch_ensure_shared_env() {
   local shared_codex_home
 
@@ -133,6 +140,8 @@ buddyswitch_ensure_shared_env() {
     "${BUDDYSWITCH_XDG_CONFIG_HOME}" \
     "${BUDDYSWITCH_CODEX_HOME}" \
     "${BUDDYSWITCH_RUN_STATE_DIR}"
+
+  buddyswitch_ensure_browser_ttl_config
 
   shared_codex_home="${BUDDYSWITCH_SHARED_ROOT}/codex-home"
   mkdir -p "${shared_codex_home}"

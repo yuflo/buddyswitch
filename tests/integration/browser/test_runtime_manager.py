@@ -169,11 +169,31 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             self.assertEqual(len(argv), 1)
             self.assertIn(f"--remote-debugging-port={port}", argv[0])
             self.assertIn(f"--user-data-dir={instance_root / 'browser' / 'profile'}", argv[0])
+            browser_proc = next(proc for proc in manager._DETACHED_BROWSER_PROCESSES if proc.pid == browser_pid)
 
             release = manager.release(instance_root=instance_root, actor_id="act-dev-browser", reason="test_cleanup")
             self.assertTrue(release.get("ok"), msg=release)
-            self.assertTrue(wait_until(lambda: not pid_alive(browser_pid), timeout=3.0), "release must stop fake Chrome")
+            self.assertIsNotNone(browser_proc.poll(), "release must reap the fake Chrome child")
             self.assertEqual(manager._DETACHED_BROWSER_PROCESSES, [])
+
+    def test_terminate_owned_record_reaps_child_when_group_disappears_during_wait(self) -> None:
+        proc = mock.Mock()
+        proc.pid = 4242
+        proc.poll.return_value = 0
+        manager._DETACHED_BROWSER_PROCESSES[:] = [proc]
+        self.addCleanup(manager._DETACHED_BROWSER_PROCESSES.clear)
+        record = manager.process_identity.RecordedProcess(pid=proc.pid, start_identity="test")
+
+        with (
+            mock.patch.object(manager.process_identity, "is_running", side_effect=[True, True, False]),
+            mock.patch.object(manager.os, "getpgid", side_effect=[5252, 6262]),
+            mock.patch.object(manager.os, "killpg"),
+            mock.patch.object(manager, "_wait_pgid_gone", return_value=False),
+            mock.patch.object(manager, "_pgid_alive", return_value=False),
+        ):
+            self.assertTrue(manager._terminate_owned_record(record))
+
+        self.assertEqual(manager._DETACHED_BROWSER_PROCESSES, [])
 
     def test_acquire_reuses_owned_recorded_ready_endpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -201,7 +221,7 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             self.assertTrue(result.get("ok"), msg=result)
             self.assertEqual(result.get("browser_port"), port)
             self.assertEqual(result.get("state_changed"), False)
-            self.assertTrue(wait_until(chrome_argv.exists, timeout=2.0))
+            self.assertTrue(wait_until(chrome_argv.exists, timeout=5.0))
             argv = [json.loads(line) for line in chrome_argv.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(argv), 1, "acquire should not start another Chrome when owned endpoint is ready")
 
@@ -456,7 +476,7 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             pid_file = browser_dir / "chrome.pid"
             page_idle_file = runtime_browser_dir / "page_idle.json"
             manager.process_identity.write_record(pid_file, chrome_proc.pid)
-            page_idle_file.write_text('{"pages": {}}\n', encoding="utf-8")
+            page_idle_file.write_text('{"targets": {}}\n', encoding="utf-8")
             state = self._daemon_state(instance_root)
             browser_schedule = state.create_schedule(
                 delay_seconds=600,

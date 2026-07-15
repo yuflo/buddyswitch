@@ -60,6 +60,12 @@ def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
     ]
 
 
+def _target_id_for_test(target: object) -> object:
+    if not isinstance(target, dict):
+        return None
+    return target.get("targetId", target.get("id"))
+
+
 def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -104,8 +110,23 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
                 raw_message = _read_client_text_frame(self.rfile)
                 message = json.loads(raw_message)
                 state.setdefault("rpc_requests", []).append(message)
-                if message.get("method") == "Target.closeTarget" and state.get("close_error"):
+                method = message.get("method")
+                if method == "Target.getTargets":
+                    list_payloads = state.get("list_payloads")
+                    if isinstance(list_payloads, list) and list_payloads:
+                        targets = list_payloads.pop(0)
+                    else:
+                        targets = state.get("list_payload", state.get("targets", []))
+                    response = {"id": message.get("id"), "result": {"targetInfos": targets}}
+                elif method == "Target.closeTarget" and state.get("close_error"):
                     response = {"id": message.get("id"), "error": {"message": str(state["close_error"])}}
+                elif method == "Target.closeTarget":
+                    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                    target_id = params.get("targetId")
+                    targets = state.get("targets")
+                    if isinstance(targets, list):
+                        state["targets"] = [target for target in targets if _target_id_for_test(target) != target_id]
+                    response = {"id": message.get("id"), "result": {"success": True}}
                 else:
                     response = {"id": message.get("id"), "result": {"success": True}}
                 _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
@@ -136,6 +157,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -236,6 +258,29 @@ for raw_line in sys.stdin:
             raise SystemExit(0)
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        if params.get("name") == "get_tab_id":
+            if os.environ.get("BUDDYSWITCH_TEST_PROXY_GET_TAB_ID_ERROR") == "1":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [{"type": "text", "text": "tab identity unavailable"}],
+                        "isError": True,
+                    },
+                }
+            else:
+                page_id = arguments.get("pageId", "selected")
+                tab_id = os.environ.get("BUDDYSWITCH_TEST_PROXY_TAB_ID") or ("stable-tab-" + str(page_id))
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [{"type": "text", "text": tab_id}],
+                        "structuredContent": {"tabId": tab_id},
+                    },
+                }
+            print(json.dumps(response, ensure_ascii=True), flush=True)
+            continue
         if arguments.get("forceError"):
             response = {
                 "jsonrpc": "2.0",
@@ -286,7 +331,8 @@ for raw_line in sys.stdin:
                         "type": "text",
                         "text": response_text,
                     }
-                ]
+                ],
+                "structuredContent": {"publicTestField": "must-not-leak"},
             },
         }
     else:
@@ -435,6 +481,12 @@ for raw_line in sys.stdin:
                     + "\n",
                     encoding="utf-8",
                 )
+                ttl_config = instance_root.parent.parent / "config" / "browser.toml"
+                ttl_config.parent.mkdir(parents=True, exist_ok=True)
+                ttl_config.write_text(
+                    "schema_version = 1\n\n[ttl]\npage_idle_seconds = 40\nrelease_delay_seconds = 10\n",
+                    encoding="utf-8",
+                )
             upstream = temp_root_path / "fake_upstream.py"
             calls_path = temp_root_path / "calls.jsonl"
             all_calls_path = temp_root_path / "all-calls.jsonl"
@@ -516,11 +568,16 @@ for raw_line in sys.stdin:
 
             self.assertEqual(proc.returncode, 0, msg=f"proxy failed\nstdout:\n{stdout}\nstderr:\n{stderr}")
             responses = [json.loads(line) for line in stdout.splitlines() if line.strip()]
-            forwarded = (
+            all_forwarded = (
                 [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines() if line.strip()]
                 if calls_path.exists()
                 else []
             )
+            forwarded = [
+                call
+                for call in all_forwarded
+                if not str(call.get("id", "")).startswith("buddyswitch.internal.")
+            ]
             self._last_proxy_all_calls = (
                 [json.loads(line) for line in all_calls_path.read_text(encoding="utf-8").splitlines() if line.strip()]
                 if all_calls_path.exists()
@@ -549,14 +606,14 @@ for raw_line in sys.stdin:
             },
         }
     def _assert_only_cleanup_snapshot_reads(self, cdp_state: dict[str, object]) -> None:
-        self.assertEqual(cdp_state.get("rpc_requests", []), [])
-        requests = cdp_state.get("requests", [])
-        self.assertIsInstance(requests, list, msg=requests)
-        assert isinstance(requests, list)
-        for request in requests:
-            self.assertIsInstance(request, dict, msg=request)
-            assert isinstance(request, dict)
-            self.assertEqual(request.get("path"), "/json/list", msg=requests)
+        rpc_requests = cdp_state.get("rpc_requests", [])
+        self.assertIsInstance(rpc_requests, list, msg=rpc_requests)
+        assert isinstance(rpc_requests, list)
+        self.assertTrue(rpc_requests, msg="new-page cleanup ownership snapshot was not taken")
+        self.assertTrue(
+            all(request.get("method") == "Target.getTargets" for request in rpc_requests),
+            msg=rpc_requests,
+        )
     def _start_mailbox(self, instance_root: Path, *, now: str = "2026-06-24T00:00:00Z") -> tuple[Any, Any, threading.Thread]:
         daemon_core = load_module(DAEMON_CORE_PATH)
         daemon_mailbox = load_module(DAEMON_MAILBOX_PATH)

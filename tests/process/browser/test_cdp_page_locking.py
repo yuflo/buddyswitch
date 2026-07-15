@@ -2,9 +2,22 @@ from tests.integration.browser.cdp_lifecycle_harness import *  # noqa: F401,F403
 
 
 class TestCdpPageLocking(CdpBrowserLifecycleHarness):
-    def test_mark_current_page_waits_for_page_idle_state_lock(self) -> None:
+    def test_forget_target_waits_for_page_idle_state_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-browser"
+            self.lifecycle._write_page_idle_state(
+                instance_root,
+                {
+                    "active_tab_target_id": "target-lock-wait",
+                    "targets": {
+                        "target-lock-wait": {
+                            "tab_target_id": "target-lock-wait",
+                            "last_used_at": "2026-07-15T00:00:00Z",
+                            "idle_seconds": 40,
+                        }
+                    },
+                },
+            )
             lock_path = instance_root / "runtime" / "browser" / "page_idle.lock"
             lock_path.parent.mkdir(parents=True, exist_ok=True)
             lock_file = lock_path.open("a+", encoding="utf-8")
@@ -18,10 +31,9 @@ instance_root = Path(sys.argv[2])
 
 from env import cdp_browser_lifecycle as lifecycle
 
-lifecycle.mark_current_page(
+lifecycle.forget_tab_idle_target(
     instance_root=instance_root,
-    page_id="page-lock-wait",
-    target_url="https://example.com/locked",
+    tab_target_id="target-lock-wait",
 )
 print("done", flush=True)
 """
@@ -49,4 +61,4 @@ print("done", flush=True)
                     process.communicate(timeout=2)
 
             state = json.loads(self.lifecycle.page_idle_state_file(instance_root).read_text(encoding="utf-8"))
-            self.assertEqual(state["current_page_id"], "page-lock-wait")
+            self.assertEqual(state, {"targets": {}})

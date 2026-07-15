@@ -250,11 +250,22 @@ def test_public_instance_start_resources_survive_until_runner_signal() -> None:
             )
         time.sleep(0.02)
     assert len(captured) == len(required_pid_files), captured
+    browser_ttl_config = shared_root / "config" / "browser.toml"
+    expected_browser_ttl_config = (
+        "schema_version = 1\n"
+        "\n"
+        "[ttl]\n"
+        "page_idle_seconds = 40\n"
+        "release_delay_seconds = 10\n"
+    )
+    assert browser_ttl_config.read_text(encoding="utf-8") == expected_browser_ttl_config
     (run_root / "instance-start-ready.json").write_text(
         json.dumps(
             {
                 "actor_id": actor_id,
                 "instance_root": str(instance_root),
+                "browser_ttl_config": str(browser_ttl_config),
+                "browser_ttl_config_text": expected_browser_ttl_config,
                 "pids": captured,
                 "worktrees": [
                     str(shared_root / "project" / "workspace"),

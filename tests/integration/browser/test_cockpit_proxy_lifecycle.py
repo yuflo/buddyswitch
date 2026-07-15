@@ -24,6 +24,7 @@ class TestCockpitProxyLifecycle(BrowserCockpitProxyHarness):
                         f"2: {search_url} [selected]"
                     )
                 },
+                message_delay_seconds=0.2,
             )
             server.close()
             thread.join(timeout=2)
@@ -32,11 +33,9 @@ class TestCockpitProxyLifecycle(BrowserCockpitProxyHarness):
             self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
             self.assertFalse(responses[1]["result"].get("isError", False), msg=responses[1])
             text = "\n".join(item["text"] for item in responses[1]["result"]["content"] if item.get("type") == "text")
-            self.assertIn("current_page_id: 2", text)
-            self.assertIn("selected_page_id: 2", text)
-            self.assertIn("page_id: 2", text)
-            self.assertIn("current: true", text)
-            self.assertIn("selected: true", text)
+            self.assertIn("active_tab_target_id: stable-tab-2", text)
+            self.assertIn("tab_target_id: stable-tab-2", text)
+            self.assertIn("active: true", text)
             self.assertIn("idle_tracked: true", text)
             saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             release_schedules = [
@@ -46,7 +45,7 @@ class TestCockpitProxyLifecycle(BrowserCockpitProxyHarness):
             ]
             self.assertEqual(release_schedules, [])
             self.assertFalse(thread.is_alive())
-    def test_list_pages_projects_page_id_resource_state(self) -> None:
+    def test_list_pages_projects_stable_target_resource_state(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
         with tempfile.TemporaryDirectory() as temp_root:
@@ -54,15 +53,14 @@ class TestCockpitProxyLifecycle(BrowserCockpitProxyHarness):
             self._write_page_idle_state(
                 instance_root,
                 {
-                    "current_page_id": "page-current",
-                    "selected_page_id": "page-current",
-                    "current_page_updated_at": "2026-07-01T00:00:00Z",
-                    "pages": {
-                        "page-current": {
-                            "page_id": "page-current",
+                    "active_tab_target_id": "target-current",
+                    "targets": {
+                        "target-current": {
+                            "tab_target_id": "target-current",
                             "url": "https://example.com/current",
                             "title": "Current Title",
                             "last_used_at": "2026-07-01T00:00:00Z",
+                            "idle_seconds": 40,
                         }
                     },
                 },
@@ -78,16 +76,14 @@ class TestCockpitProxyLifecycle(BrowserCockpitProxyHarness):
         self.assertEqual(forwarded[0]["params"]["name"], "list_pages")
         text = "\n".join(item["text"] for item in responses[0]["result"]["content"] if item.get("type") == "text")
         self.assertIn("called list_pages", text)
-        self.assertIn("BuddySwitch browser page resource projection:", text)
-        self.assertIn("current_page_id: page-current", text)
-        self.assertIn("selected_page_id: page-current", text)
-        self.assertIn("page_id: page-current", text)
+        self.assertIn("BuddySwitch browser tab resource projection:", text)
+        self.assertIn("active_tab_target_id: target-current", text)
+        self.assertIn("tab_target_id: target-current", text)
         self.assertIn("title: Current Title", text)
         self.assertIn("url: https://example.com/current", text)
-        self.assertIn("current: true", text)
+        self.assertIn("active: true", text)
         self.assertIn("idle_expires_at: 2026-07-01T00:00:40Z", text)
         self.assertNotIn(LEGACY_CURRENT_TARGET_FIELD, text)
-        self.assertNotIn("target_id:", text)
         self.assertNotIn("Browser lifecycle warning:", text)
     def test_list_pages_with_no_tracked_pages_schedules_release(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})

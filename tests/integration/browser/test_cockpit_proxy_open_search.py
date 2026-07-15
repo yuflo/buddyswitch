@@ -39,6 +39,8 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
 
         self.assertEqual(len(forwarded), 1)
         self.assertIn(f"--browser-url={browser_url}", upstream_argv)
+        self.assertIn("--experimental-interop-tools", upstream_argv)
+        self.assertIn("--experimental-structured-content", upstream_argv)
         forwarded_call = forwarded[0]
         self.assertEqual(forwarded_call["params"]["name"], "new_page")
         self.assertEqual(
@@ -48,8 +50,8 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
         response = responses[0]
         self.assertFalse(response["result"].get("isError", False), msg=response)
         self.assertIn("called new_page", response["result"]["content"][0]["text"])
-        self.assertEqual(cdp_state.get("rpc_requests", []), [])
-    def test_new_page_success_marks_opened_selected_page_current(self) -> None:
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
+    def test_new_page_success_tracks_opened_stable_target(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
 
@@ -80,15 +82,15 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
             )
             saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
-            self.assertEqual(schedule["schedule_key"], "browser.page.idle:2")
-            self.assertEqual(schedule["payload"], {"page_id": "2"})
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:stable-tab-2")
+            self.assertEqual(schedule["payload"], {"tab_target_id": "stable-tab-2", "idle_seconds": 40})
             page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-            self.assertEqual(page_idle["current_page_id"], "2")
-            self.assertEqual(page_idle["selected_page_id"], "2")
-            self.assertEqual(page_idle["pages"]["2"]["url"], "https://example.com/new")
-            self.assertEqual(cdp_state.get("rpc_requests", []), [])
+            self.assertEqual(page_idle["active_tab_target_id"], "stable-tab-2")
+            self.assertEqual(page_idle["targets"]["stable-tab-2"]["url"], "https://example.com/new")
+            self.assertNotIn("pages", page_idle)
+            self.assertEqual(cdp_state.get("rpc_requests", [])[0]["method"], "Target.getTargets")
             self.assertFalse(thread.is_alive())
-    def test_search_page_success_marks_opened_selected_page_current(self) -> None:
+    def test_search_page_success_tracks_opened_stable_target(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
         search_url = "https://www.google.com/search?q=BuddySwitch+open+current+projection"
@@ -117,13 +119,11 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
             self.assertEqual(forwarded[0]["params"]["arguments"], {"url": search_url, "background": True})
             saved = json.loads(daemon_state.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             schedule = saved["scheduled_triggers"]["schedule-1"]
-            self.assertEqual(schedule["schedule_key"], "browser.page.idle:2")
-            self.assertEqual(schedule["payload"], {"page_id": "2"})
+            self.assertEqual(schedule["schedule_key"], "browser.page.idle:stable-tab-2")
+            self.assertEqual(schedule["payload"], {"tab_target_id": "stable-tab-2", "idle_seconds": 40})
             page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
-            self.assertEqual(page_idle["current_page_id"], "2")
-            self.assertEqual(page_idle["selected_page_id"], "2")
-            self.assertEqual(page_idle["pages"]["2"]["url"], search_url)
-            self.assertEqual(cdp_state.get("rpc_requests", []), [])
+            self.assertEqual(page_idle["active_tab_target_id"], "stable-tab-2")
+            self.assertEqual(page_idle["targets"]["stable-tab-2"]["url"], search_url)
             self.assertFalse(thread.is_alive())
     def test_failed_new_page_closes_new_cdp_page_target_and_reports_cleanup(self) -> None:
         existing_targets = _page_targets(1)
@@ -150,11 +150,13 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
             self.assertIn("closed it before returning", response_text)
             self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
 
-        list_requests = [request for request in cdp_state.get("requests", []) if request.get("path") == "/json/list"]
-        self.assertEqual(len(list_requests), 2, msg=cdp_state.get("requests"))
         self.assertEqual(
             cdp_state.get("rpc_requests"),
-            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-new"}}],
+            [
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-new"}},
+            ],
         )
     def test_failed_search_page_closes_new_cdp_page_target_and_reports_cleanup(self) -> None:
         existing_targets = _page_targets(1)
@@ -186,11 +188,13 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
             self.assertIn("closed it before returning", response_text)
             self.assertFalse((instance_root / "runtime" / "browser" / "page_idle.json").exists())
 
-        list_requests = [request for request in cdp_state.get("requests", []) if request.get("path") == "/json/list"]
-        self.assertEqual(len(list_requests), 2, msg=cdp_state.get("requests"))
         self.assertEqual(
             cdp_state.get("rpc_requests"),
-            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-search-new"}}],
+            [
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-search-new"}},
+            ],
         )
     def test_new_page_without_selected_page_id_closes_new_target_and_reports_not_deliverable(self) -> None:
         existing_targets = _page_targets(1)
@@ -233,11 +237,13 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
                 self.assertEqual(page_expiry_schedules, [])
             self.assertFalse(thread.is_alive())
 
-        list_requests = [request for request in cdp_state.get("requests", []) if request.get("path") == "/json/list"]
-        self.assertEqual(len(list_requests), 2, msg=cdp_state.get("requests"))
         self.assertEqual(
             cdp_state.get("rpc_requests"),
-            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-undeliverable"}}],
+            [
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-undeliverable"}},
+            ],
         )
     def test_failed_new_page_close_failure_schedules_precise_cleanup(self) -> None:
         existing_targets = _page_targets(1)
@@ -285,7 +291,11 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
 
         self.assertEqual(
             cdp_state.get("rpc_requests"),
-            [{"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-close-fails"}}],
+            [
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.getTargets", "params": {}},
+                {"id": 1, "method": "Target.closeTarget", "params": {"targetId": "target-close-fails"}},
+            ],
         )
     def test_new_page_does_not_call_target_create_target(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
@@ -301,7 +311,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
         self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
         self.assertEqual(forwarded[0]["params"]["name"], "new_page")
         self.assertIs(forwarded[0]["params"]["arguments"]["background"], True)
-        self.assertEqual(cdp_state.get("rpc_requests", []), [])
+        self.assertNotIn("Target.createTarget", [item["method"] for item in cdp_state.get("rpc_requests", [])])
     def test_search_page_builds_url_and_forwards_upstream_new_page(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
@@ -325,7 +335,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
             },
         )
         self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
-        self.assertEqual(cdp_state.get("rpc_requests", []), [])
+        self._assert_only_cleanup_snapshot_reads(cdp_state)
     def test_search_page_does_not_call_target_create_target(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
@@ -339,7 +349,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
 
         self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
         self.assertEqual(forwarded[0]["params"]["name"], "new_page")
-        self.assertEqual(cdp_state.get("rpc_requests", []), [])
+        self.assertNotIn("Target.createTarget", [item["method"] for item in cdp_state.get("rpc_requests", [])])
     def test_search_page_rejects_blank_query_before_forwarding(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)
@@ -407,7 +417,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
                     )
                     self.assertIn(f"--browser-url={browser_url}", upstream_argv)
                     self.assertFalse(responses[0]["result"].get("isError", False), msg=responses[0])
-                    self.assertEqual(cdp_state.get("rpc_requests", []), [])
+                    self._assert_only_cleanup_snapshot_reads(cdp_state)
     def test_new_page_blank_url_is_forwarded_to_upstream(self) -> None:
         cdp_state: dict[str, object] = {"requests": [], "targets": _page_targets(1)}
         browser_url = self._start_cdp_list_server(cdp_state)

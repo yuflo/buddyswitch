@@ -30,7 +30,7 @@ from tests.support.fake_cdp import (
 ROOT = REPO_ROOT
 SESSION_PATH = ROOT / "scripts" / "env" / ("cdp_browser_" + "session.py")
 LIFECYCLE_PATH = ROOT / "scripts" / "env" / "cdp_browser_lifecycle.py"
-BACKGROUND_PAGE_PATH = ROOT / "scripts" / "env" / "cdp_background_page.py"
+TARGET_TRANSPORT_PATH = ROOT / "scripts" / "env" / "cdp_target.py"
 BROWSER_RUNTIME_MANAGER_PATH = ROOT / "tools" / "launcher" / "browser_runtime_manager.py"
 MODULE_COUNTER = count()
 LEGACY_CURRENT_TARGET_FIELD = "current_" + "target_id"
@@ -44,10 +44,10 @@ def load_lifecycle() -> Any:
     return importlib.reload(importlib.import_module("env.cdp_browser_lifecycle"))
 
 
-def load_background_page() -> Any:
-    if not BACKGROUND_PAGE_PATH.exists():
-        raise AssertionError(f"expected module to exist: {BACKGROUND_PAGE_PATH}")
-    return importlib.reload(importlib.import_module("env.cdp_background_page"))
+def load_target_transport() -> Any:
+    if not TARGET_TRANSPORT_PATH.exists():
+        raise AssertionError(f"expected module to exist: {TARGET_TRANSPORT_PATH}")
+    return importlib.reload(importlib.import_module("env.cdp_target"))
 
 
 def _make_cdp_browser_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
@@ -78,8 +78,37 @@ def _make_cdp_browser_handler(state: dict[str, object]) -> type[BaseHTTPRequestH
                 raw_message = _read_client_text_frame(self.rfile)
                 message = json.loads(raw_message)
                 state.setdefault("rpc_requests", []).append(message)
-                if state.get("close_error"):
+                if message.get("method") == "Target.getTargets":
+                    response = {"id": message.get("id"), "result": {"targetInfos": state.get("targets", [])}}
+                elif message.get("method") == "Target.getTargetInfo":
+                    target_id = message.get("params", {}).get("targetId")
+                    targets = state.get("targets")
+                    target = None
+                    if isinstance(targets, list):
+                        target = next(
+                            (
+                                target
+                                for target in targets
+                                if isinstance(target, dict) and target.get("targetId") == target_id
+                            ),
+                            None,
+                        )
+                    if target is None:
+                        response = {"id": message.get("id"), "error": {"message": "No target with given id found"}}
+                    else:
+                        response = {"id": message.get("id"), "result": {"targetInfo": target}}
+                elif message.get("method") == "Target.closeTarget" and state.get("close_error"):
                     response = {"id": message.get("id"), "error": {"message": str(state["close_error"])}}
+                elif message.get("method") == "Target.closeTarget":
+                    target_id = message.get("params", {}).get("targetId")
+                    targets = state.get("targets")
+                    if isinstance(targets, list):
+                        state["targets"] = [
+                            target
+                            for target in targets
+                            if target.get("targetId") != target_id and target.get("tabTargetId") != target_id
+                        ]
+                    response = {"id": message.get("id"), "result": {"success": True}}
                 else:
                     response = {"id": message.get("id"), "result": {"success": True}}
                 _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))

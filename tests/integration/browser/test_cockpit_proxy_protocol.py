@@ -199,7 +199,7 @@ class TestCockpitProxyProtocol(BrowserCockpitProxyHarness):
         self.assertNotIn(str(shared_root.parent), broker_params_text)
         self.assertNotIn("HOME", broker_params_text)
         self.assertNotIn("CODEX_HOME", broker_params_text)
-    def test_non_page_use_and_failed_page_response_do_not_refresh_idle(self) -> None:
+    def test_non_page_use_does_not_refresh_existing_target_idle(self) -> None:
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
 
         with tempfile.TemporaryDirectory() as temp_root:
@@ -207,10 +207,14 @@ class TestCockpitProxyProtocol(BrowserCockpitProxyHarness):
             self._write_page_idle_state(
                 instance_root,
                 {
-                    "current_page_id": "page-current",
-                    "selected_page_id": "page-current",
-                    "current_page_updated_at": "2026-06-23T00:00:00Z",
-                    "pages": {"page-current": {"page_id": "page-current", "last_used_at": "2026-06-23T00:00:00Z"}},
+                    "active_tab_target_id": "target-current",
+                    "targets": {
+                        "target-current": {
+                            "tab_target_id": "target-current",
+                            "last_used_at": "2026-06-23T00:00:00Z",
+                            "idle_seconds": 40,
+                        }
+                    },
                 },
             )
             daemon_core, server, thread = self._start_mailbox(instance_root)
@@ -219,13 +223,6 @@ class TestCockpitProxyProtocol(BrowserCockpitProxyHarness):
                 [
                     {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
                     {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_pages", "arguments": {}}},
-                    {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "close_page", "arguments": {"pageId": 3}}},
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 4,
-                        "method": "tools/call",
-                        "params": {"name": "take_snapshot", "arguments": {"forceError": True}},
-                    },
                 ],
                 browser_url=browser_url,
                 instance_root=instance_root,
@@ -233,7 +230,9 @@ class TestCockpitProxyProtocol(BrowserCockpitProxyHarness):
             server.close()
             thread.join(timeout=2)
 
-            self.assertEqual([response["id"] for response in responses], [1, 2, 3, 4])
-            self.assertEqual([item["params"]["name"] for item in forwarded if item.get("method") == "tools/call"], ["list_pages", "close_page", "take_snapshot"])
+            self.assertEqual([response["id"] for response in responses], [1, 2])
+            self.assertEqual([item["params"]["name"] for item in forwarded if item.get("method") == "tools/call"], ["list_pages"])
             self.assertFalse(daemon_state.daemon_state_file(instance_root).exists())
+            page_idle = json.loads((instance_root / "runtime" / "browser" / "page_idle.json").read_text(encoding="utf-8"))
+            self.assertEqual(page_idle["targets"]["target-current"]["last_used_at"], "2026-06-23T00:00:00Z")
             self.assertFalse(thread.is_alive())
