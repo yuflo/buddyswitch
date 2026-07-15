@@ -1,6 +1,10 @@
 # BuddySwitch Sharp Engineering Constitution Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Status: Completed — historical execution artifact.**
+
+> **Historical/audit notice:** Implementation completed in commit `cea7d0353c07b5aafb19f42db8567ba57fbf8e24`. Current policy is owned by root `AGENTS.md`. The embedded candidate body, task steps, and commands below are retained only as historical evidence; they are superseded and must not be executed or used to overwrite the current `AGENTS.md`.
+
+**Completion outcome:** Review closed protected-mode, test-ownership, state-applicability, and path issues. The final owner-backed task projection is `buddyswitch/objects/task-sys/tasks/*.json`.
 
 **Goal:** Replace the root `AGENTS.md` with a high-density Sharp Forward engineering constitution that makes forward-only REBUILD, architecture ownership, development, testing, and acceptance executable BuddySwitch policy.
 
@@ -25,7 +29,7 @@ No executable source, runtime contract, role `AGENTS.md`, test runner, or produc
 - Modify: `AGENTS.md`
 - Reference: `docs/memo/2026-07-15-buddyswitch-sharp-engineering-constitution-design.md`
 
-- [ ] **Step 1: Establish the artifact-level RED baseline**
+- [x] **Step 1: Establish the artifact-level RED baseline**
 
 Run:
 
@@ -35,9 +39,9 @@ rg -n '^## (Forward-Only REBUILD|Architecture Laws|Development Framework|Accepta
 
 Expected: exit `1` with no matches. The current linear guide does not yet expose the approved constitutional structure.
 
-- [ ] **Step 2: Replace `AGENTS.md` with the approved constitution**
+- [x] **Step 2: Replace `AGENTS.md` with the approved constitution**
 
-Use this complete file body:
+Historical candidate used to start implementation (superseded; do not apply):
 
 ````markdown
 # BuddySwitch Sharp Forward Engineering Constitution
@@ -208,7 +212,7 @@ A task is done only when:
 No verification, no acceptance. No completed replacement with historical baggage.
 ````
 
-- [ ] **Step 3: Verify the new structure and normative anchors**
+- [x] **Step 3: Verify the new structure and normative anchors**
 
 Run:
 
@@ -232,7 +236,7 @@ Expected: exit `0`; every heading and anchor is present; no whitespace errors.
 - Inspect: `.agents/skills/buddyswitch-testing/SKILL.md`
 - Inspect: `docs/memo/2026-07-15-buddyswitch-sharp-engineering-constitution-design.md`
 
-- [ ] **Step 1: Run a read-only Codex semantic probe**
+- [x] **Step 1: Run a read-only Codex semantic probe**
 
 Run:
 
@@ -250,7 +254,7 @@ Expected: the response states all of the following:
 - ordinary proof uses claim-scoped focused targets through `$buddyswitch-testing`,
   while `full` is reserved for frozen final/repository-wide acceptance.
 
-- [ ] **Step 2: Audit the ten approved pressure scenarios**
+- [x] **Step 2: Audit the ten approved pressure scenarios**
 
 Read `AGENTS.md` once for each scenario and confirm the named result:
 
@@ -268,7 +272,7 @@ Read `AGENTS.md` once for each scenario and confirm the named result:
 Expected: every scenario has one unambiguous path and none requires a second test
 policy, compatibility-by-default, or a generic architecture framework.
 
-- [ ] **Step 3: Confirm policy ownership remains singular**
+- [x] **Step 3: Confirm policy ownership remains singular**
 
 Run:
 
@@ -287,7 +291,7 @@ and review behavior. No feature map or second command appears.
 - Verify: `docs/memo/2026-07-15-buddyswitch-sharp-engineering-constitution-design.md`
 - Verify: `docs/superpowers/plans/2026-07-15-buddyswitch-sharp-engineering-constitution.md`
 
-- [ ] **Step 1: Run the completion audit against the approved design**
+- [x] **Step 1: Run the completion audit against the approved design**
 
 Run:
 
@@ -306,7 +310,7 @@ Expected: exit `0`; the constitution stays high-density, every design requiremen
 represented, whitespace is clean, and status lists only the approved documentation
 changes.
 
-- [ ] **Step 2: Verify the immutable repository contract survived the rewrite**
+- [x] **Step 2: Verify the immutable repository contract survived the rewrite**
 
 Run:
 
@@ -319,7 +323,7 @@ done
 Expected: exit `0`; test commands, key paths, and runtime write prohibitions remain
 exactly discoverable.
 
-- [ ] **Step 3: Record artifact-specific verification**
+- [x] **Step 3: Record artifact-specific verification**
 
 Record in the final handoff:
 
@@ -332,7 +336,7 @@ Verification Evidence
 - residual risk: model interpretation can vary; mitigated by explicit decisions, semantic probe, and mechanical anchors
 ```
 
-- [ ] **Step 4: Commit the constitution**
+- [x] **Step 4: Commit the constitution**
 
 Run:
 
