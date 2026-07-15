@@ -1,0 +1,4 @@
+interface:
+  display_name: "BuddySwitch Testing"
+  short_description: "Choose focused, reusable repository verification"
+  default_prompt: "Use $buddyswitch-testing to choose and record the shortest sufficient verification for this change."

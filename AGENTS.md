@@ -64,6 +64,18 @@ The only public test entry is `./buddyswitch-test`:
 ./buddyswitch-test full
 ```
 
+For executable code, tests, runtime contracts, or test infrastructure, follow
+`$buddyswitch-testing`. It owns dynamic target discovery, claim-scoped
+escalation, evidence reuse/invalidation, and reviewer probes. The commands above
+are its repository verification contract; the runner owns target validation,
+isolation, exclusivity, and cleanup.
+
+Do not encode feature-to-test mappings in `AGENTS.md` or the skill. Discover
+targets from the current diff, code, tests, contracts, and runner constraints.
+Generic completion or review guidance must not upgrade focused proof to `full`
+unless the skill reaches FINAL, repository-wide acceptance is explicit, or the
+user directly requests it.
+
 Use `focused` for the shortest relevant proof and `full` for serial acceptance
 across unit, integration, process, and system tiers. Do not publish or add a
 second test entry.
