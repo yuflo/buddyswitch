@@ -38,8 +38,8 @@ There are three deliberately separate concepts:
 | Concern | Identity | Owner |
 | --- | --- | --- |
 | Normal browser operation and selection | MCP `pageId`, valid only in the active upstream generation | `chrome_devtools_cockpit_proxy.py` |
-| Durable tab resource lifecycle | Chrome `TargetID` returned by hidden upstream `get_tab_id` | `cdp_browser_lifecycle.py` |
-| Raw browser target transport | `Target.getTargets`, `Target.closeTarget`, ready-target creation | `cdp_target.py` |
+| Durable tab resource lifecycle | Chrome outer `type=tab` TargetID returned by hidden upstream `get_tab_id` | `cdp_browser_lifecycle.py` |
+| Raw browser target transport | exact `Target.getTargetInfo`/`Target.closeTarget`, page enumeration, ready-target creation | `cdp_target.py` |
 
 URL and title may be persisted for diagnostics only. They never participate in lookup, close, absence, retry, or verification decisions.
 
@@ -78,17 +78,17 @@ The schedule key is `browser.page.idle:TAB-123`. The effective `idle_seconds` is
 
 1. Validate `tab_target_id`, `idle_seconds`, target route, and stale-due state.
 2. If the parent turn is running and this is the active target, refresh the target with the current config.
-3. Query `Target.getTargets` through the shared CDP transport.
+3. Query the exact outer tab with `Target.getTargetInfo(tab_target_id)` through the shared CDP transport. This ID is intentionally different from the inner `type=page` target shown by `/json/list` on current Chrome.
 4. If the exact target is already absent, forget it and schedule release when no tracked targets remain.
 5. Otherwise call `Target.closeTarget(tab_target_id)`.
-6. Query targets again and require exact absence.
+6. Query the same tab ID again and require `No target with given id found`.
 7. Only after verified absence, forget the record and schedule release.
 
 Query, close, or verification failure keeps the state and returns failure so daemon retry semantics retain ownership. A missing browser process may forget state because there is no live target to own.
 
 ## 4. Normal browser-use behavior
 
-The pinned `chrome-devtools-mcp@1.1.1` process is started with `--experimental-interop-tools` and `--experimental-structured-content`. Its hidden read-only `get_tab_id` returns the selected Puppeteer page's stable Chrome tab target ID.
+The pinned `chrome-devtools-mcp@1.1.1` process is started with `--experimental-interop-tools` and `--experimental-structured-content`. Its hidden read-only `get_tab_id` returns the selected Puppeteer page's stable outer Chrome `type=tab` target ID. Modern Chrome also exposes an inner `type=page` target with a different ID for the same visible tab; TTL owns and closes the outer tab, while page enumeration remains limited to release guards and failed-open cleanup.
 
 The proxy keeps this internal:
 
@@ -145,7 +145,7 @@ Rules:
 
 - Replace `scripts/env/cdp_background_page.py` with `scripts/env/cdp_target.py`.
 - Keep ready-target creation required by browser startup.
-- Add `list_page_targets()` using browser-level `Target.getTargets` and keep exact `close_target()`.
+- Add `get_target_info()` for exact outer-tab existence and verification, keep `list_page_targets()` for inner page enumeration, and keep exact `close_target()`.
 - Move every `/json/list`/raw-CDP target read out of lifecycle state code.
 - Update launcher variables/imports to the new target transport; retain no old module or environment variable alias.
 
@@ -205,7 +205,7 @@ Replace the old pageId tests in `tests/integration/browser/test_cdp_page_lifecyc
 - final verified target forget schedules configured release delay;
 - scheduling failure writes no ownership record.
 
-Extend the focused CDP transport fixture to prove exact `Target.getTargets`, `Target.closeTarget`, and ready-target creation. Run:
+Extend the focused CDP transport fixture to prove exact `Target.getTargetInfo`, `Target.getTargets`, `Target.closeTarget`, and ready-target creation. The expiry process fixture must use distinct outer-tab and inner-page IDs so a page-only lookup cannot pass. Run:
 
 ```bash
 ./buddyswitch-test focused \
@@ -363,9 +363,12 @@ Review the diff by responsibility:
 - Proxy identity/state focused file: `14 passed, 2 subtests passed in 9.08s`, including navigation with stable identity and upstream exit during internal identity lookup.
 - Runtime manager, exact target child process, and lock slice: `16 passed, 9 subtests passed in 7.70s`.
 - Launcher browser process contracts: `31 passed, 10 subtests passed in 27.71s`.
-- Final non-system risk aggregate: `147 passed, 33 subtests passed in 75.11s` (`focused-python` completed in `75.21s`). It includes regressions proving that a failed target query cannot incorrectly release the browser, failed-open cleanup retries when Chrome reports a target still present after `closeTarget`, and an owned browser child is reaped when its process group disappears during the termination wait.
-- Browser system gate with test-only `page_idle_seconds = 1` and `release_delay_seconds = 0`: `3 passed in 2.42s`. The main path proves `new_page -> list_pages -> select_page -> navigate_page (URL changes, target ID does not) -> take_snapshot -> exact Target.closeTarget -> release -> restart`, and asserts expiry never calls MCP `close_page`.
-- Public `./buddyswitch-codex instance start --role pm` under the existing ResourceLedger supervisor: `1 passed in 3.17s`. It asserts `$BUDDYSWITCH_SHARED_ROOT/config/browser.toml` is created with exact defaults and all detached services/worktrees are cleaned after the runner signal.
+- Final non-system risk aggregate: `149 passed, 33 subtests passed in 72.91s` (`focused-python` completed in `73.02s`). It includes regressions proving that a failed target query cannot incorrectly release the browser, failed-open cleanup retries when Chrome reports a target still present after `closeTarget`, an owned browser child is reaped when its process group disappears during the termination wait, and an outer tab closes correctly when its inner page uses a different ID.
+- Browser system gate with distinct fake `tab-1`/`page-1` identities and test-only `page_idle_seconds = 1`, `release_delay_seconds = 0`: `3 passed in 2.45s`. The main path proves `new_page -> list_pages -> select_page -> navigate_page (URL changes, tab ID does not) -> take_snapshot -> exact Target.closeTarget(tab ID) -> release -> restart`, and asserts expiry never calls MCP `close_page`.
+- Public `./buddyswitch-codex instance start --role pm` under the existing ResourceLedger supervisor: `1 passed in 3.29s`. It asserts `$BUDDYSWITCH_SHARED_ROOT/config/browser.toml` is created with exact defaults and all detached services/worktrees are cleaned after the runner signal.
+- A first real public-CLI actor run on commit `10a4c01` exposed a production-only distinction that the original fakes missed: `get_tab_id` returned outer tab `BF7E...`, while `/json/list` exposed inner page `2211...`. The expiry schedule was delivered but the page remained because page enumeration falsely declared the tab absent. Direct real-CDP `Target.getTargetInfo(BF7E...)` returned `type=tab`; `Target.closeTarget(BF7E...)` closed both layers. This evidence drove commit `414d67d` and the tab/page-separated regression fixtures.
+- A fresh real `./buddyswitch-codex instance start --role dev` actor on `414d67d` opened and snapshotted `BuddyTTLReal` through the cockpit. The run recorded outer tab `496B...` and inner page `9773...`; expiry closed the page, both browser schedules were delivered without failure, and browser status became `port=null`, `ready=false`, `tracked=0`.
+- A concurrent real-actor run reproduced the original multi-actor shape. `act-dev-7c351f3760cb` used port `9222`, outer tab `D7DB...`, inner page `3EFD...`; `act-market-206def46ded4` used port `9223`, outer tab `66DA...`, inner page `C3CB...`. Both schedules closed only their own pages and both browsers independently reached `port=null`, `ready=false`, `tracked=0`.
 - `git diff --check`: clean in `fea-daemon`.
 - Residue scans: no old background-target module/env alias, temporary expiry MCP session, URL/title resolution, durable pageId field, runtime TTL constant, source-checkout `config/browser.toml`, page limit, or exact-URL reuse path remains.
 - Pre-existing untracked memo/stress-design files in both worktrees were left untouched.
@@ -374,4 +377,4 @@ One combined exploratory acceptance run exposed test pollution: unit tests had r
 
 ### Remaining risk
 
-The remaining risk is limited to the pinned upstream's experimental `get_tab_id`/structured-content contract changing in a future package upgrade. The package remains pinned at `chrome-devtools-mcp@1.1.1`, argv and response-shape tests cover the current contract, and identity failure is deliberately non-blocking for ordinary browser operations. No broad full-suite run was performed; acceptance stayed on the explicit browser, launcher, daemon-contract, system lifecycle, and public CLI resource boundaries.
+The remaining risk is limited to the pinned upstream's experimental `get_tab_id`/structured-content contract changing in a future package upgrade. The package remains pinned at `chrome-devtools-mcp@1.1.1`; argv, structured-response, distinct tab/page, and real-Chrome acceptance now cover the current contract, and identity failure is deliberately non-blocking for ordinary browser operations. No broad full-suite run was performed; acceptance stayed on the explicit browser, launcher, daemon-contract, system lifecycle, public CLI resource boundaries, and real single-/dual-actor simulations.
