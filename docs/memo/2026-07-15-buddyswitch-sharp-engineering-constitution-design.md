@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-15
 
-**Status:** Proposed design approved in direction; written-spec review pending
+**Status:** Approved for implementation
 
 ## 1. Target Outcome
 
@@ -20,6 +20,11 @@ The constitution must make BuddySwitch's high-speed iteration style concrete:
 
 The target is roughly 150-200 lines. It is a map and decision framework, not a
 standalone engineering encyclopedia.
+
+The deepest invariant is forward-only development: historical burden belongs in
+Git history and historical memos, not in the live product. Ordinary development
+optimizes the current model for the next validated step without carrying retired
+semantics forward.
 
 ## 2. Current Bottleneck
 
@@ -135,6 +140,18 @@ Do not buy short-term motion by weakening the first four. Do not spend on the la
 two, or on unrelated quality polish, beyond what the current bottleneck can justify.
 Quality work is in scope when it protects the live product path or preserves the
 speed of the next change.
+
+### Forward-only invariant
+
+The live system knows the current model, not the history of models that preceded it.
+Git and historical memos preserve why the system changed. Active code, runtime
+schemas, configuration, interfaces, tests, skills, and current architecture docs
+describe only what is true now.
+
+Therefore a replacement is incomplete while a retired path remains reachable,
+discoverable, writable, readable as fallback, taught by current guidance, or
+protected by active tests. Historical burden may enter the live system only through
+the explicit protected-mode evidence in Section 6.
 
 ### S - Solve the current bottleneck
 
@@ -263,7 +280,8 @@ notes, but not skip the reasoning.
 ### FRAME
 
 Name the bottleneck, desired observable outcome, scope boundary, and protected
-contracts. Exit when one acceptance sentence can describe success.
+contracts. Express cross-layer outcomes as `consumer action -> owning system path ->
+observable consumer result`. Exit when one acceptance sentence can describe success.
 
 ### TRACE
 
@@ -320,7 +338,10 @@ The only public test entry remains:
 ./buddyswitch-test full
 ```
 
-The constitution states invariants; it does not duplicate target-selection logic.
+Use `focused` for ordinary claim-scoped proof. Use `full` only for a frozen
+merge/release candidate, explicit repository-wide acceptance, or direct user
+request. The constitution states this repository contract; it does not duplicate
+the skill's target-selection or escalation logic.
 
 ### 9.2 Acceptance owns the complete claim
 
@@ -434,7 +455,27 @@ The final `AGENTS.md` rewrite will use three explicit passes:
    remains the only test-selection owner, and keep the root file within the intended
    high-density size.
 
-## 16. Acceptance Criteria
+## 16. Design Pressure Review
+
+The constitution must produce these decisions without extra policy:
+
+| Scenario | Required decision | Required evidence |
+|---|---|---|
+| New product behavior | Add one owner-correct vertical path; no speculative framework | intended RED, GREEN, direct boundary proof |
+| Escaped defect | Reproduce the consumer-visible fault; fix its owning cause | smallest regression plus affected contract proof |
+| Behavior-preserving refactor | Do not manufacture RED or change semantics | pre-change baseline and post-change affected proof |
+| Full semantic rebuild | Cut over once and remove every retired live surface | new behavior plus deletion and scoped residue proof |
+| Real external/data migration | Enter protected mode; bound any coexistence | protected contract, risk, owner, exit trigger, migration tests |
+| Web/CLI/tool peers | Keep separate adapters converging on one semantic owner | owner/dependency structural proof and interface behavior |
+| Flake, timeout, or residue | Stop progression and diagnose; never hide with blind reruns | reproduction or finding-specific probe plus clean residual state |
+| Repeated shared-file conflict | Treat the hotspot as boundary feedback | ownership/change-locality review and structural guard when stable |
+| Long multi-stage work | Preserve exact scope and resumable state across sessions | versioned plan with progress, decisions, commands, and risks |
+| Prose-only change | Do not invent executable test evidence | diff, links, rendering, schema, or artifact-specific validation |
+
+No scenario requires a second test policy, compatibility-by-default, a generic
+architecture framework, or completion based only on broad green tests.
+
+## 17. Acceptance Criteria
 
 The upgraded constitution is accepted when:
 
@@ -443,6 +484,7 @@ The upgraded constitution is accepted when:
 2. Every philosophical statement implies a decision, prohibition, exit condition,
    or evidence requirement.
 3. REBUILD completion requires one live path plus deletion and scoped residue proof.
+   Git history, not active compatibility structure, preserves the retired model.
 4. Default and protected change modes make compatibility exceptions explicit.
 5. Architecture laws cover semantic ownership, adapter boundaries, dependency
    direction, change locality, single truth, composition, and mechanical fitness.
@@ -458,7 +500,7 @@ The upgraded constitution is accepted when:
 11. The document remains a high-density constitution rather than a feature catalog
     or engineering encyclopedia.
 
-## 17. Sources
+## 18. Sources
 
 - OpenAI, [Harness engineering: leveraging Codex in an agent-first world](https://openai.com/index/harness-engineering/)
 - OpenAI, [Custom instructions with AGENTS.md](https://developers.openai.com/codex/guides/agents-md)
