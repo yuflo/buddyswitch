@@ -467,7 +467,7 @@ test('stale lifecycle submission cannot clear attach tool feedback for a newer a
 
     const stop = app.runLifecycleAction(state, elements, 'stop', 'act-lifecycle-a');
     await app.selectActor(state, elements, 'act-lifecycle-b');
-    state.openTuiMessage = 'Terminal opened.';
+    state.openTuiMessage = 'Launch sent to Terminal.';
     state.copyCommandMessage = 'Command copied.';
 
     stopResponse.resolve(okResponse({
@@ -482,7 +482,7 @@ test('stale lifecycle submission cannot clear attach tool feedback for a newer a
     await stop;
 
     assert.equal(state.selectedActorId, 'act-lifecycle-b');
-    assert.equal(state.openTuiMessage, 'Terminal opened.');
+    assert.equal(state.openTuiMessage, 'Launch sent to Terminal.');
     assert.equal(state.copyCommandMessage, 'Command copied.');
     assert.ok(state.lifecycleOperations['op-stop-lifecycle-a']);
     if (state.actorRefreshTimer) {

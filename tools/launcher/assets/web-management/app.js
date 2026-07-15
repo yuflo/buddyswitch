@@ -3136,11 +3136,11 @@
         body: JSON.stringify({}),
       });
       if (requestOwnsSelection()) {
-        state.openTuiMessage = 'Terminal opened.';
+        state.openTuiMessage = 'Launch sent to Terminal.';
       }
     } catch (_error) {
       if (requestOwnsSelection()) {
-        state.openTuiMessage = 'Could not open Terminal.';
+        state.openTuiMessage = 'Could not launch Terminal.';
       }
     } finally {
       if (requestOwnsSelection()) {

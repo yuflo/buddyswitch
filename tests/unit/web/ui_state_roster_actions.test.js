@@ -25,7 +25,7 @@ test('state defaults to Team room as the primary section', () => {
 test('actor roster payload exposes fallback facts without changing selection intent', () => {
   const state = app.createState();
   state.selectedActorId = 'act-missing';
-  state.openTuiMessage = 'Terminal opened.';
+  state.openTuiMessage = 'Launch sent to Terminal.';
   state.copyCommandMessage = 'Command copied.';
   app.recordImProjectedMessage(state, imMessage({
     id: 'msg-stale',
@@ -42,7 +42,7 @@ test('actor roster payload exposes fallback facts without changing selection int
   });
 
   assert.equal(state.selectedActorId, 'act-missing');
-  assert.equal(state.openTuiMessage, 'Terminal opened.');
+  assert.equal(state.openTuiMessage, 'Launch sent to Terminal.');
   assert.equal(state.copyCommandMessage, 'Command copied.');
   assert.equal(state.imConversationIdentityId, '');
   assert.equal(result.selectedActorPresent, false);

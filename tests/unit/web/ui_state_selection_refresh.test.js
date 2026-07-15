@@ -76,6 +76,42 @@ test('actor selection clears stale feedback before fetch completes', async () =>
   }
 });
 
+test('open tui success reports launch acceptance', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    requests.push({ url: requestUrl, options: options });
+    if (requestUrl === '/api/instances/act-tui-a/open-tui') {
+      return okResponse({ terminal: 'Terminal.app', status: 'accepted' });
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: 'act-tui-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+    ];
+    state.selectedActorId = 'act-tui-a';
+    state.actorConsole = {
+      actor: { actor_id: 'act-tui-a', role: 'market' },
+      runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a', thread_status: 'idle' },
+    };
+
+    await app.openTui(state, elements);
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/api/instances/act-tui-a/open-tui');
+    assert.equal(requests[0].options.method, 'POST');
+    assert.equal(state.openTuiPending, false);
+    assert.equal(state.openTuiMessage, 'Launch sent to Terminal.');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('stale open tui response cannot write into a newer actor selection', async () => {
   const originalFetch = globalThis.fetch;
   const openTuiResponse = deferred();

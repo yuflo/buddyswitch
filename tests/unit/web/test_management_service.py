@@ -124,8 +124,8 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
             with self.subTest(marker=marker):
                 self.assertNotIn(marker, source)
 
-    def test_build_copy_attach_command_is_short_shell_safe_and_paste_ready(self) -> None:
-        command = WEB_MANAGEMENT.build_copy_attach_command(
+    def test_build_attach_cli_command_is_short_shell_safe_and_paste_ready(self) -> None:
+        command = WEB_MANAGEMENT.build_attach_cli_command(
             Path("/tmp/Buddy Switch"),
             "act-pm.demo",
         )
@@ -133,6 +133,40 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         self.assertEqual(
             command,
             "cd '/tmp/Buddy Switch' && ./buddyswitch-codex instance attach act-pm.demo",
+        )
+
+    def test_open_macos_terminal_app_targets_one_window_for_running_and_stopped_terminal(self) -> None:
+        completed = WEB_MANAGEMENT.subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+        command = "cd '/tmp/Buddy Switch' && ./buddyswitch-codex instance attach act-pm.demo"
+
+        with mock.patch.object(WEB_MANAGEMENT.subprocess, "run", return_value=completed) as run:
+            WEB_MANAGEMENT.open_macos_terminal_app(command)
+
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                "osascript",
+                "-e",
+                "\n".join(
+                    [
+                        'set terminalWasRunning to application "Terminal" is running',
+                        'tell application "Terminal"',
+                        "  if terminalWasRunning then",
+                        f'    do script "{command}"',
+                        "    activate",
+                        "  else",
+                        "    activate",
+                        f'    do script "{command}" in front window',
+                        "  end if",
+                        "end tell",
+                    ]
+                ),
+            ],
         )
 
     def test_recording_host_control_defaults_match_host_control_schemas(self) -> None:

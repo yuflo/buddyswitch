@@ -18,8 +18,11 @@ results and delegates directly to the owning callable:
 - Task and Track reads go to external-safe domain projections;
 - Web startup launches the Web process.
 
-The public CLI is not the Web interface's lower API. Web never shells through
-`buddyswitch-codex`.
+The public CLI is not the Web interface's lower product API. Web does not run
+the CLI as a subprocess, parse its output, or route lifecycle/domain behavior
+through it. Open TUI is the one explicit human-terminal handoff: Web gives
+Terminal.app the same paste-ready `buddyswitch-codex instance attach` command
+shown by Copy command, and Terminal runs it as a user-visible CLI session.
 
 ### Web Interface
 
@@ -29,7 +32,9 @@ own lifecycle mechanics, Actor input, Task/Track mutation, or IM semantics.
 
 `/api/actors/{id}/console` is the actor console read model, with no Task subroute.
 Instance routes delegate lifecycle work to private Host Control.
-Open TUI delegates attach resolution to Actor Session.
+Open TUI validates a local request and hands one short public attach command to
+Terminal.app. It does not resolve an attach descriptor or construct the Codex
+runtime environment.
 
 ### Web Message
 
@@ -53,8 +58,10 @@ It does not return Task or Track product state.
 
 Actor Session Input/Attach owns direct parent-thread input and Codex remote
 attach resolution. These operations are outside Task Sys: they do not create a
-Task frame, Task relation, handoff frame, or Side runtime state. The Web Open
-TUI path and public CLI call the same Actor Session boundary.
+Task frame, Task relation, handoff frame, or Side runtime state. The public CLI
+calls Actor Session directly. The Web Open TUI path reaches that owner only
+after Terminal.app starts the public CLI attach command; Web itself owns only
+local request validation and Terminal handoff.
 
 ### Product Domains
 
@@ -82,7 +89,7 @@ Valid direct paths are:
 
 ```text
 Browser -> Web Interface -> private Host Control
-Browser -> Web Interface -> Actor Session
+Browser -> Web Open-TUI route -> Terminal handoff -> public CLI instance attach -> Actor Session
 Browser -> Web Interface -> external-safe Task/Track projections
 Browser -> Web Interface -> IM API
 
@@ -96,7 +103,8 @@ Domain owners -> repositories
 
 Forbidden paths are:
 
-- Web -> public CLI;
+- Web -> CLI subprocess execution or CLI output parsing as an internal product API;
+- Web -> Actor Session attach resolution or descriptor expansion;
 - Web -> raw repository rows for product semantics;
 - Web -> actor runtime tools for console reads;
 - Web or CLI -> external Side/Goal mutation routes;
@@ -106,7 +114,8 @@ Forbidden paths are:
 ## Change Rule
 
 Classify a change by owner before adding a call. Lifecycle belongs to private
-Host Control, direct input/attach belongs to Actor Session, messages belong to
+Host Control, direct input and attach resolution belong to Actor Session,
+Open-TUI launch belongs to the explicit Terminal handoff, messages belong to
 the IM API, external Task/Track reads belong to exact allowlist projections,
 and actor-runtime mutations remain internal. Add a new external surface only
 when none of these owners can express the required product behavior.

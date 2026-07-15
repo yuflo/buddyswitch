@@ -28,9 +28,7 @@ import web_im_identity
 import im_http_router
 import imessage_channel
 import host_control as host_control_module
-import actor_session
 import cli_contract
-import codex_runtime
 from env.domain import task_read, track_read
 from env.domain.identity import ActorIdentityProfile, IdentityRef
 from env.repos import runtime_files
@@ -159,24 +157,6 @@ def map_host_control_failure(error: host_control_module.HostControlError) -> Htt
     if error.code in {"LIFECYCLE_BLOCKED", "LOCK_BUSY"} or error.returncode in {3, 4}:
         return HttpError(status=409, code="LIFECYCLE_BLOCKED", message=error.message)
     return HttpError(status=502, code="COMMAND_FAILED", message=error.message)
-
-
-def map_actor_session_failure(error: actor_session.ActorSessionError) -> HttpError:
-    message = str(error)
-    if message == "invalid actor id":
-        return HttpError(status=400, code="INVALID_REQUEST", message="Invalid actor id.")
-    if message.startswith("actor not found:"):
-        actor_id = message.split(":", 1)[1].strip()
-        return HttpError(status=404, code="NOT_FOUND", message=f"actor instance not found: {actor_id}")
-    if message.startswith("actor has no thread id"):
-        return HttpError(status=409, code="OPEN_TUI_BLOCKED", message="No thread to attach.")
-    if message.startswith("actor app server unhealthy"):
-        return HttpError(status=409, code="OPEN_TUI_BLOCKED", message="Instance is unhealthy.")
-    return HttpError(status=502, code="COMMAND_FAILED", message=message)
-
-
-def map_codex_runtime_failure(error: codex_runtime.CodexRuntimeError) -> HttpError:
-    return HttpError(status=409, code="RUNTIME_MISMATCH", message=str(error))
 
 
 def create_server(host: str, port: int, service: "WebManagementService") -> ThreadingHTTPServer:
@@ -408,7 +388,7 @@ class WebManagementService:
         if method == "POST" and action == "stop":
             return 202, self._stop(actor_id)
         if method == "POST" and action == "open-tui":
-            return 200, self._open_tui(actor_id, body, headers)
+            return 202, self._open_tui(actor_id, body, headers)
         if method == "DELETE" and action == "delete":
             return 202, self._delete(actor_id)
         raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
@@ -596,39 +576,35 @@ class WebManagementService:
     ) -> dict[str, Any]:
         self._validate_open_tui_request(headers, body)
         try:
-            descriptor = actor_session.ActorSession(
-                shared_root=self._shared_root(),
-                repo_root=self._repo_root,
-            ).resolve_attach(actor_id)
-        except actor_session.ActorSessionError as exc:
-            raise map_actor_session_failure(exc) from exc
-        except codex_runtime.CodexRuntimeError as exc:
-            raise map_codex_runtime_failure(exc) from exc
-        command = build_terminal_attach_command(descriptor)
+            normalized_actor_id = host_control_module.validate_actor_id(actor_id)
+        except host_control_module.HostControlError as exc:
+            raise map_host_control_failure(exc) from exc
         if self._platform_name != "darwin":
             raise HttpError(
                 status=400,
                 code="UNSUPPORTED_PLATFORM",
-                message="Could not open Terminal.",
+                message="Could not launch Terminal.",
             )
+        command = build_attach_cli_command(self._repo_root, normalized_actor_id)
         try:
             self._terminal_opener(command)
         except TerminalOpenError as exc:
             raise HttpError(
                 status=502,
-                code="TERMINAL_OPEN_FAILED",
-                message="Could not open Terminal.",
+                code="TERMINAL_LAUNCH_FAILED",
+                message="Could not launch Terminal.",
             ) from exc
         except Exception as exc:
             raise HttpError(
                 status=502,
-                code="TERMINAL_OPEN_FAILED",
-                message="Could not open Terminal.",
+                code="TERMINAL_LAUNCH_FAILED",
+                message="Could not launch Terminal.",
             ) from exc
         return {
             "ok": True,
-            "actor_id": actor_id,
+            "actor_id": normalized_actor_id,
             "terminal": "Terminal.app",
+            "status": "accepted",
         }
 
     def _attach_command(self, actor_id: str) -> dict[str, Any]:
@@ -639,7 +615,7 @@ class WebManagementService:
         return {
             "ok": True,
             "actor_id": normalized_actor_id,
-            "command": build_copy_attach_command(self._repo_root, normalized_actor_id),
+            "command": build_attach_cli_command(self._repo_root, normalized_actor_id),
         }
 
     def _validate_open_tui_request(self, headers: Mapping[str, str] | None, body: bytes) -> None:
@@ -1014,11 +990,7 @@ def _first_nonempty_line(text: str | None) -> str | None:
     return None
 
 
-def build_terminal_attach_command(descriptor: actor_session.AttachDescriptor) -> str:
-    return actor_session.terminal_command_from_descriptor(descriptor)
-
-
-def build_copy_attach_command(repo_root: Path, actor_id: str) -> str:
+def build_attach_cli_command(repo_root: Path, actor_id: str) -> str:
     return (
         f"cd {shlex.quote(str(repo_root))} && "
         f"./buddyswitch-codex instance attach {shlex.quote(actor_id)}"
@@ -1030,11 +1002,18 @@ def _quote_applescript_string(value: str) -> str:
 
 
 def open_macos_terminal_app(command: str) -> None:
+    quoted_command = _quote_applescript_string(command)
     script = "\n".join(
         [
+            'set terminalWasRunning to application "Terminal" is running',
             'tell application "Terminal"',
-            "  activate",
-            f"  do script {_quote_applescript_string(command)}",
+            "  if terminalWasRunning then",
+            f"    do script {quoted_command}",
+            "    activate",
+            "  else",
+            "    activate",
+            f"    do script {quoted_command} in front window",
+            "  end if",
             "end tell",
         ]
     )

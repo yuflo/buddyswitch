@@ -146,35 +146,6 @@ OPEN_TUI_HEADERS = {
 }
 
 
-def fake_attach_descriptor(actor_id: str = "act-pm-demo", thread_id: str = "thread-1") -> object:
-    instance_root = Path("/tmp") / actor_id
-    return WEB_MANAGEMENT.actor_session.AttachDescriptor(
-        actor_id=actor_id,
-        thread_id=thread_id,
-        cwd=instance_root / "workspace",
-        argv=("codex", "resume", "--remote", "unix:///tmp/app-server-web.sock", thread_id),
-        env={
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": str(instance_root / "home"),
-            "CODEX_HOME": str(instance_root / "codex-home"),
-            "XDG_CONFIG_HOME": str(instance_root / "xdg-config"),
-            "BUDDYSWITCH_ACTOR_ID": actor_id,
-            "BUDDYSWITCH_ROLE_ID": "pm",
-            "BUDDYSWITCH_INSTANCE_JSON": str(instance_root / "instance.json"),
-            "BUDDYSWITCH_ACTOR_PRIVATE_DIR": str(instance_root / "workspace" / "private"),
-            "BUDDYSWITCH_INSTANCE_TMP": str(instance_root / "tmp"),
-        },
-    )
-
-
-def assert_terminal_command_uses_descriptor(test_case: unittest.TestCase, command: str, *, actor_id: str = "act-pm-demo") -> None:
-    test_case.assertIn("codex resume --remote unix:///tmp/app-server-web.sock thread-1", command)
-    test_case.assertIn(f"BUDDYSWITCH_ACTOR_ID={actor_id}", command)
-    test_case.assertIn("BUDDYSWITCH_INSTANCE_JSON=/tmp/act-pm-demo/instance.json", command)
-    test_case.assertNotIn("buddyswitch" + "-codex", command)
-    test_case.assertNotIn("instance attach", command)
-
-
 class FakeTerminalOpener:
     def __init__(self, error: Exception | None = None) -> None:
         self.commands: list[str] = []
