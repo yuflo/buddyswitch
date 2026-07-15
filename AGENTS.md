@@ -1,118 +1,166 @@
-# BuddySwitch Sharp Forward Guide
+# BuddySwitch Sharp Forward Engineering Constitution
 
-BuddySwitch uses sharp-forward, testing-bound development.
+BuddySwitch uses **Sharp Forward** development: move the current product bottleneck through the shortest validated path, keep one clear architecture, and remove history that no longer belongs in the live system.
 
-Core rule: rebuild forward through the shortest tested path. Do not preserve old structure, compatibility, or hypothetical production stability unless the user explicitly asks for release, hotfix, security, payment, external API, or irreversible data work.
+Core rule: **rebuild forward to one current truth.** Historical burden belongs in Git and historical memos, not in active code, schemas, interfaces, tests, guidance, or runtime paths.
 
-## Priorities
+## North Star
 
-1. Product capability
-2. Iteration speed
-3. Test-bound quality
-4. Code clarity
-5. Cost
+When tradeoffs conflict, use this order:
 
-## Sharp Forward
+1. observable product capability and user outcome;
+2. iteration speed through a validated feedback loop;
+3. behavioral and architectural integrity that preserves future speed;
+4. code and repository legibility;
+5. implementation, compute, token, and infrastructure cost.
 
-- Move the current bottleneck to verified product improvement.
-- Prefer rebuild-forward over compatibility-forward.
-- Prefer direct replacement over wrappers, adapters, and dual paths.
-- Prefer deleting stale logic over preserving it just in case.
-- Prefer simple concrete code, existing project patterns, and one clear path.
-- Break internal contracts when it makes the main path clearer; protect only documented external contracts.
-- Do not add generic engines, plugin systems, rule systems, or abstraction frameworks without repeated real need.
-- Do not optimize for rollback comfort, historical compatibility, conservative migration, or online stability unless the task explicitly enters a production-sensitive scope.
+Do not buy short-term motion by weakening the first four. Quality work is in scope when it protects the live path or keeps the next change fast; unrelated polish is not.
 
-Compatibility is a cost, not a virtue. Keep it only for real users, real data migration, explicit external contracts, or clear rollback requirements.
+## SHARP
 
-## Testing Bound
+| Law | Required behavior |
+|---|---|
+| **S — Solve the bottleneck** | Name the exact constraint; prefer observable capability improvement; stop expanding scope once the claim is clear. |
+| **H — Hit the shortest validated loop** | Choose the smallest coherent vertical slice; keep it runnable; prefer executable artifacts and consumer-path feedback. |
+| **A — Assign one owner; avoid speculative abstraction** | Give every rule, transition, and truth one owner; build concretely first; reject imagined-future engines, buses, plugins, registries, service splits, and coordination. |
+| **R — Rebuild, replace, remove** | Make the current model the only live model; delete the retired path and every live surface that teaches or preserves it. |
+| **P — Prove the outcome** | Name the claim first; prove it at the nearest meaningful boundary; broaden only for affected risk; no evidence means incomplete. |
 
-Forward speed is allowed because tests hold the boundary.
+## Forward-Only REBUILD
 
-- New behavior starts with a failing test whenever practical.
-- Bug fixes start with a regression test that fails first.
-- Refactors run behavior tests first and keep them green while structure changes.
-- Core product paths need high meaningful coverage.
-- Coverage means behavior and risk coverage, not shallow line-count chasing.
-- Tests must be fast, deterministic, developer-owned, and cheap to run repeatedly.
-- Flaky, vague, or over-mocked tests are not quality gates; fix or replace them.
-- Escaped defects get the smallest regression test that would have caught them.
+A replacement is unfinished while the retired model remains reachable, discoverable, writable, readable as fallback, taught by current guidance, or protected as supported behavior by active tests.
 
-Manual checks can supplement automated tests, but should not replace automated proof for repeatable behavior.
+Default forbidden residue:
 
-## Execution Loop
+- compatibility aliases, adapters, translation layers, and deprecated entrypoints;
+- fallback reads, dual writes, shadow state, old/new config, and parallel schemas;
+- old payload fields, command names, environment variables, skills, and help text;
+- tests that preserve retired behavior instead of proving current behavior;
+- comments or current architecture docs that teach the old path.
 
-1. Identify the current bottleneck.
-2. Write or select the test that defines expected behavior.
-3. Watch the new test fail when changing behavior.
-4. Implement the smallest direct change.
-5. Run the focused test until green.
-6. Refactor or delete baggage while tests stay green.
-7. Run broader relevant verification.
-8. Report result, verification, and remaining risk.
+Scoped residue assertions and negative safety guards may name retired terms only to prove absence or forbid use. Historical memos may preserve context but are never active policy. Git preserves history. Live code preserves only current truth. Multiple intentional interfaces are not dual tracks only when they are independently current, consumer-required interfaces that project one owner without copying rules; former names and entrypoints remain residue. Do not route around baggage: replace it, update every live consumer, and delete it.
 
-Do not expand the task after the bottleneck is clear. Do not keep old and new behavior side by side unless explicitly required.
+## Change Modes
 
-## Verification
+**Sharp mode is the default** for ordinary product and internal architecture work. Internal contracts may break when the current model becomes clearer; prefer direct cutover over migration scaffolding. Rollback comfort, historical compatibility, and hypothetical production stability are not requirements.
 
-No test or verification, no done.
+**Protected mode is exceptional.** Enter only for an explicit real external API, user-data migration, release/hotfix, security, privacy, payment, permission, or irreversible operation. Compatibility must name the protected contract/data, owner and risk, read/write coexistence need, removal trigger, and distinguishing tests. A permanent external obligation is a current supported interface, not retired compatibility. Protected coexistence may complete a bounded migration phase but never a completed replacement claim. Without this evidence, compatibility code is residue.
 
-The only public test entry is `./buddyswitch-test`:
+## Architecture Laws
+
+1. **One semantic owner.** Other layers call or project the owner; they do not reproduce its rules.
+2. **Product core before interfaces.** Use `owner -> contract -> adapter/projection -> consumer`. UI, Web, CLI, tools, storage, daemon transport, and skills are not alternate products.
+3. **Dependencies point toward ownership.** Adapters depend on public owner contracts; owners do not depend on adapter DTOs or presentation. Cross-domain behavior uses an explicit operation or capability.
+4. **Boundaries follow change.** Repeated edits to a router, registry, manager, global type, or shared utility are architecture feedback. Move the boundary instead of adding another case.
+5. **One truth and one write path.** Derived projections may be many; canonical state, owner, schema, and mutation path are singular.
+6. **Monolith first, boundaries always.** Keep coordination local until real lifecycle, scaling, isolation, or ownership pressure earns distribution.
+7. **Composition is explicit.** A composition root may know concrete implementations; generic infrastructure may not discover or branch on product semantics.
+8. **Legibility over cleverness.** Prefer direct calls, exact schemas, small public contracts, boring inspectable technology, and bounded behavior.
+9. **Enforce invariants, allow local freedom.** Mechanize ownership, dependency, state, cleanup, and public-contract rules; do not micromanage equivalent local style.
+
+## Development Framework
+
+Every non-trivial change follows this state sequence. Small work may compress notes, but not skip reasoning.
+
+| State | Required action | Exit condition |
+|---|---|---|
+| FRAME | Name bottleneck, relevant observable outcome, scope, and protected contracts | One relevant observable acceptance sentence; product paths state `consumer action -> owning path -> observable result` |
+| TRACE | Locate semantic or artifact owner, affected call/state/artifact path, tests/proofs, live surfaces, and retired residue | Owner and affected path are grounded in current repository facts |
+| PROVE | Select exact RED, regression, refactor baseline, or artifact proof | Evidence can detect the intended change or preservation |
+| BUILD | Make the smallest direct owner-correct change | Changed behavior, preserved behavior, or artifact satisfies exact proof; applicable failures are explicit |
+| REPLACE | Remove every superseded live path and update every live consumer, contract, test, fixture, and doc; if nothing is superseded, prove this state inapplicable | No unexplained duplicate or retired path; actual replacement claims have one live path |
+| VERIFY | Prove exact behavior and affected boundaries; inspect cleanup | Source-bound evidence is clean and sufficient for the claim |
+| ACCEPT | Audit final diff against acceptance sentence and proof classes | Every material claim is proved or explicitly inapplicable |
+
+For multi-file, unfamiliar, cross-boundary, or high-unknown work: explore, write the smallest sufficient plan, implement coherent blocks, and verify each block. Long work keeps a resumable artifact with outcome, state, progress, decisions, commands, and risk.
+
+## Testing Contract
+
+For executable code, tests, runtime contracts, or test infrastructure, follow `$buddyswitch-testing`. It alone owns dynamic target discovery, RED/GREEN and refactor entry, evidence identity, escalation breadth, and reviewer probes.
+
+The only public test entry is:
 
 ```bash
 ./buddyswitch-test focused <file-or-nodeid>...
 ./buddyswitch-test full
 ```
 
-For executable code, tests, runtime contracts, or test infrastructure, follow
-`$buddyswitch-testing`. It owns dynamic target discovery, claim-scoped
-escalation, evidence reuse/invalidation, and reviewer probes. The commands above
-are its repository verification contract; the runner owns target validation,
-isolation, exclusivity, and cleanup.
+- Use `focused` for ordinary claim-scoped proof.
+- Use `full` only for a frozen merge/release candidate, explicit repository-wide acceptance, or direct user request.
+- Tests prove semantic behavior, persisted state, failure effects, and consumer results—not only fields, mocks, registration, or `ok=true`.
+- Resource-owning tests prove cleanup and leave no process, socket, lock, or temporary-state residue.
+- Manual checks supplement repeatable automated proof; they do not replace it.
 
-Do not encode feature-to-test mappings in `AGENTS.md` or the skill. Discover
-targets from the current diff, code, tests, contracts, and runner constraints.
-Generic completion or review guidance must not upgrade focused proof to `full`
-unless the skill reaches FINAL, repository-wide acceptance is explicit, or the
-user directly requests it.
+Do not add a second test entry, policy owner, impact engine, or evidence ledger.
 
-Use `focused` for the shortest relevant proof and `full` for serial acceptance
-across unit, integration, process, and system tiers. Do not publish or add a
-second test entry.
+## Acceptance Framework
 
-Use the fastest meaningful proof available:
+Testing answers whether selected behavior passed. Acceptance answers whether the whole claim is true. Select every material proof class:
 
-- focused unit test
-- regression test
-- integration or CLI main-path run
-- typecheck, lint, or build
-- log inspection
-- UI screenshot or manual run when relevant
+| Proof | Acceptance question |
+|---|---|
+| Product | Can the consumer complete the promised loop and observe the result? |
+| Contract | Are success, failure, authority, and state effects exact? |
+| Architecture | Is behavior owned once with valid dependencies and change locality? |
+| Replacement | Is the retired live model absent rather than guarded or bypassed? |
+| Operations | Are resources, cleanup, logs, and failure recovery correct? |
 
-A passing test suite must prove real behavior. If verification is blocked, report the blocker instead of claiming completion.
+A broad suite does not replace missing direct product or residue proof; a narrow test does not prove repository-wide acceptance. Evidence records claim, source identity, exact check, result, cleanup, and risk. If material proof is blocked, report it and do not claim completion.
 
-## BuddySwitch Context
+## Codex Engineering Style
 
-Use this checkout for BuddySwitch source, tests, docs, launcher behavior, and framework contracts.
+- Repository facts outrank memory, other-project conventions, and plausible guesses. Inspect code, contracts, tests, instructions, and git state first.
+- Trace the semantic owner and consumer path before editing. Fix the owning cause, not an interface symptom.
+- Keep one intent per change. Do not mix features, broad renames, formatting, unrelated cleanup, test-framework work, or architecture migration.
+- Preserve unrelated user work. Partition dirty scope; never stage, revert, or rewrite it for convenience.
+- Prefer code and contract clarity over prompt bulk. If a tool/API is hard to use correctly, fix its semantics, schema, response, or feedback.
+- Resolve local implementation ambiguity; escalate only for product meaning, external contracts, irreversible data or operations, security, privacy, payment, or permission risk.
+- Review generated code for guessed shapes, copied rules, unnecessary helpers, shared grab bags, hidden fallbacks, unbounded behavior, and speculative layers.
+- Do not suppress errors, weaken assertions, or add fallbacks that hide bad state.
+- Optimize team/repository throughput, not generated volume. The diff must be understandable without reconstructing agent reasoning.
 
-Key paths:
+## Quality Ratchet
 
-- Shared product-source mount point: `projects/app/`
-- Env manifest: `buddyswitch/manifest.toml`
-- Product runtime launcher: `./buddyswitch-codex instance start --role <role>`
-- Role host instructions: `tools/launcher/assets/roles/<role>/AGENTS.md`
+Move every recurring lesson to the lowest enforceable owner:
 
-Runtime state is projected under:
+```text
+wrong runtime behavior      -> owning code/contract + regression test
+repeated architecture drift -> structural test or linter
+repeated workflow judgment  -> focused skill
+durable architecture reason -> docs/arch
+long-task execution state   -> resumable plan
+historical investigation    -> memo, never live policy
+```
 
-- `buddyswitch/objects/tracks/*.json`
-- `buddyswitch/objects/tasks/*.json`
-- `buddyswitch/objects/artifacts/*.json`
+Do not add prose when a machine can enforce the rule, and do not build a framework for a one-off judgment. Repeated hotspots trigger boundary repair; escaped defects receive the smallest test that would have caught them.
 
-Persistent private host files live under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`, which resolves to the active instance `workspace/private`. Product objects still require explicit env tools; do not edit `buddyswitch/objects/**` or old private workspace runtime paths directly.
+## Repository Contract
 
-Use env tools for product-mode runtime state. Do not edit `buddyswitch/objects/**` or `buddyswitch/local/private/**` directly.
-Runtime contracts are owned by code, JSON contracts, role contracts, and tests; do not create prose mirrors for runtime behavior.
+- Root `AGENTS.md` owns durable philosophy, laws, workflow, commands, and navigation; skills own repeated judgment; `docs/arch/` owns current boundaries; plans own active multi-stage state; code, contracts, tools, and tests own executable truth; memos preserve history only.
 
-## Done
+Stable BuddySwitch paths:
 
-A task is done only when the bottleneck moved forward, the scope stayed focused, important behavior is covered by meaningful tests, replaced baggage was removed or explicitly justified, relevant verification passed, and the final response states what changed, how it was verified, and what risk remains.
+- product source mount: `projects/app/`;
+- environment manifest: `buddyswitch/manifest.toml`;
+- product launcher: `./buddyswitch-codex instance start --role <role>`;
+- role bootstrap guidance: `tools/launcher/assets/roles/<role>/AGENTS.md`;
+- runtime track projections: `buddyswitch/objects/tracks/*.json`;
+- runtime task projections: `buddyswitch/objects/task-sys/tasks/*.json`;
+- runtime artifact projections: `buddyswitch/objects/artifacts/*.json`;
+- active-instance private files: `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`, which resolves to the active instance `workspace/private`.
+
+Use environment tools for product-mode state. Do not edit `buddyswitch/objects/**`, `buddyswitch/local/private/**`, or old private runtime paths directly. Runtime contracts belong to code, JSON contracts, role contracts, and tests; do not create prose mirrors.
+
+## Definition of Done
+
+A task is done only when:
+
+1. the named bottleneck materially moved and the acceptance sentence is true;
+2. the change is owner-correct, direct, and no more abstract than current need;
+3. relevant product, contract, architecture, replacement, and operational claims have sufficient evidence;
+4. retired residue is absent; if protected coexistence remains, the task is accepted only as a bounded migration phase with a named removal trigger, never as a completed replacement;
+5. tests/checks pass at claim-appropriate breadth with clean residual state;
+6. scope stayed focused, unrelated work stayed intact, and the repository is at least as legible as before;
+7. the final report names changed behavior/files, exact verification, omitted checks, residual risk, and next owner/action.
+
+No verification, no acceptance. No completed replacement with historical baggage.
