@@ -29,6 +29,27 @@ def _shared_root_from_env() -> Path:
     return Path.home() / ".codex-buddyswitch"
 
 
+def _validate_reset_root(shared_root: Path) -> None:
+    root = shared_root.expanduser()
+    if str(root) in {"", "/"}:
+        raise cli_contract.CliError("INVALID_ARGUMENT", f"Reset blocked: unsafe shared root '{root}'.")
+    if root.name != ".codex-buddyswitch":
+        raise cli_contract.CliError(
+            "INVALID_ARGUMENT",
+            "Reset blocked: BUDDYSWITCH_SHARED_ROOT must target a '.codex-buddyswitch' directory.",
+        )
+    if root.is_symlink():
+        raise cli_contract.CliError(
+            "INVALID_ARGUMENT",
+            f"Reset blocked: shared root is a symlink ({root}).",
+        )
+    if root.exists() and not root.is_dir():
+        raise cli_contract.CliError(
+            "INVALID_ARGUMENT",
+            f"Reset blocked: shared root is not a directory ({root}).",
+        )
+
+
 os.environ.setdefault("BUDDYSWITCH_REPO_ROOT", str(REPO_ROOT))
 os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_shared_root_from_env() / "state"))
 
@@ -286,7 +307,10 @@ def _dispatch_env(args: list[str]) -> CommandResult:
     if command == "reset":
         _require_yes_only(rest, "env reset")
         shared_root = _shared_root_from_env()
-        existed = shared_root.exists()
+        _validate_reset_root(shared_root)
+        existed = shared_root.is_dir()
+        if not existed:
+            return CommandResult("env.reset", {"shared_root": str(shared_root), "removed": False})
         _run_locked_shell_owner(_reset_locked_script(), [])
         return CommandResult("env.reset", {"shared_root": str(shared_root), "removed": existed and not shared_root.exists()})
     if command == "browser":
@@ -663,7 +687,6 @@ def _source_helpers_script(
 ) -> str:
     sources = [
         f'source "{HELPER_DIR / "env.sh"}"',
-        f'source "{HELPER_DIR / "workspace.sh"}"',
     ]
     if include_browser:
         sources.append(f'source "{HELPER_DIR / "browser_cockpit.sh"}"')
@@ -696,8 +719,7 @@ if buddyswitch_browser_is_active; then
   exit 3
 fi
 if [[ -d "${BUDDYSWITCH_SHARED_ROOT}" ]]; then
-  buddyswitch_workspace_remove_registered_worktrees_under "${BUDDYSWITCH_SHARED_ROOT}"
-  buddyswitch_workspace_force_remove_path "${BUDDYSWITCH_SHARED_ROOT}"
+  buddyswitch_remove_owned_path "${BUDDYSWITCH_SHARED_ROOT}"
 fi
 """,
         include_browser=True,

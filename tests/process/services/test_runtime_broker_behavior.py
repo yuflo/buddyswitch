@@ -101,7 +101,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             self.assertEqual(len(popen_kwargs), 1)
 
     @staticmethod
-    def _sync_runtime_surface(workspace_dir: Path) -> None:
+    def _copy_runtime_fixture(workspace_dir: Path) -> None:
         runtime_surface = (
             "scripts/turn_runtime.py",
             "scripts/env_store.py",
@@ -216,7 +216,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 "# BuddySwitch Runtime Workspace\n",
                 encoding="utf-8",
             )
-            self._sync_runtime_surface(workspace_dir)
+            self._copy_runtime_fixture(workspace_dir)
             runtime_dir = workspace_dir / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
             paths = self._paths(runtime_dir)
@@ -298,7 +298,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 "# BuddySwitch Runtime Workspace\n",
                 encoding="utf-8",
             )
-            self._sync_runtime_surface(workspace_dir)
+            self._copy_runtime_fixture(workspace_dir)
             self.assertFalse((workspace_dir / "tools").exists())
             runtime_dir = workspace_dir / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)

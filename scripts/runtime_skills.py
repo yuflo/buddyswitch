@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -80,21 +81,22 @@ def _validate_skill_id(skill_id: str) -> None:
         raise RuntimeSkillsError(f"invalid skill id '{skill_id}'")
 
 
-def _validate_repo_relative_skill_path(raw_path: str) -> Path:
+def _validate_repo_relative_skill_path(raw_path: str, *, repo_root: Path | None = None) -> Path:
+    normalized_repo_root = (repo_root or ROOT).expanduser().resolve(strict=False)
     path_obj = Path(raw_path)
     if path_obj.is_absolute():
         raise RuntimeSkillsError(f"manifest skill path must be repo-relative: {raw_path}")
     if ".." in path_obj.parts:
         raise RuntimeSkillsError(f"manifest skill path must not contain '..': {raw_path}")
 
-    candidate = ROOT
+    candidate = normalized_repo_root
     for part in path_obj.parts:
         if part in ("", "."):
             continue
         candidate = candidate / part
         if candidate.is_symlink():
             try:
-                component = candidate.relative_to(ROOT).as_posix()
+                component = candidate.relative_to(normalized_repo_root).as_posix()
             except ValueError:
                 component = candidate.as_posix()
             raise RuntimeSkillsError(
@@ -104,16 +106,32 @@ def _validate_repo_relative_skill_path(raw_path: str) -> Path:
 
     resolved = candidate.resolve(strict=False)
     try:
-        resolved.relative_to(ROOT)
+        resolved.relative_to(normalized_repo_root)
     except ValueError as exc:
         raise RuntimeSkillsError(f"manifest skill path escapes repo root: {raw_path}") from exc
 
     if not resolved.exists() or not resolved.is_dir():
         raise RuntimeSkillsError(f"skill package directory not found: {raw_path}")
+    for current_root, directory_names, file_names in os.walk(resolved, followlinks=False):
+        current = Path(current_root)
+        for name in tuple(directory_names) + tuple(file_names):
+            if name == ".git":
+                continue
+            candidate = current / name
+            if candidate.is_symlink():
+                raise RuntimeSkillsError(
+                    f"skill package contains symlink boundary: {raw_path} ({candidate})"
+                )
+        directory_names[:] = [name for name in directory_names if name != ".git"]
     return resolved
 
 
-def _build_install_plan(*, manifest_path: Path, role_id: str) -> list[InstallEntry]:
+def _build_install_plan(
+    *,
+    manifest_path: Path,
+    role_id: str,
+    repo_root: Path | None = None,
+) -> list[InstallEntry]:
     manifest = load_manifest(manifest_path)
     role = require_role(manifest, role_id)
     lookup = skills_by_id(manifest)
@@ -127,7 +145,7 @@ def _build_install_plan(*, manifest_path: Path, role_id: str) -> list[InstallEnt
         raw_path = skill.get("path")
         if not isinstance(raw_path, str) or not raw_path.strip():
             raise RuntimeSkillsError(f"manifest skill '{skill_id}' must define repo-relative path")
-        source = _validate_repo_relative_skill_path(raw_path.strip())
+        source = _validate_repo_relative_skill_path(raw_path.strip(), repo_root=repo_root)
         install_entries.append(InstallEntry(skill_id=skill_id, source=source))
 
     if not install_entries:
@@ -135,9 +153,37 @@ def _build_install_plan(*, manifest_path: Path, role_id: str) -> list[InstallEnt
     return install_entries
 
 
-def install_runtime_skills(*, manifest_path: Path, role_id: str, workspace: Path) -> list[str]:
+def validate_runtime_skills(
+    *,
+    manifest_path: Path,
+    role_id: str,
+    repo_root: Path | None = None,
+) -> tuple[str, ...]:
+    """Validate one role's install plan without mutating a runtime workspace."""
+
+    return tuple(
+        entry.skill_id
+        for entry in _build_install_plan(
+            manifest_path=manifest_path,
+            role_id=role_id,
+            repo_root=repo_root,
+        )
+    )
+
+
+def install_runtime_skills(
+    *,
+    manifest_path: Path,
+    role_id: str,
+    workspace: Path,
+    repo_root: Path | None = None,
+) -> list[str]:
     agents_dir, skills_dir = _validate_runtime_target(workspace)
-    plan = _build_install_plan(manifest_path=manifest_path, role_id=role_id)
+    plan = _build_install_plan(
+        manifest_path=manifest_path,
+        role_id=role_id,
+        repo_root=repo_root,
+    )
 
     if skills_dir.exists():
         shutil.rmtree(skills_dir)
@@ -147,7 +193,12 @@ def install_runtime_skills(*, manifest_path: Path, role_id: str, workspace: Path
     installed: list[str] = []
     for entry in plan:
         target_dir = skills_dir / entry.skill_id
-        shutil.copytree(entry.source, target_dir, symlinks=True)
+        shutil.copytree(
+            entry.source,
+            target_dir,
+            symlinks=True,
+            ignore=shutil.ignore_patterns(".git"),
+        )
         installed.append(entry.skill_id)
     return installed
 

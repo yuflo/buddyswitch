@@ -343,33 +343,6 @@ print('{"targetId":"target-about-blank"}')
             ),
         )
 
-    def _write_fake_git(self, path: Path) -> None:
-        real_git = shutil.which("git")
-        self.assertIsNotNone(real_git, "git must be available for launcher tests")
-        write_executable(
-            path,
-            f"""#!/usr/bin/env bash
-set -euo pipefail
-real_git={real_git!r}
-
-if [[ -n "${{BUDDYSWITCH_TEST_GIT_CAPTURE:-}}" && " $* " == *" worktree add "* ]]; then
-  printf '%s\\n' "$*" >> "${{BUDDYSWITCH_TEST_GIT_CAPTURE}}"
-fi
-
-if [[ "${{BUDDYSWITCH_FAIL_WORKTREE_ADD:-0}}" == "1" && " $* " == *" worktree add "* ]]; then
-  echo "simulated worktree add failure" >&2
-  exit 1
-fi
-
-if [[ "${{BUDDYSWITCH_FAIL_WORKTREE_REMOVE:-0}}" == "1" && " $* " == *" worktree remove "* ]]; then
-  echo "simulated worktree remove failure" >&2
-  exit 1
-fi
-
-exec "$real_git" "$@"
-""",
-        )
-
     def _spawn_lock_holder(self, lock_path: Path) -> subprocess.Popen[str]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         holder = self._ledger.start_process(
@@ -469,29 +442,6 @@ exec "$real_git" "$@"
             "allow_background_create_about_blank": allow_background_create_about_blank,
         }
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-
-    def _add_test_worktree(self, workspace_dir: Path) -> None:
-        add = run_process(
-            ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(workspace_dir), "HEAD"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(add.returncode, 0, msg=self._output_error_text(add))
-        self.addCleanup(
-            run_process,
-            ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(workspace_dir)],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.addCleanup(
-            run_process,
-            ["git", "-C", str(ROOT), "worktree", "prune"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
 
     def _write_capability_cli_instance(
         self,

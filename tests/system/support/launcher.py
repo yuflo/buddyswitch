@@ -25,19 +25,6 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 
 class SystemLauncherHarness(LauncherTestSupport):
-    _RUNTIME_SPARSE_PATHS = (
-        "scripts/env/",
-        "scripts/runtime_kernel/",
-        "scripts/turn_runtime.py",
-        "scripts/env_store.py",
-        "scripts/env_legacy_store.py",
-        "scripts/env_manifest.py",
-        "scripts/env_profiles.py",
-        "scripts/browser_evidence.py",
-        "buddyswitch/manifest.toml",
-        "buddyswitch/env-profiles/",
-        "framework/contracts/",
-    )
     _PM_PRODUCT_SKILLS = (
         "read-product-context",
         "synthesize-cross-functional-inputs",
@@ -221,11 +208,6 @@ class SystemLauncherHarness(LauncherTestSupport):
             },
         )
         cleanup_stack.callback(self._cleanup_process_descriptor, browser_descriptor_id)
-        for worktree in (shared_root / "project" / "workspace", instance_root / "workspace"):
-            self._ledger.register_cleanup_action(
-                cleanup_strategy="git_worktree_remove",
-                cleanup_args={"repo_root": str(ROOT), "worktree": str(worktree)},
-            )
         self._ledger.reconcile_descriptors()
 
         return {

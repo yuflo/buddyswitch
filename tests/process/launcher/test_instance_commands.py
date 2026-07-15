@@ -242,7 +242,7 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, target_workspace = self._write_instance_record(shared_root, "act-pm-delete")
+            target_root, _target_workspace = self._write_instance_record(shared_root, "act-pm-delete")
             other_root, _ = self._write_instance_record(shared_root, "act-dev-keep", role="dev")
             state_task = shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-keep.json"
             state_task.parent.mkdir(parents=True, exist_ok=True)
@@ -261,8 +261,6 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
                 json.dumps({"identity": {"id": "act-pm-delete", "type": "actor"}, "role_id": "pm"}) + "\n",
                 encoding="utf-8",
             )
-            self._add_test_worktree(target_workspace)
-
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
@@ -285,25 +283,15 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
             self.assertTrue(other_root.exists())
             self.assertTrue(state_task.exists())
             self.assertTrue(identity_profile.exists())
-            worktree_list = run_process(
-                ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertNotIn(str(target_workspace), worktree_list.stdout)
     def test_instance_delete_json_removes_only_target_instance_without_shared_state(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, target_workspace = self._write_instance_record(shared_root, "act-pm-delete")
+            target_root, _target_workspace = self._write_instance_record(shared_root, "act-pm-delete")
             other_root, _ = self._write_instance_record(shared_root, "act-dev-keep", role="dev")
             state_task = shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-keep.json"
             state_task.parent.mkdir(parents=True, exist_ok=True)
             state_task.write_text('{"id":"task-keep"}\n', encoding="utf-8")
-            self._add_test_worktree(target_workspace)
-
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
@@ -325,14 +313,6 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
             self.assertFalse(target_root.exists())
             self.assertTrue(other_root.exists())
             self.assertTrue(state_task.exists())
-            worktree_list = run_process(
-                ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertNotIn(str(target_workspace), worktree_list.stdout)
     def test_instance_delete_without_yes_previews_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
@@ -551,35 +531,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 {"actor_id": "act-pm-stale-legacy-delete", "deleted": True},
             )
             self.assertFalse(target_root.exists())
-    def test_instance_delete_blocks_worktree_deregistration_failure(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            temp_root_path = Path(temp_root)
-            source_home_path = Path(source_home)
-            shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, target_workspace = self._write_instance_record(shared_root, "act-pm-remove-fail")
-            self._add_test_worktree(target_workspace)
-            fake_bin = temp_root_path / "bin"
-            fake_bin.mkdir(parents=True, exist_ok=True)
-            self._write_fake_git(fake_bin / "git")
-            env = os.environ.copy()
-            env["HOME"] = str(source_home_path)
-            env.pop("CODEX_HOME", None)
-            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
-            env["BUDDYSWITCH_FAIL_WORKTREE_REMOVE"] = "1"
-
-            delete_result = run_process(
-                [str(LAUNCHER), "instance", "delete", "act-pm-remove-fail", "--yes"],
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertNotEqual(delete_result.returncode, 0)
-            self.assertIn("simulated worktree remove failure", self._output_error_text(delete_result))
-            self.assertTrue(target_root.exists())
-    def test_instance_delete_rejects_symlinked_instance_root_without_touching_external_worktree(self) -> None:
+    def test_instance_delete_rejects_symlinked_instance_root_without_touching_external_directory(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as external_root:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -609,7 +561,6 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             )
             sentinel = external_instance_root / "sentinel.txt"
             sentinel.write_text("keep\n", encoding="utf-8")
-            self._add_test_worktree(external_workspace)
             (instances_root / "act-pm-symlink").symlink_to(external_instance_root, target_is_directory=True)
 
             env = os.environ.copy()
@@ -630,14 +581,6 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertIn("unsafe instance root", self._output_error_text(delete_result))
             self.assertTrue((instances_root / "act-pm-symlink").is_symlink())
             self.assertTrue(sentinel.exists())
-            worktree_list = run_process(
-                ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertIn(str(external_workspace), worktree_list.stdout)
     def test_instance_delete_rejects_symlinked_shared_root_without_touching_target_instance(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as external_root:
             source_home_path = Path(source_home)
@@ -871,6 +814,51 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             error = json.loads(direct_start.stdout)["error"]
             self.assertIn("Unknown role 'unknown'", error["message"])
             self.assertFalse((shared_root / "instances").exists(), "invalid locked role must not create instances")
+
+    def test_locked_start_builder_failure_blocks_record_and_runtime_services(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            project_app = shared_root / "project" / "workspace" / "projects" / "app"
+            project_app.mkdir(parents=True)
+            (project_app / ".git").mkdir()
+            actor_id = "act-pm-build-failure"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_START_ROLE"] = "pm"
+            env["BUDDYSWITCH_START_ACTOR_ID"] = actor_id
+            env["BUDDYSWITCH_START_CODEX_BIN"] = PYTHON
+            env["BUDDYSWITCH_START_CODEX_VERSION"] = "test-runtime"
+            env["BUDDYSWITCH_HOST_CONTROL_INTERNAL"] = "1"
+
+            completed = run_process(
+                [
+                    PYTHON,
+                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    "--shared-root",
+                    str(shared_root),
+                    "--",
+                    str(HOST_CONTROL),
+                    "start-bootstrap-locked",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            error = json.loads(completed.stdout)["error"]
+            self.assertIn("must be Git-free", error["message"])
+            actor_root = shared_root / "instances" / actor_id
+            self.assertFalse(actor_root.exists())
+            self.assertFalse((actor_root / "instance.json").exists())
+            self.assertFalse((actor_root / "runtime").exists())
+            self.assertTrue((project_app / ".git").is_dir())
     def test_locked_instance_inactive_rejects_traversal_actor_id(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)

@@ -31,7 +31,6 @@ def _write_fake_executables(fake_bin: Path) -> None:
 def _register_instance_resources(
     ledger: ResourceLedger,
     *,
-    shared_root: Path,
     instance_root: Path,
     actor_id: str,
 ) -> None:
@@ -102,14 +101,6 @@ def _register_instance_resources(
         cleanup_strategy="browser_stop",
         cleanup_args={"instance_root": str(instance_root), "actor_id": actor_id},
     )
-    for worktree in (
-        shared_root / "project" / "workspace",
-        instance_root / "workspace",
-    ):
-        ledger.register_cleanup_action(
-            cleanup_strategy="git_worktree_remove",
-            cleanup_args={"repo_root": str(REPO_ROOT), "worktree": str(worktree)},
-        )
 
 
 def test_public_instance_start_resources_survive_until_runner_signal() -> None:
@@ -205,7 +196,6 @@ def test_public_instance_start_resources_survive_until_runner_signal() -> None:
     _debug(run_root, f"instance-discovered actor_id={actor_id}")
     _register_instance_resources(
         ledger,
-        shared_root=shared_root,
         instance_root=instance_root,
         actor_id=actor_id,
     )
@@ -267,9 +257,9 @@ def test_public_instance_start_resources_survive_until_runner_signal() -> None:
                 "browser_ttl_config": str(browser_ttl_config),
                 "browser_ttl_config_text": expected_browser_ttl_config,
                 "pids": captured,
-                "worktrees": [
+                "environment_roots": [
                     str(shared_root / "project" / "workspace"),
-                    str(instance_root / "workspace"),
+                    str(instance_root),
                 ],
             },
             sort_keys=True,

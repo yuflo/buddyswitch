@@ -646,6 +646,40 @@ host_control_emit_error_for_output "$2" "$3"
                 self.assertNotIn(needle, source)
         self.assertNotRegex(source, r"\b--json\)")
 
+    def test_host_control_start_has_one_builder_boundary_before_runtime_services(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "host_control.sh").read_text(encoding="utf-8")
+        start_block = source.split("start_locked_bootstrap() {", 1)[1].split(
+            "instance_set_inactive_locked() {",
+            1,
+        )[0]
+        resume_block = source.split("instance_resume_locked() {", 1)[1].split(
+            "instance_stop() {",
+            1,
+        )[0]
+
+        self.assertEqual(start_block.count("actor_environment.py"), 1)
+        self.assertEqual(source.count("actor_environment.py"), 1)
+        self.assertNotIn("workspace.sh", source)
+        self.assertNotIn("WORKSPACE_HELPER", source)
+        self.assertNotIn("buddyswitch_workspace_", start_block)
+        for forbidden in (
+            "actor_environment.py",
+            "--validate-existing",
+            "buddyswitch_require_env_profile",
+            "buddyswitch_require_role_agents_template",
+        ):
+            with self.subTest(resume_forbidden=forbidden):
+                self.assertNotIn(forbidden, resume_block)
+        builder_index = start_block.index("actor_environment.py")
+        for service_call in (
+            "buddyswitch_runtime_broker_ensure",
+            "buddyswitch_app_server_ensure",
+            "buddyswitch_app_server_thread_start",
+            "buddyswitch_daemon_start",
+        ):
+            with self.subTest(service_call=service_call):
+                self.assertGreater(start_block.index(service_call), builder_index)
+
     def test_host_control_module_has_no_temporary_cli_entrypoint_residue(self) -> None:
         source = (ROOT / "tools" / "launcher" / "host_control.py").read_text(encoding="utf-8")
         forbidden = [

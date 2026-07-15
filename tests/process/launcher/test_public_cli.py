@@ -18,6 +18,51 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 
 class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
+    def test_env_reset_rejects_symlinked_shared_root_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_parent, tempfile.TemporaryDirectory() as external:
+            temp_parent_path = Path(temp_parent)
+            external_path = Path(external)
+            shared_root = temp_parent_path / ".codex-buddyswitch"
+            sentinel = external_path / "sentinel.txt"
+            sentinel.write_text("preserve\n", encoding="utf-8")
+            shared_root.symlink_to(external_path, target_is_directory=True)
+
+            env = os.environ.copy()
+            env["HOME"] = str(temp_parent_path)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+
+            completed = run_process(
+                [str(LAUNCHER), "env", "reset", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self._cli_error(completed, code="INVALID_ARGUMENT")
+            self.assertIn("Reset blocked:", self._output_error_text(completed))
+            self.assertTrue(shared_root.is_symlink())
+            self.assertEqual(sorted(path.name for path in external_path.iterdir()), ["sentinel.txt"])
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve\n")
+
+    def test_reset_owner_removes_owned_filesystem_without_workspace_or_git_path(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        helper_block = source.split("def _source_helpers_script(", 1)[1].split(
+            "def _reset_locked_script()",
+            1,
+        )[0]
+        reset_block = source.split("def _reset_locked_script()", 1)[1].split(
+            "def _cleanup_locked_script()",
+            1,
+        )[0]
+
+        self.assertNotIn("workspace.sh", helper_block)
+        self.assertNotIn("buddyswitch_workspace_", reset_block)
+        self.assertNotIn("git worktree", reset_block)
+        self.assertIn("buddyswitch_remove_owned_path", reset_block)
+
     def test_launcher_help_and_reset_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -613,40 +658,6 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             self._cli_error(debug_result, code="UNKNOWN_COMMAND")
             self.assertIn("Unknown top-level command: debug", self._output_error_text(debug_result))
             self.assertFalse(capture_path.exists(), "unknown top-level command must not invoke codex")
-    def test_locked_workspace_sync_command_is_not_supported_even_under_runtime_lock(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            temp_root_path = Path(temp_root)
-            source_home_path = Path(source_home)
-            shared_root = source_home_path / ".codex-buddyswitch"
-            runtime_lock = ROOT / "tools" / "launcher" / "runtime_lock.py"
-            workspace_dir = shared_root / "workspace"
-
-            env = os.environ.copy()
-            env["HOME"] = str(source_home_path)
-            env.pop("CODEX_HOME", None)
-            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-
-            completed = run_process(
-                [
-                    PYTHON,
-                    str(runtime_lock),
-                    "--shared-root",
-                    str(shared_root),
-                    "--",
-                    str(LAUNCHER),
-                    "__" + "locked-workspace-sync",
-                ],
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertNotEqual(completed.returncode, 0)
-            self._cli_error(completed, code="UNKNOWN_COMMAND")
-            self.assertIn("Unknown top-level command: __" + "locked-workspace-sync", self._output_error_text(completed))
-            self.assertFalse(workspace_dir.exists(), "retired locked sync command must not create workspace")
     def test_removed_cleanup_command_fails_closed_without_launching_codex(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)
