@@ -141,13 +141,9 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
                 "source": {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}},
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
                 "inbound_context": {"text": "Draft brief"},
-                "task_desc": "Draft brief",
-                "task_relation": {"kind": "after", "target_task_id": "task-user-input-prior123"},
                 "execution_handoff": {
                     "parent_frame_context": {
                         "next": "Draft the brief in parent.",
-                        "task_desc": "Draft brief",
-                        "task_relation": {"kind": "after", "target_task_id": "task-user-input-prior123"},
                     },
                     "interrupt": interrupt,
                     "ordering": {"after": "task-user-input-prior123"},
@@ -186,18 +182,17 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             },
         }
 
-    def test_render_side_frame_is_task_sys_scoped_and_names_only_two_results(self) -> None:
+    def test_render_side_frame_is_task_sys_scoped_without_relation_gate(self) -> None:
         text = self.module.render_side_frame(self._instruction()["frame"])
 
         self.assertIn("task_sys.side_frame", text)
         self.assertIn("task-user-input-abcdef123456", text)
-        self.assertIn("task_desc", text)
-        self.assertIn("task_relation", text)
-        self.assertIn("task_sys.update_task_analysis", text)
-        self.assertIn("task_sys.list(status=all)", text)
-        self.assertIn("task_sys.get(task_id=...)", text)
-        self.assertIn("task_relation.kind", text)
+        self.assertNotIn("task_desc", text)
+        self.assertNotIn("task_relation", text)
+        self.assertNotIn("task_sys.update_task_analysis", text)
+        self.assertNotIn("task_sys.list(status=all)", text)
         self.assertIn("task_sys.close", text)
+        self.assertIn("task_sys.cancel", text)
         self.assertIn("task_sys.need_parent", text)
         self.assertIn("Core policy: decide by required resources.", text)
         self.assertIn("Allowed side resources:", text)
@@ -214,7 +209,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("checkpoint_update", text)
         self.assertNotIn("no_actor_action", text)
         self.assertIn("Allowed frame completion operations:", text)
-        self.assertIn("Allowed relation-analysis operation:", text)
+        self.assertNotIn("relation-analysis", text)
         self.assertNotIn("params={parent_frame_context, relation", text)
         stale_side_result = "Task Sys side " + "result"
         self.assertNotIn(stale_side_result, text)
@@ -392,7 +387,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertEqual(len(result["attempts"]), 2)
         self.assertEqual(len(calls), 2)
         record = task_sys.get_task(task_id)
-        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["status"], "in_progress.side_processing")
         self.assertNotIn("active_processor", record)
         execution = record["execution"]
         self.assertIsNone(execution["processor"])
@@ -476,11 +471,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("task_sys.parent_frame", text)
         self.assertIn("task-user-input-abcdef123456", text)
         self.assertIn("Task Sys source:", text)
-        self.assertIn("Task desc:", text)
-        self.assertIn("Task relation:", text)
+        self.assertNotIn("Task desc:", text)
+        self.assertNotIn("Task relation:", text)
         self.assertIn("Execution handoff:", text)
         self.assertIn("Draft the brief in parent.", text)
-        self.assertIn("task-user-input-prior123", text)
         self.assertNotIn("Side result:", text)
         self.assertNotIn("Parent handoff params:", text)
         self.assertNotIn("[MESSAGE NEEDS " + "PARENT]", text)
@@ -489,13 +483,11 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def test_render_parent_frame_rejects_legacy_handoff_shape(self) -> None:
         instruction = self._parent_instruction()
         frame = instruction["frame"]
-        frame.pop("task_desc")
-        frame.pop("task_relation")
         frame.pop("execution_handoff")
         frame["side_result"] = {"outcome": "need_parent", "params": {"interrupt": False}}
         frame["parent_handoff_params"] = {"parent_frame_context": {"next": "Draft the brief in parent."}}
 
-        with self.assertRaisesRegex(ValueError, "frame.task_desc"):
+        with self.assertRaisesRegex(ValueError, "frame.execution_handoff"):
             self.module.render_parent_frame(frame)
 
     def test_render_parent_frame_requires_task_sys_close(self) -> None:
@@ -505,6 +497,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("Do not rely on parent turn completion to close this Task Sys task.", text)
         self.assertIn("Allowed parent frame operations:", text)
         self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
+        self.assertIn("- task_sys.cancel(task_id=..., reason=...)", text)
 
     def test_render_parent_frame_allows_user_input_parent_communication_before_close(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
@@ -539,6 +532,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("message.send(target_identity_id=..., content=...)", text)
         self.assertIn("message.mark(message_id=..., disposition=absorbed)", text)
         self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
+        self.assertIn("- task_sys.cancel(task_id=..., reason=...)", text)
         self.assertNotIn("Only after the source-" + "bound IM action " + "succeeds", text)
         self.assertNotIn("source-" + "bound", text)
 
@@ -553,7 +547,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
 
         self.assertIn("Allowed frame completion operations:", text)
         self.assertIn("task_sys.close(task_id=..., summary=...) when the task is completed in side.", text)
-        self.assertIn("task_sys.update_task_analysis", text)
+        self.assertNotIn("task_sys.update_task_analysis", text)
         stale_side_result = "Task Sys side " + "result"
         self.assertNotIn(stale_side_result, text)
         self.assertNotIn("side result:", text.lower())
@@ -710,6 +704,80 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertEqual(result["turn_id"], "turn-parent-race")
         self.assertNotIn("interrupted_turn_id", result)
         self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "input_actor_turn"])
+
+    def test_render_parent_progress_check_binds_existing_task_and_current_actions(self) -> None:
+        task = {
+            "id": "task-user-input-progress123",
+            "source_type": "user.input",
+            "source_ref": {"id": "input-progress-1", "surface": "cli"},
+            "status": "in_progress.parent_processing",
+            "events": [
+                {"type": "created", "at": "2026-07-16T00:00:00Z"},
+                {"type": "parent_handoff_started", "at": "2026-07-16T00:01:00Z"},
+            ],
+        }
+        previous_turn = {
+            "thread_id": "thr-main",
+            "turn_id": "turn-parent-work-1",
+            "status": "completed",
+        }
+
+        prompt = self.module.render_parent_progress_check(task, previous_turn)
+
+        self.assertIn("[TASK PROGRESS CHECK]", prompt)
+        self.assertIn("task-user-input-progress123", prompt)
+        self.assertIn("in_progress.parent_processing", prompt)
+        self.assertIn("parent_handoff_started", prompt)
+        self.assertIn("turn-parent-work-1", prompt)
+        self.assertIn("task_sys.close", prompt)
+        self.assertIn("task_sys.cancel", prompt)
+        self.assertIn("continue", prompt.lower())
+        self.assertIn("status remains in_progress.parent_processing", prompt)
+        lowered = prompt.lower()
+        for retired in ("checkpoint_update", "status=checkpoint", "task_sys.ingest"):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, lowered)
+
+    def test_submit_parent_progress_check_uses_main_actor_thread(self) -> None:
+        context = self._context()
+        task = {
+            "id": "task-user-input-progress123",
+            "source_type": "user.input",
+            "source_ref": {"id": "input-progress-1"},
+            "status": "in_progress.parent_processing",
+            "events": [{"type": "parent_handoff_started", "at": "2026-07-16T00:01:00Z"}],
+        }
+        previous_turn = {
+            "thread_id": "thr-main",
+            "turn_id": "turn-parent-work-1",
+            "status": "completed",
+        }
+        calls: list[dict[str, Any]] = []
+        original_input = self.module.actor_session.input_actor_turn
+
+        def fake_input_actor_turn(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {"turn": {"id": "turn-progress-check-1"}}
+
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_input)
+        self.module.actor_session.input_actor_turn = fake_input_actor_turn
+
+        result = self.module.submit_parent_progress_check(context, task, previous_turn)
+
+        self.assertEqual(
+            result,
+            {
+                "action": "progress_check",
+                "task_id": "task-user-input-progress123",
+                "turn_id": "turn-progress-check-1",
+            },
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["socket_path"], context.socket_path)
+        self.assertEqual(calls[0]["instance_json"], context.instance_json)
+        self.assertEqual(calls[0]["thread_id"], context.main_thread_id)
+        self.assertEqual(calls[0]["permissions"], context.permissions)
+        self.assertIn("[TASK PROGRESS CHECK]", calls[0]["text"])
 
     def test_task_sys_runtime_uses_actor_session_without_submit_turn_or_cli_imports(self) -> None:
         source = TASK_SYS_RUNTIME_PATH.read_text(encoding="utf-8")

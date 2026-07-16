@@ -40,7 +40,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         task_id: str,
         actor_id: str,
         role_id: str,
-        status: str = "in_progress",
+        status: str = "in_progress.side_processing",
         result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
@@ -50,8 +50,6 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             "actor_target": {"actor_id": actor_id, "role_id": role_id},
             "inbound_context": {"fixture": "projection"},
             "status": status,
-            "task_desc": f"Summary {task_id}",
-            "task_relation": {"kind": "independent", "target_task_id": None},
             "execution": {"processor": "side" if result is None else None, "handoff": None, "result": result},
             "events": [{"type": "created", "at": "2026-07-12T00:00:00Z"}],
             "created_at": "2026-07-12T00:00:00Z",
@@ -84,13 +82,16 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
         read_records.assert_called_once_with()
         self.assertEqual(projection["task_count"], 3)
-        self.assertEqual(projection["active_count"], 1)
+        self.assertEqual(projection["active_count"], 2)
         self.assertEqual(projection["recoverable_count"], 1)
         self.assertEqual(
             [row["task_id"] for row in projection["tasks"]],
             ["task-projection-active", "task-projection-recoverable", "task-projection-completed"],
         )
-        self.assertEqual([row["task_id"] for row in projection["active_tasks"]], ["task-projection-active"])
+        self.assertEqual(
+            [row["task_id"] for row in projection["active_tasks"]],
+            ["task-projection-active", "task-projection-recoverable"],
+        )
         self.assertEqual(
             [row["task_id"] for row in projection["recoverable_tasks"]],
             ["task-projection-recoverable"],
@@ -101,7 +102,8 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
                 self.assertEqual(set(row), summary_keys)
                 self.assertEqual(row["id"], row["task_id"])
                 self.assertEqual(row["event_types"], ["created"])
-                self.assertEqual(row["task_relation"], {"kind": "independent", "target_task_id": None})
+                self.assertNotIn("task_desc", row)
+                self.assertNotIn("task_relation", row)
 
     def test_actor_task_projection_empty_storage_has_zero_counts(self) -> None:
         task_sys = _task_sys()
@@ -167,22 +169,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def _move_to_needs_parent(self, task_id: str) -> None:
         task_sys = _task_sys()
-        task_sys.record_task_analysis_update(
-            task_id,
-            {
-                "task_desc": "Draft brief",
-                "task_relation": {"kind": "independent", "target_task_id": None},
-            },
-        )
         task_sys.record_side_need_parent(
             task_id,
             {
                 "params": {
-                    "parent_frame_context": {
-                        "next": "Draft the brief in parent.",
-                        "task_desc": "Draft brief",
-                        "task_relation": {"kind": "independent", "target_task_id": None},
-                    },
+                    "parent_frame_context": {"next": "Draft the brief in parent."},
                     "interrupt": True,
                 },
             },
@@ -208,9 +199,9 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(persisted["source_ref"], {"id": "input-1", "surface": "cli"})
         self.assertEqual(persisted["actor_target"], envelope["actor_target"])
         self.assertEqual(persisted["inbound_context"], envelope["context"])
-        self.assertEqual(persisted["status"], "in_progress")
-        self.assertIsNone(persisted["task_desc"])
-        self.assertEqual(persisted["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertEqual(persisted["status"], "in_progress.side_processing")
+        self.assertNotIn("task_desc", persisted)
+        self.assertNotIn("task_relation", persisted)
         self.assertEqual(
             persisted["execution"],
             {
@@ -245,6 +236,25 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(frame["actor_target"], envelope["actor_target"])
         self.assertEqual(frame["context"], envelope["context"])
 
+    def test_need_parent_moves_same_task_to_awaiting_parent_without_relation_analysis(self) -> None:
+        task_sys = _task_sys()
+        task_id = task_sys.ingest(self._envelope())["task_id"]
+
+        result = task_sys.record_side_need_parent(
+            task_id,
+            {
+                "params": {
+                    "parent_frame_context": {"next": "Draft the brief in parent."},
+                    "interrupt": False,
+                },
+            },
+        )
+
+        self.assertEqual(result["task_id"], task_id)
+        self.assertEqual(result["task"]["status"], "in_progress.awaiting_parent")
+        self.assertEqual(self._task_record(task_id)["status"], "in_progress.awaiting_parent")
+        self.assertEqual([record["id"] for record in self._task_records()], [task_id])
+
     def test_ingest_rejects_initial_processor_variants_without_creating_tasks(self) -> None:
         task_sys = _task_sys()
         for value in ("none", "checkpoint", "side"):
@@ -253,104 +263,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
                     task_sys.ingest({**self._envelope(), "initial_processor": value})
                 self.assertEqual(self._task_records(), [])
 
-    def test_record_task_analysis_update_writes_desc_and_independent_relation(self) -> None:
+    def test_task_analysis_domain_api_is_retired(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
 
-        result = task_sys.record_task_analysis_update(
-            task_id,
-            {
-                "task_desc": "Draft brief",
-                "task_relation": {"kind": "independent", "target_task_id": None},
-            },
-        )
-
-        self.assertTrue(result["ok"], msg=result)
-        self.assertEqual(result["task_id"], task_id)
-        record = self._task_record(task_id)
-        self.assertEqual(record["task_desc"], "Draft brief")
-        self.assertEqual(record["task_relation"], {"kind": "independent", "target_task_id": None})
-        self.assertIsInstance(record["updated_at"], str)
-        self.assertIn("task_analysis_updated", self._event_types(task_id))
-
-    def test_record_task_analysis_update_accepts_after_and_before_same_actor_target(self) -> None:
-        task_sys = _task_sys()
-        first_task_id = task_sys.ingest(self._envelope())["task_id"]
-        second_task_id = task_sys.ingest(self._envelope())["task_id"]
-
-        after_result = task_sys.record_task_analysis_update(
-            second_task_id,
-            {
-                "task_desc": "Continue brief",
-                "task_relation": {"kind": "after", "target_task_id": first_task_id},
-            },
-        )
-        before_result = task_sys.record_task_analysis_update(
-            first_task_id,
-            {
-                "task_desc": "Prepare input",
-                "task_relation": {"kind": "before", "target_task_id": second_task_id},
-            },
-        )
-
-        self.assertTrue(after_result["ok"], msg=after_result)
-        self.assertTrue(before_result["ok"], msg=before_result)
-        self.assertEqual(
-            self._task_record(second_task_id)["task_relation"],
-            {"kind": "after", "target_task_id": first_task_id},
-        )
-        self.assertEqual(
-            self._task_record(first_task_id)["task_relation"],
-            {"kind": "before", "target_task_id": second_task_id},
-        )
-
-    def test_record_task_analysis_update_rejects_invalid_desc_without_mutating(self) -> None:
-        task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
-        before = self._task_record(task_id)
-
-        for task_desc in ("", "   ", "x" * 50):
-            with self.subTest(task_desc=task_desc):
-                with self.assertRaisesRegex(ValueError, "task_desc"):
-                    task_sys.record_task_analysis_update(
-                        task_id,
-                        {
-                            "task_desc": task_desc,
-                            "task_relation": {"kind": "independent", "target_task_id": None},
-                        },
-                    )
-                self.assertEqual(self._task_record(task_id), before)
-
-    def test_record_task_analysis_update_rejects_invalid_relation_without_mutating(self) -> None:
-        task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
-        other_actor_envelope = self._envelope()
-        other_actor_envelope["actor_target"] = {
-            "role_id": "dev",
-            "actor_id": self._runtime_actor_id(role="dev", label="act-dev-other-task-sys"),
-        }
-        cross_actor_task_id = task_sys.ingest(other_actor_envelope)["task_id"]
-        before = self._task_record(task_id)
-        cases = (
-            ({"kind": "related", "target_task_id": None}, "kind"),
-            ({"kind": "after", "target_task_id": None}, "target_task_id"),
-            ({"kind": "before"}, "target_task_id"),
-            ({"kind": "after", "target_task_id": "task-user-input-missing"}, "not found"),
-            ({"kind": "before", "target_task_id": cross_actor_task_id}, "same actor"),
-            ({"kind": "after", "target_task_id": task_id}, "self"),
-        )
-
-        for relation, expected in cases:
-            with self.subTest(relation=relation):
-                with self.assertRaisesRegex(ValueError, expected):
-                    task_sys.record_task_analysis_update(
-                        task_id,
-                        {
-                            "task_desc": "Draft brief",
-                            "task_relation": relation,
-                        },
-                    )
-                self.assertEqual(self._task_record(task_id), before)
+        self.assertFalse(hasattr(task_sys, "record_task_analysis_update"))
+        self.assertFalse(hasattr(task_sys, "TASK_RELATION_KINDS"))
 
     def test_parent_runtime_instruction_shapes_are_task_traceable(self) -> None:
         task_sys = _task_sys()
@@ -393,22 +310,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
     def test_parent_instruction_from_need_parent_task_stays_parent_ready_until_runtime_start(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
-        task_sys.record_task_analysis_update(
-            task_id,
-            {
-                "task_desc": "Draft brief",
-                "task_relation": {"kind": "independent", "target_task_id": None},
-            },
-        )
         task_sys.record_side_need_parent(
             task_id,
             {
                 "params": {
-                    "parent_frame_context": {
-                        "next": "Draft the brief in parent.",
-                        "task_desc": "Draft brief",
-                        "task_relation": {"kind": "independent", "target_task_id": None},
-                    },
+                    "parent_frame_context": {"next": "Draft the brief in parent."},
                     "interrupt": True,
                     "ordering": {"priority": "normal"},
                 },
@@ -427,16 +333,12 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(frame["task_id"], task_id)
         self.assertEqual(frame["source"], {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}})
         self.assertEqual(frame["inbound_context"], self._envelope()["context"])
-        self.assertEqual(frame["task_desc"], "Draft brief")
-        self.assertEqual(frame["task_relation"], {"kind": "independent", "target_task_id": None})
+        self.assertNotIn("task_desc", frame)
+        self.assertNotIn("task_relation", frame)
         self.assertEqual(
             frame["execution_handoff"],
             {
-                "parent_frame_context": {
-                    "next": "Draft the brief in parent.",
-                    "task_desc": "Draft brief",
-                    "task_relation": {"kind": "independent", "target_task_id": None},
-                },
+                "parent_frame_context": {"next": "Draft the brief in parent."},
                 "interrupt": True,
                 "ordering": {"priority": "normal"},
                 "side_thread_id": None,
@@ -444,33 +346,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             },
         )
         persisted = json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
-        self.assertEqual(persisted["status"], "in_progress")
+        self.assertEqual(persisted["status"], "in_progress.awaiting_parent")
         self.assertEqual(persisted["execution"]["processor"], None)
         self.assertEqual(persisted["execution"]["handoff"], frame["execution_handoff"])
         self.assertIsNone(persisted["execution"]["result"])
         self._assert_no_legacy_execution_fields(persisted)
-
-    def test_side_need_parent_requires_recorded_relation_analysis(self) -> None:
-        task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
-
-        with self.assertRaisesRegex(ValueError, "task analysis"):
-            task_sys.record_side_need_parent(
-                task_id,
-                {
-                    "params": {
-                        "parent_frame_context": {"next": "Draft the brief in parent."},
-                        "interrupt": True,
-                    },
-                },
-            )
-
-        persisted = self._task_record(task_id)
-        self.assertEqual(persisted["status"], "in_progress")
-        self.assertIsNone(persisted["task_desc"])
-        self.assertEqual(persisted["task_relation"], {"kind": "independent", "target_task_id": None})
-        self.assertEqual(persisted["execution"]["processor"], "side")
-        self.assertIsNone(persisted["execution"]["handoff"])
 
     def test_record_parent_handoff_started_marks_parent_processing(self) -> None:
         task_sys = _task_sys()
@@ -482,7 +362,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertTrue(result["ok"], msg=result)
         self.assertEqual(result["task_id"], task_id)
         persisted = json.loads(self._task_record_path(task_id).read_text(encoding="utf-8"))
-        self.assertEqual(persisted["status"], "in_progress")
+        self.assertEqual(persisted["status"], "in_progress.parent_processing")
         self.assertEqual(persisted["execution"]["processor"], "parent")
         self.assertIsInstance(persisted["execution"]["handoff"], dict)
         self.assertIsNone(persisted["execution"]["result"])
@@ -506,7 +386,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
         self.assertTrue(result["ok"], msg=result)
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["status"], "in_progress.awaiting_parent")
         self.assertEqual(record["execution"]["processor"], None)
         self.assertEqual(record["execution"]["handoff"]["side_thread_id"], "thr-side-parent")
         self.assertEqual(record["execution"]["handoff"]["cleanup"]["lease_unregistered"], True)
@@ -585,7 +465,6 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             [
                 "created",
                 "side_frame_started",
-                "task_analysis_updated",
                 "side_parent_requested",
                 "parent_handoff_started",
                 "closed",
@@ -597,11 +476,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         task_id = task_sys.ingest(self._envelope())["task_id"]
         self._move_to_needs_parent(task_id)
 
-        with self.assertRaisesRegex(ValueError, "side or parent processor"):
+        with self.assertRaisesRegex(ValueError, "awaiting_parent.*close"):
             task_sys.record_task_close(task_id, {"summary": "Skipped parent."})
 
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["status"], "in_progress.awaiting_parent")
         self.assertEqual(record["execution"]["processor"], None)
         self.assertIsInstance(record["execution"]["handoff"], dict)
         self.assertIsNone(record["execution"]["result"])
@@ -610,14 +489,30 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
     def test_task_statuses_are_lifecycle_only(self) -> None:
         task_sys = _task_sys()
 
-        self.assertEqual(task_sys.TASK_STATUSES, ("in_progress", "completed", "canceled"))
-        self.assertEqual(task_sys.ACTIVE_TASK_STATUSES, ("in_progress",))
+        self.assertEqual(
+            task_sys.TASK_STATUSES,
+            (
+                "in_progress.side_processing",
+                "in_progress.awaiting_parent",
+                "in_progress.parent_processing",
+                "completed",
+                "canceled",
+            ),
+        )
+        self.assertEqual(
+            task_sys.ACTIVE_TASK_STATUSES,
+            (
+                "in_progress.side_processing",
+                "in_progress.awaiting_parent",
+                "in_progress.parent_processing",
+            ),
+        )
         self.assertEqual(task_sys.RECOVERABLE_TASK_REASONS, ("runtime_failed", "side_no_result", "side_timed_out"))
-        self.assertEqual(task_sys.TASK_RELATION_KINDS, ("independent", "after", "before"))
         self.assertNotIn("checkpoint", task_sys.TASK_STATUSES)
+        self.assertNotIn("in_progress", task_sys.TASK_STATUSES)
         self.assertNotIn("no_actor_action", task_sys.RUNTIME_INSTRUCTION_TYPES)
 
-    def test_side_runtime_failure_is_recoverable_but_not_active(self) -> None:
+    def test_side_runtime_failure_stays_side_processing_and_is_recoverable(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
         original = self._task_record(task_id)
@@ -644,7 +539,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(result["outcome"], "runtime_failed")
         self.assertEqual(result["task_id"], task_id)
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["status"], "in_progress.side_processing")
         self.assertEqual(record["execution"]["processor"], None)
         self.assertEqual(record["execution"]["result"]["type"], "failure")
         self.assertEqual(record["execution"]["result"]["reason"], "runtime_failed")
@@ -667,10 +562,10 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             {"runtime_failed", "side_no_result", "side_timed_out"},
         )
         projection = task_sys.actor_task_projection(actor_profile=self._actor_profile())
-        self.assertEqual(projection["active_tasks"], [])
+        self.assertEqual([row["id"] for row in projection["active_tasks"]], [task_id])
         self.assertEqual([row["id"] for row in projection["recoverable_tasks"]], [task_id])
 
-    def test_failed_side_runtime_task_cannot_be_closed_as_success(self) -> None:
+    def test_actor_close_uses_side_processing_status_after_runtime_failure(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
         task_sys.record_side_runtime_failure(
@@ -685,15 +580,50 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             },
         )
 
-        with self.assertRaisesRegex(ValueError, "side or parent processor"):
-            task_sys.record_task_close(task_id, {"summary": "Pretend success."})
+        result = task_sys.record_task_close(task_id, {"summary": "Recovered and completed."})
 
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "in_progress")
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(record["status"], "completed")
         self.assertEqual(record["execution"]["processor"], None)
-        self.assertEqual(record["execution"]["result"]["type"], "failure")
-        self.assertEqual(record["execution"]["result"]["reason"], "side_no_result")
+        self.assertEqual(record["execution"]["result"]["type"], "completion")
+        self.assertEqual(record["execution"]["result"]["processor"], "side")
         self._assert_no_legacy_execution_fields(record)
+
+    def test_record_task_cancel_moves_each_active_status_to_canceled(self) -> None:
+        task_sys = _task_sys()
+
+        for start_status in task_sys.ACTIVE_TASK_STATUSES:
+            with self.subTest(start_status=start_status):
+                task_id = task_sys.ingest(self._envelope())["task_id"]
+                if start_status in {task_sys.AWAITING_PARENT, task_sys.PARENT_PROCESSING}:
+                    self._move_to_needs_parent(task_id)
+                if start_status == task_sys.PARENT_PROCESSING:
+                    task_sys.record_parent_handoff_started(task_id)
+
+                result = task_sys.record_task_cancel(task_id, {"reason": "No longer required."})
+
+                self.assertTrue(result["ok"], msg=result)
+                self.assertEqual(result["outcome"], "cancel")
+                self.assertEqual(result["task"]["status"], "canceled")
+                self.assertEqual(self._task_record(task_id)["execution"]["result"]["type"], "cancellation")
+                self.assertIn("canceled", self._event_types(task_id))
+
+    def test_record_task_cancel_is_retry_safe_but_rejects_completed(self) -> None:
+        task_sys = _task_sys()
+        canceled_id = task_sys.ingest(self._envelope())["task_id"]
+        completed_id = task_sys.ingest(self._envelope())["task_id"]
+
+        first = task_sys.record_task_cancel(canceled_id, {"reason": "Superseded."})
+        retry = task_sys.record_task_cancel(canceled_id, {"reason": "Retry."})
+        task_sys.record_task_close(completed_id, {"summary": "Completed."})
+
+        self.assertTrue(first["state_changed"])
+        self.assertFalse(retry["state_changed"])
+        self.assertEqual(retry["task"]["execution"]["result"], first["task"]["execution"]["result"])
+        with self.assertRaisesRegex(ValueError, "completed.*cancel"):
+            task_sys.record_task_cancel(completed_id, {"reason": "Too late."})
+        self.assertEqual(self._task_record(completed_id)["status"], "completed")
 
     def test_record_task_close_is_retry_safe_for_closed_task(self) -> None:
         task_sys = _task_sys()

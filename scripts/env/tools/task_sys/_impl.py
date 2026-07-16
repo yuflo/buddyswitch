@@ -88,7 +88,7 @@ def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context
         retryable=True,
         retry_guidance="Retry with only documented task_sys payload fields.",
         allowed_next_actions=[
-            "Use task_sys.list, task_sys.get, task_sys.update_task_analysis, task_sys.close, or task_sys.need_parent with documented payload fields.",
+            "Use task_sys.list, task_sys.get, task_sys.close, task_sys.need_parent, or task_sys.cancel with documented payload fields.",
         ],
         correctable_fields=unknown,
     )
@@ -113,9 +113,9 @@ def _read_success(action: str, context: Any, *, effect_summary: str, extra: dict
         read_scope="actor-owned task sys task records",
         allowed_next_actions=[
             "Use task_sys.get for full task detail.",
-            "Use task_sys.update_task_analysis to record task_desc and task_relation before a side final action.",
             "Use task_sys.close when the active frame completed the required task work.",
             "Use task_sys.need_parent when side processing requires parent work.",
+            "Use task_sys.cancel when the actor decides an active task must stop without completion.",
         ],
         extra=extra,
     )
@@ -138,8 +138,6 @@ def _success(
         "task_id": result.get("task_id"),
         "outcome": result.get("outcome"),
         "task_status": task.get("status"),
-        "task_desc": task.get("task_desc"),
-        "task_relation": dict(task.get("task_relation")) if isinstance(task.get("task_relation"), dict) else None,
         "execution": execution_row,
     }
     if isinstance(execution_handoff, dict):
@@ -169,10 +167,10 @@ def _success(
         extra["parent_runtime"] = parent_runtime
     if action == "close":
         effect_summary = "Closed Task Sys task."
+    elif action == "cancel":
+        effect_summary = "Canceled Task Sys task."
     elif action == "need_parent":
         effect_summary = "Recorded Task Sys parent handoff."
-    elif action == "update_task_analysis":
-        effect_summary = "Updated Task Sys task analysis."
     else:
         effect_summary = f"Recorded Task Sys action: {result.get('outcome')}."
     return tool_results.success(
@@ -192,7 +190,7 @@ def _success(
                 "outcome": result.get("outcome"),
             }
         ],
-        allowed_next_actions=["Use returned task_status, task_desc, task_relation, execution, processor, and cleanup fields to decide the next frame action."],
+        allowed_next_actions=["Use returned task_status, execution, processor, and cleanup fields to decide the next frame action."],
         extra=extra,
     )
 
@@ -306,24 +304,6 @@ def get(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
 
-def update_task_analysis(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
-    task_sys = _task_sys_domain(context)
-    actor_target = _actor_target(context)
-    task_id = str(args.get("task_id") or "")
-    task = task_sys.get_task(task_id)
-    owner = task.get("actor_target")
-    if not isinstance(owner, Mapping) or owner.get("actor_id") != actor_target["actor_id"] or owner.get("role_id") != actor_target["role_id"]:
-        raise PermissionError("task does not belong to the active actor")
-    result = task_sys.record_task_analysis_update(
-        task_id,
-        {
-            "task_desc": args.get("task_desc"),
-            "task_relation": args.get("task_relation"),
-        },
-    )
-    return _success("update_task_analysis", result, context)
-
-
 def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
     result = task_sys.record_task_close(
@@ -336,6 +316,23 @@ def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     if isinstance(execution_result, dict) and execution_result.get("processor") == "side" and "cleanup" not in execution_result:
         result = dict(result, task=_record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))["task"])
     return _success("close", result, context)
+
+
+def cancel(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    task_sys = _task_sys_domain(context)
+    actor_target = _actor_target(context)
+    task_id = str(args.get("task_id") or "")
+    task = task_sys.get_task(task_id)
+    owner = task.get("actor_target")
+    if not isinstance(owner, Mapping) or owner.get("actor_id") != actor_target["actor_id"] or owner.get("role_id") != actor_target["role_id"]:
+        raise PermissionError("task does not belong to the active actor")
+    result = task_sys.record_task_cancel(task_id, {"reason": args.get("reason")})
+    task = result.get("task") if isinstance(result.get("task"), dict) else {}
+    execution = task.get("execution") if isinstance(task, dict) else None
+    execution_result = execution.get("result") if isinstance(execution, dict) else None
+    if isinstance(execution_result, dict) and execution_result.get("processor") == "side" and "cleanup" not in execution_result:
+        result = dict(result, task=_record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))["task"])
+    return _success("cancel", result, context)
 
 
 def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -368,8 +365,8 @@ def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 _ACTION_HANDLERS = {
     "list": list_tasks,
     "get": get,
-    "update_task_analysis": update_task_analysis,
     "close": close,
+    "cancel": cancel,
     "need_parent": need_parent,
 }
 

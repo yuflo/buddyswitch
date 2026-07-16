@@ -299,10 +299,8 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         task_record = {
             "id": "task-demo",
             "source_type": "external",
-            "status": "in_progress",
-            "task_desc": "Demo",
+            "status": "in_progress.side_processing",
             "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm", "secret": True},
-            "task_relation": {"kind": "child", "target_task_id": "task-parent", "secret": True},
             "updated_at": "2026-07-14T00:00:00Z",
             "execution": {"secret": True},
             "secret": True,
@@ -363,13 +361,12 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             tracks = track_read.list_external_tracks()
             track = track_read.get_external_track("track-demo")
 
-        task_keys = ("task_id", "source_type", "status", "task_desc", "actor", "relation", "updated_at")
+        task_keys = ("task_id", "source_type", "status", "actor", "updated_at")
         for row in (*tasks, task):
             self.assertIsNotNone(row)
             assert row is not None
             self.assertEqual(tuple(row), task_keys)
             self.assertEqual(tuple(row["actor"]), ("actor_id", "role_id"))
-            self.assertEqual(tuple(row["relation"]), ("kind", "target_task_id"))
 
         track_summary_keys = (
             "id",

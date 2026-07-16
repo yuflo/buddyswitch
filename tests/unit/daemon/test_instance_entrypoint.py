@@ -27,6 +27,7 @@ EXPECTED_HANDLER_TYPES = [
     "BrowserPageExpiredHandler",
     "BrowserReleaseHandler",
     "BrowserFailedOpenPageCleanupHandler",
+    "TaskSysProgressCheckHandler",
 ]
 EXPECTED_HANDLER_NAMES = [
     "im_message_created",
@@ -34,6 +35,7 @@ EXPECTED_HANDLER_NAMES = [
     "browser_page_expired",
     "browser_cockpit_release",
     "browser_failed_open_page_cleanup",
+    "task_sys_progress_check",
 ]
 
 
@@ -83,6 +85,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
         handlers = self.instance_daemon.default_daemon_handlers()
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
+        self.assertIsInstance(handlers[-1], self.instance_daemon.task_sys_daemon_adapter.TaskSysProgressCheckHandler)
 
     def test_run_passes_unified_daemon_handler_list_to_daemon_core(self) -> None:
         recorded: dict[str, object] = {}

@@ -48,10 +48,10 @@ class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestCase):
 
         self.assertFalse(hasattr(task_sys, "record_checkpoint_update"))
 
-    def test_actor_facing_task_sys_tool_does_not_register_checkpoint_update(self) -> None:
+    def test_actor_facing_task_sys_tool_registers_only_current_lifecycle_actions(self) -> None:
         tool_registry.clear_cache()
 
         self.assertEqual(
             tool_registry.supported_actions("task_sys"),
-            {"list", "get", "update_task_analysis", "close", "need_parent"},
+            {"list", "get", "close", "need_parent", "cancel"},
         )

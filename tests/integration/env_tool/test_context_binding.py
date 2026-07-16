@@ -71,15 +71,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
                 "context": {"fixture": "context binding"},
             },
         )
-        task_id = str(result["task_id"])
-        task_sys.record_task_analysis_update(
-            task_id,
-            {
-                "task_desc": "Context binding",
-                "task_relation": {"kind": "independent", "target_task_id": None},
-            },
-        )
-        return task_id
+        return str(result["task_id"])
 
     def _seed_legacy_shared_task(self) -> None:
         self._write_json(
@@ -444,9 +436,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
 
         candidate_task = next(row for row in candidate_tasks if isinstance(row, dict) and row.get("task_id") == self.context_task_id)
         self.assertEqual(candidate_task.get("source_type"), "test.context.active")
-        self.assertEqual(candidate_task.get("status"), "in_progress")
-        self.assertEqual(candidate_task.get("task_desc"), "Context binding")
-        self.assertEqual(candidate_task.get("task_relation"), {"kind": "independent", "target_task_id": None})
+        self.assertEqual(candidate_task.get("status"), "in_progress.side_processing")
+        self.assertNotIn("task_desc", candidate_task)
+        self.assertNotIn("task_relation", candidate_task)
         self.assertEqual(candidate_task.get("execution", {}).get("processor"), "side")
         self.assertNotIn("active_processor", candidate_task)
 

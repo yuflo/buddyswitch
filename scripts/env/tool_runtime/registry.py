@@ -389,7 +389,7 @@ def _active_task_required_rejection(
         allowed_next_actions=[
             "Continue from the current task_sys.side_frame or task_sys.parent_frame.",
             "Use task_sys.list or task_sys.get to inspect actor-owned Task Sys tasks.",
-            "Use task_sys.close or task_sys.need_parent when handling a Task Sys frame.",
+            "Use task_sys.close, task_sys.cancel, or task_sys.need_parent when handling a Task Sys frame.",
             "Route new actor-driving input through Task Sys ingress before retrying task-bound tool work.",
         ],
         alternative_capabilities=[

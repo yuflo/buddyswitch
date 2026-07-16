@@ -44,6 +44,7 @@ def default_daemon_handlers() -> list[object]:
     return [
         *notification_center.handlers_from_registrations(registrations),
         *notification_center.handlers_from_registrations(browser_registrations),
+        task_sys_daemon_adapter.TaskSysProgressCheckHandler(),
     ]
 
 

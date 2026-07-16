@@ -22,9 +22,8 @@ from env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
 from env.domain import track_read  # noqa: E402
 
 
-TASK_KEYS = ("task_id", "source_type", "status", "task_desc", "actor", "relation", "updated_at")
+TASK_KEYS = ("task_id", "source_type", "status", "actor", "updated_at")
 TASK_ACTOR_KEYS = ("actor_id", "role_id")
-TASK_RELATION_KEYS = ("kind", "target_task_id")
 TRACK_LIST_KEYS = (
     "id",
     "title",
@@ -66,9 +65,7 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
             "source_ref": {"id": task_id, "repo_path": "/private/repo"},
             "actor_target": {"actor_id": actor_id, "role_id": role_id, "internal_stack": "hidden"},
             "inbound_context": {"prompt": "secret prompt"},
-            "status": "in_progress",
-            "task_desc": f"External {task_id}",
-            "task_relation": {"kind": "after", "target_task_id": "task-baseline", "handoff": "hidden"},
+            "status": "in_progress.side_processing",
             "execution": {
                 "processor": None if result is not None else "side",
                 "handoff": {"side_thread_id": "thr-secret"},
@@ -185,10 +182,13 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
 
         list_tasks.assert_called_once_with(actor_target={"actor_id": actor_id, "role_id": "pm"})
         self.assertEqual([row["task_id"] for row in projection["tasks"]], ["task-recoverable", "task-old"])
-        self.assertEqual([row["task_id"] for row in projection["active_tasks"]], ["task-old"])
+        self.assertEqual(
+            [row["task_id"] for row in projection["active_tasks"]],
+            ["task-recoverable", "task-old"],
+        )
         self.assertEqual([row["task_id"] for row in projection["recoverable_tasks"]], ["task-recoverable"])
         self.assertEqual(projection["task_count"], 2)
-        self.assertEqual(projection["active_count"], 1)
+        self.assertEqual(projection["active_count"], 2)
         self.assertEqual(projection["recoverable_count"], 1)
         self.assertEqual(records, before)
 
@@ -196,9 +196,7 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
             for row in projection[group]:
                 self.assertEqual(tuple(row.keys()), TASK_KEYS)
                 self.assertEqual(tuple(row["actor"].keys()), TASK_ACTOR_KEYS)
-                self.assertEqual(tuple(row["relation"].keys()), TASK_RELATION_KEYS)
                 self.assertEqual(row["actor"], {"actor_id": actor_id, "role_id": "pm"})
-                self.assertEqual(row["relation"], {"kind": "after", "target_task_id": "task-baseline"})
                 for sensitive in (
                     "execution",
                     "events",
@@ -211,14 +209,14 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                     "repo_path",
                     "internal_stack",
                     "source_ref",
+                    "task_desc",
+                    "relation",
                     "task_relation",
                 ):
                     self.assertNotIn(sensitive, row)
 
         projection["tasks"][0]["actor"]["role_id"] = "changed"
-        projection["tasks"][0]["relation"]["target_task_id"] = "changed"
         self.assertEqual(records[2]["actor_target"]["role_id"], "pm")
-        self.assertEqual(records[2]["task_relation"]["target_task_id"], "task-baseline")
 
     def test_task_external_get_returns_projection_or_none_without_raw_refs(self) -> None:
         task_read = _task_read_module()
@@ -231,7 +229,6 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         assert row is not None
         self.assertEqual(tuple(row.keys()), TASK_KEYS)
         self.assertIsNot(row["actor"], record["actor_target"])
-        self.assertIsNot(row["relation"], record["task_relation"])
 
         with mock.patch.object(task_read.task_sys, "get_task", side_effect=ValueError("task not found: task-missing")):
             self.assertIsNone(task_read.get_external_task("task-missing", actor_profile=self._actor_profile()))

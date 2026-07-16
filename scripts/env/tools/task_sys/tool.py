@@ -17,26 +17,6 @@ def _task_id_schema() -> dict[str, str]:
     }
 
 
-def _task_relation_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "description": "Structured relation option selected during Task Sys relation analysis.",
-        "additionalProperties": False,
-        "required": ["kind"],
-        "properties": {
-            "kind": {
-                "type": "string",
-                "description": "Relation option for this task.",
-                "enum": ["independent", "after", "before"],
-            },
-            "target_task_id": {
-                "type": ["string", "null"],
-                "description": "Target actor-owned Task Sys task id for after/before; null for independent.",
-            },
-        },
-    }
-
-
 def _build_definition() -> ToolDefinition:
     task_id_schema = _task_id_schema()
     return ToolDefinition(
@@ -45,13 +25,13 @@ def _build_definition() -> ToolDefinition:
         description="Task Sys actions read actor-owned task state and advance active side or parent frames.",
         scope="Task Sys task reads and frame-state updates for the active actor.",
         capability_boundary=(
-            "Task Sys read actions inspect actor-owned task sys task state. task_sys.close completes side or parent "
-            "frames; task_sys.need_parent may submit or interrupt+submit the parent only through a Task Sys runtime "
-            "instruction. These actions do not send messages, mutate tracks, or write actor private files."
+            "Task Sys read actions inspect actor-owned task state. task_sys.close and task_sys.cancel make legal "
+            "terminal transitions; task_sys.need_parent may submit or interrupt+submit the parent only through a "
+            "Task Sys runtime instruction. These actions do not send messages, mutate tracks, or write actor private files."
         ),
         object_model=(
-            "Task Sys tasks are durable task records with source refs, actor targets, lifecycle status, task_desc, "
-            "structured task_relation, execution facts, and lifecycle events."
+            "Task Sys tasks are durable task records with source refs, actor targets, one canonical lifecycle status, "
+            "execution facts, and lifecycle events."
         ),
         use_when=(
             "You need to inspect ongoing actor-owned Task Sys tasks or record a legal operation for the active Task Sys side or parent frame.",
@@ -63,7 +43,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="list",
                 title="task_sys.list",
-                description="List active, recoverable, or all actor-owned Task Sys tasks with relation-analysis context.",
+                description="List active, recoverable, or all actor-owned Task Sys tasks.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
@@ -89,8 +69,8 @@ def _build_definition() -> ToolDefinition:
                 authority="task_sys.actor_owned_read",
                 visibility="Actor-owned ongoing Task Sys task summaries",
                 durability="none",
-                result_content_level="task summaries with lifecycle status, task_desc, task_relation, execution, and active/recoverable counts",
-                success_effect="Returns actor-owned Task Sys task summaries for relation analysis without changing runtime state.",
+                result_content_level="task summaries with canonical lifecycle status, execution, and active/recoverable counts",
+                success_effect="Returns actor-owned Task Sys task summaries without changing runtime state.",
                 failure_state_guarantee="Rejected list requests do not mutate task sys state.",
                 reads=("task sys task record",),
                 writes=(),
@@ -101,7 +81,7 @@ def _build_definition() -> ToolDefinition:
                     "limit is a positive integer when provided",
                 ),
                 returns=("tasks", "active_count", "recoverable_count"),
-                use_when=("You need actor-owned Task Sys task summaries, descriptions, relations, or execution state before choosing the next frame action.",),
+                use_when=("You need actor-owned Task Sys task summaries, canonical status, or execution state before choosing the next frame action.",),
                 do_not_use_when=("You already know the exact task_id and need full detail; use task_sys.get instead.",),
                 risk_hints={
                     "read_only": True,
@@ -132,7 +112,7 @@ def _build_definition() -> ToolDefinition:
                 authority="task_sys.actor_owned_read",
                 visibility="Actor-owned Task Sys task detail",
                 durability="none",
-                result_content_level="task detail, relation-analysis fields, execution, and lifecycle events",
+                result_content_level="task detail, canonical lifecycle status, execution, and lifecycle events",
                 success_effect="Returns one actor-owned Task Sys task detail without changing runtime state.",
                 failure_state_guarantee="Rejected get requests do not mutate task sys state.",
                 reads=("task sys task record",),
@@ -144,66 +124,12 @@ def _build_definition() -> ToolDefinition:
                     "task belongs to the active actor",
                 ),
                 returns=("task_id", "task", "events"),
-                use_when=("You need task_id detail, current lifecycle status, desc, relation, source refs, execution, or events for an actor-owned Task Sys task.",),
+                use_when=("You need task_id detail, current lifecycle status, source refs, execution, or events for an actor-owned Task Sys task.",),
                 do_not_use_when=("You need only a compact set of active ongoing tasks; use task_sys.list instead.",),
                 risk_hints={
                     "read_only": True,
                     "destructive": False,
                     "idempotent": True,
-                    "open_world": False,
-                    "requires_human_approval": False,
-                    "external_effect": False,
-                },
-            ),
-            ActionDefinition(
-                name="update_task_analysis",
-                title="task_sys.update_task_analysis",
-                description="Write the short task description and structured relation selected during Task Sys relation analysis.",
-                input_schema={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["task_id", "task_desc", "task_relation"],
-                    "properties": {
-                        "task_id": task_id_schema,
-                        "task_desc": {
-                            "type": "string",
-                            "description": "Short task description generated from inbound info before side gate; must be under 50 characters.",
-                        },
-                        "task_relation": _task_relation_schema(),
-                    },
-                },
-                output_schema={"$ref": "ToolResult"},
-                kind="write",
-                mutates=MUTATES_RUNTIME_OBJECTS,
-                task_requirement=TASK_REQUIREMENT_FREE,
-                required_permission="task_sys.update_task_analysis",
-                authority="task_sys.task_analysis_update",
-                visibility="Task Sys task relation-analysis mutation",
-                durability="durable",
-                result_content_level="task id, lifecycle status, task_desc, task_relation, and execution",
-                success_effect="Durably updates one actor-owned Task Sys task with task_desc and structured task_relation.",
-                failure_state_guarantee="Rejected task-analysis updates do not mutate task sys state.",
-                reads=("task sys task record",),
-                writes=("task sys task record",),
-                does_not_write=("parent turns", "side turns", "messages", "tracks", "artifacts"),
-                preconditions=(
-                    "env.tool role-action policy allows this action for the active role",
-                    "task_id exists",
-                    "task belongs to the active actor",
-                    "task_desc is non-empty and shorter than 50 characters",
-                    "task_relation.kind is independent, after, or before",
-                    "after/before target_task_id exists, belongs to the same actor, and is not the current task",
-                ),
-                returns=("task_id", "task_status", "task_desc", "task_relation", "execution", "state_changed"),
-                use_when=("A side or parent frame has generated relation analysis and must persist the selected task_desc and task_relation before deciding the final frame action.",),
-                do_not_use_when=(
-                    "You only need to inspect relation context; use task_sys.list or task_sys.get.",
-                    "You need to close or hand off the task; use task_sys.close or task_sys.need_parent after analysis is recorded.",
-                ),
-                risk_hints={
-                    "read_only": False,
-                    "destructive": False,
-                    "idempotent": False,
                     "open_world": False,
                     "requires_human_approval": False,
                     "external_effect": False,
@@ -242,7 +168,7 @@ def _build_definition() -> ToolDefinition:
                 preconditions=(
                     "env.tool role-action policy allows this action for the active role",
                     "task_id exists",
-                    "task lifecycle status is in_progress with execution.processor side or parent, or already completed",
+                    "task status is in_progress.side_processing or in_progress.parent_processing, or already completed",
                 ),
                 returns=(
                     "task_id",
@@ -263,6 +189,65 @@ def _build_definition() -> ToolDefinition:
                     "read_only": False,
                     "destructive": False,
                     "idempotent": False,
+                    "open_world": False,
+                    "requires_human_approval": False,
+                    "external_effect": False,
+                },
+            ),
+            ActionDefinition(
+                name="cancel",
+                title="task_sys.cancel",
+                description="Cancel an actor-owned Task Sys task from any active canonical lifecycle status.",
+                input_schema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["task_id"],
+                    "properties": {
+                        "task_id": task_id_schema,
+                        "reason": {
+                            "type": "string",
+                            "description": "Optional concise reason for cancellation.",
+                        },
+                    },
+                },
+                output_schema={"$ref": "ToolResult"},
+                kind="write",
+                mutates=MUTATES_RUNTIME_OBJECTS,
+                task_requirement=TASK_REQUIREMENT_FREE,
+                required_permission="task_sys.cancel",
+                authority="task_sys.task_cancel",
+                visibility="Task Sys cancel mutation",
+                durability="durable",
+                result_content_level="task id, canceled lifecycle status, and execution cancellation result",
+                success_effect="Marks the task canceled and records cancellation metadata.",
+                failure_state_guarantee="Rejected cancel requests do not mutate task sys state.",
+                reads=("task sys task record",),
+                writes=("task sys task record",),
+                does_not_write=("parent turns", "messages", "tracks", "artifacts"),
+                preconditions=(
+                    "env.tool role-action policy allows this action for the active role",
+                    "task_id exists",
+                    "task status is one of the three canonical in_progress statuses, or already canceled",
+                ),
+                returns=(
+                    "task_id",
+                    "outcome",
+                    "task_status",
+                    "state_changed",
+                    "processor",
+                    "side_thread_id",
+                    "side_cleanup",
+                    "execution_result",
+                ),
+                use_when=("The actor decides to cancel an active Task Sys task so it stops without completion.",),
+                do_not_use_when=(
+                    "The task completed successfully; use task_sys.close instead.",
+                    "A side frame needs parent work; use task_sys.need_parent instead.",
+                ),
+                risk_hints={
+                    "read_only": False,
+                    "destructive": True,
+                    "idempotent": True,
                     "open_world": False,
                     "requires_human_approval": False,
                     "external_effect": False,
@@ -323,7 +308,7 @@ def _build_definition() -> ToolDefinition:
                 preconditions=(
                     "env.tool role-action policy allows this action for the active role",
                     "task_id exists",
-                    "task lifecycle status is in_progress with execution.processor side",
+                    "task status is in_progress.side_processing",
                     "params.interrupt is a boolean when provided",
                 ),
                 returns=(

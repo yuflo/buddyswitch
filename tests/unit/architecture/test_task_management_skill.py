@@ -16,7 +16,7 @@ import env_manifest  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-TASK_SYS_OPERATIONS = {"list", "get", "update_task_analysis", "close", "need_parent"}
+TASK_SYS_OPERATIONS = {"list", "get", "close", "cancel", "need_parent"}
 
 
 class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
@@ -59,6 +59,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         self.assertIn("task_sys.list", skill_text)
         self.assertIn("task_sys.get", skill_text)
         self.assertIn("task_sys.close", skill_text)
+        self.assertIn("task_sys.cancel", skill_text)
         self.assertIn("task_sys.need_parent", skill_text)
         self.assertNotIn("task_sys.checkpoint", skill_text)
         self.assertNotIn("task_sys.checkpoint_update", skill_text)
@@ -94,8 +95,12 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         self.assertIn("Use `message.mark(..., disposition=absorbed)` only when no reply is needed.", skill_text)
         self.assertNotIn("source-" + "bound", skill_text)
         self.assertIn("Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.", skill_text)
-        self.assertIn("Use `task_sys.update_task_analysis` to record `task_desc` and `task_relation` before side close or parent handoff.", skill_text)
-        self.assertIn("Generate `task_desc`, read relation context, call `task_sys.update_task_analysis`, then close or hand off.", skill_text)
+        self.assertIn("Task `status` is the only lifecycle truth", skill_text)
+        self.assertIn("Use `task_sys.cancel` when the actor decides an active Task must stop without completion.", skill_text)
+        self.assertIn("continue parent work without changing status", skill_text)
+        self.assertNotIn("task_desc", skill_text)
+        self.assertNotIn("task_relation", skill_text)
+        self.assertNotIn("update_task_analysis", skill_text)
         self.assertNotIn("checkpoint", skill_text.lower())
         stale_finish = "finish with exactly one Task Sys side " + "result"
         stale_label = "Task Sys side " + "result"
@@ -118,9 +123,10 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
             with self.subTest(role=path.parent.name):
                 self.assertIn("task_sys__list", text)
                 self.assertIn("task_sys__get", text)
-                self.assertIn("task_sys__update_task_analysis", text)
                 self.assertIn("task_sys__close", text)
+                self.assertIn("task_sys__cancel", text)
                 self.assertIn("task_sys__need_parent", text)
+                self.assertNotIn("task_sys__update_task_analysis", text)
                 self.assertNotIn("task_sys__checkpoint_update", text)
                 self.assertNotIn("task__current", text)
 

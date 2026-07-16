@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task Sys Lifecycle and Relation Redesign Memo</title>
+  <style>
+    :root {
+      --bg: #f6f5f0;
+      --panel: #fffdf8;
+      --ink: #1d2329;
+      --muted: #626b73;
+      --line: #d8d2c5;
+      --soft: #ece8df;
+      --accent: #1d6671;
+      --accent-soft: #dcebef;
+      --ok: #2f6a48;
+      --ok-soft: #e0eee5;
+      --warn: #986017;
+      --warn-soft: #f4ead8;
+      --danger: #9b3e35;
+      --danger-soft: #f3e1dd;
+      --blue: #355b9b;
+      --blue-soft: #e2e8f5;
+      --code-bg: #efebe2;
+      --shadow: 0 1px 0 rgba(29, 35, 41, 0.05), 0 18px 42px rgba(29, 35, 41, 0.06);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.5;
+      letter-spacing: 0;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0;
+    }
+    button { font: inherit; }
+
+    .shell {
+      width: min(1440px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 26px 0 48px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+      gap: 18px;
+      align-items: stretch;
+      margin-bottom: 18px;
+    }
+
+    .hero,
+    .side,
+    .metric,
+    .section,
+    .card,
+    .timeline-step,
+    .relation-card,
+    .problem,
+    .evidence {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    .hero {
+      padding: 24px;
+      min-height: 270px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 {
+      margin-top: 10px;
+      max-width: 980px;
+      font-size: clamp(32px, 4.6vw, 58px);
+      line-height: 0.98;
+      letter-spacing: 0;
+      overflow-wrap: anywhere;
+    }
+    h2 {
+      font-size: 23px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+    h3 {
+      font-size: 16px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .lead {
+      max-width: 900px;
+      margin-top: 14px;
+      color: #38444d;
+      font-size: 16px;
+    }
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: #33404a;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .pill.ok { background: var(--ok-soft); color: var(--ok); border-color: #bed8c9; }
+    .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: #e4cfa8; }
+    .pill.blue { background: var(--blue-soft); color: var(--blue); border-color: #c6d3ed; }
+
+    .side {
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+    .status-line {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .status-line:last-child { padding-bottom: 0; border-bottom: 0; }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .value {
+      font-weight: 760;
+      overflow-wrap: anywhere;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .metric {
+      padding: 14px;
+      min-height: 118px;
+    }
+    .metric .label { display: block; margin-bottom: 8px; }
+    .metric strong {
+      display: block;
+      font-size: 25px;
+      line-height: 1.05;
+    }
+    .metric span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 284px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    nav {
+      position: sticky;
+      top: 16px;
+      background: rgba(255, 253, 248, 0.95);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 10px;
+    }
+    nav a {
+      display: block;
+      padding: 9px 10px;
+      border-radius: 6px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 720;
+    }
+    nav a:hover {
+      background: var(--soft);
+      text-decoration: none;
+    }
+    main { display: grid; gap: 18px; min-width: 0; }
+    .section {
+      padding: 18px;
+    }
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+    .section-head p {
+      max-width: 760px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card,
+    .problem,
+    .relation-card,
+    .evidence {
+      padding: 14px;
+    }
+    .card p,
+    .problem p,
+    .relation-card p,
+    .evidence p {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .tag.ok { background: var(--ok-soft); color: var(--ok); border-color: #bed8c9; }
+    .tag.warn { background: var(--warn-soft); color: var(--warn); border-color: #e5cea7; }
+    .tag.danger { background: var(--danger-soft); color: var(--danger); border-color: #e1bdb7; }
+    .tag.blue { background: var(--blue-soft); color: var(--blue); border-color: #c5d2ee; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .timeline-step {
+      position: relative;
+      padding: 14px;
+      min-height: 168px;
+    }
+    .step-num {
+      width: 30px;
+      height: 30px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 850;
+      margin-bottom: 10px;
+    }
+    .timeline-step ul,
+    .checklist ul,
+    .problem ul {
+      margin: 10px 0 0 18px;
+      padding: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    li { margin: 5px 0; }
+
+    .status-principle {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .status-statement,
+    .status-note {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+    .status-statement {
+      border-left: 5px solid var(--accent);
+    }
+    .status-statement strong {
+      display: block;
+      font-size: 19px;
+      line-height: 1.25;
+    }
+    .status-statement p,
+    .status-note p {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .status-note code {
+      color: var(--danger);
+    }
+
+    .lifecycle-figure {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .figure-caption {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .figure-caption strong { color: var(--ink); }
+    .lifecycle-svg {
+      display: block;
+      width: 100%;
+      min-width: 960px;
+      height: auto;
+    }
+    .lifecycle-svg text {
+      fill: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .lifecycle-svg .group-box {
+      fill: #f8fbfb;
+      stroke: #8fb8bf;
+      stroke-width: 2;
+    }
+    .lifecycle-svg .state-box {
+      fill: #fff;
+      stroke: var(--accent);
+      stroke-width: 2;
+    }
+    .lifecycle-svg .terminal-box {
+      fill: var(--ok-soft);
+      stroke: var(--ok);
+      stroke-width: 2;
+    }
+    .lifecycle-svg .canceled-box {
+      fill: var(--danger-soft);
+      stroke: var(--danger);
+      stroke-width: 2;
+    }
+    .lifecycle-svg .source-box {
+      fill: var(--soft);
+      stroke: #8f918d;
+      stroke-width: 1.5;
+      stroke-dasharray: 6 5;
+    }
+    .lifecycle-svg .edge {
+      fill: none;
+      stroke: #4c6970;
+      stroke-width: 2;
+      marker-end: url(#lifecycle-arrow);
+    }
+    .lifecycle-svg .edge.cancel {
+      stroke: var(--danger);
+      stroke-dasharray: 6 5;
+      marker-end: url(#lifecycle-arrow-danger);
+    }
+    .lifecycle-svg .group-title {
+      font-size: 15px;
+      font-weight: 850;
+      fill: var(--accent);
+    }
+    .lifecycle-svg .state-title {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 15px;
+      font-weight: 800;
+    }
+    .lifecycle-svg .state-subtitle {
+      font-size: 12px;
+      fill: var(--muted);
+    }
+    .lifecycle-svg .edge-label-bg {
+      fill: #fff;
+      stroke: var(--line);
+    }
+    .lifecycle-svg .edge-label {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      font-weight: 750;
+      fill: #405158;
+    }
+    .lifecycle-svg .cancel-label { fill: var(--danger); }
+
+    .status-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--accent);
+      border-radius: 3px;
+      background: #fff;
+    }
+    .legend-swatch.terminal { border-color: var(--ok); background: var(--ok-soft); }
+    .legend-swatch.trigger { border-color: #8f918d; border-style: dashed; background: var(--soft); }
+    .legend-line {
+      width: 22px;
+      height: 0;
+      border-top: 2px solid #4c6970;
+    }
+
+    .relation-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(170px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .relation-card {
+      min-height: 172px;
+    }
+    .relation-card h3 {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 14px;
+    }
+    .relation-card .effect {
+      margin-top: 10px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: #394650;
+      font-size: 12px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 46px 1fr 46px 1fr;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .flow-node {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fff;
+      min-height: 104px;
+    }
+    .flow-node p { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .arrow {
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      padding: 12px;
+      overflow: auto;
+      color: #27221d;
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .problem {
+      border-left: 5px solid var(--warn);
+    }
+    .problem.danger {
+      border-left-color: var(--danger);
+    }
+    .problem.ok {
+      border-left-color: var(--ok);
+    }
+    .evidence-list {
+      display: grid;
+      gap: 10px;
+    }
+    .evidence code {
+      display: block;
+      margin-top: 8px;
+      color: #3d4a52;
+      overflow-wrap: anywhere;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: #2d3740;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    .btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .copy-status {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .hidden { display: none !important; }
+
+    .decision-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .decision-table th,
+    .decision-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .decision-table th {
+      background: var(--soft);
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #4c555d;
+    }
+    .decision-table tr:last-child td { border-bottom: 0; }
+
+    footer {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 1100px) {
+      header,
+      .layout,
+      .grid-2,
+      .grid-3,
+      .status-principle {
+        grid-template-columns: 1fr;
+      }
+      nav {
+        position: static;
+        display: flex;
+        overflow-x: auto;
+      }
+      nav a { white-space: nowrap; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); min-height: 30px; }
+    }
+    @media (max-width: 680px) {
+      .shell { width: min(100vw - 20px, 1440px); padding-top: 14px; }
+      .metrics,
+      .timeline {
+        grid-template-columns: 1fr;
+      }
+      .hero { min-height: 0; }
+      .section-head {
+        display: grid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <section class="hero">
+        <div>
+          <div class="eyebrow">Task Sys lifecycle · alignment update · 2026-07-16</div>
+          <h1>一套 Task Status，一条 lifecycle 推进路径</h1>
+          <p class="lead">This HTML helps the user validate the single Task lifecycle model by showing every concrete status, every legal transition, and the runtime concepts that must stay outside the status model.</p>
+        </div>
+        <div class="pill-row" aria-label="current alignment status">
+          <span class="pill ok">Basic lifecycle focused</span>
+          <span class="pill ok">5 concrete statuses</span>
+          <span class="pill blue">One Task Sys owner</span>
+          <span class="pill warn">Relation deferred</span>
+        </div>
+      </section>
+
+      <aside class="side" aria-label="summary">
+        <div class="status-line">
+          <div class="label">Status model</div>
+          <div class="value">Task lifecycle 只有一套 Task Status；Task 的进展就是在这些状态之间推进。</div>
+        </div>
+        <div class="status-line">
+          <div class="label">In progress</div>
+          <div class="value"><code>side_processing → awaiting_parent → parent_processing</code></div>
+        </div>
+        <div class="status-line">
+          <div class="label">Terminal</div>
+          <div class="value"><code>completed</code> 或 <code>canceled</code></div>
+        </div>
+        <div class="status-line">
+          <div class="label">Not status</div>
+          <div class="value">frame、processor、handoff record、prompt、runtime event 和 Progress Check。</div>
+        </div>
+      </aside>
+    </header>
+
+    <section class="metrics" aria-label="top metrics">
+      <div class="metric">
+        <span class="label">Primary form</span>
+        <strong>System / flow explainer</strong>
+        <span>用状态节点和带动作标签的箭头表达唯一 lifecycle。</span>
+      </div>
+      <div class="metric">
+        <span class="label">Concrete statuses</span>
+        <strong>3 active + 2 terminal</strong>
+        <span><code>in_progress</code> 不能独立落地，必须明确位于其下某个状态。</span>
+      </div>
+      <div class="metric">
+        <span class="label">Semantic owner</span>
+        <strong>Task Sys</strong>
+        <span>Task Sys 唯一定义状态、合法越迁和写入入口。</span>
+      </div>
+      <div class="metric">
+        <span class="label">Review boundary</span>
+        <strong>Relation deferred</strong>
+        <span>本 memo 只保留 lifecycle 决策与 deferred relation proposal 供回顾。</span>
+      </div>
+    </section>
+
+    <div class="layout">
+      <nav aria-label="document navigation">
+        <a href="#lifecycle">Lifecycle 状态图</a>
+        <a href="#relation">Relation（暂缓）</a>
+      </nav>
+
+      <main>
+        <section id="lifecycle" class="section">
+          <div class="section-head">
+            <div>
+              <h2>Task lifecycle 状态转移</h2>
+              <p>图中的方框是 Task Status；箭头是越迁动作。除此之外没有第二套 Task 进展状态。</p>
+            </div>
+          </div>
+
+          <div class="status-principle">
+            <div class="status-statement">
+              <strong>Task Status = Task 当前进展；Lifecycle = Status 之间的推进。</strong>
+              <p><code>in_progress</code> 是状态分组，不能单独落地。一个进行中的 Task 必须明确处于 <code>side_processing</code>、<code>awaiting_parent</code> 或 <code>parent_processing</code>。</p>
+            </div>
+            <div class="status-note">
+              <div class="tag-row"><span class="tag ok">Review decision</span></div>
+              <h3>Execution facts 不是第二套状态</h3>
+              <p><code>processor</code>、handoff、frame、prompt、event 和 cleanup 只记录执行事实；Task 进展只由 canonical status 表达。</p>
+            </div>
+          </div>
+
+          <figure class="lifecycle-figure">
+            <figcaption class="figure-caption">
+              <strong>Canonical Task Status graph</strong>
+              <span>实线：主 lifecycle · 红色虚线：任一 active status 均可取消</span>
+            </figcaption>
+            <svg class="lifecycle-svg" viewBox="0 0 1280 520" role="img" aria-labelledby="lifecycle-title lifecycle-desc">
+              <title id="lifecycle-title">Task lifecycle 状态转移图</title>
+              <desc id="lifecycle-desc">受控 inbound 创建 task 后进入 side processing；side 可以关闭 task 或请求 parent；parent 接收后进入 parent processing，随后可完成；任一 in-progress 状态可以取消。</desc>
+              <defs>
+                <marker id="lifecycle-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                  <path d="M0,0 L0,6 L9,3 z" fill="#4c6970"></path>
+                </marker>
+                <marker id="lifecycle-arrow-danger" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                  <path d="M0,0 L0,6 L9,3 z" fill="#9b3e35"></path>
+                </marker>
+              </defs>
+
+              <rect class="source-box" x="18" y="119" width="118" height="76" rx="8"></rect>
+              <text class="state-title" x="77" y="148" text-anchor="middle">controlled</text>
+              <text class="state-title" x="77" y="167" text-anchor="middle">inbound</text>
+              <text class="state-subtitle" x="77" y="184" text-anchor="middle">不是 Task Status</text>
+
+              <rect class="group-box" x="164" y="35" width="1090" height="250" rx="10"></rect>
+              <text class="group-title" x="188" y="68">in_progress · 必须落在一个具体子状态</text>
+
+              <rect class="state-box" x="200" y="105" width="265" height="105" rx="8"></rect>
+              <text class="state-title" x="332" y="145" text-anchor="middle">side_processing</text>
+              <text class="state-subtitle" x="332" y="170" text-anchor="middle">side 独立处理与 Progress Check</text>
+
+              <rect class="state-box" x="550" y="105" width="265" height="105" rx="8"></rect>
+              <text class="state-title" x="682" y="145" text-anchor="middle">awaiting_parent</text>
+              <text class="state-subtitle" x="682" y="170" text-anchor="middle">等待 parent 接收同一个 task</text>
+
+              <rect class="state-box" x="900" y="105" width="265" height="105" rx="8"></rect>
+              <text class="state-title" x="1032" y="145" text-anchor="middle">parent_processing</text>
+              <text class="state-subtitle" x="1032" y="170" text-anchor="middle">parent 持续处理与 Progress Check</text>
+
+              <path class="edge" d="M136 157 H194"></path>
+              <rect class="edge-label-bg" x="139" y="124" width="53" height="22" rx="5"></rect>
+              <text class="edge-label" x="165" y="139" text-anchor="middle">create</text>
+
+              <path class="edge" d="M465 157 H544"></path>
+              <rect class="edge-label-bg" x="478" y="124" width="68" height="22" rx="5"></rect>
+              <text class="edge-label" x="512" y="139" text-anchor="middle">need_parent</text>
+
+              <path class="edge" d="M815 157 H894"></path>
+              <rect class="edge-label-bg" x="805" y="124" width="106" height="22" rx="5"></rect>
+              <text class="edge-label" x="858" y="139" text-anchor="middle">parent accepted</text>
+
+              <rect class="terminal-box" x="350" y="375" width="290" height="95" rx="8"></rect>
+              <text class="state-title" x="495" y="415" text-anchor="middle">completed</text>
+              <text class="state-subtitle" x="495" y="440" text-anchor="middle">终态 · actor 判断任务已完成</text>
+
+              <rect class="canceled-box" x="835" y="375" width="290" height="95" rx="8"></rect>
+              <text class="state-title" x="980" y="415" text-anchor="middle">canceled</text>
+              <text class="state-subtitle" x="980" y="440" text-anchor="middle">终态 · actor 合法取消</text>
+
+              <path class="edge" d="M332 210 V315 H455 V369"></path>
+              <rect class="edge-label-bg" x="348" y="291" width="84" height="22" rx="5"></rect>
+              <text class="edge-label" x="390" y="306" text-anchor="middle">actor: close</text>
+
+              <path class="edge" d="M1032 210 V315 H535 V369"></path>
+              <rect class="edge-label-bg" x="703" y="291" width="84" height="22" rx="5"></rect>
+              <text class="edge-label" x="745" y="306" text-anchor="middle">actor: close</text>
+
+              <path class="edge cancel" d="M1254 235 H1268 V334 H980 V369"></path>
+              <rect class="edge-label-bg" x="1005" y="323" width="172" height="22" rx="5"></rect>
+              <text class="edge-label cancel-label" x="1091" y="338" text-anchor="middle">cancel · any in_progress</text>
+            </svg>
+          </figure>
+
+          <div class="status-legend" aria-label="diagram legend">
+            <span class="legend-item"><span class="legend-swatch"></span>Task Status</span>
+            <span class="legend-item"><span class="legend-swatch terminal"></span>Terminal status</span>
+            <span class="legend-item"><span class="legend-swatch trigger"></span>External trigger, not status</span>
+            <span class="legend-item"><span class="legend-line"></span>Transition action</span>
+          </div>
+
+          <table class="decision-table" style="margin-top:14px">
+            <thead>
+              <tr>
+                <th>越迁动作</th>
+                <th>From</th>
+                <th>To</th>
+                <th>由什么触发</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>create</code></td>
+                <td>Task 不存在</td>
+                <td><code>in_progress.side_processing</code></td>
+                <td>受控 inbound 被 Task Sys ingest</td>
+              </tr>
+              <tr>
+                <td><code>need_parent</code></td>
+                <td><code>in_progress.side_processing</code></td>
+                <td><code>in_progress.awaiting_parent</code></td>
+                <td>side Progress Check 的 actor 判断</td>
+              </tr>
+              <tr>
+                <td><code>parent accepted</code></td>
+                <td><code>in_progress.awaiting_parent</code></td>
+                <td><code>in_progress.parent_processing</code></td>
+                <td>parent frame 成功提交的 runtime fact</td>
+              </tr>
+              <tr>
+                <td><code>close</code></td>
+                <td><code>side_processing</code> 或 <code>parent_processing</code></td>
+                <td><code>completed</code></td>
+                <td>Progress Check 的 actor 判断</td>
+              </tr>
+              <tr>
+                <td><code>cancel</code></td>
+                <td>任一 <code>in_progress.*</code></td>
+                <td><code>canceled</code></td>
+                <td>actor 调用 Task Sys cancel action</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="grid-2" style="margin-top:12px">
+            <article class="problem ok">
+              <div class="tag-row"><span class="tag ok">Check</span></div>
+              <h3>Progress Check 可能推进，也可能保持原状态</h3>
+              <p>例如 parent Progress Check 判断继续工作时，Task 仍是 <code>in_progress.parent_processing</code>；判断完成时才越迁到 <code>completed</code>。Check 本身不是状态。</p>
+            </article>
+            <article class="problem danger">
+              <div class="tag-row"><span class="tag danger">Boundary</span></div>
+              <h3>Execution facts 不再定义 lifecycle</h3>
+              <p><code>processor</code>、handoff record、frame、prompt、event 和 runtime cleanup 只能记录执行事实，不能与粗粒度 status 组合出另一套“隐式状态”。</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="relation" class="section">
+          <div class="section-head">
+            <div>
+              <h2>Relation model · deferred</h2>
+              <p>以下保留 2026-07-03 的 multi-task coordination 提案供后续回顾；它不是当前 basic lifecycle 的组成部分，也不是已确认的现行 contract。</p>
+            </div>
+          </div>
+
+          <pre>{
+  "task_relation": {
+    "kind": "independent | contributes_to | depends_on | blocks | supersedes",
+    "target_task_id": "task-id|null",
+    "note": "short source-visible reason"
+  },
+  "objective_task_id": "derived by program, not freely chosen by model"
+}</pre>
+
+          <div class="relation-grid" aria-label="relation kinds">
+            <article class="relation-card">
+              <div class="tag-row"><span class="tag ok">New line</span></div>
+              <h3>independent</h3>
+              <p>当前 task 和已有 actor-level task 没有需要 Task Sys 表达的执行关系。</p>
+              <div class="effect">Effect: 正常执行。`target_task_id = null`，主线锚点是 self。</div>
+            </article>
+            <article class="relation-card">
+              <div class="tag-row"><span class="tag blue">Merge</span></div>
+              <h3>contributes_to</h3>
+              <p>补充、约束、修正、细化、素材追加。目标 task 后续必须能看到它。</p>
+              <div class="effect">Effect: 当前 task 快速吸收/close，向 target 追加 event/context。</div>
+            </article>
+            <article class="relation-card">
+              <div class="tag-row"><span class="tag warn">Wait</span></div>
+              <h3>depends_on</h3>
+              <p>当前 task 需要目标 task 先产出，否则无法执行或会误报。</p>
+              <div class="effect">Effect: 当前 task waiting/blocked，直到 target completed。</div>
+            </article>
+            <article class="relation-card">
+              <div class="tag-row"><span class="tag warn">Pause target</span></div>
+              <h3>blocks</h3>
+              <p>当前 task 会暂停目标 task，例如“先别做，先确认/改方向”。</p>
+              <div class="effect">Effect: target 被 Progress Check 强提醒或暂停；当前 task 先处理。</div>
+            </article>
+            <article class="relation-card">
+              <div class="tag-row"><span class="tag danger">Replace</span></div>
+              <h3>supersedes</h3>
+              <p>当前 task 替代目标 task。目标 task 不应继续按旧方向执行。</p>
+              <div class="effect">Effect: target canceled/superseded，当前 task 成为新执行主线。</div>
+            </article>
+          </div>
+
+          <table class="decision-table" style="margin-top:12px">
+            <thead>
+              <tr>
+                <th>Design choice</th>
+                <th>Decision</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Graph scope</td>
+                <td>不维护全连接图</td>
+                <td>每个 task 只需要 primary relation。完整图会让模型做过重推断，也难以防错。</td>
+              </tr>
+              <tr>
+                <td>Candidate source</td>
+                <td>优先 active/recent objective candidates</td>
+                <td>不要每次把所有 actor tasks 交给模型比较。候选集应由程序收窄。</td>
+              </tr>
+              <tr>
+                <td>Objective anchor</td>
+                <td>程序派生，不让模型自由维护</td>
+                <td>避免链式漂移和循环。模型只选 kind、target、note。</td>
+              </tr>
+              <tr>
+                <td>Cross-role relation</td>
+                <td>不进 Task relation</td>
+                <td>跨 role 协作依赖 Track，task 是 actor-level 局部执行单元。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+      </main>
+    </div>
+
+    <footer>
+      Self-contained memo. No external assets or runtime dependencies.
+    </footer>
+  </div>
+
+</body>
+</html>
