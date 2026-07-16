@@ -2,38 +2,27 @@
 
 from __future__ import annotations
 
-import json
+from dataclasses import dataclass
 import queue
-import sys
-import tempfile
-import unittest
-import re
-import sqlite3
-import subprocess
 import threading
-import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from unittest import mock
-
-from tests.support.paths import REPO_ROOT
-from tests.support.cli import wait_until
-
-ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
 from tools.launcher import imessage_channel  # noqa: E402
 
 
-PROMPT = "Send /actors to choose an actor."
+@dataclass(frozen=True)
+class _FakeSendReceipt:
+    guid: str
 
 
 class _FakeBuddySwitchImApi:
     def __init__(self, *, actors: list[dict[str, Any]] | None = None) -> None:
         self.actors = actors if actors is not None else [_actor("market", "act-market-demo")]
         self.created: list[dict[str, Any]] = []
-        self.sent: list[dict[str, Any]] = []
+        self.sent_to_actor: list[dict[str, Any]] = []
+        self.replies: list[dict[str, Any]] = []
+        self.reply_results: list[dict[str, Any]] = []
         self.ack_calls: list[dict[str, Any]] = []
         self.acked: list[dict[str, Any]] = []
         self.ack_failures: dict[str, list[dict[str, Any]]] = {}
@@ -53,28 +42,52 @@ class _FakeBuddySwitchImApi:
     def list_actors(self, *, external_session_key: str) -> dict[str, Any]:
         return {"ok": True, "actors": list(self.actors), "count": len(self.actors)}
 
-    def send_message(
+    def send_to_actor(
         self,
         *,
         external_session_key: str,
         target_identity_id: str,
         content: str,
-        reply_to: str | None = None,
     ) -> dict[str, Any]:
-        message_id = f"msg-in-{len(self.sent) + 1}"
-        self.sent.append(
+        message_id = f"msg-in-{len(self.sent_to_actor) + 1}"
+        self.sent_to_actor.append(
             {
                 "external_session_key": external_session_key,
                 "target_identity_id": target_identity_id,
                 "content": content,
-                "reply_to": reply_to,
                 "message_id": message_id,
             }
         )
         return {
             "ok": True,
-            "message": {"id": message_id, "conversation_id": "conv-fake", "reply_to": reply_to},
-            "event_id": f"imev-in-{len(self.sent)}",
+            "message": {"id": message_id, "conversation_id": "conv-fake", "reply_to": None},
+            "event_id": f"imev-in-{len(self.sent_to_actor)}",
+        }
+
+    def reply_to_message(
+        self,
+        *,
+        external_session_key: str,
+        reply_to: str,
+        content: str,
+    ) -> dict[str, Any]:
+        self.replies.append(
+            {
+                "external_session_key": external_session_key,
+                "reply_to": reply_to,
+                "content": content,
+            }
+        )
+        if self.reply_results:
+            return self.reply_results.pop(0)
+        return {
+            "ok": True,
+            "message": {
+                "id": f"msg-reply-{len(self.replies)}",
+                "conversation_id": "conv-fake",
+                "reply_to": reply_to,
+            },
+            "event_id": f"imev-reply-{len(self.replies)}",
         }
 
     def read_events(self, *, external_session_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
@@ -137,8 +150,9 @@ class _FakeImsg:
     def status(self) -> None:
         return None
 
-    def send(self, *, route: dict[str, Any], text: str) -> None:
+    def send(self, *, route: dict[str, Any], text: str) -> _FakeSendReceipt:
         self.sent.append({"route": dict(route), "text": text})
+        return _FakeSendReceipt(guid=f"out-guid-{len(self.sent)}")
 
     def stop(self) -> None:
         self.stopped = True
@@ -184,23 +198,11 @@ class _FailingImsg(_FakeImsg):
         super().__init__()
         self.fail_on_call = fail_on_call
 
-    def send(self, *, route: dict[str, Any], text: str) -> None:
+    def send(self, *, route: dict[str, Any], text: str) -> _FakeSendReceipt:
         self.sent.append({"route": dict(route), "text": text})
         if len(self.sent) < self.fail_on_call:
-            return
+            return _FakeSendReceipt(guid=f"out-guid-{len(self.sent)}")
         raise imessage_channel.ChannelError("iMessage send status failed")
-
-
-class _RecoveringImsg(_FakeImsg):
-    def __init__(self, *, failures: int) -> None:
-        super().__init__()
-        self.failures = failures
-
-    def send(self, *, route: dict[str, Any], text: str) -> None:
-        self.sent.append({"route": dict(route), "text": text})
-        if self.failures > 0:
-            self.failures -= 1
-            raise imessage_channel.ChannelError("AppleEvent timed out -1712")
 
 
 def _actor(role_id: str, identity_id: str, *, status: str = "online") -> dict[str, Any]:
@@ -223,14 +225,24 @@ def _row(
     guid: str,
     chat_id: str = "6",
     is_from_me: bool = False,
+    reply_to_guid: str | None = None,
+    thread_originator_guid: str | None = None,
+    reply_to_text: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    row: dict[str, Any] = {
         "guid": guid,
         "chat_id": chat_id,
         "is_from_me": is_from_me,
         "sender": sender,
         "text": text,
     }
+    if reply_to_guid is not None:
+        row["reply_to_guid"] = reply_to_guid
+    if thread_originator_guid is not None:
+        row["thread_originator_guid"] = thread_originator_guid
+    if reply_to_text is not None:
+        row["reply_to_text"] = reply_to_text
+    return row
 
 
 def _controller(
@@ -238,7 +250,6 @@ def _controller(
     *,
     api: _FakeBuddySwitchImApi | None = None,
     imsg: _FakeImsg | None = None,
-    now_fn: Any | None = None,
 ) -> tuple[imessage_channel.ImessageChannelController, _FakeBuddySwitchImApi, _FakeImsg]:
     api = api or _FakeBuddySwitchImApi()
     imsg = imsg or _FakeImsg()
@@ -246,34 +257,24 @@ def _controller(
         server="http://127.0.0.1:8765",
         state_path=temp_root / "state.json",
     )
-    kwargs: dict[str, Any] = {"config": config, "api": api, "imsg": imsg}
-    if now_fn is not None:
-        kwargs["now_fn"] = now_fn
-    return imessage_channel.ImessageChannelController(**kwargs), api, imsg
+    return imessage_channel.ImessageChannelController(config=config, api=api, imsg=imsg), api, imsg
 
 
-def _fixed_now() -> datetime:
-    return datetime(2026, 7, 8, 4, 0, 0, tzinfo=timezone.utc)
-
-
-def _format_test_utc(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _schema_v4_state() -> dict[str, Any]:
+def _current_state() -> dict[str, Any]:
     return {
-        "schema_version": 4,
+        "schema_version": 6,
         "contacts": {
             "sender:user-a@example.com": {
                 "external_session_key": "imsk-existing",
                 "external_identity_id": "ext-existing",
                 "route": {"chat_id": "9", "sender": "user-a@example.com"},
-                "active_identity_id": "act-market-demo",
-                "active_identity_expires_at": "2026-07-10T12:30:00Z",
-                "pending_actor_choices": {"1": "act-market-demo"},
-                "pending_actor_choices_expires_at": "2026-07-10T12:05:00Z",
                 "seen_inbound_keys": ["guid:seen"],
-                "sent_outbound_event_ids": ["imev-sent"],
+                "message_links": {
+                    "ACTOR-BUBBLE-GUID": {
+                        "message_id": "msg-actor-1",
+                        "event_id": "imev-actor-1",
+                    }
+                },
             }
         },
     }
