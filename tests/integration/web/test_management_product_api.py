@@ -446,19 +446,20 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         console = payload["console"]
         self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
         self.assertEqual(console["runtime"]["thread_status"], "idle")
-        self.assertEqual(console["task_sys"]["active_count"], 1)
+        self.assertEqual(console["task_sys"]["active_count"], 2)
         self.assertEqual(console["task_sys"]["recoverable_count"], 1)
-        external_task_keys = ("task_id", "source_type", "status", "task_desc", "actor", "relation", "updated_at")
-        active_task = console["task_sys"]["active_tasks"][0]
+        external_task_keys = ("task_id", "source_type", "status", "actor", "updated_at")
+        active_task = next(
+            row for row in console["task_sys"]["active_tasks"] if row["task_id"] == task_result["task_id"]
+        )
         recoverable_task = console["task_sys"]["recoverable_tasks"][0]
         self.assertEqual(tuple(active_task.keys()), external_task_keys)
         self.assertEqual(tuple(recoverable_task.keys()), external_task_keys)
         self.assertEqual(active_task["task_id"], task_result["task_id"])
-        self.assertEqual(active_task["status"], "in_progress")
+        self.assertEqual(active_task["status"], "in_progress.side_processing")
         self.assertEqual(active_task["actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
-        self.assertEqual(active_task["relation"], {"kind": "independent", "target_task_id": None})
         self.assertEqual(recoverable_task["task_id"], failed_result["task_id"])
-        self.assertEqual(recoverable_task["status"], "in_progress")
+        self.assertEqual(recoverable_task["status"], "in_progress.side_processing")
         for row in (active_task, recoverable_task):
             self.assertNotIn("execution", row)
             self.assertNotIn("task_relation", row)

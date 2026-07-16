@@ -50,22 +50,11 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
 
     def _move_to_parent_processing(self, task_id: str) -> None:
         task_sys = _task_sys()
-        task_sys.record_task_analysis_update(
-            task_id,
-            {
-                "task_desc": "Draft brief",
-                "task_relation": {"kind": "independent", "target_task_id": None},
-            },
-        )
         task_sys.record_side_need_parent(
             task_id,
             {
                 "params": {
-                    "parent_frame_context": {
-                        "next": "Draft in parent.",
-                        "task_desc": "Draft brief",
-                        "task_relation": {"kind": "independent", "target_task_id": None},
-                    },
+                    "parent_frame_context": {"next": "Draft in parent."},
                     "interrupt": False,
                 },
             },
@@ -97,23 +86,12 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
     def test_side_need_parent_records_handoff_params_without_interrupt_outcome(self) -> None:
         task_sys = _task_sys()
         task_id = task_sys.ingest(self._envelope())["task_id"]
-        task_sys.record_task_analysis_update(
-            task_id,
-            {
-                "task_desc": "Draft brief",
-                "task_relation": {"kind": "independent", "target_task_id": None},
-            },
-        )
 
         result = task_sys.record_side_need_parent(
             task_id,
             {
                 "params": {
-                    "parent_frame_context": {
-                        "next": "Ask parent to draft the brief.",
-                        "task_desc": "Draft brief",
-                        "task_relation": {"kind": "independent", "target_task_id": None},
-                    },
+                    "parent_frame_context": {"next": "Ask parent to draft the brief."},
                     "interrupt": True,
                     "ordering": {"priority": "normal"},
                 },
@@ -123,16 +101,12 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
         self.assertTrue(result["ok"], msg=result)
         self.assertEqual(result["outcome"], "need_parent")
         record = self._task_record(task_id)
-        self.assertEqual(record["status"], "in_progress")
+        self.assertEqual(record["status"], "in_progress.awaiting_parent")
         self.assertEqual(record["execution"]["processor"], None)
         self.assertEqual(
             record["execution"]["handoff"],
             {
-                "parent_frame_context": {
-                    "next": "Ask parent to draft the brief.",
-                    "task_desc": "Draft brief",
-                    "task_relation": {"kind": "independent", "target_task_id": None},
-                },
+                "parent_frame_context": {"next": "Ask parent to draft the brief."},
                 "interrupt": True,
                 "ordering": {"priority": "normal"},
                 "side_thread_id": None,

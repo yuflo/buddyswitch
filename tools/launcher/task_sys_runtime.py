@@ -122,6 +122,7 @@ def _render_im_message_task_guidance(*, frame_kind: str) -> tuple[str, str, str]
                 "Allowed message operations for completing this IM-source task:",
                 *_im_message_tool_capability_lines(),
                 close_line,
+                "- If the actor decides the Task must stop without completion, call task_sys.cancel(task_id=..., reason=...).",
             )
         ),
         "Message task boundary:",
@@ -166,8 +167,7 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             (
                 "A side thread may handle the task only when completion requires this task_sys.side_frame, exact "
                 "source objects referenced by this frame, bounded read-only inspection, source-specific message "
-                "tools allowed by this frame, one Task Sys relation-analysis operation, and one Task Sys completion "
-                "operation."
+                "tools allowed by this frame, and one Task Sys completion operation."
             ),
             (
                 "If the task requires parent attention, workspace resources, browser/web/research resources, shared "
@@ -193,16 +193,9 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             "\n".join(
                 (
                     "2. Task Sys frame operation",
-                    "First record relation analysis for this task:",
-                    "- derive task_desc from the source-visible request.",
-                    "- read relation context with task_sys.list(status=all) or task_sys.get(task_id=...).",
-                    (
-                        "- call task_sys.update_task_analysis(task_id=..., task_desc=..., task_relation=...) "
-                        "before deciding whether side may continue."
-                    ),
-                    "Side may continue only when task_relation.kind == independent and all required resources are allowed.",
                     "Finish this frame with one legal completion operation:",
                     "- task_sys.close(task_id=..., summary=...) when the task is completed in side.",
+                    "- task_sys.cancel(task_id=..., reason=...) when the task must stop without completion.",
                     (
                         "- task_sys.need_parent(task_id=..., params={parent_frame_context, interrupt, "
                         "ordering}) when parent work is required."
@@ -227,22 +220,15 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             "\n".join(
                 (
                     "1. Identify the resources required to complete the user-visible task.",
+                    "2. If all required resources are allowed side resources, complete the task in side.",
+                    "3. If any required resource is forbidden or belongs to parent, call task_sys.need_parent.",
                     (
-                        "2. Generate task_desc, read relation context with task_sys.list(status=all) or "
-                        "task_sys.get(task_id=...), and persist task_relation with task_sys.update_task_analysis."
-                    ),
-                    (
-                        "3. If task_relation.kind == independent and all required resources are allowed side "
-                        "resources, complete the task in side."
-                    ),
-                    "4. If any required resource is forbidden, non-independent, or belongs to parent, call task_sys.need_parent.",
-                    (
-                        "5. Do not call task_sys.need_parent for message work that this frame's source-specific "
+                        "4. Do not call task_sys.need_parent for message work that this frame's source-specific "
                         "message guidance allows."
                     ),
                     (
-                        "6. Do call task_sys.need_parent for non-independent relation handling, research, "
-                        "implementation, planning, verification, shared product-state writes, Track replies, "
+                        "5. Do call task_sys.need_parent for research, implementation, planning, verification, "
+                        "shared product-state writes, Track replies, "
                         "artifact/evidence output, browser/web use, or parent-thread continuity."
                     ),
                 )
@@ -269,7 +255,6 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     "- what the source asked for,",
                     "- what side inspected,",
                     "- why parent resources are required,",
-                    "- task_desc and task_relation,",
                     "- any exact source ids needed by parent,",
                     "- any failure details if side could not safely close.",
                     (
@@ -278,10 +263,9 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     ),
                 )
             ),
-            "Allowed relation-analysis operation:",
-            "- task_sys.update_task_analysis(task_id=..., task_desc=..., task_relation=...)",
             "Allowed frame completion operations:",
             "- task_sys.close(task_id=..., summary=...) when the task is completed in side.",
+            "- task_sys.cancel(task_id=..., reason=...) when the task must stop without completion.",
             "- task_sys.need_parent(task_id=..., params={parent_frame_context, interrupt, ordering})",
             "Do not use any other Task Sys operation from side. Treat interrupt only as a task_sys.need_parent params field.",
         )
@@ -313,6 +297,7 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
                     "- message.send(target_identity_id=..., content=...)",
                     "- message.mark(message_id=..., disposition=absorbed)",
                     "- task_sys.close(task_id=..., summary=...)",
+                    "- task_sys.cancel(task_id=..., reason=...)",
                 )
             ),
         )
@@ -331,6 +316,7 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
                 (
                     "- message.send(target_identity_id=..., content=...) when execution_handoff requires outbound communication.",
                     "- task_sys.close(task_id=..., summary=...)",
+                    "- task_sys.cancel(task_id=..., reason=...)",
                 )
             ),
         )
@@ -344,7 +330,12 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
                 )
             ),
             "Allowed parent frame operations:",
-            "- task_sys.close(task_id=..., summary=...)",
+            "\n".join(
+                (
+                    "- task_sys.close(task_id=..., summary=...)",
+                    "- task_sys.cancel(task_id=..., reason=...)",
+                )
+            ),
         )
     return "\n\n".join(
         (
@@ -354,15 +345,12 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
             _json_block(source),
             "Inbound context:",
             _json_block(_require_mapping(payload.get("inbound_context"), "frame.inbound_context")),
-            "Task desc:",
-            _require_text(payload.get("task_desc"), "frame.task_desc"),
-            "Task relation:",
-            _json_block(_require_mapping(payload.get("task_relation"), "frame.task_relation")),
             "Execution handoff:",
             _json_block(_require_mapping(payload.get("execution_handoff"), "frame.execution_handoff")),
             "Required action:",
             "Process this Task Sys parent frame. Use source refs and task context; do not assume raw inbound outside this frame.",
             "When the source task is complete, call task_sys.close(task_id=..., summary=...).",
+            "If the Task must stop without completion, call task_sys.cancel(task_id=..., reason=...).",
             "Do not rely on parent turn completion to close this Task Sys task.",
             *source_guidance,
         )
@@ -375,6 +363,55 @@ def render_submit_parent_frame(frame: Mapping[str, Any]) -> str:
     if kind == "task_sys.parent_frame":
         return render_parent_frame(payload)
     raise ValueError(f"unsupported submit_parent frame kind: {kind}")
+
+
+def render_parent_progress_check(
+    task: Mapping[str, Any],
+    previous_turn: Mapping[str, Any],
+) -> str:
+    payload = _require_mapping(task, "task")
+    task_id = _require_text(payload.get("id"), "task.id")
+    status = _require_text(payload.get("status"), "task.status")
+    if status != task_sys.PARENT_PROCESSING:
+        raise ValueError("parent Progress Check requires an in_progress.parent_processing task")
+    turn = _require_mapping(previous_turn, "previous_turn")
+    turn_id = _require_text(turn.get("turn_id"), "previous_turn.turn_id")
+    thread_id = _require_text(turn.get("thread_id"), "previous_turn.thread_id")
+    turn_status = _require_text(turn.get("status"), "previous_turn.status")
+    if turn_status != "completed":
+        raise ValueError("parent Progress Check requires a completed previous turn")
+
+    source_ref = payload.get("source_ref")
+    source = {
+        "type": _require_text(payload.get("source_type"), "task.source_type"),
+        "ref": dict(source_ref) if isinstance(source_ref, Mapping) else {},
+    }
+    events = payload.get("events")
+    last_event: dict[str, Any] = {}
+    if isinstance(events, list) and events and isinstance(events[-1], Mapping):
+        last_event = dict(events[-1])
+
+    return "\n\n".join(
+        (
+            "[TASK PROGRESS CHECK]",
+            "Review the existing parent-owned Task after the previous main-thread turn completed.",
+            f"Previous main-thread turn: {turn_id} on {thread_id}",
+            f"Existing Task id: {task_id}",
+            f"Canonical Task status: {status}",
+            "Task source:\n" + _json_block(source),
+            "Last lifecycle event:\n" + _json_block(last_event),
+            "Actor decision:",
+            "\n".join(
+                (
+                    f"- If the Task is complete, call task_sys.close(task_id=\"{task_id}\", summary=...).",
+                    f"- If the Task must stop without completion, call task_sys.cancel(task_id=\"{task_id}\", reason=...).",
+                    "- If more parent work is required, continue that work in this turn; do not mutate Task status merely for continuing.",
+                    f"- On continue, status remains {task_sys.PARENT_PROCESSING} until the actor explicitly closes or cancels the Task.",
+                )
+            ),
+            "This Progress Check is bound to the existing Task. Do not create another Task or infer completion from turn completion alone.",
+        )
+    )
 
 
 def _main_thread_id(context: Any) -> str:
@@ -399,6 +436,27 @@ def _workspace_dir(context: Any) -> Path:
 
 def _project_workspace_dir(context: Any) -> Path:
     return _context_path(context, "project_workspace_dir")
+
+
+def submit_parent_progress_check(
+    context: Any,
+    task: Mapping[str, Any],
+    previous_turn: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = _require_mapping(task, "task")
+    task_id = _require_text(payload.get("id"), "task.id")
+    result = actor_session.input_actor_turn(
+        socket_path=_socket_path(context),
+        instance_json=_instance_json(context),
+        thread_id=_main_thread_id(context),
+        text=render_parent_progress_check(payload, previous_turn),
+        permissions=_permissions(context),
+    )
+    return {
+        "action": "progress_check",
+        "task_id": task_id,
+        "turn_id": _turn_id_from_submit_result(_require_mapping(result, "submit result")),
+    }
 
 
 def cleanup_side_lease(context: Any, task_id: str) -> dict[str, Any]:

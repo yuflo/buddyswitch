@@ -123,13 +123,13 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_list_comments = catalog.get_action_definition("track", "list_comments").input_schema
         track_resolve_comment = catalog.get_action_definition("track", "resolve_comment_thread").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
-        self.assertEqual(set(catalog.supported_actions("task_sys")), {"list", "get", "close", "need_parent", "update_task_analysis"})
+        self.assertEqual(set(catalog.supported_actions("task_sys")), {"list", "get", "close", "cancel", "need_parent"})
         task_sys_list = catalog.get_action_definition("task_sys", "list").input_schema
         task_sys_get = catalog.get_action_definition("task_sys", "get").input_schema
         task_sys_close = catalog.get_action_definition("task_sys", "close").input_schema
+        task_sys_cancel_action = catalog.get_action_definition("task_sys", "cancel")
+        task_sys_cancel = task_sys_cancel_action.input_schema
         task_sys_need_parent = catalog.get_action_definition("task_sys", "need_parent").input_schema
-        task_sys_update_analysis_action = catalog.get_action_definition("task_sys", "update_task_analysis")
-        task_sys_update_analysis = task_sys_update_analysis_action.input_schema
         context_get = catalog.get_action_definition("context", "get").input_schema
         context_summarize = catalog.get_action_definition("context", "summarize").input_schema
         evidence_issue = catalog.get_action_definition("evidence", "issue_browser").input_schema
@@ -229,18 +229,13 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(task_sys_get.get("required"), ["task_id"])
         self.assertEqual(task_sys_get["properties"]["task_id"].get("type"), "string")
         self.assertEqual(task_sys_close.get("required"), ["task_id"])
+        self.assertEqual(task_sys_cancel.get("required"), ["task_id"])
+        self.assertEqual(task_sys_cancel_action.required_permission, "task_sys.cancel")
+        self.assertEqual(task_sys_cancel["properties"]["task_id"].get("type"), "string")
+        self.assertEqual(task_sys_cancel["properties"]["reason"].get("type"), "string")
         self.assertEqual(task_sys_need_parent.get("required"), ["task_id", "params"])
         self.assertEqual(task_sys_need_parent["properties"]["params"]["properties"]["interrupt"].get("type"), "boolean")
         self.assertNotIn("relation", task_sys_need_parent["properties"]["params"]["properties"])
-        self.assertEqual(set(task_sys_update_analysis.get("required", [])), {"task_id", "task_desc", "task_relation"})
-        self.assertEqual(task_sys_update_analysis_action.required_permission, "task_sys.update_task_analysis")
-        self.assertEqual(task_sys_update_analysis["properties"]["task_id"].get("type"), "string")
-        self.assertEqual(task_sys_update_analysis["properties"]["task_desc"].get("type"), "string")
-        relation_schema = task_sys_update_analysis["properties"]["task_relation"]
-        self.assertEqual(relation_schema.get("type"), "object")
-        self.assertEqual(relation_schema.get("required"), ["kind"])
-        self.assertEqual(relation_schema["properties"]["kind"].get("enum"), ["independent", "after", "before"])
-        self.assertEqual(relation_schema["properties"]["target_task_id"].get("type"), ["string", "null"])
 
         self.assertEqual(context_get["properties"]["limit"].get("type"), "integer")
         self.assertEqual(context_get["properties"]["limit"].get("minimum"), 1)

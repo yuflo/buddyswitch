@@ -67,7 +67,7 @@ local request validation and Terminal handoff.
 
 Task Sys remains the internal actor-runtime mutation and classification owner.
 Internal runtime tools may use `actor_task_projection` and explicit mutations
-such as `task_sys.update_task_analysis`.
+such as `task_sys.close`, `task_sys.cancel`, and `task_sys.need_parent`.
 
 External interfaces use external-safe Task/Track projections only:
 

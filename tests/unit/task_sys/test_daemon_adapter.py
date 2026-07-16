@@ -78,3 +78,14 @@ class TaskSysDaemonAdapterTests(unittest.TestCase):
         self.assertEqual(calls, [(context, "task-user-input-cleanup123")])
         with self.assertRaisesRegex(ValueError, "task_id"):
             adapter.command_handlers(context)[protocol.CLEANUP_SIDE_LEASE]({"task_id": ""})
+
+    def test_progress_check_handler_owns_only_turn_completed_notifications(self) -> None:
+        adapter = _load_module(ADAPTER_PATH, "buddyswitch_task_sys_adapter_progress_test")
+        handler = adapter.TaskSysProgressCheckHandler()
+
+        completed = type("Trigger", (), {"type": "app_server.turn_completed"})()
+        message = type("Trigger", (), {"type": "im.message.created"})()
+
+        self.assertEqual(handler.name, "task_sys_progress_check")
+        self.assertTrue(handler.handles(completed))
+        self.assertFalse(handler.handles(message))

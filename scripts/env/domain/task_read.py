@@ -50,24 +50,12 @@ def _matches_actor(record: Mapping[str, Any], actor_target: Mapping[str, str] | 
     return _record_actor(record) == dict(actor_target)
 
 
-def _record_relation(record: Mapping[str, Any]) -> dict[str, Any] | None:
-    relation = record.get("task_relation")
-    if not isinstance(relation, Mapping):
-        return None
-    return {
-        "kind": relation.get("kind"),
-        "target_task_id": relation.get("target_task_id"),
-    }
-
-
 def external_task_projection(task: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "task_id": task.get("id"),
         "source_type": task.get("source_type"),
         "status": task.get("status"),
-        "task_desc": task.get("task_desc"),
         "actor": _record_actor(task),
-        "relation": _record_relation(task),
         "updated_at": task.get("updated_at"),
     }
 
@@ -137,14 +125,11 @@ def _execution_result(record: Mapping[str, Any]) -> Mapping[str, Any] | None:
 
 
 def _is_active_task(record: Mapping[str, Any]) -> bool:
-    if record.get("status") != "in_progress":
-        return False
-    result = _execution_result(record)
-    return not (isinstance(result, Mapping) and result.get("type") == "failure")
+    return record.get("status") in task_sys.ACTIVE_TASK_STATUSES
 
 
 def _is_recoverable_task(record: Mapping[str, Any]) -> bool:
-    if record.get("status") != "in_progress":
+    if record.get("status") != task_sys.SIDE_PROCESSING:
         return False
     result = _execution_result(record)
     return (

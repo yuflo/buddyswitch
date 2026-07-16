@@ -9,10 +9,25 @@ from uuid import uuid4
 from env.domain.identity import ActorIdentityProfile
 from env.repos import runtime_files
 
-TASK_STATUSES = ("in_progress", "completed", "canceled")
-ACTIVE_TASK_STATUSES = ("in_progress",)
+SIDE_PROCESSING = "in_progress.side_processing"
+AWAITING_PARENT = "in_progress.awaiting_parent"
+PARENT_PROCESSING = "in_progress.parent_processing"
+COMPLETED = "completed"
+CANCELED = "canceled"
+
+TASK_STATUSES = (SIDE_PROCESSING, AWAITING_PARENT, PARENT_PROCESSING, COMPLETED, CANCELED)
+ACTIVE_TASK_STATUSES = (SIDE_PROCESSING, AWAITING_PARENT, PARENT_PROCESSING)
+LEGAL_TASK_TRANSITIONS = {
+    "need_parent": {SIDE_PROCESSING: AWAITING_PARENT},
+    "parent_accepted": {AWAITING_PARENT: PARENT_PROCESSING},
+    "close": {SIDE_PROCESSING: COMPLETED, PARENT_PROCESSING: COMPLETED},
+    "cancel": {
+        SIDE_PROCESSING: CANCELED,
+        AWAITING_PARENT: CANCELED,
+        PARENT_PROCESSING: CANCELED,
+    },
+}
 RECOVERABLE_TASK_REASONS = ("runtime_failed", "side_no_result", "side_timed_out")
-TASK_RELATION_KINDS = ("independent", "after", "before")
 RUNTIME_INSTRUCTION_TYPES = ("start_side", "submit_parent", "interrupt_submit_parent")
 
 
@@ -49,51 +64,6 @@ def _normalize_actor_target(value: Any) -> dict[str, str]:
 
 def _normalize_context(value: Any) -> dict[str, Any]:
     return _payload_copy(_require_mapping(value, "context"))
-
-
-def _default_task_relation() -> dict[str, Any]:
-    return {"kind": "independent", "target_task_id": None}
-
-
-def _normalize_task_desc(value: Any) -> str:
-    if not isinstance(value, str):
-        raise ValueError("task_desc must be a non-empty string shorter than 50 characters")
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError("task_desc must be a non-empty string shorter than 50 characters")
-    if len(normalized) >= 50:
-        raise ValueError("task_desc must be shorter than 50 characters")
-    return normalized
-
-
-def _normalize_task_relation(
-    value: Any,
-    *,
-    current_task_id: str,
-    actor_target: Mapping[str, Any],
-) -> dict[str, Any]:
-    relation = _require_mapping(value, "task_relation")
-    kind = _require_text(relation.get("kind"), "task_relation.kind")
-    if kind not in TASK_RELATION_KINDS:
-        raise ValueError(f"task_relation.kind must be one of {', '.join(TASK_RELATION_KINDS)}")
-    target_value = relation.get("target_task_id")
-    if kind == "independent":
-        if target_value is not None:
-            raise ValueError("task_relation.target_task_id must be null for independent relation")
-        return _default_task_relation()
-    if not isinstance(target_value, str) or not target_value.strip():
-        raise ValueError("task_relation.target_task_id is required for after or before relation")
-    target_task_id = runtime_files.require_id(target_value.strip(), "task_relation.target_task_id")
-    if target_task_id == current_task_id:
-        raise ValueError("task_relation target_task_id cannot reference self")
-    try:
-        target_task = _load_task(target_task_id)
-    except ValueError as exc:
-        raise ValueError(f"task_relation target task not found: {target_task_id}") from exc
-    target_actor = target_task.get("actor_target")
-    if not isinstance(target_actor, Mapping) or _normalize_actor_target(target_actor) != _normalize_actor_target(actor_target):
-        raise ValueError("task_relation target task must belong to the same actor")
-    return {"kind": kind, "target_task_id": target_task_id}
 
 
 def _normalize_failure_reason(value: Any) -> str:
@@ -161,35 +131,12 @@ def _execution_result(record: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return _require_mapping(result, "task.execution.result")
 
 
-def _recorded_task_desc(record: Mapping[str, Any]) -> str:
-    value = record.get("task_desc")
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("task analysis must be recorded before parent handoff")
-    return value.strip()
-
-
-def _recorded_task_relation(record: Mapping[str, Any]) -> dict[str, Any]:
-    relation = _require_mapping(record.get("task_relation"), "task.task_relation")
-    kind = relation.get("kind")
-    target_task_id = relation.get("target_task_id")
-    if kind not in TASK_RELATION_KINDS:
-        raise ValueError("task analysis must be recorded before parent handoff")
-    if kind == "independent" and target_task_id is not None:
-        raise ValueError("task analysis must be recorded before parent handoff")
-    if kind in {"after", "before"} and (not isinstance(target_task_id, str) or not target_task_id.strip()):
-        raise ValueError("task analysis must be recorded before parent handoff")
-    return {"kind": str(kind), "target_task_id": target_task_id}
-
-
 def _is_active_task(record: Mapping[str, Any]) -> bool:
-    if record.get("status") != "in_progress":
-        return False
-    result = _execution_result(record)
-    return not (isinstance(result, Mapping) and result.get("type") == "failure")
+    return record.get("status") in ACTIVE_TASK_STATUSES
 
 
 def _is_recoverable_task(record: Mapping[str, Any]) -> bool:
-    if record.get("status") != "in_progress":
+    if record.get("status") != SIDE_PROCESSING:
         return False
     result = _execution_result(record)
     return isinstance(result, Mapping) and result.get("type") == "failure" and result.get("reason") in RECOVERABLE_TASK_REASONS
@@ -219,6 +166,18 @@ def _append_event(record: dict[str, Any], event_type: str, *, at: str, data: Map
     if not isinstance(events, list):
         events = []
     record["events"] = [*events, _event(event_type, at=at, data=data)]
+
+
+def _transition_status(record: dict[str, Any], action: str, *, at: str) -> str:
+    transitions = LEGAL_TASK_TRANSITIONS.get(action)
+    if transitions is None:
+        raise ValueError(f"unsupported task lifecycle action: {action}")
+    current = record.get("status")
+    next_status = transitions.get(current)
+    if next_status is None:
+        raise ValueError(f"task status {current!r} cannot transition via {action}")
+    record.update({"status": next_status, "updated_at": at})
+    return next_status
 
 
 def _reject_unsupported_ingest_fields(payload: Mapping[str, Any]) -> None:
@@ -257,8 +216,6 @@ def _parent_frame(record: Mapping[str, Any]) -> dict[str, Any]:
         },
         "actor_target": _normalize_actor_target(record.get("actor_target")),
         "inbound_context": _payload_copy(_require_mapping(record.get("inbound_context"), "task.inbound_context")),
-        "task_desc": _recorded_task_desc(record),
-        "task_relation": _recorded_task_relation(record),
         "execution_handoff": handoff,
     }
 
@@ -325,7 +282,6 @@ def task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
 
     task_id = task.get("id")
     source_ref = task.get("source_ref")
-    task_relation = task.get("task_relation")
     execution = task.get("execution")
     events = task.get("events")
     return {
@@ -334,8 +290,6 @@ def task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
         "source_type": task.get("source_type"),
         "source_ref": _payload_copy(source_ref) if isinstance(source_ref, Mapping) else {},
         "status": task.get("status"),
-        "task_desc": task.get("task_desc"),
-        "task_relation": _payload_copy(task_relation) if isinstance(task_relation, Mapping) else None,
         "execution": _payload_copy(execution) if isinstance(execution, Mapping) else {},
         "updated_at": task.get("updated_at"),
         "event_types": [
@@ -395,9 +349,7 @@ def ingest(envelope: Mapping[str, Any]) -> dict[str, Any]:
         "source_ref": _payload_copy(source["ref"]),
         "actor_target": actor_target,
         "inbound_context": context,
-        "status": "in_progress",
-        "task_desc": None,
-        "task_relation": _default_task_relation(),
+        "status": SIDE_PROCESSING,
         "execution": _new_execution("side"),
         "events": [
             _event("created", at=now),
@@ -421,14 +373,11 @@ def record_task_close(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]
     status = record.get("status")
 
     existing_result = _execution_result(record)
-    if status == "completed" and isinstance(existing_result, Mapping) and existing_result.get("type") == "completion":
+    if status == COMPLETED and isinstance(existing_result, Mapping) and existing_result.get("type") == "completion":
         return {"ok": True, "task_id": normalized_task_id, "outcome": "close", "task": record, "state_changed": False}
-    if status != "in_progress":
-        raise ValueError("task must be in progress with side or parent processor before close")
-
-    processor = _execution_processor(record)
-    if processor not in {"side", "parent"}:
-        raise ValueError("task must have side or parent processor before close")
+    processor = "side" if status == SIDE_PROCESSING else "parent" if status == PARENT_PROCESSING else None
+    if processor is None:
+        raise ValueError(f"task status {status!r} cannot transition via close")
     now = runtime_files.now_iso()
     completion_result: dict[str, Any] = {"type": "completion", "processor": processor, "updated_at": now}
     summary = payload.get("summary")
@@ -437,11 +386,46 @@ def record_task_close(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]
     execution = _payload_copy(_execution(record))
     execution["processor"] = None
     execution["result"] = completion_result
-    record.update({"status": "completed", "execution": execution, "updated_at": now})
+    record["execution"] = execution
+    _transition_status(record, "close", at=now)
     _append_event(record, "closed", at=now, data={"processor": processor})
 
     persisted = _persist_task(record)
     return {"ok": True, "task_id": normalized_task_id, "outcome": "close", "task": persisted, "state_changed": True}
+
+
+def record_task_cancel(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
+    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    payload = _require_mapping(update, "task cancel")
+    record = _load_task(normalized_task_id)
+    status = record.get("status")
+    existing_result = _execution_result(record)
+    if status == CANCELED and isinstance(existing_result, Mapping) and existing_result.get("type") == "cancellation":
+        return {"ok": True, "task_id": normalized_task_id, "outcome": "cancel", "task": record, "state_changed": False}
+    if status not in ACTIVE_TASK_STATUSES:
+        raise ValueError(f"task status {status!r} cannot transition via cancel")
+
+    now = runtime_files.now_iso()
+    cancellation_result: dict[str, Any] = {
+        "type": "cancellation",
+        "previous_status": status,
+        "updated_at": now,
+    }
+    processor = "side" if status == SIDE_PROCESSING else "parent" if status == PARENT_PROCESSING else None
+    if processor is not None:
+        cancellation_result["processor"] = processor
+    reason = payload.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        cancellation_result["reason"] = reason.strip()
+    execution = _payload_copy(_execution(record))
+    execution["processor"] = None
+    execution["result"] = cancellation_result
+    record["execution"] = execution
+    _transition_status(record, "cancel", at=now)
+    _append_event(record, "canceled", at=now, data={"previous_status": status})
+
+    persisted = _persist_task(record)
+    return {"ok": True, "task_id": normalized_task_id, "outcome": "cancel", "task": persisted, "state_changed": True}
 
 
 def record_side_need_parent(task_id: str, result: Mapping[str, Any]) -> dict[str, Any]:
@@ -449,48 +433,18 @@ def record_side_need_parent(task_id: str, result: Mapping[str, Any]) -> dict[str
     payload = _require_mapping(result, "side need_parent result")
     params = _normalize_handoff_params(payload.get("params"))
     record = _load_task(normalized_task_id)
-    if record.get("status") != "in_progress" or _execution_processor(record) != "side" or _execution_result(record) is not None:
-        raise ValueError("task must be in progress with side processor before parent handoff")
-    _recorded_task_desc(record)
-    _recorded_task_relation(record)
+    if record.get("status") != SIDE_PROCESSING:
+        raise ValueError(f"task status {record.get('status')!r} cannot transition via need_parent")
     now = runtime_files.now_iso()
     execution = _payload_copy(_execution(record))
     execution["processor"] = None
     execution["handoff"] = params
-    record.update({"status": "in_progress", "execution": execution, "updated_at": now})
+    record["execution"] = execution
+    _transition_status(record, "need_parent", at=now)
     _append_event(record, "side_parent_requested", at=now, data={"interrupt": params.get("interrupt") is True})
 
     persisted = _persist_task(record)
     return {"ok": True, "task_id": normalized_task_id, "outcome": "need_parent", "task": persisted, "state_changed": True}
-
-
-def record_task_analysis_update(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _require_mapping(update, "task analysis update")
-    record = _load_task(normalized_task_id)
-    task_desc = _normalize_task_desc(payload.get("task_desc"))
-    task_relation = _normalize_task_relation(
-        payload.get("task_relation"),
-        current_task_id=normalized_task_id,
-        actor_target=_normalize_actor_target(record.get("actor_target")),
-    )
-    now = runtime_files.now_iso()
-    record.update(
-        {
-            "task_desc": task_desc,
-            "task_relation": task_relation,
-            "updated_at": now,
-        }
-    )
-    _append_event(record, "task_analysis_updated", at=now, data={"relation_kind": task_relation["kind"]})
-    persisted = _persist_task(record)
-    return {
-        "ok": True,
-        "task_id": normalized_task_id,
-        "outcome": "task_analysis_updated",
-        "task": persisted,
-        "state_changed": True,
-    }
 
 
 def record_side_runtime_failure(task_id: str, failure: Mapping[str, Any]) -> dict[str, Any]:
@@ -498,8 +452,8 @@ def record_side_runtime_failure(task_id: str, failure: Mapping[str, Any]) -> dic
     payload = _payload_copy(_require_mapping(failure, "side runtime failure"))
     reason = _normalize_failure_reason(payload.pop("reason", None))
     record = _load_task(normalized_task_id)
-    if record.get("status") != "in_progress" or _execution_processor(record) != "side":
-        raise ValueError("task must be in progress with side processor before side runtime failure")
+    if record.get("status") != SIDE_PROCESSING:
+        raise ValueError("task must be in side processing before side runtime failure")
 
     now = runtime_files.now_iso()
     result_payload: dict[str, Any] = {
@@ -530,7 +484,7 @@ def record_side_runtime_failure(task_id: str, failure: Mapping[str, Any]) -> dic
     execution = _payload_copy(_execution(record))
     execution["processor"] = None
     execution["result"] = result_payload
-    record.update({"status": "in_progress", "execution": execution, "updated_at": now})
+    record.update({"execution": execution, "updated_at": now})
     _append_event(record, "side_runtime_failed", at=now, data={"reason": reason, "stage": result_payload["stage"]})
     persisted = _persist_task(record)
     return {
@@ -551,10 +505,14 @@ def record_side_cleanup(task_id: str, update: Mapping[str, Any]) -> dict[str, An
     now = runtime_files.now_iso()
 
     execution_result = _execution_result(record)
-    if record.get("status") == "completed" and isinstance(execution_result, Mapping) and execution_result.get("type") == "completion":
+    if (
+        record.get("status") in {COMPLETED, CANCELED}
+        and isinstance(execution_result, Mapping)
+        and execution_result.get("type") in {"completion", "cancellation"}
+    ):
         normalized_result = _payload_copy(execution_result)
         if normalized_result.get("processor") != "side":
-            raise ValueError("side cleanup can only update side close results")
+            raise ValueError("side cleanup can only update side completion or cancellation results")
         normalized_result["side_thread_id"] = side_thread_id
         normalized_result["cleanup"] = cleanup
         normalized_result["updated_at"] = now
@@ -578,7 +536,7 @@ def record_side_cleanup(task_id: str, update: Mapping[str, Any]) -> dict[str, An
         persisted = _persist_task(record)
         return {"ok": True, "task_id": normalized_task_id, "task": persisted, "state_changed": True}
 
-    raise ValueError("task must have a side close or side need_parent result before side cleanup")
+    raise ValueError("task must have a side completion, cancellation, or need_parent result before side cleanup")
 
 
 def get_task(task_id: str) -> dict[str, Any]:
@@ -588,8 +546,8 @@ def get_task(task_id: str) -> dict[str, Any]:
 def parent_handoff_instruction(task_id: str) -> dict[str, Any]:
     normalized_task_id = runtime_files.require_id(task_id, "task id")
     record = _load_task(normalized_task_id)
-    if record.get("status") != "in_progress" or _execution_handoff(record) is None:
-        raise ValueError("task must have parent handoff before parent handoff instruction")
+    if record.get("status") != AWAITING_PARENT or _execution_handoff(record) is None:
+        raise ValueError("task must be awaiting parent before parent handoff instruction")
     params = _require_mapping(_execution_handoff(record), "task.execution.handoff")
     instruction_type = "interrupt_submit_parent" if params.get("interrupt") is True else "submit_parent"
     return runtime_instruction(
@@ -603,13 +561,14 @@ def parent_handoff_instruction(task_id: str) -> dict[str, Any]:
 def record_parent_handoff_started(task_id: str) -> dict[str, Any]:
     normalized_task_id = runtime_files.require_id(task_id, "task id")
     record = _load_task(normalized_task_id)
-    if record.get("status") != "in_progress":
-        raise ValueError("task must be in progress before parent processing starts")
+    if record.get("status") != AWAITING_PARENT:
+        raise ValueError("task must be awaiting parent before parent processing starts")
     _require_mapping(_execution_handoff(record), "task.execution.handoff")
     now = runtime_files.now_iso()
     execution = _payload_copy(_execution(record))
     execution["processor"] = "parent"
-    record.update({"status": "in_progress", "execution": execution, "updated_at": now})
+    record["execution"] = execution
+    _transition_status(record, "parent_accepted", at=now)
     _append_event(record, "parent_handoff_started", at=now)
     persisted = _persist_task(record)
     return {"ok": True, "task_id": normalized_task_id, "task": persisted}

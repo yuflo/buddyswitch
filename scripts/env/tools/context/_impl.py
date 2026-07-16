@@ -279,15 +279,12 @@ def _candidate_track_row(*, track: dict[str, Any], current_identity: dict[str, A
 
 def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
     source_ref = task.get("source_ref")
-    task_relation = task.get("task_relation")
     execution = task.get("execution")
     return {
         "task_id": task.get("id"),
         "source_type": task.get("source_type"),
         "source_ref": source_ref if isinstance(source_ref, dict) else {},
         "status": task.get("status"),
-        "task_desc": task.get("task_desc"),
-        "task_relation": dict(task_relation) if isinstance(task_relation, dict) else None,
         "execution": dict(execution) if isinstance(execution, dict) else {},
         "updated_at": task.get("updated_at"),
     }
@@ -661,7 +658,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
         "tasks": {
             "description": "Task Sys frames, lifecycle events, side results, and parent handoff state.",
             "scope": "Task Sys task state",
-            "source_of_truth": "task_sys.list / task_sys.get / task_sys.close / task_sys.need_parent via runtime env tools",
+            "source_of_truth": "task_sys.list / task_sys.get / task_sys.close / task_sys.cancel / task_sys.need_parent via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",
