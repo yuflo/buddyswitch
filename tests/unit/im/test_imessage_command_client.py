@@ -2,31 +2,14 @@
 
 from __future__ import annotations
 
-import json
-import queue
-import sys
 import tempfile
 import unittest
-import re
 import sqlite3
 import subprocess
-import threading
-import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from unittest import mock
-
-from tests.support.paths import REPO_ROOT
-from tests.support.cli import wait_until
-
-ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
 from tools.launcher import imessage_channel  # noqa: E402
-
-
-PROMPT = "Send /actors to choose an actor."
 
 
 def _create_chat_db(path: Path, *, chat_id: int) -> None:
@@ -144,9 +127,10 @@ class CommandImsgClientTests(unittest.TestCase):
                 subprocess_run=fake_run,
             )
 
-            client.send(route={"chat_id": "3212", "sender": "hblouis@icloud.com"}, text="hello")
+            receipt = client.send(route={"chat_id": "3212", "sender": "hblouis@icloud.com"}, text="hello")
 
         self.assertEqual(commands[0][:5], ["imsg", "send", "--text", "hello", "--chat-id"])
+        self.assertEqual(receipt.guid, "guid-2")
 
     def test_send_rejects_failed_message_row_after_successful_command(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

@@ -10,7 +10,6 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 from urllib import error, request
@@ -24,28 +23,14 @@ for candidate in (HELPER_DIR, SCRIPTS):
 from env.repos import runtime_files  # noqa: E402
 
 
-SCHEMA_VERSION = 5
-MIGRATABLE_STATE_VERSION = 4
+SCHEMA_VERSION = 6
 DEFAULT_DISPLAY_NAME = "BuddySwitch iMessage"
-DEFAULT_NO_ACTOR_PROMPT = "Send /actors to choose an actor."
+DEFAULT_USAGE_PROMPT = "Use /actors, @actor-id <message>, or Reply to an actor message."
+DEFAULT_NO_ACTORS_PROMPT = "No reachable actors."
+DEFAULT_REPLY_UNAVAILABLE_PROMPT = "This message cannot be replied to."
+DEFAULT_REPLY_FAILED_PROMPT = "Reply failed. Reply to a newer actor message or use @actor-id."
 DEFAULT_REPLY_WAIT_MS = 30000
 IMSG_STATUS_TIMEOUT_SECONDS = 5.0
-ACTIVE_ACTOR_IDLE_SECONDS = 30 * 60
-PENDING_ACTOR_CHOICE_SECONDS = 5 * 60
-CONTROL_DELIVERY_MAX_ATTEMPTS = 3
-CONTROL_DELIVERY_RETRY_SECONDS = 2
-BLOCKED_ACTOR_STATUSES = {"offline", "registered_offline", "inactive", "unreachable", "target_not_online"}
-ACTIVE_IDENTITY_ID_FIELD = "active_identity_id"
-ACTIVE_IDENTITY_EXPIRES_AT_FIELD = "active_identity_expires_at"
-PENDING_ACTOR_CHOICES_FIELD = "pending_actor_choices"
-PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD = "pending_actor_choices_expires_at"
-CONTROL_DELIVERY_FIELD = "control_delivery"
-CONTROL_KIND_ACTOR_CHOICES = "actor_choices"
-CONTROL_KIND_ACTOR_SELECTED = "actor_selected"
-CONTROL_KIND_NEEDS_ACTOR_PROMPT = "needs_actor_prompt"
-CONTROL_STATUS_PENDING = "pending"
-CONTROL_STATUS_RETRY_WAIT = "retry_wait"
-CONTROL_STATUS_FAILED = "failed"
 
 
 class ChannelError(RuntimeError):
@@ -79,6 +64,44 @@ class _MessageSendStatus:
     is_finished: int
 
 
+@dataclass(frozen=True)
+class ImessageSendReceipt:
+    guid: str
+
+
+@dataclass(frozen=True)
+class _ListActors:
+    pass
+
+
+@dataclass(frozen=True)
+class _SendToActor:
+    target_identity_id: str
+    content: str
+
+
+@dataclass(frozen=True)
+class _InvalidTopLevel:
+    pass
+
+
+_TopLevelCommand = _ListActors | _SendToActor | _InvalidTopLevel
+
+
+@dataclass(frozen=True)
+class _NativeReply:
+    anchor_guid: str
+    body: str
+
+
+@dataclass(frozen=True)
+class _TopLevel:
+    command: _TopLevelCommand
+
+
+_ParsedInboundMessage = _NativeReply | _TopLevel
+
+
 class ImessageChannelStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -92,12 +115,7 @@ class ImessageChannelStateStore:
             raise ChannelStateError(f"invalid iMessage channel state: {exc}") from exc
         if not isinstance(payload, dict):
             raise ChannelStateError("invalid iMessage channel state: root must be an object")
-        schema_version = payload.get("schema_version")
-        if schema_version == MIGRATABLE_STATE_VERSION:
-            state = _migrate_schema_v4_state(payload)
-            self.save(state)
-            return state
-        if schema_version != SCHEMA_VERSION:
+        if payload.get("schema_version") != SCHEMA_VERSION:
             raise ChannelStateError("iMessage channel state schema is retired; reset the channel state file")
         contacts_payload = payload.get("contacts")
         contacts: dict[str, dict[str, Any]] = {}
@@ -133,22 +151,35 @@ class BuddySwitchImApi:
     def list_actors(self, *, external_session_key: str) -> dict[str, Any]:
         return self._request("GET", "/api/im/actors", None, external_session_key=external_session_key)
 
-    def send_message(
+    def send_to_actor(
         self,
         *,
         external_session_key: str,
         target_identity_id: str,
         content: str,
-        reply_to: str | None = None,
     ) -> dict[str, Any]:
+        return self._post_message(
+            external_session_key=external_session_key,
+            payload={"target_identity_id": target_identity_id, "content": content},
+        )
+
+    def reply_to_message(
+        self,
+        *,
+        external_session_key: str,
+        reply_to: str,
+        content: str,
+    ) -> dict[str, Any]:
+        return self._post_message(
+            external_session_key=external_session_key,
+            payload={"reply_to": reply_to, "content": content},
+        )
+
+    def _post_message(self, *, external_session_key: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request(
             "POST",
             "/api/im/messages",
-            {
-                "target_identity_id": target_identity_id,
-                "content": content,
-                "reply_to": reply_to,
-            },
+            payload,
             external_session_key=external_session_key,
         )
 
@@ -268,7 +299,7 @@ class CommandImsgClient:
             if isinstance(payload, dict):
                 yield payload
 
-    def send(self, *, route: dict[str, Any], text: str) -> None:
+    def send(self, *, route: dict[str, Any], text: str) -> ImessageSendReceipt:
         command = [self.imsg_bin, "send", "--text", text]
         if route.get("chat_id"):
             command.extend(["--chat-id", str(route["chat_id"])])
@@ -285,7 +316,10 @@ class CommandImsgClient:
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "imsg send failed"
             raise ChannelError(detail)
-        self._confirm_send_status(route=route, after_rowid=before_rowid)
+        status = self._confirm_send_status(route=route, after_rowid=before_rowid)
+        if not status.guid:
+            raise ChannelError("iMessage send confirmation did not include guid")
+        return ImessageSendReceipt(guid=status.guid)
 
     def stop(self) -> None:
         process = self._watch_process
@@ -309,7 +343,7 @@ class CommandImsgClient:
             return 0
         return int(row[0] or 0)
 
-    def _confirm_send_status(self, *, route: dict[str, Any], after_rowid: int) -> None:
+    def _confirm_send_status(self, *, route: dict[str, Any], after_rowid: int) -> _MessageSendStatus:
         deadline = time.monotonic() + self.send_status_timeout_seconds
         last_status: _MessageSendStatus | None = None
         while True:
@@ -317,7 +351,7 @@ class CommandImsgClient:
             if status is not None:
                 last_status = status
                 if status.error == 0 and status.is_sent == 1:
-                    return
+                    return status
                 if status.error != 0:
                     raise ChannelError(_send_status_error(status))
             if self._send_status_poll_hook is not None:
@@ -443,13 +477,11 @@ class ImessageChannelController:
         api: Any | None = None,
         imsg: Any | None = None,
         state_store: ImessageChannelStateStore | None = None,
-        now_fn: Callable[[], datetime] | None = None,
     ) -> None:
         self.config = config
         self.api = api or BuddySwitchImApi(config.server)
         self.imsg = imsg or CommandImsgClient(config.imsg_bin)
         self.state_store = state_store or ImessageChannelStateStore(config.effective_state_path())
-        self._now_fn = now_fn or _utc_now
         self._state_lock = threading.RLock()
 
     def prepare(self) -> None:
@@ -466,63 +498,60 @@ class ImessageChannelController:
         content = _content_from_row(row)
         if not content:
             return {"ok": True, "status": "ignored_empty"}
+        parsed = _parse_inbound_message(row)
 
         with self._state_lock:
-            now = _as_utc(self._now_fn())
             state = self.state_store.load()
             contact = self._contact(state, sender)
             route = _route_from_row(row, sender=sender)
             _set_contact_route(contact, route)
-            external_session_key, _external_identity_id = self._external_session_binding(contact)
-
-            if content == "/actors":
-                inbound_key = _inbound_key(row)
-                return self._handle_actors(state, contact, external_session_key, route, inbound_key=inbound_key, now=now)
-            if _is_numeric_choice(content) and _pending_choices(contact, now=now):
-                inbound_key = _inbound_key(row)
-                return self._handle_numeric_choice(state, contact, content, route, inbound_key=inbound_key, now=now)
-            return self._handle_ordinary_message(
-                state,
-                contact,
-                external_session_key,
-                row,
-                sender=sender,
-                content=content,
-                route=route,
-                now=now,
-            )
-
-    def poll_control_delivery_once(self) -> dict[str, Any]:
-        now = _as_utc(self._now_fn())
-        sent = 0
-        retrying = 0
-        failed = 0
-        with self._state_lock:
-            state = self.state_store.load()
-            for contact in _contacts(state).values():
-                delivery = _normalize_control_delivery(contact.get(CONTROL_DELIVERY_FIELD))
-                if delivery is None:
-                    _clear_control_delivery(contact)
-                    continue
-                if delivery["status"] == CONTROL_STATUS_FAILED:
-                    continue
-                next_attempt_at = _parse_utc(delivery.get("next_attempt_at"))
-                if next_attempt_at is not None and next_attempt_at > now:
-                    continue
-                try:
-                    self.imsg.send(route=delivery["route"], text=delivery["text"])
-                except Exception as exc:
-                    if _mark_control_delivery_failed_or_retrying(contact, delivery, str(exc), now=now):
-                        failed += 1
-                    else:
-                        retrying += 1
-                    self.state_store.save(state)
-                    continue
-                _apply_control_delivery_effect(contact, delivery, now=now)
-                _clear_control_delivery(contact)
+            external_session_key, _external_identity_id, binding_created = self._external_session_binding(contact)
+            if binding_created:
                 self.state_store.save(state)
-                sent += 1
-        return {"ok": True, "sent": sent, "retrying": retrying, "failed": failed}
+            inbound_key = _inbound_key(row)
+            if inbound_key in set(_string_list(contact.get("seen_inbound_keys"))):
+                self.state_store.save(state)
+                return {"ok": True, "status": "duplicate"}
+            match parsed:
+                case _NativeReply(anchor_guid=anchor_guid, body=reply_content):
+                    return self._handle_native_reply(
+                        state,
+                        contact,
+                        external_session_key,
+                        route,
+                        content=reply_content,
+                        anchor_guid=anchor_guid,
+                        inbound_key=inbound_key,
+                    )
+                case _TopLevel(command=_ListActors()):
+                    return self._handle_actors(
+                        state,
+                        contact,
+                        external_session_key,
+                        route,
+                        inbound_key=inbound_key,
+                    )
+                case _TopLevel(
+                    command=_SendToActor(target_identity_id=target_identity_id, content=message_content)
+                ):
+                    return self._handle_actor_send(
+                        state,
+                        contact,
+                        external_session_key,
+                        target_identity_id=target_identity_id,
+                        content=message_content,
+                        inbound_key=inbound_key,
+                    )
+                case _TopLevel(command=_InvalidTopLevel()):
+                    return self._send_terminal_feedback(
+                        state,
+                        contact,
+                        route=route,
+                        text=DEFAULT_USAGE_PROMPT,
+                        inbound_key=inbound_key,
+                        status="invalid_message",
+                    )
+            raise ChannelError(f"unsupported parsed iMessage message: {type(parsed).__name__}")
 
     def poll_outbound_once(self, *, wait_ms: int = 0, limit: int = 50) -> dict[str, Any]:
         with self._state_lock:
@@ -545,7 +574,6 @@ class ImessageChannelController:
                 route = _contact_route(contact)
                 if route is None:
                     continue
-                sent_ids = set(_string_list(contact.get("sent_outbound_event_ids")))
                 contact_sent_count = 0
                 for event in events.get("events") if isinstance(events.get("events"), list) else []:
                     if not isinstance(event, dict):
@@ -554,7 +582,7 @@ class ImessageChannelController:
                     message_id = str(event.get("message_id") or "")
                     if not event_id or not message_id:
                         continue
-                    if event_id in sent_ids:
+                    if _message_link_for_event(contact, event_id) is not None:
                         self._ack_outbound_event(external_session_key=external_session_key, event_id=event_id)
                         continue
                     fetched = self.api.get_message(external_session_key=external_session_key, message_id=message_id)
@@ -565,10 +593,17 @@ class ImessageChannelController:
                     actor_id = _actor_id_for_reply(event, message)
                     if not content or not actor_id:
                         continue
-                    self.imsg.send(route=route, text=f"[Message From {actor_id}]\n\n{content}")
-                    sent_ids.add(event_id)
+                    receipt = self.imsg.send(route=route, text=f"[Message From {actor_id}]\n\n{content}")
+                    guid = str(getattr(receipt, "guid", "") or "").strip()
+                    if not guid:
+                        raise ChannelError("iMessage send receipt did not include guid")
+                    _save_message_link(
+                        contact,
+                        guid=guid,
+                        message_id=message_id,
+                        event_id=event_id,
+                    )
                     contact_sent_count += 1
-                    contact["sent_outbound_event_ids"] = sorted(sent_ids)
                     self.state_store.save(state)
                     self._ack_outbound_event(external_session_key=external_session_key, event_id=event_id)
                 if contact_sent_count:
@@ -587,118 +622,41 @@ class ImessageChannelController:
         route: dict[str, Any],
         *,
         inbound_key: str,
-        now: datetime,
     ) -> dict[str, Any]:
         payload = self.api.list_actors(external_session_key=external_session_key)
         if payload.get("ok") is not True:
             raise ChannelError(str((payload.get("error") or {}).get("message") or "actor list failed"))
-        choices: dict[str, str] = {}
         lines: list[str] = []
         for actor in payload.get("actors") if isinstance(payload.get("actors"), list) else []:
-            if not isinstance(actor, dict) or not _actor_is_reachable(actor):
+            if not isinstance(actor, dict):
                 continue
             actor_id = str(actor.get("identity_id") or "")
             role_id = str(actor.get("role_id") or "")
             if not actor_id or not role_id:
                 continue
-            number = str(len(lines) + 1)
-            choices[number] = actor_id
-            lines.append(f"[{number}] {role_id} {actor_id}")
-        text = "\n".join(lines) if lines else DEFAULT_NO_ACTOR_PROMPT
-        effect = (
-            {"type": "set_pending_actor_choices", "choices": choices}
-            if choices
-            else {"type": "none"}
-        )
-        _set_control_delivery(
-            contact,
-            delivery_id=_control_delivery_id(inbound_key=inbound_key, kind=CONTROL_KIND_ACTOR_CHOICES),
-            kind=CONTROL_KIND_ACTOR_CHOICES,
+            lines.append(f"@{actor_id} ({role_id})")
+        self.imsg.send(
             route=route,
-            text=text,
-            effect=effect,
-            now=now,
+            text="\n".join(lines) if lines else DEFAULT_NO_ACTORS_PROMPT,
         )
+        _mark_inbound_seen(contact, inbound_key)
         self.state_store.save(state)
-        return {"ok": True, "status": "actors_list_queued", "count": len(lines)}
+        return {"ok": True, "status": "actors_listed", "count": len(lines)}
 
-    def _handle_numeric_choice(
-        self,
-        state: dict[str, Any],
-        contact: dict[str, Any],
-        content: str,
-        route: dict[str, Any],
-        *,
-        inbound_key: str,
-        now: datetime,
-    ) -> dict[str, Any]:
-        choices = _pending_choices(contact, now=now)
-        selected = choices.get(str(int(content)))
-        if not selected:
-            if not _active_identity_id(contact, now=now):
-                _set_control_delivery(
-                    contact,
-                    delivery_id=_control_delivery_id(inbound_key=inbound_key, kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT),
-                    kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT,
-                    route=route,
-                    text=DEFAULT_NO_ACTOR_PROMPT,
-                    effect={"type": "none"},
-                    now=now,
-                )
-                self.state_store.save(state)
-                return {"ok": True, "status": "needs_actor"}
-            self.state_store.save(state)
-            return {"ok": True, "status": "ignored_invalid_choice"}
-        _set_control_delivery(
-            contact,
-            delivery_id=_control_delivery_id(inbound_key=inbound_key, kind=CONTROL_KIND_ACTOR_SELECTED),
-            kind=CONTROL_KIND_ACTOR_SELECTED,
-            route=route,
-            text=selected,
-            effect={"type": "select_active_actor", "actor_id": selected},
-            now=now,
-        )
-        self.state_store.save(state)
-        return {"ok": True, "status": "actor_selection_queued", "actor_id": selected}
-
-    def _handle_ordinary_message(
+    def _handle_actor_send(
         self,
         state: dict[str, Any],
         contact: dict[str, Any],
         external_session_key: str,
-        row: dict[str, Any],
         *,
-        sender: str,
+        target_identity_id: str,
         content: str,
-        route: dict[str, Any],
-        now: datetime,
+        inbound_key: str,
     ) -> dict[str, Any]:
-        active_identity_id = _active_identity_id(contact, now=now)
-        if not active_identity_id:
-            _set_control_delivery(
-                contact,
-                delivery_id=_control_delivery_id(
-                    inbound_key=_inbound_key(row),
-                    kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT,
-                ),
-                kind=CONTROL_KIND_NEEDS_ACTOR_PROMPT,
-                route=route,
-                text=DEFAULT_NO_ACTOR_PROMPT,
-                effect={"type": "none"},
-                now=now,
-            )
-            self.state_store.save(state)
-            return {"ok": True, "status": "needs_actor"}
-        inbound_key = _inbound_key(row)
-        seen = set(_string_list(contact.get("seen_inbound_keys")))
-        if inbound_key in seen:
-            self.state_store.save(state)
-            return {"ok": True, "status": "duplicate"}
-        response = self.api.send_message(
+        response = self.api.send_to_actor(
             external_session_key=external_session_key,
-            target_identity_id=active_identity_id,
+            target_identity_id=target_identity_id,
             content=content,
-            reply_to=None,
         )
         if response.get("ok") is not True:
             raise ChannelError(str((response.get("error") or {}).get("message") or "BuddySwitch send failed"))
@@ -706,11 +664,67 @@ class ImessageChannelController:
         message_id = message.get("id")
         if not isinstance(message_id, str) or not message_id:
             raise ChannelError("BuddySwitch send response did not include message.id")
-        seen.add(inbound_key)
-        contact["seen_inbound_keys"] = sorted(seen)
-        _set_active_identity(contact, active_identity_id, now=now)
+        _mark_inbound_seen(contact, inbound_key)
         self.state_store.save(state)
-        return {"ok": True, "status": "delivered", "message_id": message_id, "sender": _sender_key(sender)}
+        return {"ok": True, "status": "delivered", "message_id": message_id}
+
+    def _handle_native_reply(
+        self,
+        state: dict[str, Any],
+        contact: dict[str, Any],
+        external_session_key: str,
+        route: dict[str, Any],
+        *,
+        content: str,
+        anchor_guid: str,
+        inbound_key: str,
+    ) -> dict[str, Any]:
+        message_id = _message_id_for_imessage_guid(contact, anchor_guid)
+        if not message_id:
+            return self._send_terminal_feedback(
+                state,
+                contact,
+                route=route,
+                text=DEFAULT_REPLY_UNAVAILABLE_PROMPT,
+                inbound_key=inbound_key,
+                status="reply_unavailable",
+            )
+        response = self.api.reply_to_message(
+            external_session_key=external_session_key,
+            reply_to=message_id,
+            content=content,
+        )
+        if response.get("ok") is not True:
+            return self._send_terminal_feedback(
+                state,
+                contact,
+                route=route,
+                text=DEFAULT_REPLY_FAILED_PROMPT,
+                inbound_key=inbound_key,
+                status="reply_failed",
+            )
+        message = response.get("message") if isinstance(response.get("message"), dict) else {}
+        reply_message_id = str(message.get("id") or "").strip()
+        if not reply_message_id:
+            raise ChannelError("BuddySwitch reply response did not include message.id")
+        _mark_inbound_seen(contact, inbound_key)
+        self.state_store.save(state)
+        return {"ok": True, "status": "replied", "message_id": reply_message_id, "reply_to": message_id}
+
+    def _send_terminal_feedback(
+        self,
+        state: dict[str, Any],
+        contact: dict[str, Any],
+        *,
+        route: dict[str, Any],
+        text: str,
+        inbound_key: str,
+        status: str,
+    ) -> dict[str, Any]:
+        self.imsg.send(route=route, text=text)
+        _mark_inbound_seen(contact, inbound_key)
+        self.state_store.save(state)
+        return {"ok": True, "status": status}
 
     def _contact(self, state: dict[str, Any], sender: str) -> dict[str, Any]:
         contacts = _contacts(state)
@@ -719,11 +733,11 @@ class ImessageChannelController:
             contacts[key] = _default_contact()
         return contacts[key]
 
-    def _external_session_binding(self, contact: dict[str, Any]) -> tuple[str, str]:
+    def _external_session_binding(self, contact: dict[str, Any]) -> tuple[str, str, bool]:
         existing_key = _contact_external_session_key(contact)
         existing_identity = _contact_external_identity_id(contact)
         if existing_key and existing_identity:
-            return existing_key, existing_identity
+            return existing_key, existing_identity, False
         created = self.api.create_external_session(display_name=self.config.display_name)
         if created.get("ok") is not True:
             raise ChannelError(str((created.get("error") or {}).get("message") or "external session creation failed"))
@@ -737,7 +751,7 @@ class ImessageChannelController:
             raise ChannelError("external session creation did not return external identity")
         contact["external_session_key"] = external_session_key
         contact["external_identity_id"] = external_identity_id
-        return external_session_key, external_identity_id
+        return external_session_key, external_identity_id, True
 
 
 class ImessageChannelWorker:
@@ -768,18 +782,10 @@ class ImessageChannelWorker:
             except Exception as exc:
                 print(f"iMessage channel inbound message failed: {exc}", file=sys.stderr, flush=True)
                 continue
-            try:
-                self.controller.poll_control_delivery_once()
-            except Exception as exc:
-                print(f"iMessage channel control delivery failed: {exc}", file=sys.stderr, flush=True)
 
     def run_outbound_forever(self) -> None:
         wait_ms = max(self.reply_wait_ms, 0)
         while not self._stop_event.is_set():
-            try:
-                self.controller.poll_control_delivery_once()
-            except Exception as exc:
-                print(f"iMessage channel control delivery failed: {exc}", file=sys.stderr, flush=True)
             try:
                 self.controller.poll_outbound_once(wait_ms=wait_ms)
             except Exception as exc:
@@ -806,122 +812,11 @@ def _default_state() -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "contacts": {}}
 
 
-def _migrate_schema_v4_state(payload: dict[str, Any]) -> dict[str, Any]:
-    contacts_payload = payload.get("contacts")
-    contacts: dict[str, dict[str, Any]] = {}
-    if isinstance(contacts_payload, dict):
-        for key, value in contacts_payload.items():
-            if not isinstance(key, str) or not isinstance(value, dict):
-                continue
-            preserved = {
-                field: value[field]
-                for field in (
-                    "external_session_key",
-                    "external_identity_id",
-                    "route",
-                    "seen_inbound_keys",
-                    "sent_outbound_event_ids",
-                )
-                if field in value
-            }
-            contacts[key] = _normalize_contact(preserved)
-    return {"schema_version": SCHEMA_VERSION, "contacts": contacts}
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _format_utc(value: datetime) -> str:
-    return _as_utc(value).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _parse_utc(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    text = value.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return _as_utc(parsed)
-
-
 def _default_contact() -> dict[str, Any]:
     return {
-        PENDING_ACTOR_CHOICES_FIELD: {},
         "seen_inbound_keys": [],
-        "sent_outbound_event_ids": [],
+        "message_links": {},
     }
-
-
-def _normalize_control_effect(value: dict[str, Any]) -> dict[str, Any] | None:
-    effect_type = str(value.get("type") or "").strip()
-    if effect_type == "set_pending_actor_choices":
-        choices = _string_dict(value.get("choices"))
-        if not choices:
-            return None
-        return {"type": effect_type, "choices": choices}
-    if effect_type == "select_active_actor":
-        actor_id = str(value.get("actor_id") or "").strip()
-        if not actor_id:
-            return None
-        return {"type": effect_type, "actor_id": actor_id}
-    if effect_type == "none":
-        return {"type": effect_type}
-    return None
-
-
-def _normalize_control_delivery(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    kind = str(value.get("kind") or "").strip()
-    status = str(value.get("status") or "").strip()
-    delivery_id = str(value.get("id") or "").strip()
-    text = str(value.get("text") or "")
-    route = value.get("route")
-    created_at = _parse_utc(value.get("created_at"))
-    updated_at = _parse_utc(value.get("updated_at"))
-    next_attempt_at = _parse_utc(value.get("next_attempt_at"))
-    effect = value.get("effect")
-    if kind not in {CONTROL_KIND_ACTOR_CHOICES, CONTROL_KIND_ACTOR_SELECTED, CONTROL_KIND_NEEDS_ACTOR_PROMPT}:
-        return None
-    if status not in {CONTROL_STATUS_PENDING, CONTROL_STATUS_RETRY_WAIT, CONTROL_STATUS_FAILED}:
-        return None
-    if not delivery_id or not text or not isinstance(route, dict) or not _valid_route(route):
-        return None
-    if created_at is None or updated_at is None:
-        return None
-    if status != CONTROL_STATUS_FAILED and next_attempt_at is None:
-        return None
-    if not isinstance(effect, dict):
-        return None
-    normalized_effect = _normalize_control_effect(effect)
-    if normalized_effect is None:
-        return None
-    normalized = {
-        "id": delivery_id,
-        "kind": kind,
-        "status": status,
-        "route": dict(route),
-        "text": text,
-        "attempts": _nonnegative_int(value.get("attempts")),
-        "created_at": _format_utc(created_at),
-        "updated_at": _format_utc(updated_at),
-        "last_error": str(value.get("last_error") or ""),
-        "effect": normalized_effect,
-    }
-    if next_attempt_at is not None:
-        normalized["next_attempt_at"] = _format_utc(next_attempt_at)
-    return normalized
 
 
 def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
@@ -935,24 +830,24 @@ def _normalize_contact(payload: dict[str, Any]) -> dict[str, Any]:
     route = payload.get("route")
     if isinstance(route, dict) and _valid_route(route):
         contact["route"] = dict(route)
-    active_identity_id = payload.get(ACTIVE_IDENTITY_ID_FIELD)
-    active_expires_at = _parse_utc(payload.get(ACTIVE_IDENTITY_EXPIRES_AT_FIELD))
-    if isinstance(active_identity_id, str) and active_identity_id.strip() and active_expires_at is not None:
-        contact[ACTIVE_IDENTITY_ID_FIELD] = active_identity_id.strip()
-        contact[ACTIVE_IDENTITY_EXPIRES_AT_FIELD] = _format_utc(active_expires_at)
-    pending_choices = _string_dict(payload.get(PENDING_ACTOR_CHOICES_FIELD))
-    pending_expires_at = _parse_utc(payload.get(PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD))
-    if pending_choices and pending_expires_at is not None:
-        contact[PENDING_ACTOR_CHOICES_FIELD] = pending_choices
-        contact[PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD] = _format_utc(pending_expires_at)
-    else:
-        contact[PENDING_ACTOR_CHOICES_FIELD] = {}
     contact["seen_inbound_keys"] = _string_list(payload.get("seen_inbound_keys"))
-    contact["sent_outbound_event_ids"] = _string_list(payload.get("sent_outbound_event_ids"))
-    control_delivery = _normalize_control_delivery(payload.get(CONTROL_DELIVERY_FIELD))
-    if control_delivery is not None:
-        contact[CONTROL_DELIVERY_FIELD] = control_delivery
+    contact["message_links"] = _normalize_message_links(payload.get("message_links"))
     return contact
+
+
+def _normalize_message_links(value: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(value, dict):
+        return {}
+    links: dict[str, dict[str, str]] = {}
+    for raw_guid, raw_link in value.items():
+        guid = str(raw_guid).strip() if isinstance(raw_guid, str) else ""
+        if not guid or not isinstance(raw_link, dict):
+            continue
+        message_id = str(raw_link.get("message_id") or "").strip()
+        event_id = str(raw_link.get("event_id") or "").strip()
+        if message_id and event_id:
+            links[guid] = {"message_id": message_id, "event_id": event_id}
+    return links
 
 
 def _contacts(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -967,23 +862,6 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(row) for row in value if isinstance(row, (str, int)) and str(row)]
-
-
-def _string_dict(value: Any) -> dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    result: dict[str, str] = {}
-    for key, row in value.items():
-        if isinstance(key, (str, int)) and isinstance(row, (str, int)) and str(key) and str(row):
-            result[str(key)] = str(row)
-    return result
-
-
-def _nonnegative_int(value: Any) -> int:
-    try:
-        return max(int(value or 0), 0)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _sender_key(sender: str) -> str:
@@ -1009,6 +887,27 @@ def _content_from_row(row: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _parse_inbound_message(row: dict[str, Any]) -> _ParsedInboundMessage:
+    content = _content_from_row(row)
+    raw_anchor = row.get("thread_originator_guid")
+    anchor_guid = raw_anchor.strip() if isinstance(raw_anchor, str) else ""
+    match anchor_guid:
+        case "":
+            return _TopLevel(command=_parse_top_level_command(content))
+        case _:
+            return _NativeReply(anchor_guid=anchor_guid, body=content)
+
+
+def _parse_top_level_command(content: str) -> _TopLevelCommand:
+    match content.split(maxsplit=1):
+        case ["/actors"]:
+            return _ListActors()
+        case [head, body] if head.startswith("@") and len(head) > 1 and body.strip():
+            return _SendToActor(target_identity_id=head[1:], content=body.strip())
+        case _:
+            return _InvalidTopLevel()
 
 
 def _route_from_row(row: dict[str, Any], *, sender: str) -> dict[str, Any]:
@@ -1045,128 +944,37 @@ def _truthy(value: Any) -> bool:
     return False
 
 
-def _is_numeric_choice(content: str) -> bool:
-    return content.strip().isdigit()
-
-
-def _set_active_identity(contact: dict[str, Any], identity_id: str, *, now: datetime) -> None:
-    contact[ACTIVE_IDENTITY_ID_FIELD] = identity_id
-    contact[ACTIVE_IDENTITY_EXPIRES_AT_FIELD] = _format_utc(
-        _as_utc(now) + timedelta(seconds=ACTIVE_ACTOR_IDLE_SECONDS)
-    )
-
-
-def _clear_active_identity(contact: dict[str, Any]) -> None:
-    contact.pop(ACTIVE_IDENTITY_ID_FIELD, None)
-    contact.pop(ACTIVE_IDENTITY_EXPIRES_AT_FIELD, None)
-
-
-def _active_identity_id(contact: dict[str, Any], *, now: datetime) -> str:
-    value = contact.get(ACTIVE_IDENTITY_ID_FIELD)
-    expires_at = _parse_utc(contact.get(ACTIVE_IDENTITY_EXPIRES_AT_FIELD))
-    if not isinstance(value, str) or not value.strip() or expires_at is None or expires_at <= _as_utc(now):
-        _clear_active_identity(contact)
+def _message_id_for_imessage_guid(contact: dict[str, Any], guid: str) -> str:
+    links = _normalize_message_links(contact.get("message_links"))
+    link = links.get(guid)
+    if not isinstance(link, dict):
         return ""
-    return value.strip()
+    return str(link.get("message_id") or "").strip()
 
 
-def _set_pending_choices(contact: dict[str, Any], choices: dict[str, str], *, now: datetime) -> None:
-    if not choices:
-        _clear_pending_choices(contact)
-        return
-    contact[PENDING_ACTOR_CHOICES_FIELD] = dict(choices)
-    contact[PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD] = _format_utc(
-        _as_utc(now) + timedelta(seconds=PENDING_ACTOR_CHOICE_SECONDS)
-    )
+def _message_link_for_event(contact: dict[str, Any], event_id: str) -> dict[str, str] | None:
+    for link in _normalize_message_links(contact.get("message_links")).values():
+        if link.get("event_id") == event_id:
+            return dict(link)
+    return None
 
 
-def _clear_pending_choices(contact: dict[str, Any]) -> None:
-    contact[PENDING_ACTOR_CHOICES_FIELD] = {}
-    contact.pop(PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD, None)
-
-
-def _pending_choices(contact: dict[str, Any], *, now: datetime) -> dict[str, str]:
-    choices = _string_dict(contact.get(PENDING_ACTOR_CHOICES_FIELD))
-    expires_at = _parse_utc(contact.get(PENDING_ACTOR_CHOICES_EXPIRES_AT_FIELD))
-    if not choices or expires_at is None or expires_at <= _as_utc(now):
-        _clear_pending_choices(contact)
-        return {}
-    contact[PENDING_ACTOR_CHOICES_FIELD] = choices
-    return choices
-
-
-def _control_delivery_id(*, inbound_key: str, kind: str) -> str:
-    safe = "".join(ch if ch.isalnum() else "-" for ch in inbound_key).strip("-")
-    return f"ctrl-{safe}-{kind}"
-
-
-def _set_control_delivery(
+def _save_message_link(
     contact: dict[str, Any],
     *,
-    delivery_id: str,
-    kind: str,
-    route: dict[str, Any],
-    text: str,
-    effect: dict[str, Any],
-    now: datetime,
+    guid: str,
+    message_id: str,
+    event_id: str,
 ) -> None:
-    current = _as_utc(now)
-    contact[CONTROL_DELIVERY_FIELD] = {
-        "id": delivery_id,
-        "kind": kind,
-        "status": CONTROL_STATUS_PENDING,
-        "route": dict(route),
-        "text": text,
-        "attempts": 0,
-        "created_at": _format_utc(current),
-        "updated_at": _format_utc(current),
-        "next_attempt_at": _format_utc(current),
-        "last_error": "",
-        "effect": dict(effect),
-    }
+    links = _normalize_message_links(contact.get("message_links"))
+    links[guid] = {"message_id": message_id, "event_id": event_id}
+    contact["message_links"] = links
 
 
-def _clear_control_delivery(contact: dict[str, Any]) -> None:
-    contact.pop(CONTROL_DELIVERY_FIELD, None)
-
-
-def _mark_control_delivery_failed_or_retrying(
-    contact: dict[str, Any],
-    delivery: dict[str, Any],
-    error_message: str,
-    *,
-    now: datetime,
-) -> bool:
-    attempts = int(delivery.get("attempts") or 0) + 1
-    current = _as_utc(now)
-    delivery["attempts"] = attempts
-    delivery["updated_at"] = _format_utc(current)
-    delivery["last_error"] = error_message
-    if attempts >= CONTROL_DELIVERY_MAX_ATTEMPTS:
-        delivery["status"] = CONTROL_STATUS_FAILED
-        delivery.pop("next_attempt_at", None)
-        contact[CONTROL_DELIVERY_FIELD] = delivery
-        return True
-    delivery["status"] = CONTROL_STATUS_RETRY_WAIT
-    delivery["next_attempt_at"] = _format_utc(current + timedelta(seconds=CONTROL_DELIVERY_RETRY_SECONDS))
-    contact[CONTROL_DELIVERY_FIELD] = delivery
-    return False
-
-
-def _apply_control_delivery_effect(contact: dict[str, Any], delivery: dict[str, Any], *, now: datetime) -> None:
-    effect = delivery.get("effect")
-    if not isinstance(effect, dict):
-        return
-    effect_type = effect.get("type")
-    if effect_type == "set_pending_actor_choices":
-        choices = _string_dict(effect.get("choices"))
-        _set_pending_choices(contact, choices, now=now)
-        return
-    if effect_type == "select_active_actor":
-        actor_id = str(effect.get("actor_id") or "").strip()
-        if actor_id:
-            _set_active_identity(contact, actor_id, now=now)
-            _clear_pending_choices(contact)
+def _mark_inbound_seen(contact: dict[str, Any], inbound_key: str) -> None:
+    seen = set(_string_list(contact.get("seen_inbound_keys")))
+    seen.add(inbound_key)
+    contact["seen_inbound_keys"] = sorted(seen)
 
 
 def _contact_external_session_key(contact: dict[str, Any]) -> str:
@@ -1188,11 +996,6 @@ def _inbound_key(row: dict[str, Any]) -> str:
         if isinstance(value, (str, int)) and str(value).strip():
             return f"{field}:{str(value).strip()}"
     raise ChannelError("inbound iMessage row is missing guid or rowid")
-
-
-def _actor_is_reachable(actor: dict[str, Any]) -> bool:
-    status = actor.get("reachability_status")
-    return not (isinstance(status, str) and status in BLOCKED_ACTOR_STATUSES)
 
 
 def _actor_id_for_reply(event: dict[str, Any], message: dict[str, Any]) -> str:
