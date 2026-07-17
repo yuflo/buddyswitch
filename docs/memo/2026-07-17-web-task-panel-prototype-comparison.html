@@ -1,0 +1,1082 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BuddySwitch · Task 小面板原型比较</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f4f2eb;
+      --paper-strong: #ebe8dc;
+      --paper-soft: #f8f7f2;
+      --surface: #ffffff;
+      --ink: #20201d;
+      --text: #393934;
+      --muted: #747168;
+      --faint: #a4a096;
+      --line: #dedbd1;
+      --line-strong: #c9c3b6;
+      --teal: #1f6f77;
+      --teal-soft: #e6f2f3;
+      --green: #287451;
+      --green-soft: #e8f4ed;
+      --yellow: #8a6808;
+      --yellow-soft: #fbf1d5;
+      --red: #aa3c34;
+      --red-soft: #fbeceb;
+      --blue: #235ea8;
+      --blue-soft: #e8f1fb;
+      --shadow: 0 14px 36px rgba(41, 39, 32, 0.09);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--text);
+      font: 14px/1.5 var(--sans);
+    }
+    button, select, textarea { font: inherit; }
+    button { color: inherit; }
+    a { color: var(--blue); }
+    code, pre, .mono { font-family: var(--mono); }
+    [hidden] { display: none !important; }
+
+    .page {
+      width: min(1500px, 100%);
+      margin: 0 auto;
+      padding: 22px;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr);
+      gap: 28px;
+      align-items: end;
+      padding: 10px 0 22px;
+      border-bottom: 1px solid var(--line-strong);
+    }
+    .eyebrow,
+    .section-label,
+    .mini-label {
+      margin: 0 0 7px;
+      color: var(--muted);
+      font: 760 11px/1.2 var(--mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .eyebrow { color: var(--teal); }
+    h1 {
+      margin: 0;
+      max-width: 900px;
+      color: var(--ink);
+      font-size: clamp(30px, 3.6vw, 48px);
+      line-height: 1.02;
+      letter-spacing: -.035em;
+    }
+    .lede {
+      max-width: 860px;
+      margin: 14px 0 0;
+      color: #4f4d47;
+      font-size: 16px;
+    }
+    .artifact-job {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .recommendation {
+      padding: 4px 0 4px 18px;
+      border-left: 4px solid var(--teal);
+    }
+    .recommendation strong {
+      display: block;
+      color: var(--ink);
+      font-size: 18px;
+    }
+    .recommendation p { margin: 5px 0 0; color: var(--muted); }
+
+    .review-toolbar {
+      position: sticky;
+      z-index: 10;
+      top: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 16px 0 20px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: rgba(244, 242, 235, .94);
+      box-shadow: 0 8px 22px rgba(41, 39, 32, .07);
+      backdrop-filter: blur(12px);
+    }
+    .toolbar-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .toolbar-label { margin-right: 3px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .seg-button,
+    .plain-button,
+    .choose-button,
+    .text-button,
+    .tab-button {
+      min-height: 30px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .seg-button,
+    .plain-button { padding: 0 10px; font-size: 12px; }
+    .seg-button[aria-pressed="true"],
+    .plain-button.primary {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: #fff;
+    }
+    button:focus-visible,
+    a:focus-visible {
+      outline: 3px solid rgba(31, 111, 119, .22);
+      outline-offset: 2px;
+    }
+
+    .prototype-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+    .direction {
+      position: relative;
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .62);
+      transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+    }
+    .direction.is-selected {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(31, 111, 119, .11), var(--shadow);
+      transform: translateY(-2px);
+    }
+    .direction-head {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      min-height: 112px;
+      align-items: start;
+    }
+    .direction-letter {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--teal);
+      font: 800 13px/1 var(--mono);
+    }
+    .direction h2 { margin: 0; color: var(--ink); font-size: 20px; line-height: 1.15; }
+    .direction-head p { margin: 6px 0 0; color: var(--muted); }
+    .direction-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .tag.recommended { border-color: #badac8; background: var(--green-soft); color: var(--green); }
+
+    .rail-preview {
+      min-height: 455px;
+      padding: 10px;
+      border: 1px solid #c9c3b6;
+      border-radius: 8px;
+      background: var(--paper-strong);
+      box-shadow: 0 10px 28px rgba(41, 39, 32, .11);
+    }
+    .rail-context {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .rail-context strong { color: var(--ink); font-size: 12px; }
+    .task-panel {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+    }
+    .panel-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 42px;
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-head h3 { margin: 0; color: var(--ink); font-size: 13px; }
+    .count { color: var(--muted); font: 700 11px/1 var(--mono); }
+    .section-kicker {
+      margin: 0;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: var(--faint);
+    }
+    .status-dot.active { background: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
+    .status-dot.completed { background: var(--green); }
+    .status-dot.canceled { background: var(--faint); }
+    .status-dot.recoverable { background: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-soft); }
+    .status-text.completed { color: var(--green); }
+    .status-text.canceled { color: var(--muted); }
+    .status-text.active { color: var(--teal); }
+    .status-text.recoverable { color: var(--yellow); }
+
+    .active-block { padding: 11px 10px 10px; }
+    .active-line {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+    }
+    .active-source {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 760;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .active-status { margin: 7px 0 0 16px; font-size: 12px; font-weight: 720; }
+    .task-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .task-meta .mono {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .attention-strip {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 0 10px 10px;
+      padding: 8px;
+      border: 1px solid #e6d39b;
+      border-radius: 6px;
+      background: var(--yellow-soft);
+      color: var(--yellow);
+      font-size: 11px;
+      font-weight: 720;
+    }
+    .attention-strip span:last-child { color: #5f5140; font-weight: 600; }
+    .disclosure {
+      width: 100%;
+      min-height: 36px;
+      padding: 0 10px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      background: #fbfbf8;
+      cursor: pointer;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 740;
+    }
+    .recent-list { border-top: 1px solid var(--line); }
+    .recent-row,
+    .ledger-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+      min-height: 44px;
+      padding: 7px 10px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      cursor: pointer;
+      text-align: left;
+    }
+    .recent-row:last-child,
+    .ledger-row:last-child { border-bottom: 0; }
+    .row-copy { min-width: 0; }
+    .row-copy strong,
+    .row-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-copy strong { color: var(--ink); font: 700 11px/1.25 var(--mono); }
+    .row-copy small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .row-time { color: var(--muted); font-size: 10px; white-space: nowrap; }
+
+    .empty-state {
+      padding: 24px 14px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+    }
+    .empty-state strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: 13px; }
+
+    .ledger-section-label { padding: 9px 10px 5px; }
+    .ledger-active {
+      margin: 4px 8px 10px;
+      padding: 9px;
+      border-left: 3px solid var(--teal);
+      border-radius: 5px;
+      background: var(--teal-soft);
+    }
+    .ledger-active.is-recoverable {
+      border-left-color: var(--yellow);
+      background: var(--yellow-soft);
+    }
+    .ledger-active .active-line { margin-top: 0; }
+    .ledger-active .active-source { font-size: 13px; }
+    .ledger-active .active-status { margin-left: 16px; }
+    .ledger-row[aria-expanded="true"] { background: var(--paper-soft); }
+    .ledger-detail {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr);
+      gap: 5px 8px;
+      padding: 8px 10px 10px 26px;
+      border-bottom: 1px solid var(--line);
+      background: var(--paper-soft);
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .ledger-detail strong { overflow-wrap: anywhere; color: var(--ink); font-weight: 650; }
+    .show-more {
+      width: 100%;
+      min-height: 36px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      background: #fbfbf8;
+      color: var(--teal);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 760;
+    }
+
+    .focus-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      margin: 9px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--paper-soft);
+    }
+    .tab-button {
+      position: relative;
+      min-height: 32px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .tab-button[aria-selected="true"] {
+      background: var(--surface);
+      box-shadow: 0 1px 3px rgba(41, 39, 32, .11);
+      color: var(--ink);
+    }
+    .attention-mark {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin-left: 4px;
+      border-radius: 999px;
+      background: var(--yellow);
+      vertical-align: middle;
+    }
+    .focus-current { padding: 18px 12px 12px; }
+    .focus-current .active-source { margin-top: 4px; font-size: 18px; }
+    .focus-fact { margin-top: 17px; }
+    .focus-fact span { display: block; color: var(--muted); font-size: 10px; }
+    .focus-fact strong { display: block; margin-top: 3px; color: var(--ink); font-size: 12px; }
+    .focus-link {
+      width: 100%;
+      min-height: 40px;
+      margin-top: 16px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      background: transparent;
+      color: var(--teal);
+      cursor: pointer;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 760;
+    }
+    .focus-recent { padding-bottom: 4px; }
+
+    .direction-foot {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .tradeoff {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .tradeoff div {
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+    }
+    .tradeoff strong { display: block; margin-bottom: 3px; color: var(--ink); }
+    .choose-button {
+      width: 100%;
+      padding: 8px 10px;
+      border-color: var(--teal);
+      color: var(--teal);
+    }
+    .direction.is-selected .choose-button { background: var(--teal); color: #fff; }
+
+    .section {
+      margin-top: 44px;
+      scroll-margin-top: 78px;
+    }
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, .7fr);
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+    .section h2 { margin: 0; color: var(--ink); font-size: 28px; line-height: 1.15; }
+    .section-head p { margin: 0; color: var(--muted); }
+
+    .matrix-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    thead th { background: var(--paper-soft); color: var(--muted); font: 760 11px/1.2 var(--mono); text-transform: uppercase; }
+    tbody th { width: 190px; color: var(--ink); }
+    tbody tr:last-child th,
+    tbody tr:last-child td { border-bottom: 0; }
+    .score { color: var(--teal); font: 800 15px/1 var(--mono); }
+    .score.best { color: var(--green); }
+
+    .research-grid,
+    .evidence-grid,
+    .iteration-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .research-card,
+    .evidence-card,
+    .iteration-card {
+      min-width: 0;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .research-card h3,
+    .evidence-card h3,
+    .iteration-card h3 { margin: 0; color: var(--ink); font-size: 15px; }
+    .research-card p,
+    .evidence-card p,
+    .iteration-card p { margin: 7px 0 0; color: var(--muted); }
+    .research-card a { display: inline-block; margin-top: 10px; font-size: 12px; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .flow-step {
+      position: relative;
+      min-height: 148px;
+      padding: 15px;
+      border-right: 1px solid var(--line);
+    }
+    .flow-step:last-child { border-right: 0; }
+    .flow-step:not(:last-child)::after {
+      position: absolute;
+      z-index: 2;
+      top: 50%;
+      right: -12px;
+      display: grid;
+      width: 23px;
+      height: 23px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      content: "→";
+      font-weight: 800;
+    }
+    .flow-step h3 { margin: 14px 0 0; color: var(--ink); font-size: 14px; }
+    .flow-step p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+    .flow-step code {
+      display: inline-block;
+      max-width: 100%;
+      margin-top: 9px;
+      padding: 3px 5px;
+      overflow-wrap: anywhere;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--paper-soft);
+      font-size: 10px;
+    }
+    .contract-note {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .contract-note > div {
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+    }
+    .contract-note strong { display: block; color: var(--ink); }
+    .contract-note p { margin: 5px 0 0; color: var(--muted); }
+
+    .iteration-card strong { display: inline-block; color: var(--teal); font: 800 12px/1 var(--mono); }
+    .iteration-card ul { margin: 9px 0 0; padding-left: 18px; color: var(--muted); }
+    .iteration-card li + li { margin-top: 5px; }
+
+    .decision-dock {
+      position: fixed;
+      z-index: 12;
+      right: 18px;
+      bottom: 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      width: min(430px, calc(100% - 36px));
+      padding: 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .96);
+      box-shadow: 0 18px 45px rgba(41, 39, 32, .18);
+    }
+    .decision-dock strong { display: block; color: var(--ink); font-size: 12px; }
+    .decision-dock span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .dock-actions { display: flex; gap: 6px; }
+    .copy-status { color: var(--green) !important; }
+
+    footer {
+      margin: 46px 0 72px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line-strong);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1120px) {
+      .prototype-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .direction:last-child { grid-column: 1 / -1; width: min(100%, calc(50% - 8px)); justify-self: center; }
+      .research-grid, .evidence-grid, .iteration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-step { border-bottom: 1px solid var(--line); }
+      .flow-step:nth-child(2) { border-right: 0; }
+      .flow-step:nth-child(2)::after { display: none; }
+      .flow-step:nth-child(3), .flow-step:nth-child(4) { border-bottom: 0; }
+    }
+
+    @media (max-width: 760px) {
+      .page { padding: 14px; }
+      .masthead, .section-head { grid-template-columns: 1fr; }
+      .recommendation { margin-top: 4px; }
+      .review-toolbar { position: static; align-items: flex-start; }
+      .prototype-grid { grid-template-columns: 1fr; }
+      .direction:last-child { grid-column: auto; width: auto; }
+      .direction-head { min-height: auto; }
+      .rail-preview { min-height: auto; }
+      .research-grid, .evidence-grid, .iteration-grid, .contract-note { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow-step { border-right: 0; border-bottom: 1px solid var(--line); }
+      .flow-step:nth-child(3) { border-bottom: 1px solid var(--line); }
+      .flow-step:last-child { border-bottom: 0; }
+      .flow-step::after { display: none !important; }
+      .decision-dock { position: static; width: 100%; margin-top: 18px; }
+      footer { margin-bottom: 22px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">BuddySwitch · Task panel design study · 2026-07-17</p>
+        <h1>三个小面板，回答同一个监督问题</h1>
+        <p class="lede">这份 Shape HTML 帮助评审者在同一组真实后端字段、同一条 300px 右侧 rail、同三种运行情景下，比较历史可见性、异常显著性与界面占高，选择一个精简而不失真的 Task 呈现。</p>
+        <p class="artifact-job">This HTML helps the user compare three compact Task panel directions through live, contract-faithful interaction states.</p>
+      </div>
+      <aside class="recommendation">
+        <p class="mini-label">当前推荐</p>
+        <strong>B · Quiet Ledger</strong>
+        <p>连续账本让当前与最近终态同时可见；没有额外页面，也不会把历史藏到第二次点击之后。</p>
+      </aside>
+    </header>
+
+    <nav class="review-toolbar" aria-label="原型评审控制">
+      <div class="toolbar-group" aria-label="切换演示情景">
+        <span class="toolbar-label">情景</span>
+        <button class="seg-button" type="button" data-scenario="healthy" aria-pressed="true">Active</button>
+        <button class="seg-button" type="button" data-scenario="recoverable" aria-pressed="false">Needs attention</button>
+        <button class="seg-button" type="button" data-scenario="idle" aria-pressed="false">No active task</button>
+      </div>
+      <div class="toolbar-group" aria-label="跳转到说明">
+        <a class="plain-button" href="#matrix">对比矩阵</a>
+        <a class="plain-button" href="#research">调研</a>
+        <a class="plain-button" href="#data-fit">数据契合</a>
+        <a class="plain-button" href="#iterations">迭代记录</a>
+      </div>
+    </nav>
+
+    <section class="prototype-grid" aria-label="三个可交互 Task 面板原型">
+      <article class="direction" data-direction="A">
+        <header class="direction-head">
+          <span class="direction-letter" aria-hidden="true">A</span>
+          <div>
+            <h2>Signal Stack</h2>
+            <p>当前任务占主位；异常单独提醒；历史折叠在同一张卡里。</p>
+            <div class="direction-tags"><span class="tag">最快扫视</span><span class="tag">历史按需</span></div>
+          </div>
+        </header>
+        <div class="rail-preview">
+          <div class="rail-context"><strong>Selected teammate</strong><span>right rail · 300px</span></div>
+          <section class="task-panel" aria-label="Signal Stack Task panel">
+            <div class="panel-head"><h3>Task</h3><span class="count signal-count">1 active</span></div>
+            <div class="signal-active"></div>
+            <div class="attention-strip signal-attention" hidden>
+              <span class="status-dot recoverable"></span>
+              <span>Needs attention · recoverable task</span>
+            </div>
+            <button class="disclosure signal-disclosure" type="button" aria-expanded="false">Show recent · 5</button>
+            <div class="recent-list signal-recent" hidden></div>
+          </section>
+        </div>
+        <footer class="direction-foot">
+          <div class="tradeoff"><div><strong>优势</strong>默认最安静，异常表达最明确。</div><div><strong>代价</strong>终态历史要再点击一次。</div></div>
+          <button class="choose-button" type="button" data-choose="A">选择 A</button>
+        </footer>
+      </article>
+
+      <article class="direction" data-direction="B">
+        <header class="direction-head">
+          <span class="direction-letter" aria-hidden="true">B</span>
+          <div>
+            <h2>Quiet Ledger</h2>
+            <p>把 Now 与 Recent 作为一条连续、低噪声的运行账本。</p>
+            <div class="direction-tags"><span class="tag recommended">推荐</span><span class="tag">历史直见</span></div>
+          </div>
+        </header>
+        <div class="rail-preview">
+          <div class="rail-context"><strong>Selected teammate</strong><span>right rail · 300px</span></div>
+          <section class="task-panel" aria-label="Quiet Ledger Task panel">
+            <div class="panel-head"><h3>Task</h3><span class="count ledger-count">6 total</span></div>
+            <div class="ledger-now"></div>
+            <p class="section-kicker ledger-section-label">Recent</p>
+            <div class="ledger-list"></div>
+            <button class="show-more ledger-more" type="button" aria-expanded="false">Show 2 more</button>
+          </section>
+        </div>
+        <footer class="direction-foot">
+          <div class="tradeoff"><div><strong>优势</strong>当前与历史零切换，符合监督者心智。</div><div><strong>代价</strong>比另外两案多占约 120px 高度。</div></div>
+          <button class="choose-button" type="button" data-choose="B">选择 B</button>
+        </footer>
+      </article>
+
+      <article class="direction" data-direction="C">
+        <header class="direction-head">
+          <span class="direction-letter" aria-hidden="true">C</span>
+          <div>
+            <h2>Focus Switch</h2>
+            <p>Current / Recent 共用一块空间，以一次切换换取最小占高。</p>
+            <div class="direction-tags"><span class="tag">最省空间</span><span class="tag">模式切换</span></div>
+          </div>
+        </header>
+        <div class="rail-preview">
+          <div class="rail-context"><strong>Selected teammate</strong><span>right rail · 300px</span></div>
+          <section class="task-panel" aria-label="Focus Switch Task panel">
+            <div class="panel-head"><h3>Task</h3><span class="count focus-count">1 active</span></div>
+            <div class="focus-tabs" role="tablist" aria-label="Task view">
+              <button class="tab-button focus-current-tab" type="button" role="tab" aria-selected="true">Current · 1<span class="attention-mark" hidden></span></button>
+              <button class="tab-button focus-recent-tab" type="button" role="tab" aria-selected="false">Recent · 5</button>
+            </div>
+            <div class="focus-current" role="tabpanel"></div>
+            <div class="focus-recent recent-list" role="tabpanel" hidden></div>
+          </section>
+        </div>
+        <footer class="direction-foot">
+          <div class="tradeoff"><div><strong>优势</strong>rail 高度最稳定，当前任务最聚焦。</div><div><strong>代价</strong>历史不可与当前并排比较。</div></div>
+          <button class="choose-button" type="button" data-choose="C">选择 C</button>
+        </footer>
+      </article>
+    </section>
+
+    <section class="section" id="matrix">
+      <header class="section-head">
+        <div><p class="section-label">Decision matrix</p><h2>比较的是信息架构，不是装饰风格</h2></div>
+        <p>三案共享现有 BuddySwitch token、相同模拟数据和只读边界。分数越高越符合“精简但历史可见”的目标。</p>
+      </header>
+      <div class="matrix-wrap">
+        <table>
+          <thead><tr><th>评审轴</th><th>A · Signal Stack</th><th>B · Quiet Ledger</th><th>C · Focus Switch</th></tr></thead>
+          <tbody>
+            <tr><th>当前任务扫视</th><td><span class="score best">5/5</span><br>主块 + 独立异常条</td><td><span class="score">4/5</span><br>Now 固定在第一行</td><td><span class="score best">5/5</span><br>默认只看 Current</td></tr>
+            <tr><th>历史可发现性</th><td><span class="score">3/5</span><br>需要展开 Recent</td><td><span class="score best">5/5</span><br>进入视野即看见</td><td><span class="score">3/5</span><br>需要切换视图</td></tr>
+            <tr><th>异常显著性</th><td><span class="score best">5/5</span><br>条件式 attention strip</td><td><span class="score">4/5</span><br>Now 行变为 amber</td><td><span class="score">4/5</span><br>Current tab 出现小标记</td></tr>
+            <tr><th>rail 占高稳定性</th><td><span class="score">4/5</span><br>展开时高度变化</td><td><span class="score">3/5</span><br>默认显示 3 条历史</td><td><span class="score best">5/5</span><br>两种视图共用空间</td></tr>
+            <tr><th>最小实现复杂度</th><td><span class="score">4/5</span><br>一个 disclosure 状态</td><td><span class="score best">5/5</span><br>列表 + 详情展开</td><td><span class="score">4/5</span><br>需要 tab 状态</td></tr>
+            <tr><th>结论</th><td>适合“异常优先”的运维味场景。</td><td><strong>最均衡；推荐进入实现。</strong></td><td>适合 rail 极度拥挤后的进一步收缩。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="research">
+      <header class="section-head">
+        <div><p class="section-label">Product interface research</p><h2>外部模式：保留历史，但降低历史的默认噪声</h2></div>
+        <p>调研不是寻找可复制的皮肤，而是验证列表密度、终态位置和异常信号的常见处理方式。</p>
+      </header>
+      <div class="research-grid">
+        <article class="research-card">
+          <p class="mini-label">GitHub Actions</p>
+          <h3>状态图形在前，标题与上下文居中，时间在右</h3>
+          <p>公开 workflow run 列表把成功、失败、需要操作作为第一视觉信号；每条 run 保持单一行组，不把每条记录做成独立卡片。对 BuddySwitch 的启发是：状态要先扫到，task id 应退为次级元数据。</p>
+          <a href="https://github.com/actions/checkout/actions" target="_blank" rel="noreferrer">公开运行列表示例</a>
+        </article>
+        <article class="research-card">
+          <p class="mini-label">Todoist · completed tasks</p>
+          <h3>终态被保留，但默认退到列表底部或独立日志</h3>
+          <p>官方帮助说明已完成任务会保留；在项目/Today 中按需显示在当前列表底部，日志则提供只读回顾。对 BuddySwitch 的启发是：不要让 completed 消失，也不要让它压过 active。</p>
+          <a href="https://www.todoist.com/help/articles/view-completed-tasks-in-todoist-J19h2s" target="_blank" rel="noreferrer">查看官方说明</a>
+        </article>
+        <article class="research-card">
+          <p class="mini-label">Vercel Deployments</p>
+          <h3>当前与历史属于同一对象集合，按状态与时间阅读</h3>
+          <p>官方文档明确 dashboard 管理 current and previous deployments，并按 branch、date、environment、status 过滤。对这个小面板而言，不需要照搬过滤器，但应保持“终态仍属于 Task 集合”的连续心智。</p>
+          <a href="https://vercel.com/docs/deployments/managing-deployments" target="_blank" rel="noreferrer">查看官方文档</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="data-fit">
+      <header class="section-head">
+        <div><p class="section-label">Backend fit</p><h2>后端已保留终态，缺口只在 Web 投影</h2></div>
+        <p>所有原型均为只读；没有假设新的生命周期动作，也没有使用当前 external-safe contract 不存在的标题、描述或执行细节。</p>
+      </header>
+      <div class="flow" aria-label="Task 数据到 Web 面板的数据流">
+        <article class="flow-step"><span class="mini-label">01 · semantic owner</span><h3>Task Sys</h3><p>持久化 active、completed、canceled 记录；close 更新同一任务，不删除历史。</p><code>scripts/env/domain/task_sys.py</code></article>
+        <article class="flow-step"><span class="mini-label">02 · safe projection</span><h3>Task Read</h3><p>已经产出 tasks、active_tasks、recoverable_tasks，并按 updated_at 倒序。</p><code>scripts/env/domain/task_read.py</code></article>
+        <article class="flow-step"><span class="mini-label">03 · current gap</span><h3>Web Console API</h3><p>当前只透出 active/recoverable；完整 tasks 在这里被省略。</p><code>tools/launcher/web_management.py</code></article>
+        <article class="flow-step"><span class="mini-label">04 · consumer</span><h3>Task panel</h3><p>前端目前各只取第一条。建议只补 recent terminal read，不增加 mutation。</p><code>assets/web-management/app.js</code></article>
+      </div>
+      <div class="contract-note">
+        <div><strong>最小 owner-correct 后端增量</strong><p>由 Task Read 明确产出 <code>terminal_tasks</code> / <code>terminal_count</code>（completed + canceled，仍使用同一 external allowlist）；Web 只负责切到最近 5 条。</p></div>
+        <div><strong>明确不做</strong><p>不在 Web 复制生命周期规则；不引入分页、搜索或新存储；不暴露 execution、events、summary；不添加 close/cancel/retry 操作。</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="iterations">
+      <header class="section-head">
+        <div><p class="section-label">Browser iteration log</p><h2>原型会按真实 rail 约束做多轮收敛</h2></div>
+        <p>这里记录从现状、视觉探索到浏览器宽窄屏与交互 QA 的实际修正，不把“做过截图”当成设计质量本身。</p>
+      </header>
+      <div class="iteration-grid">
+        <article class="iteration-card"><strong>Baseline</strong><h3>现有面板只是一张运行摘要卡</h3><ul><li>300px rail 已经同时承载 Capability、Runtime、Task、Track。</li><li>Task 只显示 active/recoverable 各第一条。</li><li>设计不能靠增加新页面和大控件解决。</li></ul></article>
+        <article class="iteration-card"><strong>Round 1</strong><h3>从三种信息架构开始，而非三套配色</h3><ul><li>Stack：历史折叠。</li><li>Ledger：当前与历史连续。</li><li>Switch：Current / Recent 共用高度。</li></ul></article>
+        <article class="iteration-card"><strong>Round 2</strong><h3>剔除后端不支持的“聪明文案”</h3><ul><li>不显示耗时异常原因或自动重试承诺。</li><li>异常只表达 recoverable membership。</li><li>所有行只用五个 external-safe 字段。</li></ul></article>
+        <article class="iteration-card"><strong>Round 3</strong><h3>宽屏首屏从“报告感”收回到“评审板”</h3><ul><li>标题上限从 62px 收到 48px，首屏更早进入真实原型。</li><li>rail 样板高度收至 455px，三案与选择按钮可在 1440×1024 同屏比较。</li><li>选择 dock 默认隐藏，避免遮挡 C 案。</li></ul></article>
+        <article class="iteration-card"><strong>Round 4</strong><h3>交互与窄屏完成浏览器验收</h3><ul><li>情景、历史展开、行详情、Show more、Current/Recent 与选择均通过。</li><li>复制改为同步 fallback，避免受限 Clipboard API 悬挂。</li><li>390×844 下 scrollWidth 等于 clientWidth；控制器自然换行，无横向溢出。</li></ul></article>
+      </div>
+    </section>
+
+    <div class="decision-dock" aria-live="polite" hidden>
+      <div><strong id="decision-title">尚未选择方向</strong><span id="decision-copy">建议先在三种情景中操作三个原型，再做选择。</span></div>
+      <div class="dock-actions"><button class="plain-button" id="reset-button" type="button">Reset</button><button class="plain-button primary" id="copy-button" type="button">Copy note</button></div>
+    </div>
+
+    <footer>
+      <strong>Artifact job:</strong> 用一个自包含、可交互的比较面板帮助 BuddySwitch 评审者选择精简 Task 呈现。研究与代码证据核对日期：2026-07-17；原型数据为 contract-faithful mock，不代表真实用户任务。
+    </footer>
+  </main>
+
+  <script>
+    'use strict';
+
+    const tasks = {
+      healthy: {
+        active: { task_id: 'task-im-8f2c91', source_type: 'im.message', status: 'in_progress.parent_processing', updated_at: '2m ago' },
+        recoverable: false,
+      },
+      recoverable: {
+        active: { task_id: 'task-track-a03e7b', source_type: 'track.comment', status: 'in_progress.side_processing', updated_at: 'now' },
+        recoverable: true,
+      },
+      idle: { active: null, recoverable: false },
+      terminal: [
+        { task_id: 'task-im-8f2c90', source_type: 'im.message', status: 'completed', updated_at: '4m ago', iso: '2026-07-17T10:16:00+08:00' },
+        { task_id: 'task-im-8f2c8f', source_type: 'im.message', status: 'canceled', updated_at: '12m ago', iso: '2026-07-17T10:08:00+08:00' },
+        { task_id: 'task-track-77ce02', source_type: 'track.comment', status: 'completed', updated_at: '18m ago', iso: '2026-07-17T10:02:00+08:00' },
+        { task_id: 'task-im-7d1a46', source_type: 'im.message', status: 'completed', updated_at: '27m ago', iso: '2026-07-17T09:53:00+08:00' },
+        { task_id: 'task-im-7d1a31', source_type: 'im.message', status: 'canceled', updated_at: '34m ago', iso: '2026-07-17T09:46:00+08:00' },
+      ],
+    };
+
+    const directionNames = { A: 'Signal Stack', B: 'Quiet Ledger', C: 'Focus Switch' };
+    let scenario = 'healthy';
+    let selectedDirection = null;
+    let focusView = 'current';
+    let expandedLedgerId = null;
+    let ledgerExpanded = false;
+
+    function statusLabel(status) {
+      const labels = {
+        'in_progress.side_processing': 'Side processing',
+        'in_progress.awaiting_parent': 'Awaiting parent',
+        'in_progress.parent_processing': 'Parent processing',
+        completed: 'Completed',
+        canceled: 'Canceled',
+      };
+      return labels[status] || status;
+    }
+
+    function statusClass(task, recoverable) {
+      if (recoverable) return 'recoverable';
+      if (!task) return 'canceled';
+      if (task.status === 'completed') return 'completed';
+      if (task.status === 'canceled') return 'canceled';
+      return 'active';
+    }
+
+    function activeMarkup(task, recoverable, compact) {
+      if (!task) return '<div class="empty-state"><strong>No active task</strong>Recent work stays available below.</div>';
+      const tone = statusClass(task, recoverable);
+      return [
+        '<div class="' + (compact ? 'ledger-active' + (recoverable ? ' is-recoverable' : '') : 'active-block') + '">',
+        '<p class="section-kicker">' + (compact && recoverable ? 'Needs attention' : 'Active task') + '</p>',
+        '<div class="active-line"><span class="status-dot ' + tone + '"></span><strong class="active-source">' + task.source_type + '</strong></div>',
+        '<p class="active-status status-text ' + tone + '">' + statusLabel(task.status) + '</p>',
+        '<div class="task-meta"><span class="mono">' + task.task_id + '</span><span>' + task.updated_at + '</span></div>',
+        '</div>',
+      ].join('');
+    }
+
+    function terminalRow(task, className) {
+      const tone = statusClass(task, false);
+      return [
+        '<button class="' + className + '" type="button" data-task-id="' + task.task_id + '" aria-expanded="false">',
+        '<span class="status-dot ' + tone + '"></span>',
+        '<span class="row-copy"><strong>' + task.task_id + '</strong><small><span class="status-text ' + tone + '">' + statusLabel(task.status) + '</span> · ' + task.source_type + '</small></span>',
+        '<span class="row-time">' + task.updated_at + '</span>',
+        '</button>',
+      ].join('');
+    }
+
+    function renderSignal() {
+      const state = tasks[scenario];
+      document.querySelector('.signal-count').textContent = state.active ? '1 active' : '0 active';
+      document.querySelector('.signal-active').innerHTML = activeMarkup(state.active, state.recoverable, false);
+      document.querySelector('.signal-attention').hidden = !state.recoverable;
+      document.querySelector('.signal-recent').innerHTML = tasks.terminal.map((task) => terminalRow(task, 'recent-row')).join('');
+    }
+
+    function renderLedger() {
+      const state = tasks[scenario];
+      document.querySelector('.ledger-count').textContent = String(tasks.terminal.length + (state.active ? 1 : 0)) + ' total';
+      document.querySelector('.ledger-now').innerHTML = '<p class="section-kicker ledger-section-label">Now</p>' + activeMarkup(state.active, state.recoverable, true);
+      const limit = ledgerExpanded ? tasks.terminal.length : 3;
+      document.querySelector('.ledger-list').innerHTML = tasks.terminal.slice(0, limit).map((task) => {
+        const row = terminalRow(task, 'ledger-row');
+        if (expandedLedgerId !== task.task_id) return row;
+        return row.replace('aria-expanded="false"', 'aria-expanded="true"') + '<div class="ledger-detail"><span>source_type</span><strong>' + task.source_type + '</strong><span>updated_at</span><strong class="mono">' + task.iso + '</strong></div>';
+      }).join('');
+      const more = document.querySelector('.ledger-more');
+      more.textContent = ledgerExpanded ? 'Show fewer' : 'Show 2 more';
+      more.setAttribute('aria-expanded', String(ledgerExpanded));
+    }
+
+    function renderFocus() {
+      const state = tasks[scenario];
+      const currentTab = document.querySelector('.focus-current-tab');
+      const recentTab = document.querySelector('.focus-recent-tab');
+      currentTab.innerHTML = 'Current · ' + (state.active ? '1' : '0') + '<span class="attention-mark"' + (state.recoverable ? '' : ' hidden') + '></span>';
+      document.querySelector('.focus-count').textContent = state.active ? '1 active' : '0 active';
+      currentTab.setAttribute('aria-selected', String(focusView === 'current'));
+      recentTab.setAttribute('aria-selected', String(focusView === 'recent'));
+      const currentPanel = document.querySelector('.focus-current');
+      const recentPanel = document.querySelector('.focus-recent');
+      currentPanel.hidden = focusView !== 'current';
+      recentPanel.hidden = focusView !== 'recent';
+      if (!state.active) {
+        currentPanel.innerHTML = '<div class="empty-state"><strong>No active task</strong>Switch to Recent to review terminal work.<button class="focus-link" type="button">Inspect recent activity</button></div>';
+      } else {
+        const tone = statusClass(state.active, state.recoverable);
+        currentPanel.innerHTML = [
+          '<p class="section-kicker">' + (state.recoverable ? 'Needs attention' : 'Current task') + '</p>',
+          '<strong class="active-source">' + state.active.source_type + '</strong>',
+          '<div class="focus-fact"><span>Status</span><strong class="status-text ' + tone + '"><span class="status-dot ' + tone + '"></span> ' + statusLabel(state.active.status) + '</strong></div>',
+          '<div class="focus-fact"><span>Task ID</span><strong class="mono">' + state.active.task_id + '</strong></div>',
+          '<div class="focus-fact"><span>Updated</span><strong>' + state.active.updated_at + '</strong></div>',
+          '<button class="focus-link" type="button">Inspect recent activity</button>',
+        ].join('');
+      }
+      recentPanel.innerHTML = tasks.terminal.map((task) => terminalRow(task, 'recent-row')).join('');
+    }
+
+    function renderAll() {
+      renderSignal();
+      renderLedger();
+      renderFocus();
+    }
+
+    document.querySelectorAll('[data-scenario]').forEach((button) => {
+      button.addEventListener('click', () => {
+        scenario = button.dataset.scenario;
+        document.querySelectorAll('[data-scenario]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+        expandedLedgerId = null;
+        renderAll();
+      });
+    });
+
+    document.querySelector('.signal-disclosure').addEventListener('click', (event) => {
+      const recent = document.querySelector('.signal-recent');
+      const willOpen = recent.hidden;
+      recent.hidden = !willOpen;
+      event.currentTarget.setAttribute('aria-expanded', String(willOpen));
+      event.currentTarget.textContent = willOpen ? 'Hide recent · 5' : 'Show recent · 5';
+    });
+
+    document.querySelector('.ledger-more').addEventListener('click', () => {
+      ledgerExpanded = !ledgerExpanded;
+      expandedLedgerId = null;
+      renderLedger();
+    });
+
+    document.querySelector('.ledger-list').addEventListener('click', (event) => {
+      const row = event.target.closest('.ledger-row');
+      if (!row) return;
+      expandedLedgerId = expandedLedgerId === row.dataset.taskId ? null : row.dataset.taskId;
+      renderLedger();
+    });
+
+    function setFocusView(view) {
+      focusView = view;
+      renderFocus();
+    }
+    document.querySelector('.focus-current-tab').addEventListener('click', () => setFocusView('current'));
+    document.querySelector('.focus-recent-tab').addEventListener('click', () => setFocusView('recent'));
+    document.querySelector('.task-panel[aria-label="Focus Switch Task panel"]').addEventListener('click', (event) => {
+      if (event.target.closest('.focus-link')) setFocusView('recent');
+    });
+
+    document.querySelectorAll('[data-choose]').forEach((button) => {
+      button.addEventListener('click', () => {
+        selectedDirection = button.dataset.choose;
+        document.querySelectorAll('.direction').forEach((card) => card.classList.toggle('is-selected', card.dataset.direction === selectedDirection));
+        document.querySelectorAll('[data-choose]').forEach((item) => { item.textContent = item.dataset.choose === selectedDirection ? '已选择 ' + item.dataset.choose : '选择 ' + item.dataset.choose; });
+        document.getElementById('decision-title').textContent = '已选择 ' + selectedDirection + ' · ' + directionNames[selectedDirection];
+        document.getElementById('decision-copy').textContent = selectedDirection === 'B' ? '与当前推荐一致：历史直见、结构最少。' : '选择已记录；可继续切换情景验证。';
+        document.querySelector('.decision-dock').hidden = false;
+      });
+    });
+
+    function reviewNote() {
+      if (!selectedDirection) return 'BuddySwitch Task panel review: no direction selected yet.';
+      return 'BuddySwitch Task panel review\nSelected: ' + selectedDirection + ' · ' + directionNames[selectedDirection] + '\nScenario checked: ' + scenario + '\nConstraints: read-only, external-safe fields only, recent terminal tasks visible.';
+    }
+
+    function copyText(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('copy command was not accepted');
+    }
+
+    document.getElementById('copy-button').addEventListener('click', (event) => {
+      try {
+        copyText(reviewNote());
+        event.currentTarget.textContent = 'Copied';
+        document.getElementById('decision-copy').classList.add('copy-status');
+        document.getElementById('decision-copy').textContent = 'Review note copied.';
+      } catch (error) {
+        event.currentTarget.textContent = 'Select text';
+        document.getElementById('decision-copy').textContent = reviewNote();
+      }
+    });
+
+    document.getElementById('reset-button').addEventListener('click', () => {
+      scenario = 'healthy';
+      selectedDirection = null;
+      focusView = 'current';
+      expandedLedgerId = null;
+      ledgerExpanded = false;
+      document.querySelectorAll('[data-scenario]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.scenario === 'healthy')));
+      document.querySelectorAll('.direction').forEach((card) => card.classList.remove('is-selected'));
+      document.querySelectorAll('[data-choose]').forEach((button) => { button.textContent = '选择 ' + button.dataset.choose; });
+      document.querySelector('.signal-recent').hidden = true;
+      document.querySelector('.signal-disclosure').setAttribute('aria-expanded', 'false');
+      document.querySelector('.signal-disclosure').textContent = 'Show recent · 5';
+      document.getElementById('decision-title').textContent = '尚未选择方向';
+      document.getElementById('decision-copy').classList.remove('copy-status');
+      document.getElementById('decision-copy').textContent = '建议先在三种情景中操作三个原型，再做选择。';
+      document.getElementById('copy-button').textContent = 'Copy note';
+      document.querySelector('.decision-dock').hidden = true;
+      renderAll();
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>
