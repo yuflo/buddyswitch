@@ -83,16 +83,20 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
 
         self.assertIn("Use `task_sys.close` when a `task_sys.side_frame` is completed in side.", skill_text)
         self.assertIn("When a `task_sys.parent_frame` completes required frame work, call `task_sys.close`.", skill_text)
-        self.assertIn("For IM source frames, use message tools for required message reads, sends, and disposition work.", skill_text)
+        self.assertIn("For IM source frames, use message tools for required message reads and sends; Task Sys status owns processing lifecycle.", skill_text)
         self.assertIn(
             "Use `message.send(target_identity_id=...)` when the IM task requires a new explicit actor or external target.",
             skill_text,
         )
         self.assertIn(
-            "Use `message.send(reply_to=...)` when replying to a processable inbound IM message; the runtime resolves the original sender through the normal target-identity path.",
+            "Use `message.send(reply_to=...)` when replying to an IM message addressed to the active actor; the runtime resolves the original sender through the normal target-identity path.",
             skill_text,
         )
-        self.assertIn("Use `message.mark(..., disposition=absorbed)` only when no reply is needed.", skill_text)
+        self.assertIn("If a reply is required, send it before closing the Task.", skill_text)
+        self.assertIn("If no reply is required and the source work is complete, call `task_sys.close` directly.", skill_text)
+        self.assertNotIn("message." + "mark", skill_text)
+        self.assertNotIn("processable", skill_text)
+        self.assertNotIn("disposition", skill_text)
         self.assertNotIn("source-" + "bound", skill_text)
         self.assertIn("Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.", skill_text)
         self.assertIn("Task `status` is the only lifecycle truth", skill_text)

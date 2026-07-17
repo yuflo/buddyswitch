@@ -14,10 +14,11 @@ description: Use when processing Task Sys side frames, parent-thread decisions, 
 - Use `task_sys.need_parent` when a `task_sys.side_frame` needs parent-thread work; `interrupt` is only a parameter.
 - Use `task_sys.cancel` when the actor decides an active Task must stop without completion.
 - When a `task_sys.parent_frame` completes required frame work, call `task_sys.close`.
-- For IM source frames, use message tools for required message reads, sends, and disposition work.
+- For IM source frames, use message tools for required message reads and sends; Task Sys status owns processing lifecycle.
 - Use `message.send(target_identity_id=...)` when the IM task requires a new explicit actor or external target.
-- Use `message.send(reply_to=...)` when replying to a processable inbound IM message; the runtime resolves the original sender through the normal target-identity path.
-- Use `message.mark(..., disposition=absorbed)` only when no reply is needed.
+- Use `message.send(reply_to=...)` when replying to an IM message addressed to the active actor; the runtime resolves the original sender through the normal target-identity path.
+- If a reply is required, send it before closing the Task.
+- If no reply is required and the source work is complete, call `task_sys.close` directly.
 - Exact payload schemas, effects, rejection meanings, and recovery guidance come from native tool schemas and `context.get.tool_catalog['task_sys']`.
 - Diagnostic fallback: `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 - Broker method remains `env.tool`; do not edit runtime task objects or private runtime files directly.

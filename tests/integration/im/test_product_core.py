@@ -185,7 +185,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
         target_id = str(target["identity_id"])
         before = {
             name: sorted(path.name for path in (self.runtime_state_root / "im" / name).glob("*.json"))
-            for name in ("conversations", "messages", "events", "message_states")
+            for name in ("conversations", "messages", "events")
         }
 
         response = message_service.resolve_im_send_target(
@@ -200,7 +200,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
 
         after = {
             name: sorted(path.name for path in (self.runtime_state_root / "im" / name).glob("*.json"))
-            for name in ("conversations", "messages", "events", "message_states")
+            for name in ("conversations", "messages", "events")
         }
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_IM_TARGET")
@@ -245,20 +245,6 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
                         "reply_to": None,
                         "created_at": "2026-07-07T00:00:00Z",
                         "sequence": 1,
-                        "debug_payload": {"unexpected": True},
-                    }
-                ),
-            ),
-            (
-                "state",
-                lambda: message_repo.save_im_message_state(
-                    {
-                        "message_id": "msg-unknown-state",
-                        "owner_identity_id": target["id"],
-                        "disposition": "unseen",
-                        "reason": None,
-                        "processed_by": None,
-                        "updated_at": "2026-07-07T00:00:00Z",
                         "debug_payload": {"unexpected": True},
                     }
                 ),
@@ -336,15 +322,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
         self.assertEqual(conversation["identity_ids"], [sender_ref["id"], target["identity_id"]])
         self.assertNotIn("participants", conversation)
 
-        states = [
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in sorted((self.runtime_state_root / "im" / "message_states").glob("*.json"))
-        ]
-        self.assertEqual(len(states), 1)
-        self.assertEqual(states[0]["message_id"], message_id)
-        self.assertEqual(states[0]["owner_identity_id"], target["identity_id"])
-        self.assertNotIn("participant", states[0])
-        self.assertEqual(states[0]["disposition"], "unseen")
+        self.assertFalse((self.runtime_state_root / "im" / ("message_" + "states")).exists())
 
         events = [
             json.loads(path.read_text(encoding="utf-8"))
@@ -365,7 +343,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
         self.assertTrue(all(event["message_id"] == message_id for event in events))
         self.assertTrue(all(event["conversation_id"] == conversation_id for event in events))
 
-    def test_send_im_reply_normalizes_original_sender_to_target_identity_and_marks_replied(self) -> None:
+    def test_send_im_reply_normalizes_original_sender_and_persists_reply_edge(self) -> None:
         _created, _external_session, external = self._external_session()
         actor = self._actor_identity(role="dev", label="act-dev-reply-wrapper")
         root = message_service.send_im_message(
@@ -390,60 +368,48 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
         self.assertEqual(reply["message"]["reply_to"], root["message"]["id"])
         self.assertEqual(reply["message"]["conversation_id"], root["message"]["conversation_id"])
         self.assertEqual(reply["original_message_id"], root["message"]["id"])
-        self.assertEqual(reply["original_final_disposition"], "replied")
-        state_path = (
-            self.runtime_state_root
-            / "im"
-            / "message_states"
-            / f"{root['message']['id']}--{actor['identity_id']}.json"
-        )
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        self.assertEqual(state["disposition"], "replied")
 
-    def test_send_im_reply_rejects_non_processable_source_message_without_write(self) -> None:
+    def test_send_im_reply_allows_multiple_replies_to_same_inbound_message(self) -> None:
         _created, _external_session, external = self._external_session()
-        actor = self._actor_identity(role="dev", label="act-dev-reply-processed")
+        actor = self._actor_identity(role="dev", label="act-dev-multi-reply")
         root = message_service.send_im_message(
-            sender_identity=external,
-            target_identity=actor["identity"],
-            content="ping",
+            sender_identity=actor["identity"],
+            target_identity=external,
+            content="reply more than once",
         )
 
-        before_messages = sorted(path.name for path in (self.runtime_state_root / "im" / "messages").glob("*.json"))
-        before_events = sorted(path.name for path in (self.runtime_state_root / "im" / "events").glob("*.json"))
+        def online_actor(*, target_identity_id: str) -> dict[str, object]:
+            return {
+                "reachability_status": "online",
+                "target_identity_id": target_identity_id,
+                "record": {"identity_id": target_identity_id},
+            }
 
-        for disposition in ("absorbed", "replied"):
-            with self.subTest(disposition=disposition):
-                mark = message_service.update_im_disposition(
-                    identity=actor["identity"],
-                    message_id=root["message"]["id"],
-                    disposition=disposition,
-                    reason=f"already {disposition}",
-                )
-                self.assertTrue(mark.get("ok"), msg=mark)
+        first = message_service.send_im_reply(
+            sender_identity=external,
+            reply_to=root["message"]["id"],
+            content="first",
+            actor_reachability_checker=online_actor,
+        )
+        second = message_service.send_im_reply(
+            sender_identity=external,
+            reply_to=root["message"]["id"],
+            content="second",
+            actor_reachability_checker=online_actor,
+        )
 
-                reply = message_service.send_im_reply(
-                    sender_identity=actor["identity"],
-                    reply_to=root["message"]["id"],
-                    content="pong",
-                    actor_reachability_checker=lambda *, target_identity_id: {
-                        "reachability_status": "online",
-                        "target_identity_id": target_identity_id,
-                        "record": {"identity_id": target_identity_id},
-                    },
-                )
+        self.assertTrue(first.get("ok"), msg=first)
+        self.assertTrue(second.get("ok"), msg=second)
+        self.assertNotEqual(first["message"]["id"], second["message"]["id"])
+        self.assertEqual(first["message"]["reply_to"], root["message"]["id"])
+        self.assertEqual(second["message"]["reply_to"], root["message"]["id"])
 
-                self.assertFalse(reply.get("ok"), msg=reply)
-                self.assertEqual(reply["error"]["code"], "E_IM_REPLY_TARGET")
-                self.assertIn("processable inbound message", reply["error"]["message"])
-                self.assertEqual(
-                    sorted(path.name for path in (self.runtime_state_root / "im" / "messages").glob("*.json")),
-                    before_messages,
-                )
-                self.assertEqual(
-                    sorted(path.name for path in (self.runtime_state_root / "im" / "events").glob("*.json")),
-                    before_events,
-                )
+        replies = message_service.list_im_replies(
+            identity=external,
+            message_id=root["message"]["id"],
+        )
+        self.assertEqual(replies["count"], 2)
+        self.assertEqual([row["content"] for row in replies["replies"]], ["first", "second"])
 
     def test_send_im_reply_rejects_message_not_addressed_to_sender(self) -> None:
         sender = self._actor_identity(role="pm", label="act-pm-reply-guard")
@@ -714,7 +680,6 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
 
     def test_reply_uses_original_direct_conversation(self) -> None:
         _created, _external_session, external = self._external_session()
-        external_ref = external
         actor = self._actor_identity()
         root = message_service.send_im_message(
             sender_identity=external,
@@ -733,17 +698,8 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
         self.assertEqual(reply["message"]["conversation_id"], root["message"]["conversation_id"])
         conversation_files = sorted((self.runtime_state_root / "im" / "conversations").glob("*.json"))
         self.assertEqual(len(conversation_files), 1)
-        states = [
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in sorted((self.runtime_state_root / "im" / "message_states").glob("*.json"))
-        ]
-        reply_states = [row for row in states if row["message_id"] == reply["message"]["id"]]
-        self.assertEqual(len(reply_states), 1)
-        self.assertEqual(reply_states[0]["owner_identity_id"], external_ref["id"])
-        self.assertNotIn("participant", reply_states[0])
-        self.assertEqual(reply_states[0]["disposition"], "unseen")
 
-    def test_message_replies_and_disposition_are_participant_scoped(self) -> None:
+    def test_message_replies_are_participant_scoped(self) -> None:
         _created, _external_session, external = self._external_session()
         external_ref = external
         actor = self._actor_identity()
@@ -771,13 +727,6 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
             identity=external_ref,
             message_id=root["message"]["id"],
         )
-        mark = message_service.update_im_disposition(
-            identity=external_ref,
-            message_id=reply["message"]["id"],
-            disposition="absorbed",
-            reason="reply consumed by local script",
-        )
-
         self.assertTrue(read_reply.get("ok"), msg=read_reply)
         self.assertEqual(read_reply["message"]["content"], "pong")
         self.assertEqual(read_reply["message"]["reply_to"], root["message"]["id"])
@@ -785,19 +734,6 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
         self.assertEqual(outsider_read["error"]["code"], "E_IM_SCOPE")
         self.assertTrue(replies.get("ok"), msg=replies)
         self.assertEqual([row["id"] for row in replies["replies"]], [reply["message"]["id"]])
-        self.assertTrue(mark.get("ok"), msg=mark)
-        self.assertIs(mark["state_changed"], True)
-        self.assertEqual(mark["disposition"], "absorbed")
-        state_path = (
-            self.runtime_state_root
-            / "im"
-            / "message_states"
-            / f"{reply['message']['id']}--{external['id']}.json"
-        )
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        self.assertEqual(state["disposition"], "absorbed")
-        self.assertEqual(state["reason"], "reply consumed by local script")
-        self.assertEqual(state["owner_identity_id"], external["id"])
 
     def test_direct_conversation_read_returns_visible_messages_in_order(self) -> None:
         _created, _external_session, external = self._external_session()

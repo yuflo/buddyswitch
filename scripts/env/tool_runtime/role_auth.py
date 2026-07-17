@@ -27,7 +27,6 @@ COMMON_ROLE_PERMISSIONS = frozenset(
         "message.contacts",
         "message.send",
         "message.get",
-        "message.mark",
         "message.list",
         "message.conversation",
         "track.add_comment",

@@ -289,7 +289,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     manifest_path=manifest_path,
                 )
 
-    def test_live_broker_message_needs_parent_rejects_without_parent_submit(self) -> None:
+    def test_live_broker_rejects_removed_message_action_without_parent_submit(self) -> None:
         protocol = _require_module("runtime_kernel.protocol")
         with tempfile.TemporaryDirectory() as temp:
             workspace_dir = Path(temp) / "workspace"
@@ -325,65 +325,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            im_root = workspace_dir / "state" / "im"
-            for child in ("conversations", "messages", "message_states"):
-                (im_root / child).mkdir(parents=True, exist_ok=True)
-            message_id = "msg-live-projected-root"
-            conversation_id = "conv-live-projected-root"
-            sender_identity = {"id": "act-dev-bbbbbbbbbbbb", "type": "actor"}
-            target_identity = {"id": "act-pm-aaaaaaaaaaaa", "type": "actor"}
-            state_path = im_root / "message_states" / f"{message_id}--act-pm-aaaaaaaaaaaa.json"
-            (im_root / "conversations" / f"{conversation_id}.json").write_text(
-                json.dumps(
-                    {
-                        "id": conversation_id,
-                        "type": "direct",
-                        "identity_ids": ["act-dev-bbbbbbbbbbbb", "act-pm-aaaaaaaaaaaa"],
-                        "created_at": "2026-06-04T00:00:00Z",
-                        "updated_at": "2026-06-04T00:00:00Z",
-                        "last_message_id": message_id,
-                        "last_sequence": 1,
-                    },
-                    ensure_ascii=True,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            (im_root / "messages" / f"{message_id}.json").write_text(
-                json.dumps(
-                    {
-                        "id": message_id,
-                        "conversation_id": conversation_id,
-                        "sender_identity": sender_identity,
-                        "target_identity": target_identity,
-                        "content": "This changes the active parent-thread objective.",
-                        "reply_to": None,
-                        "created_at": "2026-06-04T00:00:00Z",
-                        "sequence": 1,
-                    },
-                    ensure_ascii=True,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            state_path.write_text(
-                json.dumps(
-                    {
-                        "message_id": message_id,
-                        "owner_identity_id": "act-pm-aaaaaaaaaaaa",
-                        "disposition": "unseen",
-                        "reason": None,
-                        "processed_by": None,
-                        "updated_at": "2026-06-04T00:00:00Z",
-                    },
-                    ensure_ascii=True,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
             fake_source_root = Path(temp) / "source-checkout"
             launcher_dir = fake_source_root / "tools" / "launcher"
             launcher_dir.mkdir(parents=True, exist_ok=True)
@@ -405,18 +346,14 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             try:
                 request = {
                     "protocol": BROKER_V2_PROTOCOL,
-                    "request_id": "req-live-needs-parent-projected-root",
+                    "request_id": "req-live-removed-message-action",
                     "method": "env.tool",
                     "params": {
                         "actor_id": "act-pm-aaaaaaaaaaaa",
                         "active_role": "pm",
                         "tool": "message",
-                        "action": "mark",
-                        "args": {
-                            "message_id": message_id,
-                            "disposition": "needs_parent",
-                            "reason": "This changes the active parent-thread objective.",
-                        },
+                        "action": "ma" + "rk",
+                        "args": {},
                     },
                     "deadline_ms": 35000,
                 }
@@ -427,11 +364,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     response = protocol.read_message(sock)
 
                 self.assertFalse(response.get("ok"), msg=response)
-                self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
-                self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
-                stored = json.loads(state_path.read_text(encoding="utf-8"))
-                self.assertEqual(stored["disposition"], "unseen")
-                self.assertIsNone(stored["reason"])
+                self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL")
                 parent_request_path = workspace_dir / "runtime" / "parent-request.json"
                 self.assertFalse(parent_request_path.exists(), msg=parent_request_path)
             finally:

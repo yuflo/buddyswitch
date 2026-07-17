@@ -107,28 +107,6 @@ class _FakeExternalImSession:
         self.calls.append(("list_replies", {"external_session": external_session, "message_id": message_id}))
         return {"ok": True, "message_id": message_id, "replies": [], "count": 0}
 
-    def update_disposition(
-        self,
-        *,
-        external_session: dict[str, Any],
-        message_id: str,
-        disposition: str,
-        reason: str | None = None,
-    ) -> dict[str, Any]:
-        self.calls.append(
-            (
-                "update_disposition",
-                {
-                    "external_session": external_session,
-                    "message_id": message_id,
-                    "disposition": disposition,
-                    "reason": reason,
-                },
-            )
-        )
-        return {"ok": True, "message_id": message_id, "disposition": disposition}
-
-
 class _FakeWebIdentityProvider:
     def __init__(self, external_session: dict[str, Any]) -> None:
         self.external_session = external_session

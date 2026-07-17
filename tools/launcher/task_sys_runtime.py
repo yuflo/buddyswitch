@@ -100,11 +100,10 @@ def _im_message_tool_capability_lines() -> tuple[str, ...]:
     return (
         "- message.contacts(...) to inspect discoverable actor targets when target discovery is needed.",
         "- message.list(...) to inspect active-identity Central IM events when event feed context is needed.",
-        "- message.get(message_id=...) to read exact processable inbound messages.",
+        "- message.get(message_id=...) to read an exact message visible to the active actor.",
         "- message.conversation(target_identity_id=..., ...) to inspect visible direct conversation context.",
         "- message.send(reply_to=source_message_id, content=...) to reply to the current source message.",
         "- message.send(target_identity_id=..., content=...) to send required IM communication to an explicit actor or external identity.",
-        "- message.mark(message_id=..., disposition=absorbed) when a processable inbound message needs no reply.",
     )
 
 
@@ -118,9 +117,11 @@ def _render_im_message_task_guidance(*, frame_kind: str) -> tuple[str, str, str]
         "For an IM source message:",
         "\n".join(
             (
-                "Use the message tool contract as the authority for message reads, sends, target resolution, and disposition.",
+                "Use the message tool contract as the authority for message reads, sends, target resolution, and reply edges.",
                 "Allowed message operations for completing this IM-source task:",
                 *_im_message_tool_capability_lines(),
+                "If a reply is required, send it before closing the Task.",
+                "If no reply is required and the source work is complete, call task_sys.close directly.",
                 close_line,
                 "- If the actor decides the Task must stop without completion, call task_sys.cancel(task_id=..., reason=...).",
             )
@@ -295,7 +296,6 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
                     "- message.conversation(target_identity_id=..., ...)",
                     "- message.send(reply_to=source_message_id, content=...)",
                     "- message.send(target_identity_id=..., content=...)",
-                    "- message.mark(message_id=..., disposition=absorbed)",
                     "- task_sys.close(task_id=..., summary=...)",
                     "- task_sys.cancel(task_id=..., reason=...)",
                 )

@@ -17,7 +17,6 @@ VALID_TRACK_STATE = ("active", "blocked", "done")
 VALID_UPDATE_KIND = ("progress", "decision", "blocker")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
-VALID_MESSAGE_DISPOSITIONS = ("unseen", "absorbed", "replied", "needs_parent")
 _RETIRED_MESSAGE_API_ERROR = (
     "legacy message object APIs are retired; use identity-first IM APIs in "
     "env.services.messages and env.repos.messages"

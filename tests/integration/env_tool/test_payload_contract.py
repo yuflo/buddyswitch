@@ -132,3 +132,37 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             violations.append(f"{message_domain.relative_to(ROOT)}: legacy actor-address message domain must stay retired")
 
         self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_current_im_surfaces_do_not_contain_retired_processing_model(self) -> None:
+        current_surfaces = (
+            "scripts/env/repos/messages.py",
+            "scripts/env/services/messages.py",
+            "scripts/env_legacy_store.py",
+            "scripts/env/tools/message/tool.py",
+            "scripts/env/tools/message/_impl.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "scripts/env/tool_runtime/role_auth.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/task_sys_runtime.py",
+            "buddyswitch/skills/shared/task-management/SKILL.md",
+            "docs/arch/web-interface-call-architecture.md",
+        )
+        retired = (
+            "message_" + "states",
+            "update_im_" + "disposition",
+            "message." + "mark",
+            "original_final_" + "disposition",
+            "processable " + "inbound",
+            "per-identity " + "dispositions",
+            "disposition " + "marking",
+            "disposition " + "behavior",
+        )
+        violations: list[str] = []
+        for relative_path in current_surfaces:
+            text = (ROOT / relative_path).read_text(encoding="utf-8").lower()
+            for token in retired:
+                if token in text:
+                    violations.append(f"{relative_path}: {token}")
+
+        self.assertEqual(violations, [], msg="\n".join(violations))

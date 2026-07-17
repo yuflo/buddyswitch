@@ -228,9 +228,13 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("message.conversation", text)
         self.assertIn("message.send(reply_to=source_message_id, content=...)", text)
         self.assertIn("message.send(target_identity_id=..., content=...)", text)
-        self.assertIn("message.mark(message_id=..., disposition=absorbed)", text)
         self.assertIn("task_sys.close(task_id=..., summary=...)", text)
         self.assertIn("task_sys.need_parent", text)
+        self.assertIn("If a reply is required, send it before closing the Task.", text)
+        self.assertIn("If no reply is required and the source work is complete, call task_sys.close directly.", text)
+        self.assertNotIn("message." + "mark", text)
+        self.assertNotIn("processable", text)
+        self.assertNotIn("disposition", text)
         self.assertNotIn("Do not start a new IM " + "conversation", text)
         self.assertNotIn("Do not send to target_identity_id " + "from side", text)
         self.assertNotIn("new " + "outbound " + "communication", text)
@@ -249,7 +253,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             "message.conversation",
             "message.send(reply_to=source_message_id, content=...)",
             "message.send(target_identity_id=..., content=...)",
-            "message.mark(message_id=..., disposition=absorbed)",
+            "If no reply is required and the source work is complete, call task_sys.close directly.",
         )
         for token in required_tokens:
             with self.subTest(surface="side", token=token):
@@ -530,9 +534,13 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("message.conversation", text)
         self.assertIn("message.send(reply_to=source_message_id, content=...)", text)
         self.assertIn("message.send(target_identity_id=..., content=...)", text)
-        self.assertIn("message.mark(message_id=..., disposition=absorbed)", text)
         self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
         self.assertIn("- task_sys.cancel(task_id=..., reason=...)", text)
+        self.assertIn("If a reply is required, send it before closing the Task.", text)
+        self.assertIn("If no reply is required and the source work is complete, call task_sys.close directly.", text)
+        self.assertNotIn("message." + "mark", text)
+        self.assertNotIn("processable", text)
+        self.assertNotIn("disposition", text)
         self.assertNotIn("Only after the source-" + "bound IM action " + "succeeds", text)
         self.assertNotIn("source-" + "bound", text)
 

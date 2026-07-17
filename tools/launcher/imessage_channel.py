@@ -28,7 +28,7 @@ DEFAULT_DISPLAY_NAME = "BuddySwitch iMessage"
 DEFAULT_USAGE_PROMPT = "Use /actors, @actor-id <message>, or Reply to an actor message."
 DEFAULT_NO_ACTORS_PROMPT = "No reachable actors."
 DEFAULT_REPLY_UNAVAILABLE_PROMPT = "This message cannot be replied to."
-DEFAULT_REPLY_FAILED_PROMPT = "Reply failed. Reply to a newer actor message or use @actor-id."
+DEFAULT_REPLY_FAILED_PROMPT = "Reply failed. Try again or use @actor-id."
 DEFAULT_REPLY_WAIT_MS = 30000
 IMSG_STATUS_TIMEOUT_SECONDS = 5.0
 

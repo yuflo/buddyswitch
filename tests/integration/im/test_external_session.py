@@ -82,7 +82,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestCase):
         assert isinstance(identity, dict)
         return external_session_key, external_session, identity
 
-    def test_session_create_auth_send_event_conversation_and_disposition_flow(self) -> None:
+    def test_session_create_auth_send_event_and_conversation_flow(self) -> None:
         actor_identity = self._actor_identity()
         handling_calls: list[dict[str, Any]] = []
         session = self._session(
@@ -140,14 +140,7 @@ class ExternalImSessionTests(RuntimeWorkspaceTestCase):
         self.assertTrue(replies.get("ok"), msg=replies)
         self.assertEqual([row["id"] for row in replies["replies"]], [reply_id])
 
-        marked = session.update_disposition(
-            external_session=external_session,
-            message_id=reply_id,
-            disposition="absorbed",
-            reason="handled",
-        )
-        self.assertTrue(marked.get("ok"), msg=marked)
-        self.assertEqual(marked["disposition"], "absorbed")
+        self.assertFalse(hasattr(session, "update_" + "disposition"))
 
         conversation = session.get_direct_conversation(
             external_session=external_session,

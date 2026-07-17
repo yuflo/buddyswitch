@@ -64,7 +64,6 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "message.send",
             "message.conversation",
             "message.get",
-            "message.mark",
             "message.list",
             "task_sys.cancel",
         ):

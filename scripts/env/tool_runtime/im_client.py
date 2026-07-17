@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from env.services import messages as message_service
-from env.tool_runtime import results as tool_results
 
 
 class ActorImClient:
@@ -93,19 +92,6 @@ class ActorImClient:
             limit=args.get("limit") if isinstance(args.get("limit"), int) else 20,
         )
 
-    def mark(self, args: dict[str, Any]) -> dict[str, Any]:
-        if args.get("disposition") == "needs_parent":
-            return self._reject_message_payload(
-                message="needs_parent message disposition was replaced by task_sys.need_parent from a task_sys.side_frame",
-                correctable_fields=["disposition"],
-            )
-        return message_service.update_im_disposition(
-            identity=self._identity,
-            message_id=str(args.get("message_id") or ""),
-            disposition=str(args.get("disposition") or ""),
-            reason=args.get("reason") if isinstance(args.get("reason"), str) else None,
-        )
-
     def _send_target_identity(self, value: Any) -> dict[str, Any]:
         return message_service.resolve_im_send_target(
             sender_identity=self._identity,
@@ -136,27 +122,6 @@ class ActorImClient:
             return []
         return raw.get("actors") if isinstance(raw, dict) and isinstance(raw.get("actors"), list) else []
 
-    def _reject_message_payload(self, *, message: str, correctable_fields: list[str]) -> dict[str, Any]:
-        return tool_results.rejection(
-            tool="message",
-            action="message.mark",
-            current_identity=self._current_identity_payload(),
-            active_role=self._active_role(),
-            code="E_MESSAGE_PAYLOAD",
-            message=message,
-            permission_boundary="request-payload",
-            human_summary="Message request payload is invalid.",
-            why_blocked=message,
-            impact="No messages were created or changed.",
-            state_changed=False,
-            retryable=True,
-            retry_guidance="Fix the message payload fields and retry.",
-            allowed_next_actions=[
-                "Use message.get to inspect the original processable message.",
-            ],
-            correctable_fields=correctable_fields,
-        )
-
     def _current_identity_payload(self) -> dict[str, Any]:
         value = self._context.get("current_identity") if hasattr(self._context, "get") else getattr(self._context, "current_identity", None)
         if isinstance(value, dict) and isinstance(value.get("id"), str) and isinstance(value.get("type"), str):
@@ -167,9 +132,3 @@ class ActorImClient:
             if isinstance(payload, dict) and isinstance(payload.get("id"), str) and isinstance(payload.get("type"), str):
                 return {"id": payload["id"], "type": payload["type"]}
         raise ValueError("current identity is unavailable")
-
-    def _active_role(self) -> str:
-        role_id = self._context.get("active_role") if hasattr(self._context, "get") else getattr(self._context, "role_id", None)
-        if isinstance(role_id, str) and role_id.strip():
-            return role_id
-        raise ValueError("active role is unavailable")
