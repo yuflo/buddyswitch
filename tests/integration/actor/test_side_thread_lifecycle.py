@@ -239,7 +239,7 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 workspace_dir=self.workspace_dir,
                 shared_project_workspace_dir=self.project_workspace_dir,
                 permissions="buddyswitch-runtime",
-                task_id="task-user-input-abc123",
+                task_id="task-controlled-inbound-abc123",
             )
 
             self.assertEqual([call["helper"] for call in self.app_server.calls], ["thread_fork", "thread_inject_items", "turn_start"])
@@ -256,7 +256,7 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertEqual(rows[0]["thread_id"], "thr-side-1")
             self.assertEqual(rows[0]["parent_thread_id"], "thr-main")
             self.assertEqual(rows[0]["purpose"], "task_sys.side_frame")
-            self.assertEqual(rows[0]["task_id"], "task-user-input-abc123")
+            self.assertEqual(rows[0]["task_id"], "task-controlled-inbound-abc123")
             self.assertEqual(rows[0]["turn_id"], "turn-side-started")
 
     def test_start_side_thread_passes_model_and_effort_to_fork_without_registry_persistence(self) -> None:

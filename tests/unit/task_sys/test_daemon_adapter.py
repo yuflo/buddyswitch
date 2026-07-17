@@ -42,7 +42,7 @@ class TaskSysDaemonAdapterTests(unittest.TestCase):
         adapter = _load_module(ADAPTER_PATH, "buddyswitch_task_sys_adapter_execute_test")
         protocol = _load_module(PROTOCOL_PATH, "buddyswitch_task_sys_protocol_execute_test")
         context = object()
-        instruction = {"type": "start_parent", "task_id": "task-user-input-adapter123"}
+        instruction = {"type": "start_parent", "task_id": "task-controlled-inbound-adapter123"}
         calls: list[tuple[object, dict[str, object]]] = []
         original = adapter.task_sys_runtime.execute_instruction
         self.addCleanup(setattr, adapter.task_sys_runtime, "execute_instruction", original)
@@ -53,7 +53,7 @@ class TaskSysDaemonAdapterTests(unittest.TestCase):
 
         result = adapter.command_handlers(context)[protocol.EXECUTE_INSTRUCTION]({"instruction": instruction})
 
-        self.assertEqual(result, {"action": "start_parent", "task_id": "task-user-input-adapter123"})
+        self.assertEqual(result, {"action": "start_parent", "task_id": "task-controlled-inbound-adapter123"})
         self.assertEqual(calls, [(context, instruction)])
         with self.assertRaisesRegex(ValueError, "instruction must be an object"):
             adapter.command_handlers(context)[protocol.EXECUTE_INSTRUCTION]({"instruction": "invalid"})
@@ -71,11 +71,11 @@ class TaskSysDaemonAdapterTests(unittest.TestCase):
         )
 
         result = adapter.command_handlers(context)[protocol.CLEANUP_SIDE_LEASE](
-            {"task_id": "task-user-input-cleanup123"}
+            {"task_id": "task-controlled-inbound-cleanup123"}
         )
 
         self.assertTrue(result["lease_unregistered"])
-        self.assertEqual(calls, [(context, "task-user-input-cleanup123")])
+        self.assertEqual(calls, [(context, "task-controlled-inbound-cleanup123")])
         with self.assertRaisesRegex(ValueError, "task_id"):
             adapter.command_handlers(context)[protocol.CLEANUP_SIDE_LEASE]({"task_id": ""})
 

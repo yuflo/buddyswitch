@@ -29,8 +29,8 @@ class TaskSysProgressCheckTests(RuntimeWorkspaceTestCase):
         result = task_sys.ingest(
             {
                 "source": {
-                    "type": "user.input",
-                    "ref": {"id": "input-progress-check", "surface": "cli"},
+                    "type": "test.inbound.created",
+                    "ref": {"id": "event-progress-check", "channel": "fixture"},
                 },
                 "actor_target": {"actor_id": target_actor_id, "role_id": "dev"},
                 "context": {"text": "Continue the parent-owned task."},

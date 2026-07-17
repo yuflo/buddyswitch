@@ -36,15 +36,15 @@ class TaskSysRuntimeClientTests(unittest.TestCase):
 
         def fake_request(method: str, params: dict[str, object], **kwargs: object) -> dict[str, object]:
             calls.append({"method": method, "params": params, **kwargs})
-            return {"ok": True, "result": {"action": "start_parent", "task_id": "task-user-input-client123"}}
+            return {"ok": True, "result": {"action": "start_parent", "task_id": "task-controlled-inbound-client123"}}
 
         client.daemon_client.request_mailbox = fake_request
-        instruction = {"type": "start_parent", "task_id": "task-user-input-client123"}
+        instruction = {"type": "start_parent", "task_id": "task-controlled-inbound-client123"}
         root = ROOT / ".tmp-task-client-instance"
 
         result = client.execute_instruction(instance_root=root, instruction=instruction)
 
-        self.assertEqual(result["task_id"], "task-user-input-client123")
+        self.assertEqual(result["task_id"], "task-controlled-inbound-client123")
         self.assertEqual(calls[0]["method"], protocol.EXECUTE_INSTRUCTION)
         self.assertEqual(calls[0]["params"], {"instruction": instruction})
         self.assertEqual(calls[0]["response_timeout_seconds"], 65.0)
@@ -69,6 +69,6 @@ class TaskSysRuntimeClientTests(unittest.TestCase):
         with self.assertRaisesRegex(client.TaskSysRuntimeClientError, "cleanup failed"):
             client.cleanup_side_lease(
                 instance_root=ROOT / ".tmp-task-client-instance",
-                task_id="task-user-input-cleanup123",
+                task_id="task-controlled-inbound-cleanup123",
             )
         self.assertEqual(calls, [protocol.CLEANUP_SIDE_LEASE])

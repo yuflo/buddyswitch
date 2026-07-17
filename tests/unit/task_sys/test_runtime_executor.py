@@ -88,12 +88,12 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def _instruction(self) -> dict[str, Any]:
         return {
             "type": "start_side",
-            "task_id": "task-user-input-abcdef123456",
+            "task_id": "task-controlled-inbound-abcdef123456",
             "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
             "frame": {
                 "kind": "task_sys.side_frame",
-                "task_id": "task-user-input-abcdef123456",
-                "source": {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}},
+                "task_id": "task-controlled-inbound-abcdef123456",
+                "source": {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
                 "context": {"text": "Draft brief"},
             },
@@ -123,7 +123,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def _ingested_instruction(self) -> tuple[str, dict[str, Any]]:
         result = task_sys.ingest(
             {
-                "source": {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}},
+                "source": {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
                 "context": {"text": "Draft brief"},
             }
@@ -133,12 +133,12 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def _parent_instruction(self, *, interrupt: bool = False) -> dict[str, Any]:
         return {
             "type": "interrupt_submit_parent" if interrupt else "submit_parent",
-            "task_id": "task-user-input-abcdef123456",
+            "task_id": "task-controlled-inbound-abcdef123456",
             "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
             "frame": {
                 "kind": "task_sys.parent_frame",
-                "task_id": "task-user-input-abcdef123456",
-                "source": {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}},
+                "task_id": "task-controlled-inbound-abcdef123456",
+                "source": {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
                 "inbound_context": {"text": "Draft brief"},
                 "execution_handoff": {
@@ -146,7 +146,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
                         "next": "Draft the brief in parent.",
                     },
                     "interrupt": interrupt,
-                    "ordering": {"after": "task-user-input-prior123"},
+                    "ordering": {"after": "task-controlled-inbound-prior123"},
                     "side_thread_id": "thr-side-1",
                     "cleanup": {},
                 },
@@ -186,7 +186,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         text = self.module.render_side_frame(self._instruction()["frame"])
 
         self.assertIn("task_sys.side_frame", text)
-        self.assertIn("task-user-input-abcdef123456", text)
+        self.assertIn("task-controlled-inbound-abcdef123456", text)
         self.assertNotIn("task_desc", text)
         self.assertNotIn("task_relation", text)
         self.assertNotIn("task_sys.update_task_analysis", text)
@@ -293,7 +293,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertEqual(call["workspace_dir"], context.workspace_dir)
         self.assertEqual(call["shared_project_workspace_dir"], context.project_workspace_dir)
         self.assertEqual(call["permissions"], context.permissions)
-        self.assertEqual(call["task_id"], "task-user-input-abcdef123456")
+        self.assertEqual(call["task_id"], "task-controlled-inbound-abcdef123456")
         self.assertNotIn("model", call)
         self.assertNotIn("model_reasoning_effort", call)
         self.assertIn("task_sys.side_frame", call["text"])
@@ -323,13 +323,16 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
 
         first = self.module.execute_instruction(context, self._instruction())
         second_instruction = self._instruction()
-        second_instruction["task_id"] = "task-user-input-second123"
-        second_instruction["frame"]["task_id"] = "task-user-input-second123"
+        second_instruction["task_id"] = "task-controlled-inbound-second123"
+        second_instruction["frame"]["task_id"] = "task-controlled-inbound-second123"
         second = self.module.execute_instruction(context, second_instruction)
 
         self.assertEqual(first["side_thread_id"], "thr-side-1")
         self.assertEqual(second["side_thread_id"], "thr-side-2")
-        self.assertEqual([call["task_id"] for call in calls], ["task-user-input-abcdef123456", "task-user-input-second123"])
+        self.assertEqual(
+            [call["task_id"] for call in calls],
+            ["task-controlled-inbound-abcdef123456", "task-controlled-inbound-second123"],
+        )
         self.assertNotEqual(calls[0]["text"], calls[1]["text"])
 
     def test_execute_start_side_retries_lifecycle_failure_with_fresh_attempt(self) -> None:
@@ -418,7 +421,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.addCleanup(setattr, self.module.side_thread_lifecycle, "cleanup_task_side_lease", original_cleanup)
         self.module.side_thread_lifecycle.cleanup_task_side_lease = fake_cleanup_task_side_lease
 
-        result = self.module.cleanup_side_lease(context, "task-user-input-cleanup123")
+        result = self.module.cleanup_side_lease(context, "task-controlled-inbound-cleanup123")
 
         self.assertEqual(result["side_thread_id"], "thr-side-cleanup")
         self.assertEqual(result["turn_interrupt_attempted"], True)
@@ -433,7 +436,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
                     "instance_json": context.instance_json,
                     "actor_id": context.actor_id,
                     "parent_thread_id": context.main_thread_id,
-                    "task_id": "task-user-input-cleanup123",
+                    "task_id": "task-controlled-inbound-cleanup123",
                 }
             ],
         )
@@ -469,7 +472,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
 
         self.assertIn("task_sys.parent_frame", text)
-        self.assertIn("task-user-input-abcdef123456", text)
+        self.assertIn("task-controlled-inbound-abcdef123456", text)
         self.assertIn("Task Sys source:", text)
         self.assertNotIn("Task desc:", text)
         self.assertNotIn("Task relation:", text)
@@ -499,11 +502,11 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
         self.assertIn("- task_sys.cancel(task_id=..., reason=...)", text)
 
-    def test_render_parent_frame_allows_user_input_parent_communication_before_close(self) -> None:
+    def test_render_parent_frame_for_generic_controlled_source_uses_task_sys_actions(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
 
-        self.assertIn("For a user.input source:", text)
-        self.assertIn("message.send(target_identity_id=..., content=...)", text)
+        self.assertIn("For this parent source:", text)
+        self.assertNotIn("message.send(target_identity_id=..., content=...)", text)
         self.assertIn("After required parent work is complete, call task_sys.close.", text)
         self.assertIn("execution_handoff", text)
         self.assertNotIn("parent_handoff_params", text)
@@ -578,12 +581,12 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result["action"], "submit_parent")
         self.assertEqual(result["turn_id"], "turn-parent-1")
-        self.assertEqual(result["task_id"], "task-user-input-abcdef123456")
+        self.assertEqual(result["task_id"], "task-controlled-inbound-abcdef123456")
         self.assertEqual([call["helper"] for call in calls], ["input_actor_turn"])
         self.assertEqual(calls[0]["instance_json"], context.instance_json)
         self.assertEqual(calls[0]["thread_id"], "thr-main")
         self.assertIn("task_sys.parent_frame", calls[0]["text"])
-        self.assertIn("task-user-input-abcdef123456", calls[0]["text"])
+        self.assertIn("task-controlled-inbound-abcdef123456", calls[0]["text"])
 
     def test_execute_submit_parent_delegates_capability_and_start_steer_to_actor_session(self) -> None:
         context = self._context()
@@ -707,9 +710,9 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
 
     def test_render_parent_progress_check_binds_existing_task_and_current_actions(self) -> None:
         task = {
-            "id": "task-user-input-progress123",
-            "source_type": "user.input",
-            "source_ref": {"id": "input-progress-1", "surface": "cli"},
+            "id": "task-controlled-inbound-progress123",
+            "source_type": "test.inbound.created",
+            "source_ref": {"id": "event-progress-1", "channel": "fixture"},
             "status": "in_progress.parent_processing",
             "events": [
                 {"type": "created", "at": "2026-07-16T00:00:00Z"},
@@ -725,7 +728,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         prompt = self.module.render_parent_progress_check(task, previous_turn)
 
         self.assertIn("[TASK PROGRESS CHECK]", prompt)
-        self.assertIn("task-user-input-progress123", prompt)
+        self.assertIn("task-controlled-inbound-progress123", prompt)
         self.assertIn("in_progress.parent_processing", prompt)
         self.assertIn("parent_handoff_started", prompt)
         self.assertIn("turn-parent-work-1", prompt)
@@ -741,9 +744,9 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def test_submit_parent_progress_check_uses_main_actor_thread(self) -> None:
         context = self._context()
         task = {
-            "id": "task-user-input-progress123",
-            "source_type": "user.input",
-            "source_ref": {"id": "input-progress-1"},
+            "id": "task-controlled-inbound-progress123",
+            "source_type": "test.inbound.created",
+            "source_ref": {"id": "event-progress-1"},
             "status": "in_progress.parent_processing",
             "events": [{"type": "parent_handoff_started", "at": "2026-07-16T00:01:00Z"}],
         }
@@ -768,7 +771,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             result,
             {
                 "action": "progress_check",
-                "task_id": "task-user-input-progress123",
+                "task_id": "task-controlled-inbound-progress123",
                 "turn_id": "turn-progress-check-1",
             },
         )

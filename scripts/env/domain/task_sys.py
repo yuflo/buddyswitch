@@ -187,10 +187,13 @@ def _reject_unsupported_ingest_fields(payload: Mapping[str, Any]) -> None:
         raise ValueError(f"envelope has unsupported fields: {', '.join(unsupported)}")
 
 
-def _reject_retired_source(source_type: str) -> None:
-    retired_source = "{}_{}.{}".format("app", "server", "turn_completed")
-    if source_type == retired_source:
-        raise ValueError(f"{retired_source} is not a Task Sys ingest source")
+def _reject_non_task_sys_ingest_source(source_type: str) -> None:
+    non_task_sys_sources = (
+        "{}_{}.{}".format("app", "server", "turn_completed"),
+        "{}.{}".format("user", "input"),
+    )
+    if source_type in non_task_sys_sources:
+        raise ValueError(f"{source_type} is not a Task Sys ingest source")
 
 
 def _side_frame(*, task_id: str, source: Mapping[str, Any], actor_target: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
@@ -337,7 +340,7 @@ def ingest(envelope: Mapping[str, Any]) -> dict[str, Any]:
     payload = _require_mapping(envelope, "envelope")
     _reject_unsupported_ingest_fields(payload)
     source = _normalize_source(payload.get("source"))
-    _reject_retired_source(str(source["type"]))
+    _reject_non_task_sys_ingest_source(str(source["type"]))
     actor_target = _normalize_actor_target(payload.get("actor_target"))
     context = _normalize_context(payload.get("context"))
 

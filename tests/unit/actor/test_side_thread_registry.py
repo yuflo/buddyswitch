@@ -80,14 +80,14 @@ class SideThreadRegistryTests(unittest.TestCase):
                 actor_id="act-dev-side",
                 parent_thread_id="thr-main",
                 side_thread_id="thr-side-task",
-                task_id="task-user-input-abcdef123456",
+                task_id="task-controlled-inbound-abcdef123456",
                 purpose="task_sys.side_frame",
                 turn_id="turn-side-1",
                 now=lambda: "2026-06-30T00:00:00Z",
             )
 
             self.assertEqual(row["thread_id"], "thr-side-task")
-            self.assertEqual(row["task_id"], "task-user-input-abcdef123456")
+            self.assertEqual(row["task_id"], "task-controlled-inbound-abcdef123456")
             self.assertEqual(row["purpose"], "task_sys.side_frame")
             self.assertEqual(row["turn_id"], "turn-side-1")
             payload = self._payload(instance_json)

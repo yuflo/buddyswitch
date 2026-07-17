@@ -26,8 +26,8 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
     def _envelope(self) -> dict[str, Any]:
         return {
             "source": {
-                "type": "user.input",
-                "ref": {"id": "input-1", "surface": "cli"},
+                "type": "test.inbound.created",
+                "ref": {"id": "event-1", "channel": "fixture"},
             },
             "actor_target": {
                 "role_id": "dev",
@@ -35,7 +35,7 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
             },
             "context": {
                 "text": "Draft brief",
-                "surface": "cli",
+                "channel": "fixture",
             },
         }
 

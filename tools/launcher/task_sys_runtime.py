@@ -301,25 +301,6 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
                 )
             ),
         )
-    elif source_type == "user.input":
-        source_guidance = (
-            "For a user.input source:",
-            "\n".join(
-                (
-                    "- Perform the parent work requested by execution_handoff.",
-                    "- If parent work requires outbound communication, use message.send(target_identity_id=..., content=...).",
-                    "- After required parent work is complete, call task_sys.close.",
-                )
-            ),
-            "Allowed parent frame operations:",
-            "\n".join(
-                (
-                    "- message.send(target_identity_id=..., content=...) when execution_handoff requires outbound communication.",
-                    "- task_sys.close(task_id=..., summary=...)",
-                    "- task_sys.cancel(task_id=..., reason=...)",
-                )
-            ),
-        )
     else:
         source_guidance = (
             "For this parent source:",

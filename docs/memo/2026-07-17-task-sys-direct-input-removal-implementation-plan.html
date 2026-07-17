@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task Sys Direct Input Removal — Implementation Handoff Plan</title>
+  <style>
+    :root {
+      --paper: #f4f0e7;
+      --ink: #17201d;
+      --muted: #64706b;
+      --line: #c8cec7;
+      --card: rgba(255, 255, 255, 0.74);
+      --accent: #0b6b57;
+      --accent-soft: #dcebe5;
+      --danger: #9b3f2f;
+      --danger-soft: #f2ded9;
+      --code: #202b27;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 4%, rgba(11, 107, 87, 0.13), transparent 28rem),
+        linear-gradient(180deg, #faf8f2 0, var(--paper) 38rem);
+      font: 15px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 48px 0 72px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.7fr);
+      gap: 28px;
+      align-items: end;
+      padding-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 820px;
+      font-family: ui-serif, Georgia, serif;
+      font-size: clamp(38px, 6vw, 72px);
+      font-weight: 600;
+      letter-spacing: -0.04em;
+      line-height: 0.98;
+    }
+
+    .lead {
+      margin: 22px 0 0;
+      max-width: 760px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .job {
+      padding: 20px;
+      border: 1px solid rgba(11, 107, 87, 0.32);
+      border-radius: 18px;
+      background: var(--accent-soft);
+    }
+
+    .job strong { display: block; margin-bottom: 6px; color: var(--accent); }
+    .job p { margin: 0; }
+
+    section { margin-top: 44px; }
+
+    h2 {
+      margin: 0 0 16px;
+      font-family: ui-serif, Georgia, serif;
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    p { margin: 8px 0; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      box-shadow: 0 14px 42px rgba(30, 48, 41, 0.05);
+    }
+
+    .selected { border-color: rgba(11, 107, 87, 0.48); }
+    .rejected { border-color: rgba(155, 63, 47, 0.28); }
+    .selected h3 { color: var(--accent); }
+    .rejected h3 { color: var(--danger); }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .step {
+      position: relative;
+      min-height: 128px;
+      padding: 16px;
+      border-top: 3px solid var(--accent);
+      background: var(--card);
+    }
+
+    .step b { display: block; margin-bottom: 8px; color: var(--accent); font-size: 12px; letter-spacing: 0.1em; }
+    .step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      z-index: 2;
+      top: 48%;
+      right: -13px;
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--card);
+    }
+
+    th, td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th { color: var(--accent); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+
+    code {
+      padding: 0.12em 0.35em;
+      border-radius: 5px;
+      color: #f3f7f5;
+      background: var(--code);
+      font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 12px 0 0;
+      padding: 16px;
+      border-radius: 12px;
+      color: #eff7f3;
+      background: var(--code);
+      font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+    }
+
+    ul, ol { margin: 8px 0 0; padding-left: 21px; }
+    li + li { margin-top: 6px; }
+
+    .acceptance {
+      padding: 24px;
+      border-left: 5px solid var(--accent);
+      background: var(--accent-soft);
+      font-family: ui-serif, Georgia, serif;
+      font-size: 20px;
+    }
+
+    .boundary {
+      padding: 20px;
+      border-left: 5px solid var(--danger);
+      background: var(--danger-soft);
+    }
+
+    footer {
+      margin-top: 50px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 820px) {
+      header, .grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .step { min-height: auto; }
+      .step:not(:last-child)::after { content: "↓"; top: auto; right: 50%; bottom: -20px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">Implementation Handoff Plan · 2026-07-17</p>
+        <h1>Task Sys Direct Input Removal</h1>
+        <p class="lead">一次 forward-only 清理：让 direct Actor input 只走 ActorSession / AppServer，把 <code>user.input</code> 从 Task Sys 的入口、运行时语义和正向测试模型中彻底移除。</p>
+      </div>
+      <aside class="job">
+        <strong>Artifact job</strong>
+        <p>让实施者可以从当前事实出发，按 RED → GREEN → REPLACE → ACCEPT 的最短路径完成清理，并留下可复现证据。</p>
+      </aside>
+    </header>
+
+    <section>
+      <h2>Acceptance sentence</h2>
+      <div class="acceptance">Direct Actor input reaches only ActorSession / AppServer. Task Sys has no user-input ingress helper, CLI, or runtime prompt branch; its domain rejects <code>user.input</code>; controlled IM / Track ingress remains intact; current tests use <code>user.input</code> only in explicit negative guards.</div>
+    </section>
+
+    <section>
+      <h2>Decision and boundary</h2>
+      <div class="grid">
+        <article class="card selected">
+          <h3>Selected · direct REBUILD</h3>
+          <p>删除 Task Sys 的 direct-input 写入口与专用解释分支，在 domain owner 明确拒绝该 source，并替换所有正向 fixture。最终只保留一个产品事实。</p>
+        </article>
+        <article class="card rejected">
+          <h3>Rejected · 仅断开产品调用</h3>
+          <p>只保证 ActorSession 不调用 Task Sys、但继续保留 helper / CLI / domain 接受能力，会让退休模型仍然可达、可发现。</p>
+        </article>
+        <article class="card rejected">
+          <h3>Rejected · 重命名或重新解释</h3>
+          <p>把 <code>user.input</code> 解释为未来受控文本入口会继续混淆直接交互和可治理 inbound。未来若需要，必须以新的受控 source 契约引入。</p>
+        </article>
+        <article class="card">
+          <h3>Out of scope</h3>
+          <p>不改变 lifecycle 状态机、side → parent handoff、parent 并发处理策略、relation analysis，也不重写历史 memo。</p>
+        </article>
+      </div>
+      <div class="boundary" style="margin-top:16px">
+        <strong>唯一允许的残留：</strong>Task Sys domain 与测试可以明确写出 <code>user.input</code>，但只能用于“拒绝它、证明不会创建任务”的负向契约；不能作为可处理 source、fixture 或 task ID 来源。
+      </div>
+    </section>
+
+    <section>
+      <h2>Current trace</h2>
+      <table>
+        <thead>
+          <tr><th>Surface</th><th>Current residue</th><th>Target truth</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>tools/launcher/task_sys_ingress.py</code></td><td><code>ingest_user_input</code>、<code>user-input</code> CLI、UUID / argparse 支撑</td><td>只保留 IM / Track controlled ingress helpers</td></tr>
+          <tr><td><code>scripts/env/domain/task_sys.py</code></td><td><code>ingest()</code> 接受任意 source type</td><td>owner 在任何写入前拒绝 <code>user.input</code></td></tr>
+          <tr><td><code>tools/launcher/task_sys_runtime.py</code></td><td>parent frame 为 <code>user.input</code> 提供专用 prompt</td><td>删除退休 source 的解释和行为分支</td></tr>
+          <tr><td>Task Sys / actor tests</td><td>正向 source fixture 与 <code>task-user-input-*</code> IDs 教授旧模型</td><td>正向测试改用 controlled source；direct input 只留负向保护</td></tr>
+          <tr><td><code>tools/launcher/actor_session.py</code></td><td>已直接调用 AppServer，无 Task Sys 依赖</td><td>保持现状并回归验证 repository unchanged</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Execution sequence</h2>
+      <div class="flow">
+        <article class="step"><b>01 · BASELINE</b>确认精确测试目标与当前 green，先把正向 fixture 改为 controlled source 并证明是无行为变化的 refactor。</article>
+        <article class="step"><b>02 · RED</b>新增 domain rejection、retired ingress surface 和 runtime branch absence 三类失败证明。</article>
+        <article class="step"><b>03 · GREEN</b>在 semantic owner 拒绝 source；删除 helper / CLI / imports；删除 runtime prompt 分支。</article>
+        <article class="step"><b>04 · REPLACE</b>替换全部正向 <code>user.input</code> source 和 task IDs；保留并收紧 direct input 负向测试。</article>
+        <article class="step"><b>05 · ACCEPT</b>运行 focused impact tests、residue scan、diff review 与清理检查，逐项回答 acceptance sentence。</article>
+      </div>
+    </section>
+
+    <section>
+      <h2>TDD batches and proofs</h2>
+      <table>
+        <thead>
+          <tr><th>Batch</th><th>RED / baseline claim</th><th>Minimal build</th><th>Focused proof</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1 · Domain owner</td>
+            <td><code>TaskSys.ingest(source.type=user.input)</code> 当前仍会创建 task；新增测试要求抛错且 repository 不变。</td>
+            <td>在 <code>scripts/env/domain/task_sys.py</code> 的 ingest 边界、持久化之前明确拒绝。</td>
+            <td><code>tests/integration/task_sys/test_substrate.py</code></td>
+          </tr>
+          <tr>
+            <td>2 · Reachability</td>
+            <td>架构测试要求 ingress module 不再暴露 direct-input helper / CLI，并要求 runtime 无专用分支；当前应失败。</td>
+            <td>精确删除 <code>ingest_user_input</code>、CLI parser / main 和 <code>user.input</code> runtime branch。</td>
+            <td><code>tests/unit/task_sys/test_direct_input_retirement.py</code></td>
+          </tr>
+          <tr>
+            <td>3 · Positive model</td>
+            <td>以既有 green 作为 refactor baseline；禁止制造无意义失败。</td>
+            <td>将正向 fixture 切到 controlled source，删除 <code>task-user-input-*</code> 命名。</td>
+            <td>受影响 Task Sys、actor runtime / registry、daemon adapter tests</td>
+          </tr>
+          <tr>
+            <td>4 · Consumer regressions</td>
+            <td>direct Actor input 不改变 Task Sys repository；IM / Track 仍创建并推进受控任务。</td>
+            <td>不修改这些产品路径，只验证删除没有破坏它们。</td>
+            <td><code>test_session.py</code>、IM / Track integration tests</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Commands and evidence</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Focused execution</h3>
+          <pre>./buddyswitch-test focused \
+  tests/integration/task_sys/test_substrate.py \
+  tests/unit/task_sys/test_direct_input_retirement.py
+
+./buddyswitch-test focused \
+  tests/integration/task_sys/test_side_processing.py \
+  tests/integration/task_sys/test_progress_check.py \
+  tests/unit/task_sys/test_runtime_executor.py \
+  tests/unit/task_sys/test_runtime_client.py \
+  tests/unit/task_sys/test_daemon_adapter.py \
+  tests/integration/actor/test_side_thread_lifecycle.py \
+  tests/unit/actor/test_side_thread_registry.py \
+  tests/unit/actor/test_session.py \
+  tests/integration/im/test_external_query.py \
+  tests/integration/track/test_comment_added_handler.py</pre>
+        </article>
+        <article class="card">
+          <h3>Replacement and repository hygiene</h3>
+          <pre>rg -n "ingest_user_input|user\\.input|user-input|task-user-input" \
+  scripts tools buddyswitch tests docs/arch \
+  --glob '!docs/memo/**'
+
+git diff --check
+git status --short</pre>
+          <p>Expected: production 仅 domain rejection 可命中 <code>user.input</code>；tests 仅负向 guard 可命中；其余退休 token 零命中。测试 runner 不遗留 process、socket、lock 或临时状态。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Execution evidence · completed</h2>
+      <div class="grid">
+        <article class="card selected">
+          <h3>RED → GREEN</h3>
+          <p><strong>RED run <code>08ee466a235f425f98412d76d5d49fda</code>:</strong> 8 intended failures proved domain acceptance, reachable ingress / CLI, and the runtime prompt branch.</p>
+          <p><strong>GREEN run <code>26b8384c97354ff18c446a266557db0f</code>:</strong> 3 tests + 6 subtests passed for the new retirement contract.</p>
+        </article>
+        <article class="card selected">
+          <h3>Final affected-path proof</h3>
+          <p><strong>Run <code>260187eb2bb949988538c1ed7eccccbe</code>:</strong> 119 tests + 132 subtests passed across Task Sys lifecycle/runtime, ActorSession, side-thread cleanup, IM ingress, and Track ingress.</p>
+          <p><strong>Architecture run <code>d6d29859439e417f9207e51948aed504</code>:</strong> 9 tests + 58 subtests passed for external-control ownership and ActorSession separation.</p>
+          <p>Runner root <code>/private/tmp/bs-test-260187eb-le8bgk9v</code> was removed after execution.</p>
+        </article>
+        <article class="card">
+          <h3>Replacement scan</h3>
+          <p>No production or current architecture surface contains <code>ingest_user_input</code>, <code>user-input</code>, <code>task-user-input</code>, or a <code>user.input</code> runtime branch. Remaining hits are only the domain rejection behavior test and source-absence guards.</p>
+        </article>
+        <article class="card">
+          <h3>Review result</h3>
+          <p><code>git diff --check</code> passed. The change deletes more live code than it adds, keeps IM / Track helpers intact, and does not alter lifecycle, relation, or parent scheduling semantics.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Final acceptance review</h2>
+      <ol>
+        <li><strong>Product：</strong>direct input 仍完成 ActorSession → AppServer loop，Task Sys repository 保持不变。</li>
+        <li><strong>Contract：</strong>Task Sys 在写入前拒绝 <code>user.input</code>；失败无 task、event 或 lease 副作用。</li>
+        <li><strong>Architecture：</strong>Task Sys source policy 由 domain owner 管理；launcher / runtime 不复制退休 source 语义。</li>
+        <li><strong>Replacement：</strong>helper、CLI、prompt branch、正向 fixtures 和旧 task IDs 全部消失。</li>
+        <li><strong>Operations：</strong>IM / Track controlled ingress 与 runtime cleanup focused tests 通过且无 residue。</li>
+        <li><strong>Scope：</strong>不触碰 lifecycle / relation / parent scheduling 语义，不混入无关重构。</li>
+      </ol>
+    </section>
+
+    <footer>
+      Status: implemented and accepted on 2026-07-17 against the working-tree source recorded above. This memo is an execution artifact, not a replacement for current architecture contracts or the historical lifecycle/relation memo.
+    </footer>
+  </main>
+</body>
+</html>

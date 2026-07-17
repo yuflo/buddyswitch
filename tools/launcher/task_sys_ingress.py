@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
 from pathlib import Path
 import sys
 from typing import Any, Mapping
-from uuid import uuid4
 
 
 HELPER_DIR = Path(__file__).resolve().parent
@@ -44,7 +41,7 @@ def _actor_target(*, actor_id: str, role_id: str) -> dict[str, str]:
     }
 
 
-def _result_payload(result: Mapping[str, Any], *, actor_id: str, role_id: str, thread_id: str | None = None) -> dict[str, Any]:
+def _result_payload(result: Mapping[str, Any], *, actor_id: str, role_id: str) -> dict[str, Any]:
     instruction = result.get("instruction")
     instruction_type = instruction.get("type") if isinstance(instruction, Mapping) else None
     payload: dict[str, Any] = {
@@ -56,40 +53,7 @@ def _result_payload(result: Mapping[str, Any], *, actor_id: str, role_id: str, t
         "instruction_type": instruction_type,
         "instruction": dict(instruction) if isinstance(instruction, Mapping) else None,
     }
-    if thread_id is not None:
-        payload["thread_id"] = thread_id
     return payload
-
-
-def ingest_user_input(
-    *,
-    actor_id: str,
-    role_id: str,
-    thread_id: str,
-    text: str,
-    surface: str = "cli",
-) -> dict[str, Any]:
-    envelope = {
-        "source": {
-            "type": "user.input",
-            "ref": {
-                "id": f"user-input-{uuid4().hex[:12]}",
-                "surface": _require_text(surface, "surface"),
-            },
-        },
-        "actor_target": _actor_target(actor_id=actor_id, role_id=role_id),
-        "context": {
-            "text": _require_text(text, "text"),
-            "surface": surface,
-            "thread_id": _require_text(thread_id, "thread_id"),
-        },
-    }
-    return _result_payload(
-        task_sys.ingest(envelope),
-        actor_id=actor_id,
-        role_id=role_id,
-        thread_id=thread_id,
-    )
 
 
 def ingest_im_message(
@@ -155,35 +119,3 @@ def ingest_track_comment(
         actor_id=actor_id,
         role_id=role_id,
     )
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    user_input = subparsers.add_parser("user-input")
-    user_input.add_argument("--actor-id", required=True)
-    user_input.add_argument("--role-id", required=True)
-    user_input.add_argument("--thread-id", required=True)
-    user_input.add_argument("--text", required=True)
-    user_input.add_argument("--surface", default="cli")
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-    if args.command == "user-input":
-        payload = ingest_user_input(
-            actor_id=args.actor_id,
-            role_id=args.role_id,
-            thread_id=args.thread_id,
-            text=args.text,
-            surface=args.surface,
-        )
-        print(json.dumps(payload, ensure_ascii=True))
-        return 0
-    raise ValueError(f"unsupported ingress command: {args.command}")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

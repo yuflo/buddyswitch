@@ -127,8 +127,8 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
     def _envelope(self) -> dict[str, Any]:
         return {
             "source": {
-                "type": "user.input",
-                "ref": {"id": "input-1", "surface": "cli"},
+                "type": "test.inbound.created",
+                "ref": {"id": "event-1", "channel": "fixture"},
             },
             "actor_target": {
                 "role_id": "dev",
@@ -136,7 +136,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             },
             "context": {
                 "text": "Draft brief",
-                "surface": "cli",
+                "channel": "fixture",
             },
         }
 
@@ -179,6 +179,24 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             },
         )
 
+    def test_ingest_rejects_direct_user_input_without_persisting_task(self) -> None:
+        task_sys = _task_sys()
+        before = self._task_records()
+
+        with self.assertRaisesRegex(ValueError, "user.input"):
+            task_sys.ingest(
+                {
+                    "source": {
+                        "type": "user.input",
+                        "ref": {"id": "input-direct-1", "surface": "codex-tui"},
+                    },
+                    "actor_target": self._envelope()["actor_target"],
+                    "context": {"text": "Uncontrolled direct input", "surface": "codex-tui"},
+                }
+            )
+
+        self.assertEqual(self._task_records(), before)
+
     def test_ingest_persists_task_record_and_returns_start_side_instruction(self) -> None:
         task_sys = _task_sys()
         envelope = self._envelope()
@@ -195,8 +213,8 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         persisted = json.loads(record_path.read_text(encoding="utf-8"))
         self.assertEqual(result.get("task"), persisted)
         self.assertEqual(persisted["id"], task_id)
-        self.assertEqual(persisted["source_type"], "user.input")
-        self.assertEqual(persisted["source_ref"], {"id": "input-1", "surface": "cli"})
+        self.assertEqual(persisted["source_type"], "test.inbound.created")
+        self.assertEqual(persisted["source_ref"], {"id": "event-1", "channel": "fixture"})
         self.assertEqual(persisted["actor_target"], envelope["actor_target"])
         self.assertEqual(persisted["inbound_context"], envelope["context"])
         self.assertEqual(persisted["status"], "in_progress.side_processing")
@@ -232,7 +250,10 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         assert isinstance(frame, dict)
         self.assertEqual(frame["kind"], "task_sys.side_frame")
         self.assertEqual(frame["task_id"], task_id)
-        self.assertEqual(frame["source"], {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}})
+        self.assertEqual(
+            frame["source"],
+            {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
+        )
         self.assertEqual(frame["actor_target"], envelope["actor_target"])
         self.assertEqual(frame["context"], envelope["context"])
 
@@ -274,19 +295,19 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         actor_target = self._envelope()["actor_target"]
         frame = {
             "kind": "task_sys.parent_frame",
-            "task_id": "task-user-input-123456abcdef",
+            "task_id": "task-controlled-inbound-123456abcdef",
             "context": {"text": "Draft brief"},
         }
 
         submit = task_sys.runtime_instruction(
             "submit_parent",
-            task_id="task-user-input-123456abcdef",
+            task_id="task-controlled-inbound-123456abcdef",
             actor_target=actor_target,
             frame=frame,
         )
         interrupt = task_sys.runtime_instruction(
             "interrupt_submit_parent",
-            task_id="task-user-input-123456abcdef",
+            task_id="task-controlled-inbound-123456abcdef",
             actor_target=actor_target,
             frame=frame,
         )
@@ -295,14 +316,14 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(interrupt["type"], "interrupt_submit_parent")
         for instruction in (submit, interrupt):
             with self.subTest(instruction=instruction["type"]):
-                self.assertEqual(instruction["task_id"], "task-user-input-123456abcdef")
+                self.assertEqual(instruction["task_id"], "task-controlled-inbound-123456abcdef")
                 self.assertEqual(instruction["actor_target"], actor_target)
                 self.assertEqual(instruction["frame"], frame)
 
         with self.assertRaisesRegex(ValueError, "runtime instruction"):
             task_sys.runtime_instruction(
                 "side_interrupt",
-                task_id="task-user-input-123456abcdef",
+                task_id="task-controlled-inbound-123456abcdef",
                 actor_target=actor_target,
                 frame=frame,
             )
@@ -331,7 +352,10 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         assert isinstance(frame, dict)
         self.assertEqual(frame["kind"], "task_sys.parent_frame")
         self.assertEqual(frame["task_id"], task_id)
-        self.assertEqual(frame["source"], {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}})
+        self.assertEqual(
+            frame["source"],
+            {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
+        )
         self.assertEqual(frame["inbound_context"], self._envelope()["context"])
         self.assertNotIn("task_desc", frame)
         self.assertNotIn("task_relation", frame)
@@ -652,9 +676,9 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         valid = self._envelope()
         cases = (
             ({}, "source"),
-            ({**valid, "source": "user.input"}, "source"),
-            ({**valid, "source": {"ref": {"id": "input-1"}}}, "source.type"),
-            ({**valid, "source": {"type": "user.input"}}, "source.ref"),
+            ({**valid, "source": "test.inbound.created"}, "source"),
+            ({**valid, "source": {"ref": {"id": "event-1"}}}, "source.type"),
+            ({**valid, "source": {"type": "test.inbound.created"}}, "source.ref"),
             ({**valid, "actor_target": {"role_id": "dev"}}, "actor_target.actor_id"),
             ({**valid, "actor_target": {"actor_id": valid["actor_target"]["actor_id"]}}, "actor_target.role_id"),
             ({**valid, "context": "Draft brief"}, "context"),
