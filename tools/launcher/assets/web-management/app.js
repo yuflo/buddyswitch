@@ -338,6 +338,8 @@
       selectedRole: '',
       selectedActorId: '',
       actorConsole: null,
+      actorTaskRecentExpanded: false,
+      actorTaskOpenId: '',
       actorCapabilityActorId: '',
       actorCapabilitySaved: { parent: '', side: '' },
       actorCapabilityDraft: { parent: '', side: '' },
@@ -1366,6 +1368,88 @@
     ].join('');
   }
 
+  function formatTaskLedgerTime(value) {
+    if (typeof value !== 'string' || !value) {
+      return '—';
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return '—';
+    }
+    return parsed.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function renderTaskLedgerRowHtml(task, options) {
+    const current = options && options.current === true;
+    const attention = options && options.attention === true;
+    const rowClasses = ['task-ledger-row'];
+    if (current) {
+      rowClasses.push('is-current');
+    }
+    if (attention) {
+      rowClasses.push('needs-attention');
+    }
+    const status = task && task.status ? String(task.status) : 'unknown';
+    const context = current
+      ? (attention ? 'Needs attention · ' : 'Now · ') + status
+      : status;
+    const taskId = task && task.task_id ? String(task.task_id) : '—';
+    const updatedAt = task && task.updated_at ? String(task.updated_at) : '—';
+    const open = Boolean(options && options.visible && options.openTaskId === taskId);
+    return [
+      '<details class="task-ledger-row-detail" name="actor-task-row-detail" data-task-ledger-task-id="' + escapeHtml(taskId) + '"' + (open ? ' open' : '') + '>',
+      '<summary class="' + rowClasses.join(' ') + '" data-task-ledger-task-id="' + escapeHtml(taskId) + '" aria-expanded="' + String(open) + '">',
+      '<span class="task-ledger-row-copy">',
+      '<strong>' + escapeHtml(task && task.source_type ? task.source_type : 'Task') + '</strong>',
+      '<span>' + escapeHtml(context) + '</span>',
+      '</span>',
+      '<time class="task-ledger-short-time" datetime="' + escapeHtml(updatedAt) + '">' + escapeHtml(formatTaskLedgerTime(updatedAt)) + '</time>',
+      '</summary>',
+      '<div class="task-ledger-detail">',
+      '<span>Task ID</span><code>' + escapeHtml(taskId) + '</code>',
+      '<span>Updated</span><time datetime="' + escapeHtml(updatedAt) + '">' + escapeHtml(updatedAt) + '</time>',
+      '</div>',
+      '</details>',
+    ].join('');
+  }
+
+  function renderTaskLedgerRecentHtml(terminalTasks, state) {
+    if (!terminalTasks.length) {
+      return '';
+    }
+    const expanded = state.actorTaskRecentExpanded === true;
+    const collapsedRows = terminalTasks.slice(0, 2).map(function (task) {
+      return renderTaskLedgerRowHtml(task, {
+        current: false,
+        attention: false,
+        visible: !expanded,
+        openTaskId: state.actorTaskOpenId,
+      });
+    }).join('');
+    const expandedRows = terminalTasks.map(function (task) {
+      return renderTaskLedgerRowHtml(task, {
+        current: false,
+        attention: false,
+        visible: expanded,
+        openTaskId: state.actorTaskOpenId,
+      });
+    }).join('');
+    const collapsedCount = Math.min(2, terminalTasks.length);
+    return [
+      '<div class="task-ledger-recent">',
+      '<details class="task-ledger-recent-disclosure"' + (expanded ? ' open' : '') + '>',
+      '<summary class="task-ledger-recent-toggle" data-task-ledger-recent-toggle aria-expanded="' + String(expanded) + '">',
+      '<span>Recent</span>',
+      '<span class="task-ledger-recent-show">' + escapeHtml(String(collapsedCount)) + ' of ' + escapeHtml(String(terminalTasks.length)) + ' · Show all</span>',
+      '<span class="task-ledger-recent-hide">' + escapeHtml(String(terminalTasks.length)) + ' of ' + escapeHtml(String(terminalTasks.length)) + ' · Show fewer</span>',
+      '</summary>',
+      '<div class="task-ledger-recent-expanded">' + expandedRows + '</div>',
+      '</details>',
+      '<div class="task-ledger-recent-collapsed">' + collapsedRows + '</div>',
+      '</div>',
+    ].join('');
+  }
+
   function renderTaskSummaryHtml(state) {
     if (state.actorCardLoading && !state.actorConsole) {
       return renderSummarySkeletonHtml(3);
@@ -1377,17 +1461,34 @@
     if (!taskSys) {
       return renderEmpty('No Task Sys state loaded.');
     }
-    const activeTasks = Array.isArray(taskSys.active_tasks) ? taskSys.active_tasks : [];
-    const recoverableTasks = Array.isArray(taskSys.recoverable_tasks) ? taskSys.recoverable_tasks : [];
-    const active = activeTasks[0] || null;
-    const recoverable = recoverableTasks[0] || null;
+    if (
+      !Array.isArray(taskSys.active_tasks)
+      || !Array.isArray(taskSys.recoverable_tasks)
+      || !Array.isArray(taskSys.terminal_tasks)
+      || typeof taskSys.active_count !== 'number'
+      || typeof taskSys.terminal_count !== 'number'
+    ) {
+      return renderEmpty('Task Sys response is missing required fields.');
+    }
+    const current = taskSys.recoverable_tasks[0] || taskSys.active_tasks[0] || null;
+    const attention = taskSys.recoverable_tasks.length > 0;
+    const terminalTasks = taskSys.terminal_tasks;
+    const countHtml = '<span class="task-ledger-count">' + escapeHtml(String(taskSys.active_count)) + ' active · ' + escapeHtml(String(taskSys.terminal_count)) + ' recent</span>';
+    if (!current && !terminalTasks.length) {
+      return countHtml + '<div class="task-ledger-empty"><strong>No tasks yet</strong><span>Completed work will appear here</span></div>';
+    }
+    const currentHtml = current
+      ? renderTaskLedgerRowHtml(current, {
+        current: true,
+        attention,
+        visible: true,
+        openTaskId: state.actorTaskOpenId,
+      })
+      : '<div class="task-ledger-idle"><strong>No active task</strong><span>Recent stays visible</span></div>';
     return [
-      '<div class="summary-line"><span>Active</span><strong>' + escapeHtml(String(taskSys.active_count || 0)) + '</strong></div>',
-      active ? '<div class="task-row"><strong>' + escapeHtml(active.source_type || active.status || 'Task Sys') + '</strong><span class="micro mono">' + escapeHtml(active.task_id || '') + '</span></div>' : '',
-      active ? '<div class="summary-line"><span>Status</span>' + badge(active.status || 'unknown') + '</div>' : '',
-      '<div class="summary-line"><span>Recoverable</span><strong>' + escapeHtml(String(taskSys.recoverable_count || 0)) + '</strong></div>',
-      recoverable ? '<div class="task-row"><strong>' + escapeHtml(recoverable.source_type || recoverable.status || 'Task Sys') + '</strong><span class="micro mono">' + escapeHtml(recoverable.task_id || '') + '</span></div>' : '',
-      recoverable ? '<div class="summary-line"><span>Status</span>' + badge(recoverable.status || 'unknown') + '</div>' : '',
+      countHtml,
+      currentHtml,
+      renderTaskLedgerRecentHtml(terminalTasks, state),
     ].join('');
   }
 
@@ -2193,6 +2294,8 @@
     state.actorConsoleRequestId += 1;
     state.selectedActorId = selectedActorId;
     state.actorConsole = null;
+    state.actorTaskRecentExpanded = false;
+    state.actorTaskOpenId = '';
     syncActorCapabilitiesFromConsole(state, { force: true });
     state.actorSelectionPendingId = selectedActorId;
     state.actorCardLoading = Boolean(selectedActorId);
@@ -3366,6 +3469,47 @@
         state.message = error.message;
         renderShell(state, elements);
       });
+    });
+    elements.actorTaskSummary.addEventListener('click', function (event) {
+      const recentToggle = event.target && event.target.closest
+        ? event.target.closest('[data-task-ledger-recent-toggle]')
+        : null;
+      if (recentToggle) {
+        const disclosure = recentToggle.parentElement;
+        setTimeout(function () {
+          state.actorTaskRecentExpanded = Boolean(disclosure && disclosure.open);
+          recentToggle.setAttribute('aria-expanded', String(state.actorTaskRecentExpanded));
+        }, 0);
+        return;
+      }
+      const rowToggle = event.target && event.target.closest
+        ? event.target.closest('summary[data-task-ledger-task-id]')
+        : null;
+      if (!rowToggle) {
+        return;
+      }
+      setTimeout(function () {
+        const openDetail = elements.actorTaskSummary.querySelector('details[data-task-ledger-task-id][open]');
+        state.actorTaskOpenId = openDetail
+          ? openDetail.getAttribute('data-task-ledger-task-id') || ''
+          : '';
+        elements.actorTaskSummary.querySelectorAll('summary[data-task-ledger-task-id]').forEach(function (summary) {
+          summary.setAttribute('aria-expanded', String(Boolean(summary.parentElement && summary.parentElement.open)));
+        });
+      }, 0);
+    });
+    elements.actorTaskSummary.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+      const taskToggle = event.target && event.target.closest
+        ? event.target.closest('summary[data-task-ledger-task-id], summary[data-task-ledger-recent-toggle]')
+        : null;
+      if (!taskToggle) {
+        return;
+      }
+      event.preventDefault();
+      taskToggle.click();
     });
     if (elements.actorCapabilityToggle) {
       elements.actorCapabilityToggle.addEventListener('click', function () {

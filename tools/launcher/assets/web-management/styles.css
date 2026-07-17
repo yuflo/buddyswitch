@@ -871,6 +871,12 @@ button.track-row {
 .person-panel {
   border-left: 1px solid #c9c3b6;
   background: #f0eee4;
+  scrollbar-width: none;
+}
+
+.person-panel::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .studio-rail {
@@ -939,6 +945,204 @@ button.track-row {
   min-width: 0;
   color: var(--ink);
   text-align: right;
+}
+
+.task-ledger-card {
+  position: relative;
+  width: calc(100% + 1px);
+}
+
+.task-ledger-count {
+  position: absolute;
+  top: 13px;
+  right: 12px;
+  max-width: 170px;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-ledger-row-detail,
+.task-ledger-recent-disclosure {
+  min-width: 0;
+}
+
+.task-ledger-row-detail > summary,
+.task-ledger-recent-disclosure > summary {
+  list-style: none;
+}
+
+.task-ledger-row-detail > summary::-webkit-details-marker,
+.task-ledger-recent-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-ledger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.task-ledger-row.is-current {
+  min-height: 42px;
+  border-color: #9fc3c7;
+  background: var(--teal-soft);
+  box-shadow: inset 3px 0 0 var(--teal);
+}
+
+.task-ledger-row.is-current.needs-attention {
+  border-color: #ddc77f;
+  background: var(--yellow-soft);
+  box-shadow: inset 3px 0 0 var(--yellow);
+}
+
+.task-ledger-row:hover {
+  border-color: var(--line-strong);
+}
+
+.task-ledger-row:focus-visible,
+.task-ledger-recent-toggle:focus-visible {
+  outline: 3px solid rgba(31, 111, 119, 0.24);
+  outline-offset: 1px;
+}
+
+.task-ledger-row-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.task-ledger-row-copy strong,
+.task-ledger-row-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-ledger-row-copy strong {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.task-ledger-row-copy span,
+.task-ledger-short-time {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.task-ledger-short-time {
+  white-space: nowrap;
+}
+
+.task-ledger-detail {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 7px;
+  padding: 6px 8px 7px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+  background: #fafaf7;
+  font-size: 9px;
+}
+
+.task-ledger-detail span {
+  color: var(--muted);
+}
+
+.task-ledger-detail code,
+.task-ledger-detail time {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.task-ledger-idle,
+.task-ledger-empty {
+  display: grid;
+  align-content: center;
+  min-height: 36px;
+  padding: 5px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 7px;
+  background: #fafaf7;
+}
+
+.task-ledger-idle strong,
+.task-ledger-empty strong {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.task-ledger-idle span,
+.task-ledger-empty span {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.task-ledger-recent,
+.task-ledger-recent-expanded,
+.task-ledger-recent-collapsed {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.task-ledger-recent-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 1px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.task-ledger-recent-toggle span:last-child,
+.task-ledger-recent-show,
+.task-ledger-recent-hide {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-ledger-recent-hide,
+.task-ledger-recent-expanded {
+  display: none;
+}
+
+.task-ledger-recent-disclosure[open] .task-ledger-recent-show,
+.task-ledger-recent-disclosure[open] + .task-ledger-recent-collapsed {
+  display: none;
+}
+
+.task-ledger-recent-disclosure[open] .task-ledger-recent-hide,
+.task-ledger-recent-disclosure[open] .task-ledger-recent-expanded {
+  display: grid;
 }
 
 .summary-callout {

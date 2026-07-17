@@ -426,9 +426,25 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                 "attempts": 2,
             },
         )
+        terminal_task_ids = []
+        for index in range(6):
+            terminal_result = task_sys.ingest(
+                {
+                    "source": {"type": "test.console", "ref": {"id": f"console-terminal-{index}"}},
+                    "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
+                    "context": {"fixture": f"web console terminal {index}"},
+                }
+            )
+            terminal_task_ids.append(terminal_result["task_id"])
+            if index % 2:
+                task_sys.record_task_cancel(terminal_result["task_id"], {"reason": "fixture cancellation"})
+            else:
+                task_sys.record_task_close(terminal_result["task_id"], {"summary": "fixture completion"})
 
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
         self.assertNotIn("task_sys.actor_task_projection", source)
+        self.assertNotIn("task_sys.COMPLETED", source)
+        self.assertNotIn("task_sys.CANCELED", source)
         self.assertTrue(hasattr(WEB_MANAGEMENT, "task_read"), "Web console should use external Task read projections.")
         task_read_module = WEB_MANAGEMENT.task_read
         with mock.patch.object(
@@ -448,6 +464,16 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         self.assertEqual(console["runtime"]["thread_status"], "idle")
         self.assertEqual(console["task_sys"]["active_count"], 2)
         self.assertEqual(console["task_sys"]["recoverable_count"], 1)
+        self.assertEqual(console["task_sys"]["terminal_count"], 6)
+        self.assertEqual(len(console["task_sys"]["terminal_tasks"]), 5)
+        expected_terminal_tasks = task_read_module.actor_external_task_projection(
+            actor_profile=projection_profile
+        )["terminal_tasks"]
+        self.assertEqual(console["task_sys"]["terminal_tasks"], expected_terminal_tasks[:5])
+        self.assertEqual(
+            {row["task_id"] for row in expected_terminal_tasks},
+            set(terminal_task_ids),
+        )
         external_task_keys = ("task_id", "source_type", "status", "actor", "updated_at")
         active_task = next(
             row for row in console["task_sys"]["active_tasks"] if row["task_id"] == task_result["task_id"]
@@ -460,7 +486,8 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         self.assertEqual(active_task["actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
         self.assertEqual(recoverable_task["task_id"], failed_result["task_id"])
         self.assertEqual(recoverable_task["status"], "in_progress.side_processing")
-        for row in (active_task, recoverable_task):
+        for row in (active_task, recoverable_task, *console["task_sys"]["terminal_tasks"]):
+            self.assertEqual(tuple(row.keys()), external_task_keys)
             self.assertNotIn("execution", row)
             self.assertNotIn("task_relation", row)
             self.assertNotIn("active_processor", row)

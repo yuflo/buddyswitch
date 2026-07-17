@@ -45,11 +45,37 @@ test('production html keeps all real control ids used by the web UI', () => {
   });
 });
 
-test('task sys panel uses canonical external lifecycle fields only', () => {
-  assertIncludes(appJs, 'active.status');
+test('B2 task ledger uses terminal projection and canonical external fields only', () => {
+  [
+    'taskSys.terminal_tasks',
+    'taskSys.terminal_count',
+    'task.status',
+    'task.task_id',
+    'task.updated_at',
+    'name="actor-task-row-detail"',
+  ].forEach((marker) => {
+    assertIncludes(appJs, marker);
+  });
+  ['<span>Active</span>', '<span>Recoverable</span>'].forEach((marker) => {
+    assertExcludes(appJs, marker);
+  });
   ['task_desc', 'relation', 'execution', 'task_relation', 'active_processor', 'failure_result'].forEach((marker) => {
     assertExcludes(appJs, marker);
   });
+});
+
+test('B2 task ledger keeps its approved width while the right rail remains scrollable', () => {
+  assertCssDeclarations('.person-panel', ['scrollbar-width: none;']);
+  assertIncludes(stylesCss, '.person-panel::-webkit-scrollbar');
+  assertCssDeclarations('.task-ledger-card', ['width: calc(100% + 1px);']);
+});
+
+test('B2 task ledger explicitly supports keyboard disclosure activation', () => {
+  assertIncludes(appJs, "elements.actorTaskSummary.addEventListener('keydown'");
+  assertIncludes(appJs, "event.key !== 'Enter' && event.key !== ' '");
+  assertIncludes(appJs, 'taskToggle.click()');
+  assertIncludes(stylesCss, '.task-ledger-row:focus-visible');
+  assertIncludes(stylesCss, '.task-ledger-recent-toggle:focus-visible');
 });
 
 test('production html removes the old management shell completely', () => {
