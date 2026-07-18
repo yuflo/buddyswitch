@@ -11,18 +11,19 @@ test('production javascript has one actor selection state owner and no retired s
   assertExcludes(appJs, 'suppressNextRosterAutoSelection');
   assertExcludes(appJs, 'refreshSelectedActorConversation');
 
-  const createdStart = appJs.indexOf('function beginCreatedActorReconciliation');
-  const createdEnd = appJs.indexOf('function nextActorIdAfterRemoval', createdStart);
-  const createdSource = appJs.slice(createdStart, createdEnd);
-  assertIncludes(createdSource, 'await loadActorSelection(state, elements, actorId)');
-  assertExcludes(createdSource, 'refreshActorCard(');
-  assertExcludes(createdSource, 'refreshConversation(');
+  const selectionStart = appJs.indexOf('async function loadActorSelection');
+  const selectionEnd = appJs.indexOf('async function refreshSelectedActorConsole', selectionStart);
+  const selectionSource = appJs.slice(selectionStart, selectionEnd);
+  assertIncludes(selectionSource, '!actorIsInteractive(actorById(state, selection.actorId))');
 
   const lifecycleStart = appJs.indexOf('async function reconcileLifecycleOperation');
   const lifecycleEnd = appJs.indexOf('async function createInstance', lifecycleStart);
   const lifecycleSource = appJs.slice(lifecycleStart, lifecycleEnd);
-  assertIncludes(lifecycleSource, 'loadActorSelection(state, elements, restoreActorId)');
+  assertIncludes(lifecycleSource, 'loadActorSelection(state, elements, candidateActorId');
   assertIncludes(lifecycleSource, "beginActorSelection(state, '')");
+  assertExcludes(appJs, 'selectedLifecycleOperationId');
+  assertExcludes(appJs, 'rosterPendingActors');
+  assertExcludes(appJs, 'data-operation-id');
 
   const refreshStart = appJs.indexOf('async function refreshVisibleRegionsWithFeedback');
   const refreshEnd = appJs.indexOf('async function bootstrap', refreshStart);

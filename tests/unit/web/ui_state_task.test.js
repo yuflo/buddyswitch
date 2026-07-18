@@ -47,7 +47,7 @@ async function renderTaskPanel(taskSys, interactionState) {
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-task', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-task', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
 
     await app.selectActor(state, elements, 'act-task');

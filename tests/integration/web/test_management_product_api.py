@@ -37,6 +37,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                     "browser_port": 9222,
                     "updated_at": "2026-06-26T10:00:00Z",
                     "workspace_dir": "/tmp/buddyswitch/instances/act-pm-demo/workspace",
+                    "last_failure": None,
                 },
                 {
                     "actor_id": "act-dev-demo",
@@ -47,6 +48,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                     "browser_port": None,
                     "updated_at": "2026-06-26T10:05:00Z",
                     "workspace_dir": "/tmp/buddyswitch/instances/act-dev-demo/workspace",
+                    "last_failure": None,
                 },
             ]
         }
@@ -201,8 +203,95 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         self.assertEqual([row["actor_id"] for row in payload["actors"]], ["act-pm-demo", "act-dev-demo"])
         self.assertEqual(payload["actors"][0]["runtime"]["status"], "active")
         self.assertEqual(payload["actors"][0]["runtime"]["app_server_health"], "healthy")
+        self.assertEqual(payload["actors"][0]["lifecycle_state"], "active")
         self.assertEqual(payload["actors"][1]["runtime"]["status"], "inactive")
+        self.assertEqual(payload["actors"][1]["lifecycle_state"], "stopped")
         self.assertEqual(runner.calls, [("list_instances", (None,))])
+
+    def test_actor_roster_merges_start_operation_and_published_instance_into_one_starting_row(self) -> None:
+        runner = RecordingHostControl()
+        release_start = threading.Event()
+        actor_id = "act-dev-demo"
+        runner.roles_response = [{"id": "dev", "label": "Dev", "scope": "product"}]
+        runner.list_instances_response = [dict(failed_status(actor_id, role="dev"), last_failure=None)]
+        runner.block("start", ("dev", actor_id), release_start)
+        runner.set_response("start", ("dev", actor_id), {"actor_id": actor_id})
+        runner.set_response("status", (actor_id,), active_status(actor_id, "thread-dev", "idle"))
+        service = self._service(runner)
+
+        _, start_payload = service.handle_api("POST", "/api/instances", b'{"role":"dev"}')
+        try:
+            wait_for_operation_status(service, start_payload["operation"]["id"], "running")
+            status, payload = service.handle_api("GET", "/api/actors", b"")
+
+            self.assertEqual(status, 200)
+            self.assertEqual(len(payload["actors"]), 1)
+            self.assertEqual(payload["actors"][0]["actor_id"], actor_id)
+            self.assertEqual(payload["actors"][0]["lifecycle_state"], "starting")
+            self.assertEqual(payload["actors"][0]["lifecycle_operation"]["id"], start_payload["operation"]["id"])
+        finally:
+            release_start.set()
+        wait_for_operation_status(service, start_payload["operation"]["id"], "succeeded")
+
+    def test_actor_roster_correlates_retry_across_previous_and_replacement_ids(self) -> None:
+        runner = RecordingHostControl()
+        release_retry = threading.Event()
+        previous_actor_id = "act-pm-failed"
+        replacement_actor_id = "act-pm-replacement"
+        previous = failed_status(previous_actor_id)
+        replacement = failed_status(replacement_actor_id)
+        runner.list_instances_response = [previous]
+        runner.set_response(
+            "prepare_retry",
+            (previous_actor_id,),
+            {
+                "actor_id": previous_actor_id,
+                "replacement_actor_id": replacement_actor_id,
+                "role": "pm",
+            },
+        )
+        runner.block("retry", (previous_actor_id, replacement_actor_id), release_retry)
+        runner.set_response(
+            "retry",
+            (previous_actor_id, replacement_actor_id),
+            {"previous_actor_id": previous_actor_id, "actor_id": replacement_actor_id, "role": "pm"},
+        )
+        runner.set_response(
+            "status",
+            (replacement_actor_id,),
+            active_status(replacement_actor_id, "thread-replacement", "idle"),
+        )
+        service = self._service(runner)
+
+        _, retry_payload = service.handle_api("POST", f"/api/instances/{previous_actor_id}/retry", b"")
+        try:
+            wait_for_operation_status(service, retry_payload["operation"]["id"], "running")
+            _, before = service.handle_api("GET", "/api/actors", b"")
+            self.assertEqual(len(before["actors"]), 1)
+            self.assertEqual(before["actors"][0]["actor_id"], previous_actor_id)
+            self.assertEqual(before["actors"][0]["replacement_actor_id"], replacement_actor_id)
+            self.assertEqual(before["actors"][0]["lifecycle_state"], "retrying")
+
+            runner.list_instances_response = [previous, replacement]
+            _, after = service.handle_api("GET", "/api/actors", b"")
+            self.assertEqual(len(after["actors"]), 1)
+            self.assertEqual(after["actors"][0]["actor_id"], replacement_actor_id)
+            self.assertEqual(after["actors"][0]["previous_actor_id"], previous_actor_id)
+            self.assertEqual(after["actors"][0]["lifecycle_state"], "retrying")
+        finally:
+            release_retry.set()
+        wait_for_operation_status(service, retry_payload["operation"]["id"], "succeeded")
+
+    def test_actor_roster_projects_published_start_failure_as_start_failed(self) -> None:
+        runner = RecordingHostControl()
+        runner.list_instances_response = [failed_status("act-pm-failed")]
+        service = self._service(runner)
+
+        _, payload = service.handle_api("GET", "/api/actors", b"")
+
+        self.assertEqual(len(payload["actors"]), 1)
+        self.assertEqual(payload["actors"][0]["lifecycle_state"], "start_failed")
+        self.assertEqual(payload["actors"][0]["last_failure"]["phase"], "daemon_start")
 
     def test_actor_capabilities_get_api_returns_creation_default_dto(self) -> None:
         shared_root = self._use_capability_shared_root()

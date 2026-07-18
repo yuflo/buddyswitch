@@ -23,6 +23,7 @@ test('production html keeps all real control ids used by the web UI', () => {
     'stop-button',
     'clear-button',
     'resume-button',
+    'retry-button',
     'delete-button',
     'lifecycle-operation-status',
     'action-availability-status',
@@ -124,12 +125,13 @@ test('production roster exposes grouped lifecycle hierarchy and unmistakable sel
     'aria-selected',
     'aria-expanded',
     'rosterStoppedExpanded',
-    'rosterPendingActors',
+    'lifecycle_state',
+    'needs-attention',
   ].forEach((marker) => {
     assertIncludes(appJs, marker);
   });
-  assertExcludes(appJs, 'rosterPendingActorId');
-  assertExcludes(appJs, 'rosterReconcileActorId');
+  assertExcludes(appJs, 'rosterPendingActors');
+  assertExcludes(appJs, 'data-operation-id');
   assertCssDeclarations('.person-row.is-selected', [
     'border-color: var(--teal);',
     'background: var(--teal-soft);',
@@ -201,7 +203,7 @@ test('production assets expose scoped skeleton and aria busy states', () => {
     "aria-busy",
     'actorCardLoading',
     'conversationLoading',
-    'rosterPendingActors',
+    'actorSelectionPendingId',
   ].forEach((marker) => {
     assertIncludes(appJs, marker);
   });
@@ -241,6 +243,7 @@ test('Team room binds selected actor actions to a compact thread header', () => 
     'id="selected-context-health"',
     'id="stop-button"',
     'id="resume-button"',
+    'id="retry-button"',
     'id="delete-button"',
     'id="lifecycle-operation-status"',
     'id="action-availability-status"',
@@ -283,13 +286,14 @@ test('Team room binds selected actor actions to a compact thread header', () => 
     assertExcludes(teammateRail[0], forbidden);
   });
 
-  ['stop-button', 'resume-button', 'delete-button'].forEach((id) => {
+  ['stop-button', 'resume-button', 'retry-button', 'delete-button'].forEach((id) => {
     const matches = indexHtml.match(new RegExp('id="' + id + '"', 'g')) || [];
     assert.equal(matches.length, 1, `Expected one production control for ${id}`);
   });
   [
     'id="stop-button"',
     'id="resume-button"',
+    'id="retry-button"',
     'id="delete-button"',
     'id="lifecycle-operation-status"',
     'id="action-availability-status"',

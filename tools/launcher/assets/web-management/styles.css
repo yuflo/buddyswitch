@@ -1641,6 +1641,15 @@ button.track-row {
   color: var(--muted);
 }
 
+.empty-state > strong {
+  display: block;
+}
+
+.empty-state > span {
+  display: block;
+  margin-top: 4px;
+}
+
 .studio-doc {
   min-width: 0;
   min-height: 0;

@@ -127,6 +127,13 @@ class SystemLauncherHarness(LauncherTestSupport):
             capture_output=True,
             check=False,
         )
+        if not capture_path.is_file():
+            raise AssertionError(
+                "instance start exited before fake Codex capture"
+                f"\nreturncode: {completed.returncode}"
+                f"\nstdout:\n{completed.stdout}"
+                f"\nstderr:\n{completed.stderr}"
+            )
         payload = json.loads(capture_path.read_text(encoding="utf-8"))
         actor_id = payload["actor_id"]
         instance_root = shared_root / "instances" / actor_id

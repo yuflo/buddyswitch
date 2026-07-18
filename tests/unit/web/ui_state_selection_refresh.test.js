@@ -45,8 +45,8 @@ test('actor selection clears stale feedback before fetch completes', async () =>
     state.message = 'Created act-old.';
     state.selectedActorId = 'act-old';
     state.actors = [
-      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-new', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-new', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     app.recordImProjectedMessage(state, imMessage({
       id: 'msg-old',
@@ -92,7 +92,7 @@ test('open tui success reports launch acceptance', async () => {
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-tui-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+      { actor_id: 'act-tui-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
     ];
     state.selectedActorId = 'act-tui-a';
     state.actorConsole = {
@@ -141,8 +141,8 @@ test('stale open tui response cannot write into a newer actor selection', async 
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-tui-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
-      { actor_id: 'act-tui-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b' } },
+      { actor_id: 'act-tui-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+      { actor_id: 'act-tui-b', role: 'pm', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b' } },
     ];
     state.selectedActorId = 'act-tui-a';
     state.actorConsole = {
@@ -195,7 +195,7 @@ test('copy command fetches and copies independently from open tui', async () => 
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-copy-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+      { actor_id: 'act-copy-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
     ];
     state.selectedActorId = 'act-copy-a';
     state.openTuiPending = true;
@@ -258,8 +258,8 @@ test('stale copy command response cannot copy or write feedback into a newer act
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-copy-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
-      { actor_id: 'act-copy-b', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b' } },
+      { actor_id: 'act-copy-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-a' } },
+      { actor_id: 'act-copy-b', role: 'pm', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-b' } },
     ];
     state.selectedActorId = 'act-copy-a';
 
@@ -285,110 +285,6 @@ test('stale copy command response cannot copy or write feedback into a newer act
     } else {
       delete globalThis.navigator;
     }
-  }
-});
-
-test('create reconciliation timeout keeps selected pending row and manual refresh can confirm it', async () => {
-  const originalFetch = globalThis.fetch;
-  let actorRosterCalls = 0;
-  globalThis.fetch = async function (url, options) {
-    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
-    if (requestUrl === '/api/instances') {
-      assert.equal(options && options.method, 'POST');
-      return okResponse({
-        operation: lifecycleOperation({
-          id: 'op-start-late',
-          action: 'start',
-          status: 'running',
-          label: 'Starting Market',
-          target: { actor_id: '', role: 'market' },
-        }),
-      });
-    }
-    if (requestUrl === '/api/operations/op-start-late') {
-      return okResponse({
-        operation: lifecycleOperation({
-          id: 'op-start-late',
-          action: 'start',
-          status: 'succeeded',
-          label: 'Starting Market',
-          target: { actor_id: 'act-market-late', role: 'market' },
-          result: { ok: true, actor_id: 'act-market-late' },
-        }),
-      });
-    }
-    if (requestUrl === '/api/actors') {
-      actorRosterCalls += 1;
-      return okResponse({
-        actors: actorRosterCalls < 2
-          ? [
-              { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-            ]
-          : [
-              { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-              { actor_id: 'act-market-late', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-            ],
-      });
-    }
-    if (requestUrl === '/api/actors/act-market-late/console') {
-      return okResponse({
-        console: {
-          actor: { actor_id: 'act-market-late', role: 'market' },
-          runtime: { status: 'active', app_server_health: 'healthy', thread_id: 'thread-late', thread_status: 'idle' },
-          task_sys: { active_count: 0, active_tasks: [] },
-          tracks: { items: [] },
-          im: { target: { identity_id: 'act-market-late', role_id: 'market' } },
-        },
-      });
-    }
-    if (requestUrl === '/api/im/conversations/direct?identity_id=act-market-late&limit=50') {
-      return imNotFoundResponse();
-    }
-    if (requestUrl === '/api/health') {
-      return okResponse({});
-    }
-    if (requestUrl === '/api/roles') {
-      return okResponse({ roles: [{ id: 'market', label: 'Market' }] });
-    }
-    if (requestUrl === '/api/tracks') {
-      return okResponse({ tracks: [] });
-    }
-    throw new Error('unexpected fetch ' + requestUrl);
-  };
-
-  try {
-    const state = app.createState();
-    const elements = createRenderElements();
-    state.roles = [{ id: 'market', label: 'Market', scope: 'product' }];
-    state.selectedRole = 'market';
-    state.actors = [
-      { actor_id: 'act-market-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-    ];
-    state.selectedActorId = 'act-market-old';
-    state.lifecycleOperationPollDelaysMs = [];
-    state.rosterReconcileDelaysMs = [0];
-
-    await app.createInstance(state, elements);
-    await app.pollLifecycleOperations(state, elements);
-    await waitFor(
-      () => /has not confirmed/.test(elements.messageBanner.textContent),
-      'roster timeout message',
-      300
-    );
-
-    assert.equal(state.selectedActorId, 'act-market-late');
-    assert.deepEqual(state.rosterPendingActors, { 'act-market-late': 'market' });
-    assert.match(elements.actorsList.innerHTML, /act-market-late/);
-    assert.match(elements.actorsList.innerHTML, /initializing/);
-
-    await app.refreshVisibleRegionsWithFeedback(state, elements);
-
-    assert.equal(state.selectedActorId, 'act-market-late');
-    assert.deepEqual(state.rosterPendingActors, {});
-    assert.match(elements.actorsList.innerHTML, /act-market-late/);
-    assert.doesNotMatch(elements.actorsList.innerHTML, /initializing/);
-  } finally {
-    globalThis.fetch = originalFetch;
   }
 });
 
@@ -428,7 +324,7 @@ test('deleting final actor clears projection and invalidates prior selection gen
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-final', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-final', role: 'market', lifecycle_state: 'stopped', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
     ];
     state.selectedActorId = 'act-final';
     state.actorConsole = { actor: { actor_id: 'act-final', role: 'market' } };
@@ -463,8 +359,8 @@ test('manual refresh explicitly selects and loads preferred actor when selection
     if (requestUrl === '/api/actors') {
       return okResponse({
         actors: [
-          { actor_id: 'act-stopped', role: 'dev', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
-          { actor_id: 'act-preferred', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+          { actor_id: 'act-stopped', role: 'dev', lifecycle_state: 'stopped', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+          { actor_id: 'act-preferred', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
         ],
       });
     }
@@ -500,7 +396,7 @@ test('manual refresh explicitly selects and loads preferred actor when selection
     const elements = createRenderElements();
     state.selectedActorId = 'act-missing';
     state.actors = [
-      { actor_id: 'act-missing', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-missing', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
 
     await app.refreshVisibleRegionsWithFeedback(state, elements);
@@ -523,7 +419,7 @@ test('manual refresh selects stopped-only fallback and expands stopped roster', 
     if (requestUrl === '/api/actors') {
       return okResponse({
         actors: [
-          { actor_id: 'act-stopped-only', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+          { actor_id: 'act-stopped-only', role: 'pm', lifecycle_state: 'stopped', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
         ],
       });
     }
@@ -602,7 +498,7 @@ test('manual refresh restarts a pending actor selection instead of sharing its g
     if (requestUrl === '/api/actors') {
       return okResponse({
         actors: [
-          { actor_id: 'act-pending', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+          { actor_id: 'act-pending', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
         ],
       });
     }
@@ -630,7 +526,7 @@ test('manual refresh restarts a pending actor selection instead of sharing its g
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-pending', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-pending', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
 
     const initialSelection = app.selectActor(state, elements, 'act-pending');
@@ -671,7 +567,7 @@ test('manual refresh wins over an older same-generation console refresh', async 
     if (requestUrl === '/api/actors') {
       return okResponse({
         actors: [
-          { actor_id: 'act-stable', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+          { actor_id: 'act-stable', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
         ],
       });
     }
@@ -699,7 +595,7 @@ test('manual refresh wins over an older same-generation console refresh', async 
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-stable', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-stable', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-stable';
     state.actorConsole = {
@@ -764,8 +660,8 @@ test('rapid actor switching keeps the latest selected teammate visible', async (
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-first', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-second', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-first', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-second', role: 'pm', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-old';
 
@@ -866,8 +762,8 @@ test('stale actor console refresh cannot cross an A to B to A selection generati
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-b', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-a';
     state.actorConsole = {
@@ -903,6 +799,12 @@ test('selected actor console refresh is limited to visible actor workspace', () 
   const state = app.createState();
   state.selectedSection = 'actors';
   state.selectedActorId = 'act-market-demo';
+  state.actors = [{
+    actor_id: 'act-market-demo',
+    role: 'market',
+    lifecycle_state: 'active',
+    runtime: { status: 'active', app_server_health: 'healthy' },
+  }];
 
   assert.equal(app.shouldRefreshSelectedActorConsole(state, { documentHidden: false }), true);
   assert.equal(app.shouldRefreshSelectedActorConsole(state, { documentHidden: true }), false);

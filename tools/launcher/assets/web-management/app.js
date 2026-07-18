@@ -36,18 +36,24 @@
     }
     return lifecycleOperationList(state).find(function (operation) {
       const target = operation && operation.target ? operation.target : {};
-      return operationIsActive(operation) && target.actor_id === actorId;
+      const actor = actorById(state, actorId);
+      const targetActorId = typeof target.actor_id === 'string' ? target.actor_id : '';
+      const targetReplacementActorId = typeof target.replacement_actor_id === 'string'
+        ? target.replacement_actor_id
+        : '';
+      const previousActorId = actor && typeof actor.previous_actor_id === 'string'
+        ? actor.previous_actor_id
+        : '';
+      const replacementActorId = actor && typeof actor.replacement_actor_id === 'string'
+        ? actor.replacement_actor_id
+        : '';
+      return operationIsActive(operation) && (
+        targetActorId === actorId
+        || (targetReplacementActorId && targetReplacementActorId === actorId)
+        || (previousActorId && previousActorId === targetActorId)
+        || (replacementActorId && replacementActorId === targetReplacementActorId)
+      );
     }) || null;
-  }
-
-  function selectedLifecycleOperation(state) {
-    if (!state || !state.selectedLifecycleOperationId) {
-      return null;
-    }
-    const operation = state.lifecycleOperations
-      ? state.lifecycleOperations[state.selectedLifecycleOperationId]
-      : null;
-    return operationIsActive(operation) ? operation : null;
   }
 
   function recordLifecycleOperation(state, operation) {
@@ -103,6 +109,9 @@
     if (action === 'delete') {
       return 'Deleting';
     }
+    if (action === 'retry') {
+      return 'Retrying';
+    }
     return 'Working';
   }
 
@@ -121,6 +130,9 @@
     }
     if (action === 'delete') {
       return 'Delete';
+    }
+    if (action === 'retry') {
+      return 'Retry';
     }
     return 'Lifecycle operation';
   }
@@ -144,6 +156,9 @@
     }
     if (action === 'delete') {
       return 'deleting';
+    }
+    if (action === 'retry') {
+      return 'retrying';
     }
     return 'initializing';
   }
@@ -209,17 +224,20 @@
         canDelete: false,
         canClear: false,
         canResume: false,
+        canRetry: false,
       };
     }
 
+    const lifecycleState = typeof instance.lifecycle_state === 'string' ? instance.lifecycle_state : '';
     const status = instance.status || '';
     const threadStatus = instance.thread && typeof instance.thread.status === 'string'
       ? instance.thread.status
       : '';
     const appServerHealthy = instance.app_server_health === 'healthy'
       || Boolean(instance.app_server && instance.app_server.healthy);
-    const isActive = status === 'active';
-    const isInactive = status === 'inactive';
+    const isActive = lifecycleState === 'active';
+    const isStopped = lifecycleState === 'stopped';
+    const isStartFailed = lifecycleState === 'start_failed';
     const threadBusy = threadStatus === 'active' || threadStatus === 'in_progress';
     const lifecyclePending = Boolean(lifecycleOperation);
 
@@ -227,9 +245,10 @@
       canSend: isActive && appServerHealthy && draftText.length > 0 && !sendPending,
       canInterrupt: isActive && appServerHealthy && threadBusy && !lifecyclePending && !interruptPending,
       canStop: isActive && !lifecyclePending,
-      canDelete: isInactive && !lifecyclePending,
+      canDelete: (isStopped || isStartFailed) && !lifecyclePending,
       canClear: isActive && appServerHealthy && !threadBusy && !lifecyclePending,
-      canResume: isInactive && !lifecyclePending,
+      canResume: isStopped && !lifecyclePending,
+      canRetry: isStartFailed && !lifecyclePending,
     };
   }
 
@@ -253,6 +272,9 @@
     if (action === 'delete') {
       return actionState.canDelete;
     }
+    if (action === 'retry') {
+      return actionState.canRetry;
+    }
     return false;
   }
 
@@ -262,6 +284,9 @@
       ? options.lifecycleOperation
       : null;
     const status = instance && instance.status ? instance.status : '';
+    const lifecycleState = instance && typeof instance.lifecycle_state === 'string'
+      ? instance.lifecycle_state
+      : '';
     const threadStatus = instance && instance.thread && typeof instance.thread.status === 'string'
       ? instance.thread.status
       : '';
@@ -275,6 +300,8 @@
       clearReason = 'Select an actor.';
     } else if (lifecycleOperation) {
       clearReason = lifecycleOperationLabel(lifecycleOperation) + '.';
+    } else if (lifecycleState === 'start_failed') {
+      clearReason = 'Retry or delete this actor.';
     } else if (status !== 'active') {
       clearReason = 'Resume actor first.';
     } else if (!appServerHealthy) {
@@ -298,7 +325,20 @@
       };
     }
 
+    const lifecycleState = typeof instance.lifecycle_state === 'string' ? instance.lifecycle_state : '';
     const status = instance.status || '';
+    if (lifecycleState === 'start_failed') {
+      return {
+        canAttach: false,
+        message: 'Retry or delete this actor.',
+      };
+    }
+    if (lifecycleState === 'starting' || lifecycleState === 'retrying') {
+      return {
+        canAttach: false,
+        message: 'Available after startup completes.',
+      };
+    }
     if (status !== 'active') {
       return {
         canAttach: false,
@@ -356,8 +396,6 @@
       sendPending: false,
       refreshPending: false,
       lifecycleOperations: {},
-      selectedLifecycleOperationId: '',
-      lifecycleOperationPreviousActorIds: {},
       lifecycleOperationPollTimer: null,
       lifecycleOperationPollInFlight: false,
       lifecycleOperationPollDelaysMs: null,
@@ -369,10 +407,6 @@
       rosterLoading: false,
       rosterError: '',
       rosterStoppedExpanded: false,
-      rosterPendingActors: {},
-      rosterReconcileAttempt: 0,
-      rosterReconcileTimer: null,
-      rosterReconcileDelaysMs: null,
       tracksListLoading: false,
       tracksError: '',
       selectedTrackDetailLoading: false,
@@ -557,94 +591,35 @@
     state.selectedSection = section === 'tracks' ? 'tracks' : 'actors';
   }
 
-  function buildPendingActor(actorId, roleId) {
-    return {
-      actor_id: actorId,
-      role: roleId || '',
-      pending: true,
-      runtime: {
-        status: 'initializing',
-        app_server_health: '',
-      },
-    };
-  }
-
-  function upsertPendingActor(state, actorId, roleId) {
-    if (!actorId) {
-      return;
-    }
-    const pendingActor = buildPendingActor(actorId, roleId);
-    const found = state.actors.some(function (actor, index) {
-      if (actor.actor_id !== actorId) {
-        return false;
-      }
-      state.actors[index] = Object.assign({}, actor, pendingActor);
-      return true;
-    });
-    if (!found) {
-      state.actors = state.actors.concat([pendingActor]);
-    }
-  }
-
-  function pendingCreatedActorIds(state) {
-    return state && state.rosterPendingActors && typeof state.rosterPendingActors === 'object'
-      ? Object.keys(state.rosterPendingActors)
-      : [];
-  }
-
-  function recordPendingCreatedActor(state, actorId, roleId) {
-    if (!actorId) {
-      return;
-    }
-    state.rosterPendingActors[actorId] = roleId || '';
-    state.rosterReconcileAttempt = 0;
-  }
-
   function applyActorsPayload(state, payload) {
     const previousActorId = state.selectedActorId;
-    const previousActors = state.actors.slice();
-    const previousSelectedActor = previousActors.find(function (actor) {
+    const previousSelectedActor = state.actors.find(function (actor) {
       return actor.actor_id === previousActorId;
     }) || null;
     const incomingActors = payload && Array.isArray(payload.actors) ? payload.actors : [];
-    const pendingActorIds = pendingCreatedActorIds(state);
     state.actors = incomingActors.slice();
-    pendingActorIds.forEach(function (pendingActorId) {
-      const pendingConfirmed = incomingActors.some(function (actor) {
-        return actor.actor_id === pendingActorId;
-      });
-      if (pendingConfirmed) {
-        delete state.rosterPendingActors[pendingActorId];
-        return;
+    incomingActors.forEach(function (actor) {
+      if (actor && operationIsActive(actor.lifecycle_operation)) {
+        recordLifecycleOperation(state, actor.lifecycle_operation);
       }
-      const previousPending = previousActors.find(function (actor) {
-        return actor.actor_id === pendingActorId;
-      });
-      const roleId = (previousPending && previousPending.role)
-        || state.rosterPendingActors[pendingActorId]
-        || '';
-      state.actors.push(buildPendingActor(pendingActorId, roleId));
     });
-    if (!pendingCreatedActorIds(state).length) {
-      state.rosterReconcileAttempt = 0;
-      if (state.rosterReconcileTimer) {
-        clearTimeout(state.rosterReconcileTimer);
-        state.rosterReconcileTimer = null;
-      }
-    }
     const selectedActor = actorById(state, state.selectedActorId);
-    const previousSelectedRuntime = previousSelectedActor && (previousSelectedActor.runtime || previousSelectedActor);
-    const selectedRuntime = selectedActor && (selectedActor.runtime || selectedActor);
-    if (selectedRuntime && selectedRuntime.status === 'inactive' && (
+    const replacementActor = !selectedActor && previousActorId
+      ? incomingActors.find(function (actor) {
+          return actor && actor.previous_actor_id === previousActorId;
+        }) || null
+      : null;
+    if (selectedActor && actorIsStopped(selectedActor) && (
       state.selectedActorId !== previousActorId
-      || !previousSelectedRuntime
-      || previousSelectedRuntime.status !== 'inactive'
+      || !previousSelectedActor
+      || !actorIsStopped(previousSelectedActor)
     )) {
       state.rosterStoppedExpanded = true;
     }
     return {
       selectedActorPresent: Boolean(selectedActor),
       preferredActorId: preferredActorId(state.actors),
+      replacementActorId: replacementActor && replacementActor.actor_id ? replacementActor.actor_id : '',
     };
   }
 
@@ -791,17 +766,29 @@
     }) || null;
   }
 
+  function actorLifecycleState(actor) {
+    return actor && typeof actor.lifecycle_state === 'string' ? actor.lifecycle_state : '';
+  }
+
   function actorIsStopped(actor) {
-    const runtime = actor && (actor.runtime || actor);
-    return Boolean(runtime && runtime.status === 'inactive');
+    return actorLifecycleState(actor) === 'stopped';
+  }
+
+  function actorIsStartupOnly(actor) {
+    return ['starting', 'retrying', 'start_failed'].indexOf(actorLifecycleState(actor)) >= 0;
+  }
+
+  function actorIsInteractive(actor) {
+    return ['active', 'stopped'].indexOf(actorLifecycleState(actor)) >= 0;
   }
 
   function preferredActorId(actors) {
     const rows = Array.isArray(actors) ? actors : [];
     const activeActor = rows.find(function (actor) {
-      return !actorIsStopped(actor);
+      return actorLifecycleState(actor) === 'active';
     });
-    const preferred = activeActor || rows[0] || null;
+    const readyActor = rows.find(actorIsInteractive);
+    const preferred = activeActor || readyActor || rows[0] || null;
     return preferred && typeof preferred.actor_id === 'string' ? preferred.actor_id : '';
   }
 
@@ -836,6 +823,8 @@
     return {
       actor_id: actorId,
       role,
+      lifecycle_state: instance.lifecycle_state,
+      last_failure: instance.last_failure || null,
       status: instance.status,
       app_server_health: appServerHealth,
       thread_id: instance.thread_id,
@@ -864,6 +853,8 @@
       }
       state.actors[index] = Object.assign({}, actor, actorRow, {
         role: actorRow.role || actor.role,
+        lifecycle_state: actorRow.lifecycle_state || actor.lifecycle_state,
+        last_failure: actorRow.last_failure || actor.last_failure || null,
         runtime: Object.assign({}, actor.runtime || {}, actorRow.runtime),
       });
       return true;
@@ -901,6 +892,7 @@
     return {
       actor_id: actorId,
       role: consoleMatches && consoleActor ? consoleActor.role : actor && actor.role,
+      lifecycle_state: actorLifecycleState(actor),
       status: runtime.status,
       app_server_health: runtime.app_server_health,
       thread_id: runtime.thread_id,
@@ -1096,10 +1088,12 @@
     if (value === 'active' || value === 'healthy' || value === 'idle' || value === 'none') {
       return 'healthy';
     }
-    if (value === 'in_progress' || value === 'active_thread' || value === 'active turn' || value === 'blocked') {
+    if (value === 'in_progress' || value === 'active_thread' || value === 'active turn' || value === 'blocked'
+        || value === 'starting' || value === 'retrying') {
       return 'busy';
     }
-    if (value === 'inactive' || value === 'unhealthy' || value === 'stopped' || value === 'interrupted') {
+    if (value === 'inactive' || value === 'unhealthy' || value === 'stopped' || value === 'interrupted'
+        || value === 'start failed') {
       return 'danger';
     }
     return 'neutral';
@@ -1186,41 +1180,38 @@
     return 'dot';
   }
 
-  function renderStartOperationRowHtml(state, operation) {
-    const roleId = lifecycleOperationRoleId(operation);
-    const roleLabel = formatValue(roleLabelById(state, roleId));
-    const initials = actorInitials(roleId, '');
-    const label = lifecycleOperationLabel(operation) || ('Starting ' + roleLabel);
-    const selected = operation.id === state.selectedLifecycleOperationId;
-    const accessibleLabel = label + ', ' + lifecycleOperationBadgeText(operation) + (selected ? ', selected' : '');
-    return [
-      '<button class="person-row selectable-row actor-row is-pending is-operation' + (selected ? ' is-selected' : '') + '" type="button" data-operation-id="' + escapeHtml(operation.id) + '" role="option" aria-selected="' + selected + '" aria-label="' + escapeHtml(accessibleLabel) + '">',
-      '<span class="avatar teal" aria-hidden="true">' + escapeHtml(initials) + '</span>',
-      '<span>',
-      '<strong>' + escapeHtml(label) + '</strong>',
-      '<span class="micro mono">' + escapeHtml(operation.id) + '</span>',
-      '</span>',
-      '<span class="row-status">',
-      badge(lifecycleOperationBadgeText(operation), 'busy'),
-      '</span>',
-      '</button>',
-    ].join('');
+  function effectiveActorLifecycleState(state, actor) {
+    const operation = activeLifecycleOperationForActor(state, actor && actor.actor_id);
+    if (operation && operation.action === 'retry') {
+      return 'retrying';
+    }
+    if (operation && operation.action === 'start') {
+      return 'starting';
+    }
+    return actorLifecycleState(actor);
+  }
+
+  function lifecycleStateLabel(lifecycleState) {
+    if (lifecycleState === 'start_failed') {
+      return 'start failed';
+    }
+    return lifecycleState || 'unknown';
   }
 
   function renderActorRowHtml(state, actor) {
     const selected = actor.actor_id === state.selectedActorId;
     const loading = actor.actor_id === state.actorSelectionPendingId;
     const lifecycleOperation = activeLifecycleOperationForActor(state, actor.actor_id);
-    const pending = Boolean(actor.pending
-      || lifecycleOperation
-      || (state.rosterPendingActors && Object.prototype.hasOwnProperty.call(state.rosterPendingActors, actor.actor_id)));
+    const lifecycleState = effectiveActorLifecycleState(state, actor);
+    const pending = Boolean(lifecycleOperation || lifecycleState === 'starting' || lifecycleState === 'retrying');
+    const startupOnly = ['starting', 'retrying', 'start_failed'].indexOf(lifecycleState) >= 0;
     const runtime = actor.runtime || actor;
     const roleLabel = formatValue(roleLabelById(state, actor.role));
     const initials = actorInitials(actor.role, actor.actor_id);
     const tone = actorVisualTone(runtime);
-    const status = lifecycleOperation
+    const status = lifecycleOperation && lifecycleOperation.action !== 'start' && lifecycleOperation.action !== 'retry'
       ? lifecycleOperationBadgeText(lifecycleOperation)
-      : (pending ? 'initializing' : formatValue(runtime.status));
+      : lifecycleStateLabel(lifecycleState);
     const accessibleLabel = roleLabel + ' actor ' + formatValue(actor.actor_id) + ', ' + status + (selected ? ', selected' : '');
     return [
       '<button class="person-row selectable-row actor-row' + (selected ? ' is-selected' : '') + (loading ? ' is-loading' : '') + (pending ? ' is-pending' : '') + '" type="button" data-actor-id="' + escapeHtml(actor.actor_id) + '" role="option" aria-selected="' + selected + '" aria-label="' + escapeHtml(accessibleLabel) + '">',
@@ -1230,9 +1221,9 @@
       '<span class="micro mono">' + escapeHtml(formatValue(actor.actor_id)) + '</span>',
       '</span>',
       '<span class="row-status">',
-      lifecycleOperation ? badge(status, 'busy') : (pending ? badge('initializing', 'busy') : badge(runtime.status)),
-      pending ? '' : badge(runtime.app_server_health),
-      pending ? '' : '<span class="' + escapeHtml(actorDotClass(runtime)) + '" aria-hidden="true"></span>',
+      badge(status, pending ? 'busy' : undefined),
+      startupOnly || pending ? '' : badge(runtime.app_server_health),
+      startupOnly || pending ? '' : '<span class="' + escapeHtml(actorDotClass(runtime)) + '" aria-hidden="true"></span>',
       '</span>',
       '</button>',
     ].join('');
@@ -1261,30 +1252,32 @@
   }
 
   function renderActorRowsHtml(state) {
-    const startOperationRows = lifecycleOperationList(state).filter(function (operation) {
-      return operationIsActive(operation) && operation.action === 'start';
-    }).map(function (operation) {
-      return renderStartOperationRowHtml(state, operation);
-    });
-    if (!state.actors.length && !startOperationRows.length) {
+    if (!state.actors.length) {
       return renderEmpty('No actors available.');
     }
+    const startingRows = [];
     const activeRows = [];
+    const attentionRows = [];
     const stoppedRows = [];
     state.actors.forEach(function (actor) {
       const rowHtml = renderActorRowHtml(state, actor);
-      if (actorIsStopped(actor)) {
+      const lifecycleState = effectiveActorLifecycleState(state, actor);
+      if (lifecycleState === 'starting' || lifecycleState === 'retrying') {
+        startingRows.push(rowHtml);
+      } else if (lifecycleState === 'start_failed') {
+        attentionRows.push(rowHtml);
+      } else if (lifecycleState === 'stopped') {
         stoppedRows.push(rowHtml);
       } else {
         activeRows.push(rowHtml);
       }
     });
     const groups = [];
-    if (startOperationRows.length) {
+    if (startingRows.length) {
       groups.push(renderRosterGroupHtml({
         key: 'starting',
         title: 'Starting',
-        rows: startOperationRows,
+        rows: startingRows,
       }));
     }
     groups.push(renderRosterGroupHtml({
@@ -1292,6 +1285,13 @@
       title: 'Active',
       rows: activeRows,
     }));
+    if (attentionRows.length) {
+      groups.push(renderRosterGroupHtml({
+        key: 'needs-attention',
+        title: 'Needs attention',
+        rows: attentionRows,
+      }));
+    }
     groups.push(renderRosterGroupHtml({
       key: 'stopped',
       title: 'Stopped',
@@ -1326,12 +1326,44 @@
     }).join('');
   }
 
+  function selectedStartupActor(state) {
+    const actor = actorById(state, state.selectedActorId);
+    if (!actor) {
+      return null;
+    }
+    const lifecycleState = effectiveActorLifecycleState(state, actor);
+    return ['starting', 'retrying', 'start_failed'].indexOf(lifecycleState) >= 0
+      ? Object.assign({}, actor, { lifecycle_state: lifecycleState })
+      : null;
+  }
+
+  function startupActorNoticeHtml(actor) {
+    const lifecycleState = actorLifecycleState(actor);
+    if (lifecycleState === 'start_failed') {
+      const failure = actor && actor.last_failure && typeof actor.last_failure === 'object'
+        ? actor.last_failure
+        : {};
+      const message = typeof failure.message === 'string' && failure.message
+        ? failure.message
+        : 'The actor did not finish starting.';
+      return '<div class="empty-state"><strong>Start failed</strong><span>' + escapeHtml(message) + '</span></div>';
+    }
+    if (lifecycleState === 'retrying') {
+      return '<div class="empty-state"><strong>Retrying actor</strong><span>A fresh actor is starting with the same role.</span></div>';
+    }
+    return '<div class="empty-state"><strong>Starting actor</strong><span>Runtime details will appear when startup completes.</span></div>';
+  }
+
   function renderRuntimeDetailHtml(state) {
     if (state.actorCardLoading && !state.actorConsole) {
       return renderMetricSkeletonHtml();
     }
     if (state.actorCardError) {
       return renderEmpty(state.actorCardError);
+    }
+    const startupActor = selectedStartupActor(state);
+    if (startupActor) {
+      return startupActorNoticeHtml(startupActor);
     }
     const runtime = selectedActorRuntime(state);
     const taskSys = state.actorConsole && state.actorConsole.task_sys ? state.actorConsole.task_sys : null;
@@ -1355,6 +1387,10 @@
     }
     if (state.actorCardError) {
       return renderEmpty(state.actorCardError);
+    }
+    const startupActor = selectedStartupActor(state);
+    if (startupActor) {
+      return startupActorNoticeHtml(startupActor);
     }
     const runtime = selectedActorRuntime(state);
     if (!runtime) {
@@ -1457,6 +1493,12 @@
     if (state.actorCardError) {
       return renderEmpty(state.actorCardError);
     }
+    const startupActor = selectedStartupActor(state);
+    if (startupActor) {
+      return renderEmpty(actorLifecycleState(startupActor) === 'start_failed'
+        ? 'Tasks are unavailable because startup failed.'
+        : 'Tasks will appear after startup completes.');
+    }
     const taskSys = state.actorConsole && state.actorConsole.task_sys ? state.actorConsole.task_sys : null;
     if (!taskSys) {
       return renderEmpty('No Task Sys state loaded.');
@@ -1498,6 +1540,12 @@
     }
     if (state.actorCardError) {
       return renderEmpty(state.actorCardError);
+    }
+    const startupActor = selectedStartupActor(state);
+    if (startupActor) {
+      return renderEmpty(actorLifecycleState(startupActor) === 'start_failed'
+        ? 'Tracks are unavailable because startup failed.'
+        : 'Tracks will appear after startup completes.');
     }
     const tracks = state.actorConsole && state.actorConsole.tracks && Array.isArray(state.actorConsole.tracks.items)
       ? state.actorConsole.tracks.items
@@ -1972,28 +2020,25 @@
 
   function renderSelectedActorContext(state, elements) {
     const runtime = selectedActorRuntime(state);
-    const lifecycleOperation = selectedLifecycleOperation(state)
-      || activeLifecycleOperationForActor(state, state.selectedActorId);
+    const lifecycleOperation = activeLifecycleOperationForActor(state, state.selectedActorId);
     const selectedActor = actorById(state, state.selectedActorId);
-    const operationRoleId = lifecycleOperationRoleId(lifecycleOperation);
-    const roleId = (runtime && runtime.role) || (selectedActor && selectedActor.role) || operationRoleId;
+    const roleId = (runtime && runtime.role) || (selectedActor && selectedActor.role) || lifecycleOperationRoleId(lifecycleOperation);
     const hasActor = Boolean(state.selectedActorId && selectedActor);
-    const hasOperationContext = Boolean(!hasActor && lifecycleOperation);
     const roleLabel = roleId ? formatValue(roleLabelById(state, roleId)) : 'Direct thread';
-    const contextId = hasActor
-      ? state.selectedActorId
-      : (hasOperationContext ? lifecycleOperation.id : 'No teammate selected');
-    const lifecycleValue = lifecycleOperation
-      ? lifecycleOperationBadgeText(lifecycleOperation)
-      : (runtime && runtime.status ? formatValue(runtime.status) : '');
-    const healthValue = hasActor && runtime && runtime.app_server_health
+    const contextId = hasActor ? state.selectedActorId : 'No teammate selected';
+    const lifecycleValue = !hasActor
+      ? ''
+      : (lifecycleOperation && !['start', 'retry'].includes(lifecycleOperation.action)
+          ? lifecycleOperationBadgeText(lifecycleOperation)
+          : lifecycleStateLabel(effectiveActorLifecycleState(state, selectedActor)));
+    const healthValue = hasActor && selectedActor && !actorIsStartupOnly(selectedActor) && runtime && runtime.app_server_health
       ? formatValue(runtime.app_server_health)
       : '';
     const initials = actorInitials(roleId, state.selectedActorId);
 
     elements.selectedContextAvatar.textContent = initials;
     elements.selectedContextAvatar.className = 'avatar ' + (hasActor ? actorVisualTone(runtime) : 'teal');
-    elements.selectedContextAvatar.hidden = !hasActor && !hasOperationContext;
+    elements.selectedContextAvatar.hidden = !hasActor;
     elements.selectedContextRole.textContent = roleLabel;
     elements.selectedContextId.textContent = contextId;
     elements.selectedContextRuntime.textContent = lifecycleValue;
@@ -2010,7 +2055,7 @@
       interruptPending: state.interruptPending,
     });
     elements.stopButton.disabled = !actionState.canStop;
-    elements.stopButton.hidden = !hasActor || Boolean(runtime && runtime.status === 'inactive');
+    elements.stopButton.hidden = !hasActor || actorLifecycleState(selectedActor) !== 'active';
     elements.stopButton.textContent = lifecycleOperation && lifecycleOperation.action === 'stop' ? 'Stopping...' : 'Stop';
     elements.stopButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'stop'));
     elements.stopButton.setAttribute('aria-label', hasActor ? 'Stop actor ' + state.selectedActorId : 'Stop selected actor');
@@ -2023,10 +2068,15 @@
     elements.clearButton.textContent = lifecycleOperation && lifecycleOperation.action === 'clear' ? 'Clearing...' : 'Clear';
     elements.clearButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'clear'));
     elements.resumeButton.disabled = !actionState.canResume;
-    elements.resumeButton.hidden = !hasActor || !runtime || runtime.status !== 'inactive';
+    elements.resumeButton.hidden = !hasActor || actorLifecycleState(selectedActor) !== 'stopped';
     elements.resumeButton.textContent = lifecycleOperation && lifecycleOperation.action === 'resume' ? 'Resuming...' : 'Resume';
     elements.resumeButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'resume'));
     elements.resumeButton.setAttribute('aria-label', hasActor ? 'Resume actor ' + state.selectedActorId : 'Resume selected actor');
+    elements.retryButton.disabled = !actionState.canRetry;
+    elements.retryButton.hidden = !hasActor || actorLifecycleState(selectedActor) !== 'start_failed';
+    elements.retryButton.textContent = lifecycleOperation && lifecycleOperation.action === 'retry' ? 'Retrying...' : 'Retry';
+    elements.retryButton.classList.toggle('is-pending', Boolean(lifecycleOperation && lifecycleOperation.action === 'retry'));
+    elements.retryButton.setAttribute('aria-label', hasActor ? 'Retry actor ' + state.selectedActorId : 'Retry selected actor');
     if (elements.lifecycleOperationStatus) {
       elements.lifecycleOperationStatus.textContent = actionState.lifecycleStatus;
     }
@@ -2040,8 +2090,7 @@
   function renderComposer(state, elements) {
     elements.instructionInput.value = state.draftText;
     const runtime = selectedActorRuntime(state);
-    const lifecycleOperation = selectedLifecycleOperation(state)
-      || activeLifecycleOperationForActor(state, state.selectedActorId);
+    const lifecycleOperation = activeLifecycleOperationForActor(state, state.selectedActorId);
     const actionState = describeInstanceActionState(runtime, {
       draftText: state.draftText,
       sendPending: state.sendPending,
@@ -2207,7 +2256,9 @@
     renderActorList(state, elements);
     try {
       const payload = await fetchJson('/api/actors');
-      return applyActorsPayload(state, payload);
+      const reconciliation = applyActorsPayload(state, payload);
+      scheduleLifecycleOperationPolling(state, elements);
+      return reconciliation;
     } catch (error) {
       state.rosterError = error.message;
       state.message = error.message;
@@ -2222,6 +2273,10 @@
   async function reconcileActorSelectionAfterRoster(state, elements, reconciliation) {
     if (reconciliation.selectedActorPresent) {
       return false;
+    }
+    if (reconciliation.replacementActorId) {
+      await loadActorSelection(state, elements, reconciliation.replacementActorId);
+      return true;
     }
     if (reconciliation.preferredActorId) {
       if (actorIsStopped(actorById(state, reconciliation.preferredActorId))) {
@@ -2441,7 +2496,7 @@
   async function loadActorSelection(state, elements, actorId) {
     const selection = beginActorSelection(state, actorId);
     renderActorSelectionRegions(state, elements);
-    if (!selection.actorId) {
+    if (!selection.actorId || !actorIsInteractive(actorById(state, selection.actorId))) {
       settleActorSelection(state, elements, selection);
       return;
     }
@@ -2471,7 +2526,7 @@
     const requestId = state.actorSelectionRequestId;
     const consoleRequestId = state.actorConsoleRequestId + 1;
     state.actorConsoleRequestId = consoleRequestId;
-    if (!requestedActorId) {
+    if (!requestedActorId || !actorIsInteractive(actorById(state, requestedActorId))) {
       state.actorConsole = null;
       syncActorCapabilitiesFromConsole(state, { force: true });
       clearImConversation(state, '');
@@ -2503,6 +2558,7 @@
       state
       && state.selectedSection === 'actors'
       && state.selectedActorId
+      && actorIsInteractive(actorById(state, state.selectedActorId))
       && !documentHidden
       && !state.actorSelectionPendingId
       && !state.actorRefreshInFlight
@@ -2594,23 +2650,11 @@
     if (state.deleteConfirmationActorId) {
       closeDeleteConfirmation(state, elements, { restoreFocus: false });
     }
-    state.selectedLifecycleOperationId = '';
     if (actorIsStopped(actorById(state, actorId))) {
       state.rosterStoppedExpanded = true;
     }
     state.message = '';
     await loadActorSelection(state, elements, actorId);
-  }
-
-  function selectLifecycleOperationContext(state, elements, operationId) {
-    const operation = state.lifecycleOperations ? state.lifecycleOperations[operationId] : null;
-    if (!operationIsActive(operation)) {
-      return;
-    }
-    state.selectedLifecycleOperationId = operationId;
-    beginActorSelection(state, '');
-    state.message = lifecycleOperationStatusText(operation);
-    renderActorSelectionRegions(state, elements);
   }
 
   async function selectTrack(state, elements, trackId) {
@@ -2634,7 +2678,7 @@
   }
 
   async function runLifecycleAction(state, elements, action, actorId) {
-    if (!action || ['stop', 'resume', 'clear', 'delete'].indexOf(action) < 0 || !actorId || !actorById(state, actorId)) {
+    if (!action || ['stop', 'resume', 'clear', 'delete', 'retry'].indexOf(action) < 0 || !actorId || !actorById(state, actorId)) {
       return;
     }
     if (!lifecycleActionAllowed(state, action, actorId)) {
@@ -2664,6 +2708,7 @@
       }
       renderShell(state, elements);
       renderActorList(state, elements);
+      renderActorDetail(state, elements);
       renderActorInteractionRegions(state, elements);
       renderAttachTools(state, elements);
       if (operationIsTerminal(operation)) {
@@ -2718,69 +2763,6 @@
         renderAttachTools(state, elements);
       }
     }
-  }
-
-  function rosterReconcileDelays(state) {
-    return Array.isArray(state.rosterReconcileDelaysMs)
-      ? state.rosterReconcileDelaysMs
-      : [0, 150, 300, 600, 1000, 1500, 2500];
-  }
-
-  function scheduleCreatedActorReconciliation(state, elements) {
-    const delays = rosterReconcileDelays(state);
-    const pendingActorIds = pendingCreatedActorIds(state);
-    if (!pendingActorIds.length) {
-      return;
-    }
-    if (state.rosterReconcileTimer) {
-      clearTimeout(state.rosterReconcileTimer);
-      state.rosterReconcileTimer = null;
-    }
-    const attempt = state.rosterReconcileAttempt;
-    if (attempt >= delays.length) {
-      state.message = pendingActorIds.length === 1
-        ? 'Created ' + pendingActorIds[0] + '. Roster has not confirmed it yet.'
-        : 'Created ' + pendingActorIds.length + ' actors. Roster has not confirmed them yet.';
-      renderShell(state, elements);
-      renderActorList(state, elements);
-      return;
-    }
-    state.rosterReconcileTimer = setTimeout(function () {
-      state.rosterReconcileTimer = null;
-      reconcileCreatedActorsInRoster(state, elements).catch(function (error) {
-        const remainingActorIds = pendingCreatedActorIds(state);
-        state.rosterError = error.message;
-        state.message = remainingActorIds.length === 1
-          ? 'Created ' + remainingActorIds[0] + '. Waiting for roster confirmation.'
-          : 'Created actors. Waiting for roster confirmation.';
-        renderShell(state, elements);
-        renderActorList(state, elements);
-        scheduleCreatedActorReconciliation(state, elements);
-      });
-    }, delays[attempt]);
-  }
-
-  async function reconcileCreatedActorsInRoster(state, elements) {
-    const actorIds = pendingCreatedActorIds(state);
-    if (!actorIds.length) {
-      return;
-    }
-    state.rosterReconcileAttempt += 1;
-    await refreshRoster(state, elements);
-    const remainingActorIds = pendingCreatedActorIds(state);
-    if (remainingActorIds.length) {
-      state.message = remainingActorIds.length === 1
-        ? 'Created ' + remainingActorIds[0] + '. Waiting for roster confirmation.'
-        : 'Created ' + remainingActorIds.length + ' actors. Waiting for roster confirmation.';
-      renderShell(state, elements);
-      scheduleCreatedActorReconciliation(state, elements);
-      return;
-    }
-    state.message = actorIds.length === 1
-      ? 'Created ' + actorIds[0] + '.'
-      : 'Created ' + actorIds.length + ' actors.';
-    renderShell(state, elements);
-    renderActorList(state, elements);
   }
 
   function lifecycleOperationPollDelays(state) {
@@ -2839,6 +2821,8 @@
         if (operationIsTerminal(updatedOperation)) {
           await reconcileLifecycleOperation(state, elements, updatedOperation);
         } else {
+          const reconciliation = await refreshRoster(state, elements);
+          await reconcileActorSelectionAfterRoster(state, elements, reconciliation);
           state.message = lifecycleOperationStatusText(updatedOperation);
           renderShell(state, elements);
           renderActorList(state, elements);
@@ -2850,22 +2834,6 @@
       state.lifecycleOperationPollInFlight = false;
     }
     scheduleLifecycleOperationPolling(state, elements);
-  }
-
-  async function beginCreatedActorReconciliation(state, elements, actorId, roleId, options) {
-    const selectCreatedActor = Boolean(options && options.select);
-    recordPendingCreatedActor(state, actorId, roleId);
-    state.message = 'Started ' + actorId + '. Waiting for roster confirmation.';
-    upsertPendingActor(state, actorId, roleId);
-    scheduleCreatedActorReconciliation(state, elements);
-    if (selectCreatedActor) {
-      state.selectedSection = 'actors';
-      await loadActorSelection(state, elements, actorId);
-    } else {
-      renderShell(state, elements);
-      renderActorList(state, elements);
-      renderActorInteractionRegions(state, elements);
-    }
   }
 
   function nextActorIdAfterRemoval(actors, actorId) {
@@ -2898,74 +2866,22 @@
   }
 
   async function reconcileLifecycleOperation(state, elements, operation) {
-    if (!operation) {
+    if (!operationIsTerminal(operation)) {
       return;
     }
-    if (operation.status === 'failed') {
-      const failureMessage = lifecycleOperationStatusText(operation);
-      let restoreActorId = '';
-      if (state.selectedLifecycleOperationId === operation.id) {
-        state.selectedLifecycleOperationId = '';
-        const previousActorId = state.lifecycleOperationPreviousActorIds
-          ? state.lifecycleOperationPreviousActorIds[operation.id]
-          : '';
-        if (previousActorId && actorById(state, previousActorId)) {
-          restoreActorId = previousActorId;
-        }
-      }
-      if (state.lifecycleOperationPreviousActorIds) {
-        delete state.lifecycleOperationPreviousActorIds[operation.id];
-      }
-      forgetLifecycleOperation(state, operation);
-      if (restoreActorId) {
-        await loadActorSelection(state, elements, restoreActorId);
-      }
-      state.message = failureMessage;
-      renderActorSelectionRegions(state, elements);
-      return;
-    }
-    if (operation.status !== 'succeeded') {
-      return;
-    }
-    if (operation.action === 'start') {
-      const actorId = lifecycleOperationActorId(operation);
-      if (!actorId) {
-        state.message = 'Start operation completed without actor id.';
-        forgetLifecycleOperation(state, operation);
-        renderShell(state, elements);
-        renderActorList(state, elements);
-        renderActorInteractionRegions(state, elements);
-        renderAttachTools(state, elements);
-        return;
-      }
-      const roleId = lifecycleOperationRoleId(operation) || state.selectedRole;
-      const selectCreatedActor = state.selectedLifecycleOperationId === operation.id;
-      if (selectCreatedActor) {
-        state.selectedLifecycleOperationId = '';
-      }
-      if (state.lifecycleOperationPreviousActorIds) {
-        delete state.lifecycleOperationPreviousActorIds[operation.id];
-      }
-      forgetLifecycleOperation(state, operation);
-      await beginCreatedActorReconciliation(state, elements, actorId, roleId, { select: selectCreatedActor });
-      return;
-    }
-    const actorId = lifecycleOperationActorId(operation);
-    state.message = lifecycleOperationStatusText(operation);
+    const completionMessage = lifecycleOperationStatusText(operation);
+    const target = operation.target && typeof operation.target === 'object' ? operation.target : {};
+    const previousActorId = typeof target.actor_id === 'string' ? target.actor_id : '';
+    const replacementActorId = typeof target.replacement_actor_id === 'string' ? target.replacement_actor_id : '';
+    const selectedBefore = state.selectedActorId;
+    const selectionBelongsToOperation = selectedBefore === previousActorId || selectedBefore === replacementActorId;
     if (operation.action === 'delete') {
-      const nextActorId = nextActorIdAfterRemoval(state.actors, actorId);
-      const completionMessage = state.message;
-      if (state.selectedLifecycleOperationId === operation.id) {
-        state.selectedLifecycleOperationId = '';
-      }
-      if (state.lifecycleOperationPreviousActorIds) {
-        delete state.lifecycleOperationPreviousActorIds[operation.id];
-      }
+      const nextActorId = nextActorIdAfterRemoval(state.actors, previousActorId);
       forgetLifecycleOperation(state, operation);
       state.actors = state.actors.filter(function (actor) {
-        return actor.actor_id !== actorId;
+        return actor.actor_id !== previousActorId;
       });
-      if (state.selectedActorId === actorId) {
+      if (state.selectedActorId === previousActorId) {
         beginActorSelection(state, '');
       }
       renderActorSelectionRegions(state, elements);
@@ -2986,37 +2902,51 @@
       } else {
         renderActorList(state, elements);
       }
+      state.message = completionMessage;
+      renderShell(state, elements);
       return;
     }
-    applyLifecycleOperationInstanceResult(state, operation);
+
+    if (operation.status === 'succeeded' && operation.action !== 'start' && operation.action !== 'retry') {
+      applyLifecycleOperationInstanceResult(state, operation);
+    }
     forgetLifecycleOperation(state, operation);
-    renderShell(state, elements);
-    renderActorList(state, elements);
-    renderActorInteractionRegions(state, elements);
-    renderAttachTools(state, elements);
-    if (actorId && state.selectedActorId === actorId) {
-      try {
-        await refreshSelectedActorConsole(state);
-        renderActorDetail(state, elements);
-        renderActorInteractionRegions(state, elements);
-        renderAttachTools(state, elements);
-      } catch (error) {
-        state.message = error.message;
-        renderShell(state, elements);
+    let reconciliation = null;
+    try {
+      reconciliation = await refreshRoster(state, elements);
+    } catch (_error) {
+      state.message = completionMessage;
+      renderActorSelectionRegions(state, elements);
+      return;
+    }
+
+    if (operation.action === 'start' || operation.action === 'retry') {
+      const candidateActorId = replacementActorId && actorById(state, replacementActorId)
+        ? replacementActorId
+        : (previousActorId && actorById(state, previousActorId) ? previousActorId : '');
+      if (selectionBelongsToOperation) {
+        await loadActorSelection(state, elements, candidateActorId || preferredActorId(state.actors));
+      } else if (reconciliation) {
+        await reconcileActorSelectionAfterRoster(state, elements, reconciliation);
+      }
+    } else if (reconciliation) {
+      await reconcileActorSelectionAfterRoster(state, elements, reconciliation);
+      if (state.selectedActorId && actorIsInteractive(actorById(state, state.selectedActorId))) {
+        try {
+          await refreshSelectedActorConsole(state);
+        } catch (_error) {
+          // The operation result and roster remain authoritative even if the detail refresh fails.
+        }
       }
     }
-    try {
-      await refreshRoster(state, elements);
-    } catch (_error) {
-      return;
-    }
+    state.message = completionMessage;
+    renderActorSelectionRegions(state, elements);
   }
 
   async function createInstance(state, elements) {
     if (!state.selectedRole) {
       return;
     }
-    const previousActorId = state.selectedActorId;
     state.message = '';
     renderShell(state, elements);
     try {
@@ -3029,9 +2959,34 @@
       if (!operation || typeof operation.id !== 'string' || operation.action !== 'start') {
         throw new Error('Start response did not include operation.');
       }
+      const actorId = lifecycleOperationActorId(operation);
+      const roleId = lifecycleOperationRoleId(operation) || state.selectedRole;
+      if (!actorId) {
+        throw new Error('Start response did not include actor id.');
+      }
       recordLifecycleOperation(state, operation);
-      state.lifecycleOperationPreviousActorIds[operation.id] = previousActorId;
-      selectLifecycleOperationContext(state, elements, operation.id);
+      const startingActor = {
+        actor_id: actorId,
+        role: roleId,
+        lifecycle_state: 'starting',
+        last_failure: null,
+        lifecycle_operation: operation,
+        runtime: {
+          status: 'inactive',
+          app_server_health: '',
+          thread_status: '',
+        },
+      };
+      const existingIndex = state.actors.findIndex(function (actor) {
+        return actor.actor_id === actorId;
+      });
+      if (existingIndex >= 0) {
+        state.actors[existingIndex] = startingActor;
+      } else {
+        state.actors = state.actors.concat([startingActor]);
+      }
+      state.selectedSection = 'actors';
+      await loadActorSelection(state, elements, actorId);
       state.message = lifecycleOperationStatusText(operation);
       renderShell(state, elements);
       renderActorList(state, elements);
@@ -3335,7 +3290,8 @@
         selectionChanged = true;
       }
       const refreshes = [appBasicsPromise, tracksPromise];
-      if (!selectionChanged && state.selectedActorId) {
+      if (!selectionChanged && state.selectedActorId
+          && actorIsInteractive(actorById(state, state.selectedActorId))) {
         const actorId = state.selectedActorId;
         const requestId = state.actorSelectionRequestId;
         const target = selectedActorImTarget(state);
@@ -3409,6 +3365,7 @@
       deleteButton: document.getElementById('delete-button'),
       clearButton: document.getElementById('clear-button'),
       resumeButton: document.getElementById('resume-button'),
+      retryButton: document.getElementById('retry-button'),
       openTuiButton: document.getElementById('open-tui-button'),
       openTuiStatus: document.getElementById('open-tui-status'),
       copyCommandButton: document.getElementById('copy-command-button'),
@@ -3450,13 +3407,6 @@
           state.rosterStoppedExpanded = !state.rosterStoppedExpanded;
           renderActorList(state, elements);
         }
-        return;
-      }
-      const operationRow = event.target && event.target.closest
-        ? event.target.closest('[data-operation-id]')
-        : null;
-      if (operationRow) {
-        selectLifecycleOperationContext(state, elements, operationRow.getAttribute('data-operation-id') || '');
         return;
       }
       const row = event.target && event.target.closest
@@ -3614,6 +3564,13 @@
     });
     elements.resumeButton.addEventListener('click', function () {
       runLifecycleAction(state, elements, 'resume', state.selectedActorId).catch(function (error) {
+        state.message = error.message;
+        renderShell(state, elements);
+        renderActorInteractionRegions(state, elements);
+      });
+    });
+    elements.retryButton.addEventListener('click', function () {
+      runLifecycleAction(state, elements, 'retry', state.selectedActorId).catch(function (error) {
         state.message = error.message;
         renderShell(state, elements);
         renderActorInteractionRegions(state, elements);
