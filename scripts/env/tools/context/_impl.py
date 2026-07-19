@@ -660,6 +660,11 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "scope": "Task Sys task state",
             "source_of_truth": "task_sys.list / task_sys.get / task_sys.close / task_sys.cancel / task_sys.need_parent via runtime env tools",
         },
+        "demands": {
+            "description": "Actor-owned Demand needs, unchecked revisions, and live organization state.",
+            "scope": "active actor Demand state",
+            "source_of_truth": "demand_sys.list / demand_sys.get / demand_sys.check / demand_sys.get_many via runtime env tools",
+        },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",
             "scope": "product deliverable state",

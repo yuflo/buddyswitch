@@ -13,6 +13,7 @@ import uuid
 from env.domain import artifact_relations as _artifact_relations_domain
 from env.domain import artifact_visibility as _artifact_visibility_domain
 from env.domain import actor_private_workspace as _actor_private_workspace_domain
+from env.domain import demand_sys as _demand_sys_domain
 from env.domain import source_refs as _source_ref_domain
 from env.domain import task_sys as _task_sys_domain
 from env.domain import track_comments as _track_comment_domain
@@ -173,6 +174,7 @@ class RuntimeObjectAccess:
         return {
             "tracks": "track.list / track.open",
             "tasks": "task_sys.list / task_sys.get / task_sys.close / task_sys.cancel / task_sys.need_parent",
+            "demands": "demand_sys.list / demand_sys.get / demand_sys.check / demand_sys.get_many",
             "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
             "track_comments": "track.list_comments",
@@ -419,6 +421,7 @@ class DomainAccess:
     artifact_relations: Any = field(default_factory=lambda: _artifact_relations_domain)
     artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
     actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
+    demand_sys: Any = field(default_factory=lambda: _demand_sys_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
     task_sys: Any = field(default_factory=lambda: _task_sys_domain)
     track_comment: Any = field(default_factory=lambda: _track_comment_domain)

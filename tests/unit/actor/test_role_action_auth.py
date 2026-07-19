@@ -71,6 +71,33 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             with self.subTest(permission=permission):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
 
+    def test_every_demand_sys_permission_allows_every_manifest_role(self) -> None:
+        expected = {
+            "demand_sys.create",
+            "demand_sys.revise",
+            "demand_sys.list",
+            "demand_sys.get",
+            "demand_sys.get_many",
+            "demand_sys.check",
+            "demand_sys.complete_check",
+            "demand_sys.set_parent",
+            "demand_sys.add_dependency",
+            "demand_sys.remove_dependency",
+            "demand_sys.split",
+            "demand_sys.absorb_into",
+            "demand_sys.mark_duplicate",
+            "demand_sys.supersede",
+            "demand_sys.complete",
+            "demand_sys.cancel",
+        }
+        self.assertEqual(
+            {permission for permission in role_auth.COMMON_ROLE_PERMISSIONS if permission.startswith("demand_sys.")},
+            expected,
+        )
+        for permission in expected:
+            with self.subTest(permission=permission):
+                self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
+
     def test_unknown_active_role_is_denied(self) -> None:
         decision = role_auth.authorize("track.read", "ghost", self.manifest)
         self.assertFalse(decision.allowed)

@@ -26,7 +26,7 @@ from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-_EXPECTED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "search", "message"}
+_EXPECTED_TOOLS = {"demand_sys", "task_sys", "track", "artifact", "context", "evidence", "search", "message"}
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
@@ -46,6 +46,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIsInstance(context.signal_delivery, runtime_context.SignalDeliveryAccess)
         self.assertIsInstance(context.task_sys_runtime, runtime_context.TaskSysRuntimeAccess)
         self.assertIsInstance(context.im_actor_delivery, runtime_context.ImActorDeliveryAccess)
+        self.assertIs(context.rules.demand_sys, runtime_context._demand_sys_domain)
+        self.assertFalse(hasattr(context.repos, "demand"))
+        self.assertFalse(hasattr(context.repos, "demands"))
         self.assertFalse(hasattr(context, "daemon"))
         self.assertFalse(hasattr(runtime_context, "Daemon" + "Access"))
 
@@ -276,7 +279,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("payload_fields", dumped)
         self.assertNotIn("action_semantics", dumped)
         self.assertNotIn('"properties"', dumped)
-        for tool_name in ("track", "artifact", "task_sys", "context"):
+        for tool_name in ("track", "artifact", "demand_sys", "task_sys", "context"):
             with self.subTest(tool=tool_name):
                 compact = affordances.get(tool_name)
                 self.assertIsInstance(compact, dict, msg=summary)
@@ -645,6 +648,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIn("tracks", sources)
         self.assertIn("artifacts", sources)
         self.assertIn("tasks", sources)
+        self.assertIn("demands", sources)
+        demand_source_text = json.dumps(sources["demands"], ensure_ascii=True, sort_keys=True)
+        for action in ("demand_sys.list", "demand_sys.get", "demand_sys.check", "demand_sys.get_many"):
+            self.assertIn(action, demand_source_text)
         task_source = sources["tasks"]
         task_source_text = json.dumps(task_source, ensure_ascii=True, sort_keys=True)
         self.assertIn("task_sys.list", task_source_text)

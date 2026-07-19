@@ -19,7 +19,7 @@ from env.tool_runtime.definition import validate_definition  # noqa: E402
 from env.tool_runtime import registry as catalog  # noqa: E402
 from env.tool_runtime import role_auth  # noqa: E402
 
-_EXPECTED_TOOLS = {"track", "artifact", "context", "evidence", "search", "message", "task_sys"}
+_EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 _EXPECTED_ACTIONS_BY_TOOL = {
     "track": {
         "create",
@@ -37,6 +37,24 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     },
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
+    "demand_sys": {
+        "create",
+        "revise",
+        "list",
+        "get",
+        "get_many",
+        "check",
+        "complete_check",
+        "set_parent",
+        "add_dependency",
+        "remove_dependency",
+        "split",
+        "absorb_into",
+        "mark_duplicate",
+        "supersede",
+        "complete",
+        "cancel",
+    },
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request"},
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
@@ -53,6 +71,22 @@ _EXPECTED_FREE_ACTIONS = {
     "context.summarize",
     "context.get",
     "context.list_sources",
+    "demand_sys.create",
+    "demand_sys.revise",
+    "demand_sys.list",
+    "demand_sys.get",
+    "demand_sys.get_many",
+    "demand_sys.check",
+    "demand_sys.complete_check",
+    "demand_sys.set_parent",
+    "demand_sys.add_dependency",
+    "demand_sys.remove_dependency",
+    "demand_sys.split",
+    "demand_sys.absorb_into",
+    "demand_sys.mark_duplicate",
+    "demand_sys.supersede",
+    "demand_sys.complete",
+    "demand_sys.cancel",
     "message.contacts",
     "message.send",
     "message.get",
