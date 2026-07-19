@@ -275,6 +275,19 @@ def _require_live(record: Mapping[str, Any]) -> None:
         raise DemandTerminalConflict(f"Demand {record['id']} is terminal")
 
 
+def _require_no_live_children(
+    records: Mapping[str, Mapping[str, Any]],
+    demand_id: str,
+) -> None:
+    if any(
+        record["parent_id"] == demand_id and record["terminal"] is None
+        for record in records.values()
+    ):
+        raise DemandRelationConflict(
+            f"Demand {demand_id} cannot be terminalized while it has live children"
+        )
+
+
 def create(
     actor_target: Mapping[str, Any],
     intake_key: Any,
@@ -299,7 +312,11 @@ def create(
                 and record["source_refs"] == normalized_source_refs
             )
             if same_input:
-                return False, _receipt(state_changed=False, changes=[])
+                return False, {
+                    **_receipt(state_changed=False, changes=[]),
+                    "demand_id": record["id"],
+                    "revision": record["revision"],
+                }
             raise DemandIntakeConflict(
                 f"Demand intake_key already exists with different content: {normalized_intake_key}"
             )
@@ -321,10 +338,14 @@ def create(
             "updated_at": now,
         }
         state["demands"][demand_id] = record
-        return True, _receipt(
-            state_changed=True,
-            changes=[{"demand_id": demand_id, "revision": 1, "kind": "created"}],
-        )
+        return True, {
+            **_receipt(
+                state_changed=True,
+                changes=[{"demand_id": demand_id, "revision": 1, "kind": "created"}],
+            ),
+            "demand_id": demand_id,
+            "revision": 1,
+        }
 
     return demands.transact_actor_state(normalized_target, mutate)
 
@@ -839,14 +860,7 @@ def absorb_into(
         _require_live(target)
         _require_expected_revision(source, normalized_source_revision)
         _require_expected_revision(target, normalized_target_revision)
-        if any(
-            record["parent_id"] == normalized_source_id
-            and record["terminal"] is None
-            for record in records.values()
-        ):
-            raise DemandRelationConflict(
-                "A Demand with live children cannot be absorbed"
-            )
+        _require_no_live_children(records, normalized_source_id)
         now = runtime_files.now_iso()
         stored_target = state["demands"][normalized_target_id]
         stored_target.update(deepcopy(normalized_merged_target))
@@ -906,6 +920,7 @@ def _terminalize_lineage(
         target = _find_record(records, normalized_target_id)
         _require_live(target)
         _require_expected_revision(source, normalized_source_revision)
+        _require_no_live_children(records, normalized_source_id)
         now = runtime_files.now_iso()
         stored = state["demands"][normalized_source_id]
         stored["terminal"] = {
@@ -993,6 +1008,7 @@ def _terminalize_single(
                 return False, _receipt(state_changed=False, changes=[])
             raise DemandTerminalConflict(f"Demand {normalized_id} is terminal")
         _require_expected_revision(record, normalized_revision)
+        _require_no_live_children(records, normalized_id)
         now = runtime_files.now_iso()
         stored = state["demands"][normalized_id]
         next_terminal: dict[str, Any] = {

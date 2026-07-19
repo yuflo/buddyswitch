@@ -176,6 +176,21 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
             actor_id=actor_label,
             intake_key="root",
         )
+        replayed = self._demand_dispatch(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            action="create",
+            args={
+                "intake_key": "root",
+                "description": "root",
+                "detail": "Detail for root",
+                "source_refs": [{"type": "actor", "ref": {"key": "root"}}],
+            },
+        )
+        self._assert_success_contract(replayed)
+        self.assertFalse(replayed["state_changed"], msg=replayed)
+        self.assertEqual(replayed["demand_id"], root)
+        self.assertEqual(replayed["revision"], root_revision)
         revised = self._demand_dispatch(
             instance_json=instance_json,
             actor_id=actor_label,

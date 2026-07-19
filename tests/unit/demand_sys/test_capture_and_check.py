@@ -61,6 +61,8 @@ class DemandCaptureAndCheckTests(RuntimeWorkspaceTestCase):
                     }
                 ],
                 "check_required": True,
+                "demand_id": record["id"],
+                "revision": 1,
             },
         )
         self.assertEqual(
@@ -98,7 +100,13 @@ class DemandCaptureAndCheckTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(
             replay,
-            {"state_changed": False, "changes": [], "check_required": False},
+            {
+                "state_changed": False,
+                "changes": [],
+                "check_required": False,
+                "demand_id": record["id"],
+                "revision": 1,
+            },
         )
         self.assertEqual(self._aggregate_bytes(), before)
         self.assertEqual(demand_sys.get(self.actor_target, record["id"]), record)

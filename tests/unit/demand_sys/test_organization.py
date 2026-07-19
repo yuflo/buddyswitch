@@ -405,6 +405,57 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
             ),
         )
 
+    def test_every_terminal_action_rejects_a_demand_with_live_children(self) -> None:
+        for action_name in ("mark_duplicate", "supersede", "complete", "cancel"):
+            with self.subTest(action=action_name):
+                parent = self._create(f"{action_name}-parent")
+                child = self._create(f"{action_name}-child")
+                target = self._create(f"{action_name}-target")
+                demand_sys.set_parent(
+                    self.actor_target,
+                    child["id"],
+                    1,
+                    parent["id"],
+                )
+
+                if action_name == "mark_duplicate":
+                    action = lambda: demand_sys.mark_duplicate(
+                        self.actor_target,
+                        parent["id"],
+                        1,
+                        target["id"],
+                        "Live children must remain attached to a live parent.",
+                    )
+                elif action_name == "supersede":
+                    action = lambda: demand_sys.supersede(
+                        self.actor_target,
+                        parent["id"],
+                        1,
+                        target["id"],
+                        "Live children must remain attached to a live parent.",
+                    )
+                elif action_name == "complete":
+                    action = lambda: demand_sys.complete(
+                        self.actor_target,
+                        parent["id"],
+                        1,
+                        "Parent cannot complete before its live children are resolved.",
+                        [],
+                    )
+                else:
+                    action = lambda: demand_sys.cancel(
+                        self.actor_target,
+                        parent["id"],
+                        1,
+                        "Parent cannot cancel while its live children remain.",
+                    )
+
+                error = self._assert_unchanged_error(
+                    demand_sys.DemandRelationConflict,
+                    action,
+                )
+                self.assertEqual(error.code, "E_DEMAND_RELATION")
+
     def test_mark_duplicate_terminalizes_source_only_and_exact_replay_is_noop(self) -> None:
         source = self._create("duplicate-source")
         target = self._create("duplicate-target")
