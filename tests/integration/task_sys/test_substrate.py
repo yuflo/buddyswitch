@@ -197,6 +197,26 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(self._task_records(), before)
 
+    def test_ingest_rejects_im_message_without_persisting_task(self) -> None:
+        task_sys = _task_sys()
+        before = self._task_records()
+
+        with self.assertRaisesRegex(ValueError, "im.message.created"):
+            task_sys.ingest({
+                "source": {
+                    "type": "im.message.created",
+                    "ref": {
+                        "message_id": "msg-retired-1",
+                        "conversation_id": "conv-retired-1",
+                        "event_id": "imev-retired-1",
+                    },
+                },
+                "actor_target": self._envelope()["actor_target"],
+                "context": {"message_id": "msg-retired-1"},
+            })
+
+        self.assertEqual(self._task_records(), before)
+
     def test_ingest_persists_task_record_and_returns_start_side_instruction(self) -> None:
         task_sys = _task_sys()
         envelope = self._envelope()

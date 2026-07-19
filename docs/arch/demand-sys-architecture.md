@@ -6,17 +6,26 @@ Demand Sys is the local product module that captures and organizes needs owned
 by one actor. A Demand records what requires attention; it is not a Task Sys
 execution record and does not imply that work has started.
 
-The implemented Phase 1 boundary is:
+The implemented inbound boundary is:
 
 ```text
-actor source or actor judgment
-  -> demand_sys action
-      -> Demand domain owner
-          -> one actor aggregate transaction
+IM message fact -> IM handler -> Demand daemon adapter -> Demand domain
+                                      |
+                                      -> generic input_actor -> actor Demand Check
+
+actor judgment -> demand_sys action -> Demand domain
 ```
 
-There is no Demand-to-Task trigger, daemon wake-up, inbound handler, IM hook, or
-Track hook in the current implementation.
+The IM handler validates one exact target-visible message/event fact and maps it
+deterministically to Demand intake. The Demand daemon adapter owns only capture
+coordination, pending-attention policy, and the fixed Demand Check prompt. It
+calls the same domain owner used by actor actions and uses the generic daemon
+`input_actor` host capability; it does not own lifecycle or storage.
+
+The actor owns matching and organization judgment. Task Sys has no IM or Demand
+dependency. Track remains on its separate current Task path. This phase captures
+only for an already-active target actor; offline capture, replay, and startup
+recovery are not implemented.
 
 ## Ownership and storage
 
@@ -86,6 +95,9 @@ the exact Demand revisions it observed. Acknowledgement never advances past an
 observed revision, so a concurrent newer revision remains pending.
 
 This is attention state, not Task progress state and not a daemon subscription.
+After inbound capture, the Demand daemon adapter derives attention only from
+this durable pending state. A create replay therefore retries actor input while
+the revision remains unchecked and does not wake after acknowledgement.
 
 ## Actor tool boundary
 
@@ -120,6 +132,8 @@ Demand domain -> Demand repository -> runtime file primitives
 Demand read projection -> Demand domain
 Demand tool adapter -> ToolContext.rules.demand_sys
 public CLI -> Demand read projection
+IM handler -> IM read service + Demand daemon adapter
+Demand daemon adapter -> Demand domain + generic DaemonRuntime.input_actor
 ```
 
 Forbidden:
@@ -128,7 +142,9 @@ Forbidden:
 Demand implementation -> Task Sys
 Demand implementation -> daemon modules or launcher product adapters
 generic daemon -> Demand implementation or Demand semantics
-IM or Track handler -> Demand implementation in Phase 1
+IM handler -> Task Sys
+Task Sys -> IM or Demand
+Track handler -> Demand implementation in this phase
 public CLI or actor tool -> Demand repository/raw aggregate files
 new Demand alias, fallback read, dual write, shadow state, or second schema
 ```

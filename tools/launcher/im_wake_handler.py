@@ -14,9 +14,9 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_contracts  # noqa: E402
-import task_sys_ingress  # noqa: E402
-import task_sys_daemon_adapter  # noqa: E402
+import demand_sys_daemon_adapter  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
+from env.services import messages as message_service  # noqa: E402
 
 
 IM_MESSAGE_CREATED_EVENT_TYPE = "im.message.created"
@@ -36,6 +36,24 @@ def _payload_id(trigger: Any, field: str) -> str:
     return runtime_files.require_id(payload.get(field), field)
 
 
+def _service_row(response: Any, field: str) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise ValueError(f"IM {field} read returned a non-object response")
+    if response.get("ok") is not True:
+        error = response.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            raise ValueError(error["message"])
+        raise ValueError(f"IM {field} read failed")
+    row = response.get(field)
+    if not isinstance(row, dict):
+        raise ValueError(f"IM {field} read returned no {field} object")
+    return row
+
+
+def _actor_identity(actor_id: str) -> dict[str, str]:
+    return {"id": runtime_files.require_id(actor_id, "actor identity id"), "type": "actor"}
+
+
 class ImMessageCreatedHandler:
     name = "im_message_created"
 
@@ -49,7 +67,7 @@ class ImMessageCreatedHandler:
         runtime: Any,
         trigger: Any,
     ) -> Any:
-        del state, runtime
+        del state
         if not self.handles(trigger):
             return daemon_contracts.HandlerResult.ignored()
         try:
@@ -63,14 +81,58 @@ class ImMessageCreatedHandler:
             message_id = _payload_id(trigger, "message_id")
             conversation_id = _payload_id(trigger, "conversation_id")
             event_id = _payload_id(trigger, "event_id")
-            result = task_sys_ingress.ingest_im_message(
-                actor_id=target_route["identity_id"],
-                role_id=target_route["role_id"],
-                message_id=message_id,
-                conversation_id=conversation_id,
-                event_id=event_id,
+            local_identity = _actor_identity(local_route["identity_id"])
+            message = _service_row(
+                message_service.get_im_message(
+                    identity=local_identity,
+                    message_id=message_id,
+                ),
+                "message",
             )
-            task_sys_daemon_adapter.execute_instruction(context, result["instruction"])
+            event = _service_row(
+                message_service.get_im_event(
+                    identity=local_identity,
+                    event_id=event_id,
+                ),
+                "event",
+            )
+            if message.get("id") != message_id:
+                raise ValueError("IM message id does not match trigger")
+            if message.get("conversation_id") != conversation_id:
+                raise ValueError("IM message conversation does not match trigger")
+            if message.get("target_identity") != local_identity:
+                raise PermissionError("IM message target is not the local actor")
+            if event.get("event_id") != event_id:
+                raise ValueError("IM event id does not match trigger")
+            if event.get("type") != "message.created":
+                raise ValueError("IM event type must be message.created")
+            if event.get("message_id") != message_id:
+                raise ValueError("IM event message does not match trigger")
+            if event.get("conversation_id") != conversation_id:
+                raise ValueError("IM event conversation does not match trigger")
+            if event.get("target_identity") != message.get("target_identity"):
+                raise ValueError("IM event target does not match message target")
+            if event.get("visible_to_identity_id") != local_route["identity_id"]:
+                raise PermissionError("IM event is not visible to the local actor")
+            content = message.get("content")
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("IM message content must be a non-empty string")
+            normalized_content = content.strip()
+            demand_sys_daemon_adapter.capture_inbound(
+                context,
+                runtime,
+                intake_key=f"im.message.created:{message_id}",
+                description=normalized_content,
+                detail=normalized_content,
+                source_refs=[{
+                    "type": IM_MESSAGE_CREATED_EVENT_TYPE,
+                    "ref": {
+                        "message_id": message_id,
+                        "conversation_id": conversation_id,
+                        "event_id": event_id,
+                    },
+                }],
+            )
             return daemon_contracts.HandlerResult.handled()
         except Exception as exc:
             return daemon_contracts.HandlerResult.failed(str(exc))

@@ -56,37 +56,6 @@ def _result_payload(result: Mapping[str, Any], *, actor_id: str, role_id: str) -
     return payload
 
 
-def ingest_im_message(
-    *,
-    actor_id: str,
-    role_id: str,
-    message_id: str,
-    conversation_id: str,
-    event_id: str,
-) -> dict[str, Any]:
-    envelope = {
-        "source": {
-            "type": "im.message.created",
-            "ref": {
-                "message_id": _require_text(message_id, "message_id"),
-                "conversation_id": _require_text(conversation_id, "conversation_id"),
-                "event_id": _require_text(event_id, "event_id"),
-            },
-        },
-        "actor_target": _actor_target(actor_id=actor_id, role_id=role_id),
-        "context": {
-            "message_id": message_id,
-            "conversation_id": conversation_id,
-            "event_id": event_id,
-        },
-    }
-    return _result_payload(
-        task_sys.ingest(envelope),
-        actor_id=actor_id,
-        role_id=role_id,
-    )
-
-
 def ingest_track_comment(
     *,
     actor_id: str,

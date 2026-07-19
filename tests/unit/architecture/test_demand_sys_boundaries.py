@@ -1,4 +1,4 @@
-"""Machine-enforced standalone boundaries for Demand Sys Phase 1."""
+"""Machine-enforced ownership boundaries for Demand Sys."""
 
 from __future__ import annotations
 
@@ -105,18 +105,32 @@ def test_demand_mutation_has_one_domain_owner_and_one_repository_write_path() ->
     assert "demands.transact_actor_state(" in domain_source
 
 
-def test_phase_one_has_no_daemon_im_track_or_task_sys_product_integration() -> None:
+def test_phase_two_has_one_demand_daemon_adapter_and_no_task_or_generic_daemon_coupling() -> None:
     for relative in GENERIC_DAEMON_PATHS:
         assert not [name for name in _imports(relative) if "demand" in name], relative
+        source = (REPO_ROOT / relative).read_text(encoding="utf-8").lower()
+        assert "demand_sys" not in source, relative
+        assert "demand-sys" not in source, relative
 
-    for relative in (
-        Path("tools/launcher/instance_daemon.py"),
-        Path("tools/launcher/im_wake_handler.py"),
-        Path("tools/launcher/track_comment_added_handler.py"),
-    ):
-        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
-        assert "demand_sys" not in source
-        assert "demand-sys" not in source
+    handler = Path("tools/launcher/im_wake_handler.py")
+    adapter = Path("tools/launcher/demand_sys_daemon_adapter.py")
+    handler_imports = _imports(handler)
+    adapter_imports = _imports(adapter)
+    assert "demand_sys_daemon_adapter" in handler_imports
+    assert "env.services.messages" in handler_imports
+    assert not any("task_sys" in name for name in handler_imports)
+    assert "env.domain.demand_sys" in adapter_imports
+    assert not any("env.repos.demands" in name for name in adapter_imports)
+
+    track_source = (REPO_ROOT / "tools/launcher/track_comment_added_handler.py").read_text(encoding="utf-8")
+    task_ingress = (REPO_ROOT / "tools/launcher/task_sys_ingress.py").read_text(encoding="utf-8")
+    task_runtime = (REPO_ROOT / "tools/launcher/task_sys_runtime.py").read_text(encoding="utf-8")
+    actor_session = (REPO_ROOT / "tools/launcher/actor_session.py").read_text(encoding="utf-8")
+    assert "demand_sys" not in track_source
+    assert "ingest_im_message" not in task_ingress
+    assert 'source_type == "im.message.created"' not in task_runtime
+    assert "demand_sys" not in actor_session
+    assert "demand-sys" not in actor_session
 
 
 def test_phase_one_has_one_tool_name_and_one_actor_scoped_read_path() -> None:

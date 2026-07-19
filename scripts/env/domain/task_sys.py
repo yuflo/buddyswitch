@@ -191,6 +191,7 @@ def _reject_non_task_sys_ingest_source(source_type: str) -> None:
     non_task_sys_sources = (
         "{}_{}.{}".format("app", "server", "turn_completed"),
         "{}.{}".format("user", "input"),
+        "{}.{}.{}".format("im", "message", "created"),
     )
     if source_type in non_task_sys_sources:
         raise ValueError(f"{source_type} is not a Task Sys ingest source")

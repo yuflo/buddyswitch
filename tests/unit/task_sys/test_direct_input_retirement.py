@@ -15,8 +15,9 @@ class TaskSysDirectInputRetirementTests(unittest.TestCase):
     def test_task_sys_ingress_exposes_only_controlled_inbound_helpers(self) -> None:
         source = _source("tools/launcher/task_sys_ingress.py")
 
-        self.assertIn("def ingest_im_message(", source)
+        self.assertNotIn("def ingest_im_message(", source)
         self.assertIn("def ingest_track_comment(", source)
+        self.assertNotIn('"im.message.created"', source)
         for retired in (
             "def ingest_user_input(",
             '"user.input"',
@@ -28,11 +29,14 @@ class TaskSysDirectInputRetirementTests(unittest.TestCase):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, source)
 
-    def test_task_sys_runtime_has_no_direct_input_prompt_branch(self) -> None:
+    def test_task_sys_runtime_has_no_direct_or_im_prompt_branch(self) -> None:
         source = _source("tools/launcher/task_sys_runtime.py")
 
         self.assertNotIn('source_type == "user.input"', source)
         self.assertNotIn("For a user.input source:", source)
+        self.assertNotIn("_render_im_message_task_guidance", source)
+        self.assertNotIn('source_type == "im.message.created"', source)
+        self.assertNotIn("For an IM source message:", source)
 
 
 if __name__ == "__main__":

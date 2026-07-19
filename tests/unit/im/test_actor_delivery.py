@@ -100,6 +100,35 @@ class ImActorDeliveryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(params["correlation_id"], "imwake-delivery123")
         self.assertEqual(params["source_context"], {"source": "central_im"})
 
+    def test_daemon_failed_or_ignored_handling_is_not_reported_as_submitted(self) -> None:
+        module = self._module()
+        self._profile(module)
+
+        def online_reachability(**_kwargs: object) -> dict[str, object]:
+            return {
+                "reachability_status": "online",
+                "record": {
+                    "endpoint": {
+                        "kind": "daemon_mailbox_socket",
+                        "socket_path": "/tmp/im-delivery.sock",
+                    }
+                },
+            }
+
+        for status in ("failed", "ignored", None):
+            with self.subTest(status=status):
+                response: dict[str, Any] = {"ok": True, "result": {}}
+                if status is not None:
+                    response["result"]["handling_status"] = status
+                result = module.deliver(
+                    self._payload(),
+                    check_reachability_fn=online_reachability,
+                    request_mailbox_fn=lambda *_args, response=response, **_kwargs: response,
+                )
+                self.assertEqual(result["actor_handling_status"], "handling_failed")
+                self.assertEqual(result["handling_status"], status)
+                self.assertIn("did not handle", result["error"])
+
     def test_delivery_rejects_role_injection_and_missing_profile(self) -> None:
         module = self._module()
         injected = self._payload()

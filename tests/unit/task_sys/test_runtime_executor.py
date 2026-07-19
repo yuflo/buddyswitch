@@ -99,27 +99,6 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             },
         }
 
-    def _im_instruction(self) -> dict[str, Any]:
-        instruction = self._instruction()
-        instruction["type"] = "start_side"
-        instruction["task_id"] = "task-im-message-created-abcdef123456"
-        frame = instruction["frame"]
-        frame["task_id"] = "task-im-message-created-abcdef123456"
-        frame["source"] = {
-            "type": "im.message.created",
-            "ref": {
-                "message_id": "msg-source-1",
-                "conversation_id": "conv-source-1",
-                "event_id": "imev-source-1",
-            },
-        }
-        frame["context"] = {
-            "message_id": "msg-source-1",
-            "conversation_id": "conv-source-1",
-            "event_id": "imev-source-1",
-        }
-        return instruction
-
     def _ingested_instruction(self) -> tuple[str, dict[str, Any]]:
         result = task_sys.ingest(
             {
@@ -217,45 +196,6 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("[TRACK COMMENT " + "TRIAGE]", text)
         self.assertNotIn("submit parent", text.lower())
         self.assertNotIn("side_" + "interrupt", text)
-
-    def test_render_side_frame_for_im_source_allows_full_message_tool_surface(self) -> None:
-        text = self.module.render_side_frame(self._im_instruction()["frame"])
-
-        self.assertIn("For an IM source message:", text)
-        self.assertIn("message.contacts", text)
-        self.assertIn("message.list", text)
-        self.assertIn("message.get", text)
-        self.assertIn("message.conversation", text)
-        self.assertIn("message.send(reply_to=source_message_id, content=...)", text)
-        self.assertIn("message.send(target_identity_id=..., content=...)", text)
-        self.assertIn("message.mark(message_id=..., disposition=absorbed)", text)
-        self.assertIn("task_sys.close(task_id=..., summary=...)", text)
-        self.assertIn("task_sys.need_parent", text)
-        self.assertNotIn("Do not start a new IM " + "conversation", text)
-        self.assertNotIn("Do not send to target_identity_id " + "from side", text)
-        self.assertNotIn("new " + "outbound " + "communication", text)
-        self.assertNotIn("source-" + "bound", text)
-
-    def test_im_message_frames_share_the_same_message_capability_contract(self) -> None:
-        side_text = self.module.render_side_frame(self._im_instruction()["frame"])
-        parent_instruction = self._parent_instruction()
-        parent_instruction["frame"]["source"] = self._im_instruction()["frame"]["source"]
-        parent_text = self.module.render_parent_frame(parent_instruction["frame"])
-
-        required_tokens = (
-            "message.contacts",
-            "message.list",
-            "message.get",
-            "message.conversation",
-            "message.send(reply_to=source_message_id, content=...)",
-            "message.send(target_identity_id=..., content=...)",
-            "message.mark(message_id=..., disposition=absorbed)",
-        )
-        for token in required_tokens:
-            with self.subTest(surface="side", token=token):
-                self.assertIn(token, side_text)
-            with self.subTest(surface="parent", token=token):
-                self.assertIn(token, parent_text)
 
     def test_execute_start_side_instruction_delegates_to_actor_side_boundary(self) -> None:
         context = self._context()
@@ -512,32 +452,6 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("parent_handoff_params", text)
         self.assertNotIn("For an IM source message:", text)
         self.assertNotIn("Only after the source-" + "bound IM action " + "succeeds", text)
-
-    def test_render_parent_frame_for_im_source_allows_full_message_tool_surface(self) -> None:
-        instruction = self._parent_instruction()
-        instruction["frame"]["source"] = {
-            "type": "im.message.created",
-            "ref": {
-                "message_id": "msg-1",
-                "conversation_id": "conv-1",
-                "event_id": "imev-1",
-            },
-        }
-
-        text = self.module.render_parent_frame(instruction["frame"])
-
-        self.assertIn("For an IM source message:", text)
-        self.assertIn("message.contacts", text)
-        self.assertIn("message.list", text)
-        self.assertIn("message.get", text)
-        self.assertIn("message.conversation", text)
-        self.assertIn("message.send(reply_to=source_message_id, content=...)", text)
-        self.assertIn("message.send(target_identity_id=..., content=...)", text)
-        self.assertIn("message.mark(message_id=..., disposition=absorbed)", text)
-        self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
-        self.assertIn("- task_sys.cancel(task_id=..., reason=...)", text)
-        self.assertNotIn("Only after the source-" + "bound IM action " + "succeeds", text)
-        self.assertNotIn("source-" + "bound", text)
 
     def test_render_parent_frame_does_not_mention_checkpoint_update(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])

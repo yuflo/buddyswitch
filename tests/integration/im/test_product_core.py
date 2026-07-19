@@ -365,6 +365,40 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
         self.assertTrue(all(event["message_id"] == message_id for event in events))
         self.assertTrue(all(event["conversation_id"] == conversation_id for event in events))
 
+    def test_exact_im_event_read_is_visible_only_to_named_identity(self) -> None:
+        _created, _external_session, external = self._external_session(
+            display_name="event sender"
+        )
+        actor = self._actor_identity(role="dev", label="event-target")
+        _outsider_created, _outsider_session, outsider = self._external_session(
+            display_name="event outsider"
+        )
+        sent = message_service.send_im_message(
+            sender_identity=external,
+            target_identity=actor["identity"],
+            content="Exact event read probe.",
+        )
+        event_id = sent["event_id"]
+
+        repo_row = message_repo.get_im_event(event_id, actor["identity"])
+        service_row = message_service.get_im_event(
+            identity=actor["identity"],
+            event_id=event_id,
+        )
+        outsider_row = message_service.get_im_event(
+            identity=outsider,
+            event_id=event_id,
+        )
+
+        self.assertIsInstance(repo_row, dict)
+        assert isinstance(repo_row, dict)
+        self.assertEqual(repo_row["event_id"], event_id)
+        self.assertEqual(repo_row["message_id"], sent["message"]["id"])
+        self.assertEqual(repo_row["visible_to_identity_id"], actor["identity_id"])
+        self.assertEqual(service_row, {"ok": True, "event": repo_row})
+        self.assertFalse(outsider_row["ok"])
+        self.assertEqual(outsider_row["error"]["code"], "E_IM_NOT_FOUND")
+
     def test_send_im_reply_normalizes_original_sender_to_target_identity_and_marks_replied(self) -> None:
         _created, _external_session, external = self._external_session()
         actor = self._actor_identity(role="dev", label="act-dev-reply-wrapper")

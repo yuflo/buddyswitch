@@ -437,6 +437,42 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(handler_events[0]["origin_id"], "turn-user-1")
             self.assertEqual(handler_events[0]["result"], "handled")
 
+    def test_daemon_runtime_input_actor_delegates_exact_context_to_actor_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.core.load_daemon_context(instance["instance_json"])
+            calls: list[dict[str, Any]] = []
+            original = daemon_runtime.actor_session.input_actor_turn
+            self.addCleanup(
+                setattr,
+                daemon_runtime.actor_session,
+                "input_actor_turn",
+                original,
+            )
+            daemon_runtime.actor_session.input_actor_turn = lambda **kwargs: (
+                calls.append(dict(kwargs))
+                or {"action": "steer", "turn_id": "turn-demand-check"}
+            )
+
+            result = daemon_runtime.DaemonRuntime(context=context).input_actor(
+                "Demand check"
+            )
+
+            self.assertEqual(
+                result,
+                {"action": "steer", "turn_id": "turn-demand-check"},
+            )
+            self.assertEqual(
+                calls,
+                [{
+                    "socket_path": context.socket_path,
+                    "instance_json": context.instance_json,
+                    "thread_id": context.main_thread_id,
+                    "text": "Demand check",
+                    "permissions": context.permissions,
+                }],
+            )
+
     def test_daemon_runtime_handler_facing_surface_is_exactly_clean_runtime_methods(self) -> None:
         public_methods = {
             name
@@ -445,7 +481,7 @@ class DaemonServiceContractTests(unittest.TestCase):
         }
         self.assertEqual(
             public_methods,
-            {"parent_activity"},
+            {"parent_activity", "input_actor"},
         )
 
     def test_daemon_runtime_handler_facing_surface_excludes_old_action_names(self) -> None:

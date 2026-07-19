@@ -150,9 +150,17 @@ def deliver(
         message = error.get("message") if isinstance(error.get("message"), str) else "mailbox local trigger failed"
         return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": message}
     result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
+    handling_status = result.get("handling_status")
+    if handling_status != "handled":
+        return {
+            "actor_handling_status": "handling_failed",
+            "runtime_target": "daemon_mailbox",
+            "error": f"daemon handler did not handle IM trigger: {handling_status or 'missing'}",
+            "handling_status": handling_status,
+        }
     return {
         "actor_handling_status": "submitted",
         "runtime_target": "daemon_mailbox",
         "error": None,
-        "handling_status": result.get("handling_status") if isinstance(result.get("handling_status"), str) else None,
+        "handling_status": "handled",
     }

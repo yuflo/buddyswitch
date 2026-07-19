@@ -26,7 +26,8 @@ The generic daemon owns:
 - host-control status for readiness, registered handlers, schedules, and errors.
 
 Generic daemon contracts, state, runtime, core, mailbox, and client modules do
-not import or branch on Task Sys, IM, Track, Browser, or Web product semantics.
+not import or branch on Demand, Task Sys, IM, Track, Browser, or Web product
+semantics.
 
 ## Product module responsibilities
 
@@ -35,6 +36,8 @@ to generic daemon capabilities.
 
 - Task Sys owns task storage, lifecycle rules, actor task projection, runtime
   command names, payload validation, timeout policy, and Task errors.
+- Demand Sys owns Demand lifecycle, attention policy, actor-check prompt,
+  organization judgment contract, and persistence.
 - IM owns actor-directed message delivery, payload validation, identity and
   reachability decisions, and its trigger semantics.
 - Track owns comment delivery and the Task lifecycle requests caused by a
@@ -44,6 +47,16 @@ to generic daemon capabilities.
 
 Product adapters may depend on generic daemon contracts and clients. Generic
 daemon modules may not depend on product adapters.
+
+`DaemonRuntime` exposes only product-neutral host mechanics to handlers:
+
+- `parent_activity()` reads the current main-thread activity fact;
+- `input_actor(text)` delegates to the existing Actor Session input primitive,
+  which starts an idle actor turn or steers the active turn.
+
+The runtime does not interpret the input text or own a prompt, check policy,
+product id, schema, retry, or receipt. Those remain with the product adapter
+that requests actor input.
 
 ## Explicit runtime capabilities
 
@@ -146,6 +159,7 @@ Allowed:
 
 ```text
 product adapter -> generic daemon contracts/client
+product adapter -> generic DaemonRuntime host capability
 product adapter -> owning product domain/runtime/repo
 instance_daemon -> generic daemon + product adapters
 Web API -> host-control API + public product read model

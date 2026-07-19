@@ -770,6 +770,16 @@ def get_im_message(*, identity: dict[str, Any], message_id: str) -> dict[str, An
     return {"ok": True, "message": message}
 
 
+def get_im_event(*, identity: dict[str, Any], event_id: str) -> dict[str, Any]:
+    from env.repos import messages as message_repo
+
+    identity_ref = _identity_ref(identity)
+    event = message_repo.get_im_event(event_id, identity_ref)
+    if event is None:
+        return _im_not_found(f"event not found: {event_id}")
+    return {"ok": True, "event": event}
+
+
 def list_im_replies(*, identity: dict[str, Any], message_id: str) -> dict[str, Any]:
     from env.repos import messages as message_repo
 

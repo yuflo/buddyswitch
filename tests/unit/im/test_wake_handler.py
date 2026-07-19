@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import sys
-import tempfile
-import unittest
-from dataclasses import dataclass
 import json
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
-from tests.support.paths import REPO_ROOT
+import demand_sys_daemon_adapter
+import im_wake_handler
+from env.repos import identities as identity_repo
+from env.repos import runtime_files
+from env.services import messages as message_service
 from tests.support.runtime import RuntimeWorkspaceTestCase
-
-ROOT = REPO_ROOT
-HELPER_DIR = ROOT / "tools" / "launcher"
-SCRIPTS = ROOT / "scripts"
-
-import im_wake_handler  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
 
 
 @dataclass
@@ -36,44 +29,92 @@ class _Trigger:
 
 
 class _Runtime:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
     def parent_activity(self) -> dict[str, str]:
-        self.calls.append({"method": "parent_activity"})
         raise AssertionError("IM wake handler must not inspect parent activity")
+
+    def input_actor(self, _text: str) -> dict[str, str]:
+        raise AssertionError("IM wake handler must delegate attention through the Demand adapter")
+
 
 class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.adapter_calls: list[dict[str, Any]] = []
-        original_execute = im_wake_handler.task_sys_daemon_adapter.execute_instruction
+        self.route = {
+            "identity_id": self._runtime_actor_id(role="market", label="im-demand-target"),
+            "role_id": "market",
+        }
+        self.context = _Context(
+            actor_id=self.route["identity_id"],
+            role=self.route["role_id"],
+        )
+        self._save_actor(self.route["identity_id"], self.route["role_id"])
+        self.capture_calls: list[dict[str, Any]] = []
+        original_capture = demand_sys_daemon_adapter.capture_inbound
         self.addCleanup(
             setattr,
-            im_wake_handler.task_sys_daemon_adapter,
-            "execute_instruction",
-            original_execute,
+            demand_sys_daemon_adapter,
+            "capture_inbound",
+            original_capture,
         )
-        im_wake_handler.task_sys_daemon_adapter.execute_instruction = (
-            lambda _context, instruction: self.adapter_calls.append(dict(instruction))
-            or {"action": instruction["type"], "task_id": instruction["task_id"]}
+        demand_sys_daemon_adapter.capture_inbound = self._capture_inbound
+
+    def _save_actor(self, actor_id: str, role_id: str) -> None:
+        identity_repo.save_actor_identity_profile({
+            "identity": {"id": actor_id, "type": "actor"},
+            "role_id": role_id,
+        })
+
+    def _external_identity(self, display_name: str = "wake sender") -> dict[str, str]:
+        created = message_service.create_external_session(display_name=display_name)
+        authenticated = message_service.authenticate_external_session_key(
+            created["external_session_key"]
         )
+        self.assertTrue(authenticated["ok"], authenticated)
+        return authenticated["identity"]
 
-    def _identity_route(self) -> dict[str, str]:
-        return {"identity_id": "act-market-test", "role_id": "market"}
-
-    def _trigger(self, route: dict[str, str] | None = None) -> _Trigger:
-        target = route or self._identity_route()
-        return _Trigger(
+    def _persist_message(
+        self,
+        *,
+        sender_identity: dict[str, str] | None = None,
+        target_identity: dict[str, str] | None = None,
+        content: str = "Support user data CSV export.",
+    ) -> tuple[dict[str, Any], _Trigger]:
+        sent = message_service.send_im_message(
+            sender_identity=sender_identity or self._external_identity(),
+            target_identity=target_identity or {
+                "id": self.route["identity_id"],
+                "type": "actor",
+            },
+            content=content,
+        )
+        self.assertTrue(sent["ok"], sent)
+        trigger = _Trigger(
             type="im.message.created",
-            target_identity_id=target["identity_id"],
-            target_role_id=target["role_id"],
+            target_identity_id=self.route["identity_id"],
+            target_role_id=self.route["role_id"],
             payload={
-                "message_id": "msg-abc123",
-                "conversation_id": "conv-abc123",
-                "event_id": "imev-abc123",
+                "message_id": sent["message"]["id"],
+                "conversation_id": sent["message"]["conversation_id"],
+                "event_id": sent["event_id"],
             },
         )
+        return sent, trigger
+
+    def _capture_inbound(
+        self,
+        context: Any,
+        runtime: Any,
+        **intake: Any,
+    ) -> dict[str, Any]:
+        self.capture_calls.append({"context": context, "runtime": runtime, **intake})
+        return {
+            "demand_id": "demand-handler-probe",
+            "revision": 1,
+            "capture_state_changed": True,
+            "pending_count": 1,
+            "attention_requested": True,
+            "actor_input": {"action": "start", "turn_id": "turn-handler-probe"},
+        }
 
     def _task_records(self) -> list[dict[str, Any]]:
         tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
@@ -82,40 +123,160 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
             for path in sorted(tasks_dir.glob("*.json"))
         ]
 
-    def test_im_message_ingests_task_without_parent_or_side_prompt(self) -> None:
-        route = self._identity_route()
+    def test_exact_target_visible_message_maps_to_one_demand_capture(self) -> None:
+        sent, trigger = self._persist_message()
         runtime = _Runtime()
-        handler = im_wake_handler.ImMessageCreatedHandler()
 
-        result = handler.handle(_Context(actor_id=route["identity_id"], role=route["role_id"]), None, runtime, self._trigger(route))
+        result = im_wake_handler.ImMessageCreatedHandler().handle(
+            self.context,
+            None,
+            runtime,
+            trigger,
+        )
 
+        message_id = sent["message"]["id"]
+        conversation_id = sent["message"]["conversation_id"]
+        event_id = sent["event_id"]
         self.assertEqual(result.status, "handled")
-        records = self._task_records()
-        self.assertEqual(len(records), 1)
-        record = records[0]
-        self.assertEqual(record["source_type"], "im.message.created")
-        self.assertEqual(record["source_ref"], {"message_id": "msg-abc123", "conversation_id": "conv-abc123", "event_id": "imev-abc123"})
-        self.assertEqual(record["actor_target"], {"actor_id": route["identity_id"], "role_id": route["role_id"]})
-        self.assertEqual(record["inbound_context"]["message_id"], "msg-abc123")
-        self.assertEqual(record["status"], "in_progress.side_processing")
-        self.assertEqual(record["execution"]["processor"], "side")
-        self.assertNotIn("task_relation", record)
-        self.assertNotIn("active_processor", record)
-        self.assertEqual(len(self.adapter_calls), 1)
-        self.assertEqual(self.adapter_calls[0]["type"], "start_side")
-        self.assertEqual(self.adapter_calls[0]["task_id"], record["id"])
+        self.assertEqual(
+            self.capture_calls,
+            [{
+                "context": self.context,
+                "runtime": runtime,
+                "intake_key": f"im.message.created:{message_id}",
+                "description": "Support user data CSV export.",
+                "detail": "Support user data CSV export.",
+                "source_refs": [{
+                    "type": "im.message.created",
+                    "ref": {
+                        "message_id": message_id,
+                        "conversation_id": conversation_id,
+                        "event_id": event_id,
+                    },
+                }],
+            }],
+        )
+        self.assertEqual(self._task_records(), [])
 
-    def test_wrong_target_actor_fails(self) -> None:
-        handler = im_wake_handler.ImMessageCreatedHandler()
-        wrong = {"identity_id": "act-market-other", "role_id": "market"}
+    def test_wrong_target_actor_fails_before_capture(self) -> None:
+        _sent, trigger = self._persist_message()
+        trigger.target_identity_id = self._runtime_actor_id(
+            role="market",
+            label="wrong-im-target",
+        )
 
-        route = self._identity_route()
-        result = handler.handle(_Context(actor_id=route["identity_id"], role=route["role_id"]), None, _Runtime(), self._trigger(wrong))
+        result = im_wake_handler.ImMessageCreatedHandler().handle(
+            self.context,
+            None,
+            _Runtime(),
+            trigger,
+        )
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("wrong target identity", result.message)
+        self.assertIn("wrong target identity", result.message or "")
+        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self._task_records(), [])
+
+    def test_missing_message_or_event_fails_before_capture(self) -> None:
+        _sent, valid_trigger = self._persist_message()
+        cases = (
+            ("message_id", "msg-missing"),
+            ("event_id", "imev-missing"),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                trigger = _Trigger(
+                    type=valid_trigger.type,
+                    target_identity_id=valid_trigger.target_identity_id,
+                    target_role_id=valid_trigger.target_role_id,
+                    payload={**valid_trigger.payload, field: value},
+                )
+                result = im_wake_handler.ImMessageCreatedHandler().handle(
+                    self.context,
+                    None,
+                    _Runtime(),
+                    trigger,
+                )
+                self.assertEqual(result.status, "failed")
+
+        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self._task_records(), [])
+
+    def test_mismatched_conversation_or_event_link_fails_before_capture(self) -> None:
+        _first, first_trigger = self._persist_message(content="first need")
+        _second, second_trigger = self._persist_message(content="second need")
+        cases = (
+            {**first_trigger.payload, "conversation_id": "conv-mismatch"},
+            {**first_trigger.payload, "event_id": second_trigger.payload["event_id"]},
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                trigger = _Trigger(
+                    type=first_trigger.type,
+                    target_identity_id=first_trigger.target_identity_id,
+                    target_role_id=first_trigger.target_role_id,
+                    payload=payload,
+                )
+                result = im_wake_handler.ImMessageCreatedHandler().handle(
+                    self.context,
+                    None,
+                    _Runtime(),
+                    trigger,
+                )
+                self.assertEqual(result.status, "failed")
+
+        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self._task_records(), [])
+
+    def test_conversation_member_that_is_not_message_target_fails_before_capture(self) -> None:
+        other_actor_id = self._runtime_actor_id(role="dev", label="other-im-target")
+        self._save_actor(other_actor_id, "dev")
+        _sent, trigger = self._persist_message(
+            sender_identity={"id": self.route["identity_id"], "type": "actor"},
+            target_identity={"id": other_actor_id, "type": "actor"},
+            content="Message for a different actor.",
+        )
+
+        result = im_wake_handler.ImMessageCreatedHandler().handle(
+            self.context,
+            None,
+            _Runtime(),
+            trigger,
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("target", result.message or "")
+        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self._task_records(), [])
+
+    def test_capture_error_returns_failed_and_keeps_task_projection_empty(self) -> None:
+        _sent, trigger = self._persist_message()
+        demand_sys_daemon_adapter.capture_inbound = lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(RuntimeError("demand capture unavailable"))
+        )
+
+        result = im_wake_handler.ImMessageCreatedHandler().handle(
+            self.context,
+            None,
+            _Runtime(),
+            trigger,
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("demand capture unavailable", result.message or "")
+        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self._task_records(), [])
 
     def test_handler_does_not_handle_unrelated_event(self) -> None:
         handler = im_wake_handler.ImMessageCreatedHandler()
+        trigger = _Trigger(
+            "example.ready",
+            self.route["identity_id"],
+            self.route["role_id"],
+            {"message_id": "msg-unrelated"},
+        )
 
-        self.assertFalse(handler.handles(_Trigger("example.ready", "act-market-test", "market", {"message_id": "msg-abc123"})))
+        self.assertFalse(handler.handles(trigger))
+        result = handler.handle(self.context, None, _Runtime(), trigger)
+        self.assertEqual(result.status, "ignored")
+        self.assertEqual(self.capture_calls, [])

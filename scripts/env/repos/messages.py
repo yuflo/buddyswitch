@@ -330,6 +330,18 @@ def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def get_im_event(
+    event_id: str,
+    identity: dict[str, Any] | str,
+) -> dict[str, Any] | None:
+    normalized_event_id = runtime_files.require_id(event_id, "event_id")
+    identity_id = im_identity_id_for_row(identity, "identity_id")
+    path = _im_dir("events") / f"{normalized_event_id}--{_identity_filename_key(identity_id)}.json"
+    if not path.exists():
+        return None
+    return runtime_files.read_json_object(path)
+
+
 def list_im_events_for_identity(identity: dict[str, Any] | str) -> list[dict[str, Any]]:
     if isinstance(identity, str):
         identity_id = runtime_files.require_id(identity, "identity_id")
