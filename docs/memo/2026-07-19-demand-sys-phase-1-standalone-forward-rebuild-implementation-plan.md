@@ -819,3 +819,35 @@ Stop implementation and report the exact evidence instead of adding a workaround
 - a failure can only be hidden by fallback, compatibility, retry-until-green, or weakened assertions.
 
 The correct response to any of these is to repair the owner boundary or reduce Phase 1 scope, never to layer around it.
+
+## 6. Execution evidence
+
+### Task 7 IMPACT — 2026-07-19
+
+```text
+Verification Evidence
+- state: IMPACT
+- source: /Users/chen/Dev/buddyswitch/.worktrees/fea-daemon; HEAD a985425e19e6cea043d186e3fccf7ffdd64857d3; tracked patch sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855; unrelated non-ignored untracked files limited to .superpowers/brainstorm/22131-1784393393/{content/demand-organization-models.html,content/waiting-after-organization.html,state/server-stopped,state/server.pid}
+- command: ./buddyswitch-test focused tests/unit/demand_sys/test_capture_and_check.py tests/unit/demand_sys/test_organization.py tests/integration/demand_sys/test_repository_atomicity.py tests/integration/env_tool/test_response_demand.py tests/process/launcher/test_demand_commands.py tests/unit/architecture/test_demand_sys_boundaries.py tests/unit/architecture/test_repo_contracts.py tests/unit/actor/test_role_action_auth.py tests/integration/env_tool/test_context_binding.py tests/process/cli/test_env_native_mcp_projection.py tests/unit/env_tool/test_schema_contract.py tests/unit/env_tool/test_semantic_contract.py tests/process/launcher/test_public_cli.py
+- environment: BuddySwitch public test runner; Python 3.13.5
+- result: exit 0; run a8a93ca6fcbc477289e3af69662b5596; 130 passed and 806 subtests passed in 5.52s; run root /private/tmp/bs-test-a8a93ca6-vqu69z9q absent after completion
+- proves: Demand capture, organization, atomicity, actor tool, public read CLI, authorization, ToolContext, native MCP, schema/semantic, architecture, and public CLI contracts pass together on the frozen source
+- valid-for: executable source at a985425e19e6cea043d186e3fccf7ffdd64857d3
+- residual-risk: real installed-Codex actor behavior remains for Task 8 MILESTONE
+```
+
+```text
+Verification Evidence
+- state: IMPACT
+- source: same frozen executable source and untracked identity as the preceding IMPACT record
+- command: ./buddyswitch-test focused tests/system/instance_lifecycle/test_main_flow.py
+- environment: BuddySwitch public test runner; Python 3.13.5
+- result: exit 0; run f05deca748674db1a9540e90a5f8336e; 1 passed in 5.80s; run root /private/tmp/bs-test-f05deca7-8e9x2byu absent after completion
+- proves: public actor start, input, status, stop, resume, and delete lifecycle remains operational with clean test resources
+- valid-for: executable source at a985425e19e6cea043d186e3fccf7ffdd64857d3
+- residual-risk: nondeterministic real actor Demand action selection is not covered by the system fixture
+```
+
+The baseline non-impact audit used `git merge-base 3c0abe1 HEAD` and returned no
+changed path among `instance_daemon.py`, `task_sys_ingress.py`, the IM and Track
+handlers, the Task Sys domain, or the Task Sys tool package.
