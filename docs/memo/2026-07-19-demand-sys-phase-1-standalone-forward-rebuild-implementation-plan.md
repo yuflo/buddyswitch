@@ -851,3 +851,25 @@ Verification Evidence
 The baseline non-impact audit used `git merge-base 3c0abe1 HEAD` and returned no
 changed path among `instance_daemon.py`, `task_sys_ingress.py`, the IM and Track
 handlers, the Task Sys domain, or the Task Sys tool package.
+
+### Task 8 MILESTONE — 2026-07-19
+
+```text
+Verification Evidence
+- state: MILESTONE
+- source: /Users/chen/Dev/buddyswitch/.worktrees/fea-daemon; HEAD 1b16d07cd5b6d2d2b77b0eb169550358319496e4; tracked patch sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855; unrelated .superpowers/ untracked identity unchanged from Task 7
+- command: public CLI instance start/status/input, public demand list polling, public task list, instance stop/delete, env reset, followed by direct absence probes for owned pids, sockets, actor process, and isolated root
+- environment: installed /Users/chen/.npm-global/bin/codex; codex-cli 0.144.4; BuddySwitch Python /Users/chen/miniconda3/bin/python; fresh role pm actor act-pm-a37f25798f37; thread 019f7a9c-16a5-77f2-9792-497be7fcbece; turn 019f7a9c-2352-7c60-a74d-570e4153c1f9
+- exact prompt: Demand Sys acceptance probe real-1784468480. Do not call task_sys. Explicitly use demand_sys actions only: create C with intake_key actor-self:real-1784468480-c, description 'Support user data CSV export.', detail 'Users can export their data as CSV.', and source_refs [{type:'actor.self_requested',ref:{key:'real-1784468480-c'}}]; create D with intake_key actor-self:real-1784468480-d, description 'CSV export must include the user timezone.', detail 'Add the user timezone to every exported row.', and source_refs [{type:'actor.self_requested',ref:{key:'real-1784468480-d'}}]; call demand_sys.check; use get_many for C and D; absorb D into C with both returned revisions and merged description 'Support CSV export with the user timezone.', merged detail 'Users can export their data as CSV and every exported row includes the user timezone.', and both source refs; call complete_check with the returned final revisions for C and D; finally call check and finish only when pending_count is zero.
+- result: exit 0; one accepted actor turn; public projection observed on poll 17: C demand-554af2b680d7 live at revision=checked_revision=2 with merged description, D demand-887ff7a64d81 terminal absorbed ref demand-554af2b680d7 at revision=checked_revision=2; public task.list returned []; stop/delete/reset succeeded
+- cleanup: app-server pid 21606, daemon pid 21672, and runtime-broker pid 21576 not live; app-server and broker sockets absent; no process matched actor id; /private/tmp/bs-demand-real-8r4j4l and its .codex-buddyswitch root absent
+- proves: one fresh installed-Codex actor can discover and use the current native demand_sys action contract to complete the exact C/D consolidation and acknowledgement loop while Task Sys stays untouched
+- valid-for: executable source at 1b16d07cd5b6d2d2b77b0eb169550358319496e4
+- residual-risk: this is one nondeterministic model sample; proactive wake and Demand/Task integration are intentionally outside Phase 1
+```
+
+Actor/model retries were zero. One preflight orchestration command was rejected
+before runtime creation because the host tool defaulted to zsh while `env.sh`
+requires Bash; the accepted run used an explicit Bash shell and created a fresh
+isolated actor. No product source changed between source identity capture and
+the accepted run.
