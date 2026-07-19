@@ -203,7 +203,7 @@ git commit -m "feat(demand-sys): add atomic actor aggregate repository"
 - Create: `scripts/env/domain/demand_sys.py`
 - Create: `tests/unit/demand_sys/test_capture_and_check.py`
 
-- [ ] **Step 1: Write exact lifecycle RED cases**
+- [x] **Step 1: Write exact lifecycle RED cases**
 
 Cover:
 
@@ -223,7 +223,7 @@ cross-actor get/list/check never exposes another actor aggregate
 
 The D/C fixture must use descriptions from the design memo so the later organization test reuses the same scenario vocabulary.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 ./buddyswitch-test focused tests/unit/demand_sys/test_capture_and_check.py
@@ -231,7 +231,7 @@ The D/C fixture must use descriptions from the design memo so the later organiza
 
 Expected: missing domain functions fail for the intended reason.
 
-- [ ] **Step 3: Implement canonical normalization and receipts**
+- [x] **Step 3: Implement canonical normalization and receipts**
 
 Every mutation result must use this shape:
 
@@ -248,7 +248,7 @@ def _receipt(*, state_changed: bool, changes: list[dict[str, Any]]) -> dict[str,
 
 Normalize `source_refs` as a list of objects with exactly `type` and object-valued `ref`. Reject unknown top-level Demand fields by constructing records inside the owner rather than copying caller payloads.
 
-- [ ] **Step 4: Implement read/check semantics**
+- [x] **Step 4: Implement read/check semantics**
 
 Return this exact projection from `check`:
 
@@ -265,7 +265,7 @@ Return this exact projection from `check`:
 
 Sort both collections by `(created_at, id)` for deterministic actor input. `complete_check` returns `acknowledged`, `still_pending`, `state_changed`, and `check_required=False`.
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 ```bash
 ./buddyswitch-test focused tests/unit/demand_sys/test_capture_and_check.py
@@ -273,7 +273,7 @@ Sort both collections by `(created_at, id)` for deterministic actor input. `comp
 
 Expected: all capture/check tests pass.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add scripts/env/domain/demand_sys.py tests/unit/demand_sys/test_capture_and_check.py
@@ -287,7 +287,7 @@ git commit -m "feat(demand-sys): own capture revision and check lifecycle"
 - Modify: `scripts/env/domain/demand_sys.py`
 - Create: `tests/unit/demand_sys/test_organization.py`
 
-- [ ] **Step 1: Write organization RED cases**
+- [x] **Step 1: Write organization RED cases**
 
 Use exact cases:
 
@@ -309,7 +309,7 @@ exact terminal action replay -> state_changed false
 different action against terminal Demand -> E_DEMAND_TERMINAL
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 ./buddyswitch-test focused tests/unit/demand_sys/test_organization.py
@@ -317,13 +317,13 @@ different action against terminal Demand -> E_DEMAND_TERMINAL
 
 Expected: missing organization actions fail.
 
-- [ ] **Step 3: Implement cycle and terminal invariants**
+- [x] **Step 3: Implement cycle and terminal invariants**
 
 Parent traversal follows `parent_id` through live records. Dependency traversal follows `depends_on` through live records. A proposed edge is rejected when the target can already reach the source.
 
 All target Demand lookup, revision validation, record construction, and multi-record mutation occurs inside one `transact_actor_state` callback. Do not pre-read then write in a later transaction.
 
-- [ ] **Step 4: Implement split and lineage actions**
+- [x] **Step 4: Implement split and lineage actions**
 
 `split` requires two or more children. Its input child shape is:
 
@@ -338,7 +338,7 @@ All target Demand lookup, revision validation, record construction, and multi-re
 
 `absorb_into.merged_target` accepts exactly `description`, `detail`, and `source_refs`. No caller may patch `revision`, `checked_revision`, relations, terminal state, actor target, or timestamps.
 
-- [ ] **Step 5: Run GREEN with capture regression**
+- [x] **Step 5: Run GREEN with capture regression**
 
 ```bash
 ./buddyswitch-test focused \
@@ -348,7 +348,7 @@ All target Demand lookup, revision validation, record construction, and multi-re
 
 Expected: all Demand domain tests pass.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add scripts/env/domain/demand_sys.py tests/unit/demand_sys/test_organization.py
@@ -369,7 +369,7 @@ git commit -m "feat(demand-sys): add atomic demand organization"
 - Modify: `tests/integration/env_tool/test_context_binding.py`
 - Modify: `tests/process/cli/test_env_native_mcp_projection.py`
 
-- [ ] **Step 1: Write actor contract RED tests**
+- [x] **Step 1: Write actor contract RED tests**
 
 Prove:
 
@@ -385,7 +385,7 @@ complete_check response exposes acknowledged/still_pending
 Task record set is byte-for-byte unchanged across every Demand action
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 ./buddyswitch-test focused \
@@ -396,7 +396,7 @@ Task record set is byte-for-byte unchanged across every Demand action
 
 Expected: Demand tool discovery and permissions are absent.
 
-- [ ] **Step 3: Define exact actor schemas**
+- [x] **Step 3: Define exact actor schemas**
 
 Create one `ToolDefinition(id="demand_sys", actions=DEMAND_ACTIONS)` with the sixteen actions listed in the design. Every schema has `additionalProperties: false`; all existing-Demand mutations require positive integer expected revisions; `state` for list is exactly `live|terminal|all`; `observed` contains unique `{demand_id, revision}` rows.
 
@@ -421,13 +421,13 @@ demand_sys.complete
 demand_sys.cancel
 ```
 
-- [ ] **Step 4: Implement the thin tool adapter**
+- [x] **Step 4: Implement the thin tool adapter**
 
 `_impl.py` derives actor target only from `ToolContext.current_actor_identity_profile`; it never accepts actor id or role id from action payloads. It calls `context.rules.demand_sys` and maps `DemandError.code` to a `tool_results.rejection` with `state_changed=False`. Success uses `tool_results.success`, preserving the returned Demand receipt fields.
 
 Add `demand_sys` to `DomainAccess`; do not add Demand to `RepoAccess` because the tool must not bypass the domain owner. Do not add a runtime capability class because Demand Phase 1 has no daemon/runtime capability.
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 ```bash
 ./buddyswitch-test focused \
@@ -441,7 +441,7 @@ Add `demand_sys` to `DomainAccess`; do not add Demand to `RepoAccess` because th
 
 Expected: Demand actions are discoverable and current generic schema/semantic contracts remain green.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add scripts/env/tools/demand_sys scripts/env/tool_runtime/context.py scripts/env/tool_runtime/role_auth.py tests/integration/env_tool/test_response_demand.py tests/unit/actor/test_role_action_auth.py tests/integration/env_tool/test_context_binding.py tests/process/cli/test_env_native_mcp_projection.py
@@ -458,7 +458,7 @@ git commit -m "feat(demand-sys): expose actor demand actions"
 - Create: `tests/process/launcher/test_demand_commands.py`
 - Modify: `tests/process/launcher/test_public_cli.py`
 
-- [ ] **Step 1: Write CLI RED cases**
+- [x] **Step 1: Write CLI RED cases**
 
 Prove:
 
@@ -471,7 +471,7 @@ help publishes demand list/get only
 malformed actor and demand ids fail before state mutation
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 ./buddyswitch-test focused \
@@ -481,7 +481,7 @@ malformed actor and demand ids fail before state mutation
 
 Expected: `demand` is an unknown top-level command.
 
-- [ ] **Step 3: Implement the read projection**
+- [x] **Step 3: Implement the read projection**
 
 The projection shape is exact:
 
@@ -503,7 +503,7 @@ The projection shape is exact:
 
 Do not expose a CLI mutation or read raw files in `cli.py`.
 
-- [ ] **Step 4: Implement CLI routing**
+- [x] **Step 4: Implement CLI routing**
 
 Add:
 
@@ -514,7 +514,7 @@ buddyswitch-codex demand get <demand-id> --actor <actor-id>
 
 `_dispatch_demand` derives the exact `{actor_id, role_id}` target from the required actor id and calls only `demand_read.list_external_demands` and `demand_read.get_external_demand`, following the current Task read adapter pattern without adding aggregate-wide discovery.
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 ```bash
 ./buddyswitch-test focused \
@@ -525,7 +525,7 @@ buddyswitch-codex demand get <demand-id> --actor <actor-id>
 
 Expected: all selected tests pass; CLI remains a thin adapter.
 
-- [ ] **Step 6: Commit Task 5**
+- [x] **Step 6: Commit Task 5**
 
 ```bash
 git add scripts/env/domain/demand_read.py tools/launcher/cli.py README.md tests/process/launcher/test_demand_commands.py tests/process/launcher/test_public_cli.py
@@ -539,7 +539,7 @@ git commit -m "feat(demand-sys): add public demand read projection"
 - Create: `tests/unit/architecture/test_demand_sys_boundaries.py`
 - Create: `docs/arch/demand-sys-architecture.md`
 
-- [ ] **Step 1: Write architecture RED assertions**
+- [x] **Step 1: Write architecture RED assertions**
 
 The test parses imports and asserts:
 
@@ -556,7 +556,7 @@ only env.domain.demand_sys calls demands.transact_actor_state
 no demand/demand_v2 tool package or fallback read path exists
 ```
 
-- [ ] **Step 2: Run the architecture test and fix only real findings**
+- [x] **Step 2: Run the architecture test and fix only real findings**
 
 ```bash
 ./buddyswitch-test focused tests/unit/architecture/test_demand_sys_boundaries.py
@@ -564,11 +564,11 @@ no demand/demand_v2 tool package or fallback read path exists
 
 Expected: pass. A failure means the implementation boundary is wrong; do not weaken the assertion to allow an unnecessary dependency.
 
-- [ ] **Step 3: Write current architecture documentation**
+- [x] **Step 3: Write current architecture documentation**
 
 `docs/arch/demand-sys-architecture.md` records only the implemented Phase 1 truth: owner, aggregate path, action surface, check semantics, CLI projection, and forbidden dependencies. It must not describe Phase 2-4 as already live and must not copy complete tool payload tables owned by `tool.py`.
 
-- [ ] **Step 4: Run documentation and residue checks**
+- [x] **Step 4: Run documentation and residue checks**
 
 ```bash
 git diff --check
@@ -577,7 +577,7 @@ rg -n "demand_v2|legacy_demand|fallback.*demand|shadow.*demand|dual.*demand" scr
 
 Expected: `git diff --check` exits 0; the residue search returns no live implementation hit.
 
-- [ ] **Step 5: Commit Task 6**
+- [x] **Step 5: Commit Task 6**
 
 ```bash
 git add tests/unit/architecture/test_demand_sys_boundaries.py docs/arch/demand-sys-architecture.md
@@ -588,7 +588,7 @@ git commit -m "docs(demand-sys): lock standalone architecture"
 
 **Files:** no production changes expected; update only a failing direct contract when the failure proves a real omitted impact.
 
-- [ ] **Step 1: Record source identity**
+- [x] **Step 1: Record source identity**
 
 ```bash
 git status --short
@@ -599,7 +599,7 @@ git ls-files --others --exclude-standard
 
 Record the unrelated `.superpowers/` entries separately and do not stage them.
 
-- [ ] **Step 2: Run one compatible owner/contract batch**
+- [x] **Step 2: Run one compatible owner/contract batch**
 
 ```bash
 ./buddyswitch-test focused \
@@ -620,7 +620,7 @@ Record the unrelated `.superpowers/` entries separately and do not stage them.
 
 Expected: all targets pass and the runner reports no cleanup residual.
 
-- [ ] **Step 3: Run the public-instance regression separately**
+- [x] **Step 3: Run the public-instance regression separately**
 
 ```bash
 ./buddyswitch-test focused tests/system/instance_lifecycle/test_main_flow.py
@@ -628,7 +628,7 @@ Expected: all targets pass and the runner reports no cleanup residual.
 
 Expected: public start/input/status/stop/resume/delete remains green with clean service cleanup.
 
-- [ ] **Step 4: Inspect Task and daemon non-impact**
+- [x] **Step 4: Inspect Task and daemon non-impact**
 
 ```bash
 BASE="$(git merge-base 3c0abe1 HEAD)"
@@ -637,7 +637,7 @@ git diff --name-only "$BASE" HEAD -- tools/launcher/instance_daemon.py tools/lau
 
 Expected: no output. If a listed file changed, Phase 1 scope has drifted and must be corrected before acceptance.
 
-- [ ] **Step 5: Record IMPACT evidence**
+- [x] **Step 5: Record IMPACT evidence**
 
 Record exact commands, run ids, source identity, Python/runtime environment, pass counts, cleanup state, and residual risk using `.agents/skills/buddyswitch-testing/references/evidence.md`.
 
@@ -647,7 +647,7 @@ Record exact commands, run ids, source identity, Python/runtime environment, pas
 
 This is a real installed-Codex acceptance. Do not put fake Codex earlier on `PATH`, do not reuse an existing actor, and do not treat this nondeterministic model run as a replacement for Task 7.
 
-- [ ] **Step 1: Create an isolated real actor using the public CLI**
+- [x] **Step 1: Create an isolated real actor using the public CLI**
 
 ```bash
 source tools/launcher/env.sh
@@ -670,7 +670,7 @@ ACTOR_ID="$(printf '%s' "$START_JSON" | "$BUDDYSWITCH_PYTHON" -c 'import json,sy
 
 Expected: a new `act-pm-*` actor is active; app server, runtime broker, and daemon are healthy.
 
-- [ ] **Step 2: Drive the exact Demand scenario through one actor turn**
+- [x] **Step 2: Drive the exact Demand scenario through one actor turn**
 
 ```bash
 PROBE_ID="real-$(date +%s)"
@@ -679,7 +679,7 @@ PROBE_ID="real-$(date +%s)"
 
 Expected: `instance.input` returns an accepted turn. The prompt is test control; only explicit `demand_sys.create` calls produce Demands.
 
-- [ ] **Step 3: Poll the public Demand projection, not raw state**
+- [x] **Step 3: Poll the public Demand projection, not raw state**
 
 ```bash
 "$BUDDYSWITCH_PYTHON" - "$ACTOR_ID" "$PROBE_ID" <<'PY'
@@ -721,7 +721,7 @@ PY
 
 Expected: one live C, one terminal D→C, and both records fully acknowledged.
 
-- [ ] **Step 4: Prove Task Sys remained untouched**
+- [x] **Step 4: Prove Task Sys remained untouched**
 
 ```bash
 ./buddyswitch-codex task list --actor "$ACTOR_ID"
@@ -729,7 +729,7 @@ Expected: one live C, one terminal D→C, and both records fully acknowledged.
 
 Expected: `data.tasks` is an empty list.
 
-- [ ] **Step 5: Stop, delete, reset, and verify cleanup**
+- [x] **Step 5: Stop, delete, reset, and verify cleanup**
 
 ```bash
 ./buddyswitch-codex instance stop "$ACTOR_ID"
@@ -743,13 +743,13 @@ trap - EXIT INT TERM
 
 Expected: actor root, service pid/socket markers, isolated shared root, and `RUN_ROOT` are absent. No accepted actor process remains live.
 
-- [ ] **Step 6: Record MILESTONE evidence**
+- [x] **Step 6: Record MILESTONE evidence**
 
 Record installed Codex version, actor id, thread id, exact prompt, observed C/D projections, empty Task projection, process/socket cleanup, source identity, and any model retry. If the actor selects an incorrect action, preserve the failure as evidence, diagnose tool description/schema clarity, fix the owner contract, rerun focused affected proof, then create a new actor for the next milestone attempt.
 
 ## Task 9: Final replacement and scope audit
 
-- [ ] **Step 1: Scan the final diff by owner**
+- [x] **Step 1: Scan the final diff by owner**
 
 ```bash
 BASE="$(git merge-base 3c0abe1 HEAD)"
@@ -760,7 +760,7 @@ git status --short
 
 Expected: only Phase 1 files and the unrelated untouched `.superpowers/` fact are present.
 
-- [ ] **Step 2: Prove no forbidden live surface**
+- [x] **Step 2: Prove no forbidden live surface**
 
 ```bash
 rg -n "demand_v2|legacy_demand|fallback.*demand|shadow.*demand|dual.*demand" scripts tools tests docs/arch
@@ -769,7 +769,7 @@ rg -n "demand_sys" tools/launcher/instance_daemon.py tools/launcher/task_sys_ing
 
 Expected: both commands return no hit. Naming the forbidden terms inside the dedicated residue test is allowed only when the assertion proves absence.
 
-- [ ] **Step 3: Audit the acceptance sentence**
+- [x] **Step 3: Audit the acceptance sentence**
 
 Confirm every phrase has evidence:
 
@@ -784,7 +784,7 @@ no residue/dual path        -> path/import/token audit
 clean resources             -> runner and real actor cleanup evidence
 ```
 
-- [ ] **Step 4: Commit evidence/document updates only if created by execution**
+- [x] **Step 4: Commit evidence/document updates only if created by execution**
 
 If acceptance adds evidence to the architecture document, commit only that changed document:
 
@@ -873,3 +873,60 @@ before runtime creation because the host tool defaulted to zsh while `env.sh`
 requires Bash; the accepted run used an explicit Bash shell and created a fresh
 isolated actor. No product source changed between source identity capture and
 the accepted run.
+
+### Final candidate corrective review — 2026-07-19
+
+Independent code review found no critical issue and two important contract gaps:
+an idempotent `create` replay lost the existing Demand identity, and terminal
+actions other than `absorb_into` could leave a live child attached to a terminal
+parent. Both were repaired at the Demand domain owner without compatibility
+paths or duplicated rules.
+
+```text
+Verification Evidence
+- state: RED -> GREEN
+- source: corrective commit a4bd56047bb68aea44c80af123ba0612660370d5
+- RED: run ddb6c1a1b923474f81aa56d12dc61669; 7 expected failures proving both missing contracts
+- GREEN: run 20c03572738842278348a78d8e2e37fa; 30 passed and 10 subtests passed
+- result: create and exact replay return the same demand_id/revision; every first terminalization rejects live children atomically through one domain invariant
+- residual-risk: none specific to the two reviewed contracts
+```
+
+### Final candidate IMPACT — 2026-07-19
+
+```text
+Verification Evidence
+- state: IMPACT
+- source: /Users/chen/Dev/buddyswitch/.worktrees/fea-daemon; executable HEAD a4bd56047bb68aea44c80af123ba0612660370d5; tracked patch sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- command: the Task 7 compatible focused batch across Demand domain/repository/tool/read CLI, authorization, ToolContext, native MCP, architecture, schema/semantic, and public CLI contracts
+- environment: BuddySwitch public test runner; Python 3.13.5
+- result: exit 0; run 57f5fa1ad5e14afd84396bfe7a06ca69; 131 passed and 810 subtests passed in 5.49s; run root /private/tmp/bs-test-57f5fa1a-wcrawl4c absent
+- system regression: exit 0; run 5232c7e00a504aadb211e3bfa48830c5; 1 passed in 5.66s; run root /private/tmp/bs-test-5232c7e0-xtg6mhhn absent
+- proves: the corrected executable candidate passes the complete Phase 1 affected contract set and preserves the public instance lifecycle
+- residual-risk: repository-wide full was intentionally omitted by the plan; the affected owner and consumer paths are covered directly
+```
+
+### Final candidate MILESTONE — 2026-07-19
+
+```text
+Verification Evidence
+- state: MILESTONE
+- source: /Users/chen/Dev/buddyswitch/.worktrees/fea-daemon; executable HEAD a4bd56047bb68aea44c80af123ba0612660370d5; tracked patch sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- command: public CLI instance start/status/input, public demand list polling, public task list, instance stop/delete, env reset, then exact pid/socket/process/root absence probes
+- environment: installed /Users/chen/.npm-global/bin/codex; codex-cli 0.144.4; BuddySwitch Python /Users/chen/miniconda3/bin/python; fresh role pm actor act-pm-feda35ac4293; thread 019f7aaa-8a8e-76b1-9ea3-8328841081f7; turn 019f7aaa-9bf9-7722-88ed-7e3cede37611
+- probe: real-final-1784469429; the exact Task 8 C/D prompt was used; actor/model retries were zero
+- result: exit 0; public projection observed on poll 16: C demand-cdc2f3911917 live at revision=checked_revision=2 with merged description, D demand-bcf359aca0fd terminal absorbed ref demand-cdc2f3911917 at revision=checked_revision=2; public task.list returned []
+- cleanup: pids 27555, 27585, 27654, and 27658 absent; app-server, runtime-broker, and central-daemon sockets absent; no process contains actor id act-pm-feda35ac4293; /private/tmp/bs-demand-real-final-ZqHuPr absent
+- proves: the corrected current executable lets one fresh real actor complete the exact standalone Demand consolidation/check loop while Task Sys stays untouched and all owned runtime resources are released
+- residual-risk: this is one nondeterministic model sample; proactive wake, inbound adapters, and Demand/Task coordination remain intentionally outside Phase 1
+```
+
+### Task 9 final scope and replacement audit — 2026-07-19
+
+The final audit used base `3c0abe17e3b3a0bb49cad69a3270e5f42529e202`.
+All 27 changed files belong to Phase 1 documentation, the Demand owner and its
+projections, or direct tests/registrations. `git diff --check` passed. The
+forbidden integration scan found no `demand_sys` reference in daemon, inbound,
+or Task Sys owners. The residue token scan found only negative assertions in
+`test_demand_sys_boundaries.py`; no retired live path exists. The four
+pre-existing `.superpowers/` files remain untracked and untouched.
