@@ -18,6 +18,8 @@ GENERIC_DAEMON_PATHS = (
     Path("scripts/env/tool_runtime/daemon_client.py"),
 )
 
+DEMAND_REPOSITORY_PATH = Path("scripts/env/repos/demands.py")
+
 
 def _imported_modules(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -47,6 +49,19 @@ def _called_names(path: Path) -> set[str]:
         elif isinstance(node.func, ast.Attribute):
             calls.add(node.func.attr)
     return calls
+
+
+def _call_count(path: Path, name: str) -> int:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    count = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == name:
+            count += 1
+        elif isinstance(node.func, ast.Attribute) and node.func.attr == name:
+            count += 1
+    return count
 
 
 def test_public_launcher_is_a_thin_python_cli_bootstrap() -> None:
@@ -155,6 +170,38 @@ def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
             if "env_store" in _imported_modules(path):
                 violations.append(path.relative_to(REPO_ROOT).as_posix())
     assert violations == []
+
+
+def test_demand_actor_aggregate_has_one_atomic_repository_owner() -> None:
+    repository = REPO_ROOT / DEMAND_REPOSITORY_PATH
+    assert repository.is_file()
+    imports = _imported_modules(repository)
+    calls = _called_names(repository)
+
+    assert "fcntl" in imports
+    assert "runtime_files" in imports
+    assert {"flock", "write_json_object"}.issubset(calls)
+    assert _call_count(repository, "write_json_object") == 1
+
+    path_owners: list[str] = []
+    for root in (REPO_ROOT / "scripts" / "env", REPO_ROOT / "tools" / "launcher"):
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            constants = {
+                node.value
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            }
+            runtime_roots = {
+                node.attr
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute)
+                and node.attr in {"OBJECTS_ROOT", "LOCAL_ROOT"}
+            }
+            if "demand-sys" in constants and runtime_roots:
+                path_owners.append(path.relative_to(REPO_ROOT).as_posix())
+
+    assert path_owners == [DEMAND_REPOSITORY_PATH.as_posix()]
 
 
 def test_tool_catalog_projections_are_generated_from_definitions() -> None:
