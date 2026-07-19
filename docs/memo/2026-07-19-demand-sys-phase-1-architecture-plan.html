@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demand Sys Phase 1 · Architecture & Delivery Plan</title>
+  <style>
+    :root {
+      --paper:#f4f2ec; --surface:#fffefa; --ink:#1d2527; --muted:#667073;
+      --line:#cfd3cf; --accent:#1e6f67; --accent-soft:#dcebe7;
+      --task:#665c82; --task-soft:#e9e5f0; --warn:#a36321; --warn-soft:#f5e8d6;
+      --danger:#8b3b35; --danger-soft:#f3dfdc; --ok:#2b6b47; --ok-soft:#e0eee4;
+      --mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+      --sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.5; }
+    .shell { width:min(1240px,calc(100% - 32px)); margin:24px auto 56px; }
+    header,section { background:var(--surface); border:1px solid var(--line); border-radius:8px; }
+    header { padding:28px 30px 24px; }
+    section { margin-top:14px; padding:22px; }
+    .eyebrow,.owner,.tag { font:700 11px/1.2 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+    .eyebrow { color:var(--accent); overflow-wrap:anywhere; }
+    h1 { margin:7px 0 10px; font-size:clamp(30px,5vw,52px); line-height:1.02; letter-spacing:-.045em; }
+    h2 { margin:0 0 5px; font-size:21px; letter-spacing:-.02em; }
+    h3 { margin:0 0 5px; font-size:15px; }
+    p { margin:0; }
+    .lead { max-width:840px; color:var(--muted); font-size:16px; }
+    .decision { display:grid; grid-template-columns:1fr auto; gap:20px; align-items:center; margin-top:22px; padding:15px 17px; border-left:4px solid var(--accent); background:var(--accent-soft); }
+    .decision > *,.panel-head > * { min-width:0; }
+    .decision code { display:block; white-space:normal; overflow-wrap:anywhere; }
+    .decision strong { font-size:18px; }
+    .badges { display:flex; flex-wrap:wrap; gap:7px; margin-top:15px; }
+    .badge { border:1px solid var(--line); border-radius:999px; padding:5px 9px; font:700 11px/1.2 var(--mono); background:#fff; }
+    .badge.go { color:var(--ok); border-color:#a9c8b3; background:var(--ok-soft); }
+    .badge.stop { color:var(--danger); border-color:#d4aaa5; background:var(--danger-soft); }
+    .panel-head { display:flex; justify-content:space-between; gap:18px; align-items:end; margin-bottom:16px; }
+    .panel-head p,.note { color:var(--muted); font-size:13px; }
+    .arch-scroll { max-width:100%; overflow-x:auto; padding-bottom:4px; }
+    svg { display:block; min-width:1080px; width:100%; height:auto; }
+    .node { fill:#fff; stroke:#aeb6b3; stroke-width:1.5; rx:6; }
+    .node-demand { fill:#eef7f4; stroke:#64a095; }
+    .node-storage { fill:#f3f1ea; stroke:#9f9b8f; }
+    .node-consumer { fill:#f9f4e9; stroke:#bc965f; }
+    .node-forbidden { fill:#f8e9e7; stroke:#b66f68; stroke-dasharray:7 5; }
+    .svg-title { font:700 15px var(--sans); fill:var(--ink); }
+    .svg-label { font:12px var(--sans); fill:var(--muted); }
+    .svg-code { font:11px var(--mono); fill:#425053; }
+    .arrow { stroke:#627b77; stroke-width:2; fill:none; marker-end:url(#arrow); }
+    .forbidden-arrow { stroke:#a34e47; stroke-width:2; stroke-dasharray:7 5; fill:none; marker-end:url(#stop); }
+    .boundary-line { stroke:#b9beb9; stroke-width:1; stroke-dasharray:4 4; }
+    .phase-tabs { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:14px; }
+    button { appearance:none; border:1px solid var(--line); background:#fff; color:var(--ink); padding:8px 11px; border-radius:5px; font:700 12px var(--sans); cursor:pointer; }
+    button[aria-selected="true"] { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+    .phase-panel { border:1px solid var(--line); padding:16px; background:#fff; }
+    .phase-panel[hidden] { display:none; }
+    .phase-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .card { border:1px solid var(--line); padding:13px; background:#fff; }
+    .card ul { margin:8px 0 0; padding-left:18px; color:#3f494b; font-size:13px; }
+    .card li + li { margin-top:4px; }
+    .phase-now { border-color:#70a69b; background:#f3faf8; }
+    .locked { border-color:#d4aaa5; background:#fff8f7; }
+    .file-map { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; }
+    .file { border-top:3px solid var(--accent); padding:12px; background:#fff; border-right:1px solid var(--line); border-bottom:1px solid var(--line); border-left:1px solid var(--line); }
+    .file.adapter { border-top-color:var(--warn); }
+    .file.proof { border-top-color:var(--task); }
+    code,.path { font-family:var(--mono); font-size:11px; overflow-wrap:anywhere; }
+    .file p { margin-top:7px; color:var(--muted); font-size:12px; }
+    .proof-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+    .proof { padding:13px; border:1px solid var(--line); }
+    .proof strong { display:block; margin-bottom:4px; }
+    .proof span { color:var(--muted); font-size:12px; }
+    .proof.real { border-color:#b99561; background:#fffaf1; }
+    .facts { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .fact { padding:10px 12px; border-left:3px solid #afb6b3; background:#f7f7f3; font-size:12px; }
+    .fact code { display:block; color:var(--accent); margin-bottom:3px; }
+    .gate { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+    .gate-step { position:relative; padding:12px; border:1px solid var(--line); min-height:100px; }
+    .gate-step:not(:last-child)::after { content:"→"; position:absolute; right:-10px; top:36px; z-index:2; color:var(--accent); font-weight:800; }
+    .gate-step strong { display:block; margin:5px 0; }
+    .gate-step p { color:var(--muted); font-size:12px; }
+    .footer { margin-top:14px; color:var(--muted); font-size:12px; text-align:right; }
+    @media (max-width:860px) {
+      .shell { width:min(100% - 18px,1240px); margin-top:9px; }
+      header,section { padding:17px; }
+      .decision { grid-template-columns:1fr; }
+      .phase-grid,.facts,.proof-grid { grid-template-columns:1fr; }
+      .file-map,.gate { grid-template-columns:1fr 1fr; }
+      .gate-step::after { display:none; }
+    }
+    @media (max-width:520px) { .file-map,.gate { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <p class="eyebrow">Implementation handoff · grounded at 3c0abe1 · 2026-07-19</p>
+      <h1>Demand Sys Phase 1</h1>
+      <p class="lead">先把 Demand 做成一个可独立运行、可被真实 actor 使用、可通过公共 CLI 观察的产品内核。当前 inbound、Task Sys 与 daemon 注册一行不改。</p>
+      <div class="badges">
+        <span class="badge go">GO · standalone build</span>
+        <span class="badge">one semantic owner</span>
+        <span class="badge">one actor aggregate</span>
+        <span class="badge">native actor actions</span>
+        <span class="badge stop">NO Task / daemon / inbound</span>
+      </div>
+      <div class="decision">
+        <div><strong>本次唯一交付闭环</strong><p>actor 显式创建 C、D → 两次判断 → 原子吸收 D 到 C → ack → CLI 观察收敛。</p></div>
+        <code>0 Task records · 0 daemon registrations · 0 dual paths</code>
+      </div>
+    </header>
+
+    <section aria-labelledby="arch-title">
+      <div class="panel-head"><div><h2 id="arch-title">组件拓扑与依赖方向</h2><p>箭头表示调用依赖；红色虚线表示 Phase 1 明确不存在。</p></div><span class="tag">OWNER → CONTRACT → ADAPTER → CONSUMER</span></div>
+      <div class="arch-scroll">
+        <svg viewBox="0 0 1180 510" role="img" aria-labelledby="svg-title svg-desc">
+          <title id="svg-title">Demand Sys Phase 1 component topology</title>
+          <desc id="svg-desc">Real actor and public CLI project one Demand domain and repository. Task, daemon and inbound have no connection.</desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#627b77"/></marker>
+            <marker id="stop" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#a34e47"/></marker>
+          </defs>
+          <line class="boundary-line" x1="40" y1="165" x2="1140" y2="165"/>
+          <text class="svg-code" x="48" y="154">CONSUMERS / ADAPTERS</text>
+          <line class="boundary-line" x1="40" y1="345" x2="1140" y2="345"/>
+          <text class="svg-code" x="48" y="334">PRODUCT CORE / STORAGE</text>
+
+          <rect class="node node-consumer" x="55" y="48" width="230" height="82"/>
+          <text class="svg-title" x="75" y="77">Fresh real actor</text>
+          <text class="svg-label" x="75" y="99">Codex native MCP actions</text>
+          <text class="svg-code" x="75" y="117">demand_sys__*</text>
+
+          <rect class="node node-consumer" x="325" y="48" width="230" height="82"/>
+          <text class="svg-title" x="345" y="77">Public BuddySwitch CLI</text>
+          <text class="svg-label" x="345" y="99">read-only operator projection</text>
+          <text class="svg-code" x="345" y="117">demand list/get --actor</text>
+
+          <rect class="node node-demand" x="55" y="205" width="230" height="92"/>
+          <text class="svg-title" x="75" y="235">Demand tool adapter</text>
+          <text class="svg-label" x="75" y="257">schema · actor scope · result</text>
+          <text class="svg-code" x="75" y="278">env/tools/demand_sys</text>
+
+          <rect class="node node-demand" x="325" y="205" width="230" height="92"/>
+          <text class="svg-title" x="345" y="235">Demand read projection</text>
+          <text class="svg-label" x="345" y="257">external-safe · no writes</text>
+          <text class="svg-code" x="345" y="278">domain/demand_read.py</text>
+
+          <rect class="node node-demand" x="620" y="205" width="250" height="92"/>
+          <text class="svg-title" x="640" y="235">Demand domain</text>
+          <text class="svg-label" x="640" y="257">only semantic / transition owner</text>
+          <text class="svg-code" x="640" y="278">domain/demand_sys.py</text>
+
+          <rect class="node node-storage" x="620" y="380" width="250" height="82"/>
+          <text class="svg-title" x="640" y="410">Demand repository</text>
+          <text class="svg-label" x="640" y="432">flock · load · atomic replace</text>
+          <text class="svg-code" x="640" y="450">repos/demands.py</text>
+
+          <rect class="node node-storage" x="910" y="380" width="220" height="82"/>
+          <text class="svg-title" x="930" y="410">Actor aggregate</text>
+          <text class="svg-label" x="930" y="432">one canonical JSON</text>
+          <text class="svg-code" x="930" y="450">objects/demand-sys/actors</text>
+
+          <rect class="node node-forbidden" x="930" y="45" width="200" height="250"/>
+          <text class="svg-title" x="950" y="76">Outside Phase 1</text>
+          <text class="svg-code" x="950" y="110">Task Sys</text>
+          <text class="svg-code" x="950" y="145">generic daemon</text>
+          <text class="svg-code" x="950" y="180">IM / Track inbound</text>
+          <text class="svg-code" x="950" y="215">request_check wake</text>
+          <text class="svg-label" x="950" y="257">no import · no call</text>
+          <text class="svg-label" x="950" y="276">no register · no shadow</text>
+
+          <path class="arrow" d="M170 130 L170 205"/>
+          <path class="arrow" d="M440 130 L440 205"/>
+          <path class="arrow" d="M285 251 L305 251 L305 320 L590 320 L590 251 L620 251"/>
+          <path class="arrow" d="M555 251 L620 251"/>
+          <path class="arrow" d="M745 297 L745 380"/>
+          <path class="arrow" d="M870 421 L910 421"/>
+          <path class="forbidden-arrow" d="M870 245 L925 170"/>
+          <text class="svg-code" x="852" y="208">×</text>
+        </svg>
+      </div>
+    </section>
+
+    <section aria-labelledby="phase-title">
+      <div class="panel-head"><div><h2 id="phase-title">四阶段边界</h2><p>点击查看每阶段唯一结果。当前计划只实施 Phase 1。</p></div></div>
+      <div class="phase-tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-phase="p1">01 独立 Demand</button>
+        <button role="tab" aria-selected="false" data-phase="p2">02 Pro-active attention</button>
+        <button role="tab" aria-selected="false" data-phase="p3">03 Actor 协调 Task</button>
+        <button role="tab" aria-selected="false" data-phase="p4">04 Inbound 收敛</button>
+      </div>
+      <article class="phase-panel" data-panel="p1">
+        <div class="phase-grid"><div class="card phase-now"><span class="owner">BUILD NOW</span><h3>Demand 自己成立</h3><ul><li>canonical state + atomic repository</li><li>check/index/get_many/ack</li><li>tree/dependency/lineage actions</li><li>actor tool + read-only CLI</li></ul></div><div class="card"><span class="owner">EXIT</span><h3>D→C 收敛可观测</h3><ul><li>one live C</li><li>terminal D absorbed into C</li><li>pending check = 0</li><li>Task records = 0</li></ul></div></div>
+      </article>
+      <article class="phase-panel" data-panel="p2" hidden><div class="phase-grid"><div class="card locked"><span class="owner">NOT BUILT NOW</span><h3>Demand 变化获得 actor 注意</h3><ul><li>Demand-owned attention policy</li><li>generic Actor Input capability</li><li>daemon only transports/wakes</li></ul></div><div class="card"><span class="owner">BOUNDARY</span><h3>Domain 仍不依赖 daemon</h3><ul><li>runtime adapter composes both</li><li>fixed check prompt carries no truth</li><li>no Task involvement</li></ul></div></div></article>
+      <article class="phase-panel" data-panel="p3" hidden><div class="phase-grid"><div class="card locked"><span class="owner">NOT BUILT NOW</span><h3>Actor 使用单 active Task 消费 Demand</h3><ul><li>actor calls both APIs separately</li><li>Task completion is evidence</li><li>actor explicitly reconciles Demand</li></ul></div><div class="card"><span class="owner">FORBIDDEN</span><h3>没有跨域自动联动</h3><ul><li>Demand never calls Task</li><li>Task never completes Demand</li><li>no shared transaction/callback</li></ul></div></div></article>
+      <article class="phase-panel" data-panel="p4" hidden><div class="phase-grid"><div class="card locked"><span class="owner">NOT BUILT NOW</span><h3>真实 inbound 先形成 Demand</h3><ul><li>source-by-source direct cutover</li><li>same-source old Task ingress deleted</li><li>no dual write or fallback</li></ul></div><div class="card"><span class="owner">FINAL TRUTH</span><h3>Inbound → Demand → Actor → optional Task</h3><ul><li>controlled inbound only</li><li>direct TUI input remains outside intake</li><li>one write path per source</li></ul></div></div></article>
+    </section>
+
+    <section aria-labelledby="files-title">
+      <div class="panel-head"><div><h2 id="files-title">Phase 1 文件责任</h2><p>文件按责任拆分，不按未来平台层级拆分。</p></div></div>
+      <div class="file-map">
+        <article class="file"><span class="owner">STORE</span><h3 class="path">repos/demands.py</h3><p>actor aggregate、flock、严格读取、一次原子写。</p></article>
+        <article class="file"><span class="owner">OWNER</span><h3 class="path">domain/demand_sys.py</h3><p>全部 lifecycle、revision、check、relation 规则。</p></article>
+        <article class="file adapter"><span class="owner">ACTOR CONTRACT</span><h3 class="path">tools/demand_sys/*</h3><p>schema、actor scope、tool result；不复制业务规则。</p></article>
+        <article class="file adapter"><span class="owner">READ ADAPTER</span><h3 class="path">domain/demand_read.py + cli.py</h3><p>外部安全观察；绝无写操作。</p></article>
+        <article class="file proof"><span class="owner">OWNER PROOF</span><h3 class="path">tests/unit/demand_sys</h3><p>revision、check、关系、terminal。</p></article>
+        <article class="file proof"><span class="owner">ATOMIC PROOF</span><h3 class="path">tests/integration/demand_sys</h3><p>并发写者、失败无部分状态。</p></article>
+        <article class="file proof"><span class="owner">CONTRACT PROOF</span><h3 class="path">test_response_demand.py</h3><p>native actor action、错误与 scope。</p></article>
+        <article class="file proof"><span class="owner">BOUNDARY PROOF</span><h3 class="path">test_demand_sys_boundaries.py</h3><p>Task/daemon/inbound import 与注册为零。</p></article>
+      </div>
+    </section>
+
+    <section aria-labelledby="proof-title">
+      <div class="panel-head"><div><h2 id="proof-title">高效交付证据</h2><p>确定性自动测试为主，真实 actor 为补充里程碑，不盲跑 full。</p></div></div>
+      <div class="proof-grid">
+        <article class="proof"><strong>RED → GREEN</strong><span>每个 owner 行为先用精确 case 失败，再让同一 target 通过。</span></article>
+        <article class="proof"><strong>IMPACT batch</strong><span>Demand owner、tool、CLI、architecture 兼容 targets 一次批量运行。</span></article>
+        <article class="proof"><strong>System regression</strong><span>公共 instance main flow 独立运行，保持 live service cleanup 边界。</span></article>
+        <article class="proof real"><strong>Real actor MILESTONE</strong><span>真实 Codex + public start/input + Demand actions + CLI observation + cleanup。</span></article>
+        <article class="proof"><strong>Negative proof</strong><span>Task files未改、Task record=0、daemon/inbound无 Demand token。</span></article>
+        <article class="proof"><strong>Resource proof</strong><span>runner root、actor root、pid/socket、isolated shared root 全部清理。</span></article>
+      </div>
+    </section>
+
+    <section aria-labelledby="facts-title">
+      <div class="panel-head"><div><h2 id="facts-title">当前代码证据</h2><p>计划没有根据记忆猜接口。</p></div></div>
+      <div class="facts">
+        <div class="fact"><code>tools/launcher/im_wake_handler.py:66–73</code>IM 目前直接 Task ingest + runtime instruction。</div>
+        <div class="fact"><code>tools/launcher/track_comment_added_handler.py:122–131</code>Track comment 目前直接 Task ingest + runtime instruction。</div>
+        <div class="fact"><code>scripts/env/tool_runtime/registry.py:29–40</code>actor tools 通过 package 自动发现，无需新 registry。</div>
+        <div class="fact"><code>scripts/env/tool_runtime/native_mcp.py:89–98</code>tool definition 自动成为 Codex native MCP action。</div>
+        <div class="fact"><code>scripts/env/tool_runtime/context.py:415–454</code>DomainAccess / RepoAccess 是当前注入 owner。</div>
+        <div class="fact"><code>tools/launcher/cli.py:82–119</code>公共 instance 与只读产品 projection 已有稳定 CLI。</div>
+      </div>
+    </section>
+
+    <section aria-labelledby="gate-title">
+      <div class="panel-head"><div><h2 id="gate-title">实施门禁</h2><p>任何一步需要双写、fallback 或跨域调用，就停止并修边界。</p></div></div>
+      <div class="gate">
+        <div class="gate-step"><span class="owner">01 TRACE</span><strong>owner 与路径</strong><p>当前事实、dirty scope、direct tests 已锁定。</p></div>
+        <div class="gate-step"><span class="owner">02 BUILD</span><strong>最短闭环</strong><p>store → domain → actor tool → CLI。</p></div>
+        <div class="gate-step"><span class="owner">03 PROVE</span><strong>focused + real actor</strong><p>确定性证据后再敲真实模型边界。</p></div>
+        <div class="gate-step"><span class="owner">04 ACCEPT</span><strong>无残留审计</strong><p>0 Task、0 daemon、0 inbound、0 alternate。</p></div>
+      </div>
+    </section>
+    <p class="footer">Companion: 2026-07-19-demand-sys-phase-1-standalone-forward-rebuild-design.md · implementation-plan.md</p>
+  </main>
+  <script>
+    const tabs = [...document.querySelectorAll('[data-phase]')];
+    const panels = [...document.querySelectorAll('[data-panel]')];
+    tabs.forEach((tab) => tab.addEventListener('click', () => {
+      const selected = tab.dataset.phase;
+      tabs.forEach((item) => item.setAttribute('aria-selected', String(item === tab)));
+      panels.forEach((panel) => { panel.hidden = panel.dataset.panel !== selected; });
+    }));
+  </script>
+</body>
+</html>
