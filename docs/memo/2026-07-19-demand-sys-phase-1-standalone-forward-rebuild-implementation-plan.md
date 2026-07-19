@@ -124,19 +124,27 @@ The lines above are the complete public API inventory, expressed as contract sig
 
 ## Task 1: Atomic Demand repository
 
+**Completed 2026-07-19 in `1f1ad07`.** RED was observed with run
+`12b6180ccb1545a9b1591949db2ecebd` because `env.repos.demands` did not exist;
+the architecture owner probe independently failed before implementation. Final
+GREEN/IMPACT run `9532b692f3424837b328ba53825a4cd3` passed 17 tests and 5
+subtests with no retained run root or writer process. Scope audit found one
+aggregate path owner, one atomic write call, zero forbidden Task/daemon/inbound
+dependencies, and only the three Task 1 implementation files in the code commit.
+
 **Files:**
 
 - Create: `scripts/env/repos/demands.py`
 - Create: `tests/integration/demand_sys/test_repository_atomicity.py`
 - Modify: `tests/unit/architecture/test_repo_contracts.py`
 
-- [ ] **Step 1: Write the repository RED tests**
+- [x] **Step 1: Write the repository RED tests**
 
 Add cases with these exact names: `test_absent_actor_state_loads_one_empty_schema_v1_aggregate`, `test_successful_transaction_persists_one_actor_aggregate`, `test_failed_mutator_keeps_previous_aggregate_byte_identical`, `test_two_process_writers_serialize_without_losing_either_change`, and `test_wrong_schema_or_actor_target_is_rejected_without_rewrite`.
 
 Use `RuntimeWorkspaceTestCase` for isolated `BUDDYSWITCH_STATE_ROOT`. The process case launches two short Python children through the existing integration-test process support; each calls the same repository transaction and writes a different Demand id. Assert that the final aggregate contains both ids and that no temporary file remains beside the aggregate.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 ./buddyswitch-test focused tests/integration/demand_sys/test_repository_atomicity.py
@@ -144,7 +152,7 @@ Use `RuntimeWorkspaceTestCase` for isolated `BUDDYSWITCH_STATE_ROOT`. The proces
 
 Expected: collection/import failure because `env.repos.demands` does not exist. This is the intended RED.
 
-- [ ] **Step 3: Implement the repository**
+- [x] **Step 3: Implement the repository**
 
 The repository contract is:
 
@@ -171,7 +179,7 @@ def transact_actor_state(
 
 `transact_actor_state` must acquire `fcntl.LOCK_EX`, call the mutator once, require a `(bool, result)` tuple, validate the complete aggregate before writing, call `runtime_files.write_json_object` once when changed, and release the lock in `finally`. Exceptions write nothing.
 
-- [ ] **Step 4: Run GREEN and repository architecture proof**
+- [x] **Step 4: Run GREEN and repository architecture proof**
 
 ```bash
 ./buddyswitch-test focused \
@@ -181,7 +189,7 @@ def transact_actor_state(
 
 Expected: all selected tests pass and runner cleanup reports no residual process or temporary root.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add scripts/env/repos/demands.py tests/integration/demand_sys/test_repository_atomicity.py tests/unit/architecture/test_repo_contracts.py
