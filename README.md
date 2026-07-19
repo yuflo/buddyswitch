@@ -68,6 +68,13 @@ Private workspace private files are active-instance-local under `$BUDDYSWITCH_AC
 ./buddyswitch-codex instance delete <actor-id>
 ```
 
+Read actor-scoped Demand projections without exposing mutations:
+
+```bash
+./buddyswitch-codex demand list --actor <actor-id>
+./buddyswitch-codex demand get <demand-id> --actor <actor-id>
+```
+
 ## Test
 
 Use the repository supervisor for every test run:

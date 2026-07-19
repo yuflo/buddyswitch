@@ -53,7 +53,7 @@ def _validate_reset_root(shared_root: Path) -> None:
 os.environ.setdefault("BUDDYSWITCH_REPO_ROOT", str(REPO_ROOT))
 os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_shared_root_from_env() / "state"))
 
-from env.domain import task_read, track_read  # noqa: E402
+from env.domain import demand_read, task_read, track_read  # noqa: E402
 from tools.launcher import actor_session, central_daemon, central_daemon_core, cli_contract, codex_runtime, host_control  # noqa: E402
 
 
@@ -97,6 +97,8 @@ HELP_TEXT = """Usage:
 
   buddyswitch-codex task list [--actor <actor-id>]
   buddyswitch-codex task get <task-id>
+  buddyswitch-codex demand list --actor <actor-id>
+  buddyswitch-codex demand get <demand-id> --actor <actor-id>
   buddyswitch-codex track list [--owner <identity-id>]
   buddyswitch-codex track get <track-id>
 
@@ -112,6 +114,7 @@ HELP_TEXT = """Usage:
 Commands:
   instance  Manage BuddySwitch product-mode instances.
   task      Read external-safe Task projections.
+  demand    Read actor-scoped external-safe Demand projections.
   track     Read external-safe Track projections.
   data      Manage BuddySwitch data cleanup commands.
   env       Manage BuddySwitch environment status and reset commands.
@@ -152,6 +155,8 @@ def _dispatch(args: list[str]) -> CommandResult:
         return _dispatch_instance(rest)
     if command == "task":
         return _dispatch_task(rest)
+    if command == "demand":
+        return _dispatch_demand(rest)
     if command == "track":
         return _dispatch_track(rest)
     if command == "data":
@@ -251,6 +256,40 @@ def _dispatch_task(args: list[str]) -> CommandResult:
     except ValueError as exc:
         raise cli_contract.CliError("INVALID_ARGUMENT", str(exc)) from exc
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown task command: {command}")
+
+
+def _dispatch_demand(args: list[str]) -> CommandResult:
+    if not args:
+        raise cli_contract.CliError("UNKNOWN_COMMAND", "demand command is required")
+    command, rest = args[0], args[1:]
+    try:
+        if command == "list":
+            actor_id = _single_required_option(rest, DASH + "actor", "demand list")
+            target = _actor_target_from_id(actor_id)
+            return CommandResult(
+                "demand.list",
+                {"demands": demand_read.list_external_demands(actor_target=target)},
+            )
+        if command == "get":
+            if not rest or rest[0].startswith("-"):
+                raise cli_contract.CliError(
+                    "INVALID_ARGUMENT",
+                    "demand get requires <demand id> --actor <actor-id>",
+                )
+            demand_id = rest[0]
+            actor_id = _single_required_option(rest[1:], DASH + "actor", "demand get")
+            target = _actor_target_from_id(actor_id)
+            demand = demand_read.get_external_demand(demand_id, actor_target=target)
+            if demand is None:
+                raise cli_contract.CliError(
+                    "NOT_FOUND",
+                    f"Demand not found for actor {actor_id}: {demand_id}",
+                    {"demand_id": demand_id, "actor_id": actor_id},
+                )
+            return CommandResult("demand.get", {"demand": demand})
+    except ValueError as exc:
+        raise cli_contract.CliError("INVALID_ARGUMENT", str(exc)) from exc
+    raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown demand command: {command}")
 
 
 def _dispatch_track(args: list[str]) -> CommandResult:
