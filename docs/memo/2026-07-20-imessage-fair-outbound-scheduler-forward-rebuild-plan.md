@@ -10,7 +10,7 @@
 
 Date: 2026-07-20
 
-Status: plan only; implementation intentionally not started
+Status: automated implementation and claim-scoped verification complete; real two-contact iMessage validation pending
 
 Branch/worktree: `fea-im` / `/Users/chen/Dev/buddyswitch/.worktrees/fea-im`
 
@@ -214,14 +214,14 @@ bounded fields:
     "first_failed_at": 1784540000.0,
     "next_attempt_at": 1784540001.0,
     "attempts": 1,
-    "last_error": "iMessage send status failed"
+    "last_error": "imessage_send_failed"
   },
   "last_delivery_failure": {
     "event_id": "imev-...",
     "message_id": "msg-...",
     "failed_at": 1784540120.0,
     "attempts": 7,
-    "last_error": "iMessage send status failed"
+    "last_error": "imessage_send_failed"
   }
 }
 ```
@@ -237,10 +237,10 @@ OUTBOUND_RETRY_WINDOW_SECONDS = 120.0
 OUTBOUND_RETRY_DELAYS_SECONDS = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 ```
 
-For attempt number `n`, use the indexed delay and clamp subsequent delays to
-30 seconds. `time.time()` is persisted because the deadline must survive
-restart; the controller accepts a clock callable so tests advance time without
-sleeping.
+For attempt number `n`, use the indexed delay, clamp subsequent delays to 30
+seconds, and clamp every `next_attempt_at` to the absolute 120-second terminal
+deadline. `time.time()` is persisted because the deadline must survive restart;
+the controller accepts a clock callable so tests advance time without sleeping.
 
 Rules:
 
@@ -253,7 +253,9 @@ Rules:
 5. If terminal-failure ACK fails, the event remains visible. Matching
    `last_delivery_failure.event_id` causes ACK-only retry and never another
    iMessage send.
-6. A successful send with an ACK failure is already protected by
+6. Persisted and logged failure values are allow-listed stage codes, never raw
+   transport exception text.
+7. A successful send with an ACK failure is already protected by
    `message_links`: the next read performs ACK-only retry.
 
 ### Locking Invariants
@@ -301,7 +303,7 @@ No other runtime, API, Web, Task, or actor file is in the planned write set.
 
 **Files:** none
 
-- [ ] Record the exact source identity and dirty scope:
+- [x] Record the exact source identity and dirty scope:
 
 ```bash
 git rev-parse HEAD
@@ -311,7 +313,7 @@ git status --short
 Expected before implementation: only user-owned changes already present are
 reported; do not stage, rewrite, or mix them.
 
-- [ ] Run the current claim-adjacent baseline:
+- [x] Run the current claim-adjacent baseline:
 
 ```bash
 ./buddyswitch-test focused \
@@ -330,7 +332,7 @@ the intentional RED added next.
 - Modify: `tests/integration/im/_imessage_fakes.py`
 - Modify: `tests/integration/im/test_imessage_worker.py`
 
-- [ ] First make `_FakeBuddySwitchImApi.read_events()` mirror the real API by
+- [x] First make `_FakeBuddySwitchImApi.read_events()` mirror the real API by
   returning at most `limit` unacknowledged events. This is test-fixture repair,
   not product behavior:
 
@@ -343,12 +345,12 @@ available = [
 return {"ok": True, "events": available[:limit]}
 ```
 
-- [ ] Rename `_BlockingReadApi` to `_ControlledBlockingReadApi` and keep it only
+- [x] Rename `_BlockingReadApi` to `_ControlledBlockingReadApi` and keep it only
   as the current contract double proving that a deliberately stalled External
   IM read cannot stop inbound work or another contact. It must block only keys
   explicitly configured by the test; the old all-reads-block shape is deleted.
 
-- [ ] Add a controlled `imsg` double that blocks selected routes and records
+- [x] Add a controlled `imsg` double that blocks selected routes and records
   active/max-active send counts under a lock. It must return a unique GUID and
   must not implement scheduling decisions:
 
@@ -382,7 +384,7 @@ class _ControlledSendImsg(_QueueImsg):
                 self.active_sends -= 1
 ```
 
-- [ ] Add these exact worker behavior tests:
+- [x] Add these exact worker behavior tests:
 
 ```text
 test_silent_contact_does_not_delay_ready_contact
@@ -396,7 +398,7 @@ Each test creates complete bound contact state and real-shaped event/message
 payloads. Assertions must observe delivered iMessage rows, ACK calls, FIFO
 order, and active send count—not merely executor submission or fake call count.
 
-- [ ] Run the RED tests through the only public entry:
+- [x] Run the RED tests through the only public entry:
 
 ```bash
 ./buddyswitch-test focused \
@@ -417,7 +419,7 @@ serially blocks the later contact. Record the run id and exact expected failure.
 - Modify: `tests/integration/im/test_imessage_outbound.py`
 - Modify: `tests/integration/im/test_imessage_worker.py`
 
-- [ ] Replace `poll_outbound_once(wait_ms, limit)` with two concrete controller
+- [x] Replace `poll_outbound_once(wait_ms, limit)` with two concrete controller
   operations:
 
 ```python
@@ -454,7 +456,7 @@ retry_wait
 delivery_failed
 ```
 
-- [ ] Replace worker reply-wait configuration with explicit local scheduler
+- [x] Replace worker reply-wait configuration with explicit local scheduler
   configuration:
 
 ```python
@@ -467,7 +469,7 @@ def __init__(
 ) -> None:
 ```
 
-- [ ] Implement the scheduler directly in `ImessageChannelWorker`:
+- [x] Implement the scheduler directly in `ImessageChannelWorker`:
 
 ```python
 def _schedule_outbound_contacts(self, contact_keys: list[str]) -> int:
@@ -482,15 +484,15 @@ def _finish_outbound_contact(self, sender_key: str, future: Future[Any]) -> None
 The comment above describes the complete permitted behavior; the method must
 not enqueue event payloads or create per-contact workers.
 
-- [ ] Remove all calls that pass a positive wait to outbound event reads.
+- [x] Remove all calls that pass a positive wait to outbound event reads.
 `BuddySwitchImApi.read_events` remains unchanged because `wait_ms` is a current
 single-session API capability used by other current consumers.
 
-- [ ] Update the existing outbound tests to call
+- [x] Update the existing outbound tests to call
 `deliver_outbound_contact_once(sender_key="sender:user-a@example.com")` and
 preserve their link-before-ACK/no-duplicate assertions.
 
-- [ ] Run Task 1 tests and all existing outbound tests:
+- [x] Run Task 1 tests and all existing outbound tests:
 
 ```bash
 ./buddyswitch-test focused \
@@ -507,7 +509,7 @@ Expected GREEN: all selected tests pass; no test sleeps for a 30-second poll.
 - Modify: `tests/integration/im/test_imessage_worker.py`
 - Modify: `tests/integration/im/test_imessage_routing.py`
 
-- [ ] Add this exact product-boundary test:
+- [x] Add this exact product-boundary test:
 
 ```text
 test_blocked_inbound_api_for_contact_a_does_not_block_outbound_contact_b
@@ -517,7 +519,7 @@ The fake API blocks A's `send_to_actor`; B already has a ready actor event.
 Start the real worker, push A's inbound message, wait until A is blocked, then
 assert B's iMessage send completes before A is released.
 
-- [ ] Run the test and record RED caused by `_state_lock` spanning A's HTTP
+- [x] Run the test and record RED caused by `_state_lock` spanning A's HTTP
 operation:
 
 ```bash
@@ -525,7 +527,7 @@ operation:
   tests/integration/im/test_imessage_worker.py::ImessageWorkerTests::test_blocked_inbound_api_for_contact_a_does_not_block_outbound_contact_b
 ```
 
-- [ ] Refactor inbound processing to one concrete snapshot/result pattern:
+- [x] Refactor inbound processing to one concrete snapshot/result pattern:
 
 ```python
 @dataclass(frozen=True)
@@ -547,7 +549,11 @@ All `_handle_*` functions perform HTTP/`imsg` work from immutable context and
 call `_mark_inbound_seen` only after the observable operation succeeds. Native
 reply GUID lookup snapshots `message_links` under lock before the HTTP reply.
 
-- [ ] Re-run the RED and all routing tests:
+Execution note: the implementation kept this context as four direct local
+values instead of introducing `_InboundContext`; this preserves the same short
+lock/external-I/O boundary with less live abstraction.
+
+- [x] Re-run the RED and all routing tests:
 
 ```bash
 ./buddyswitch-test focused \
@@ -565,7 +571,7 @@ route, and message-link behavior remains exact.
 - Modify: `tests/integration/im/test_imessage_outbound.py`
 - Modify: `tests/integration/im/test_imessage_state.py`
 
-- [ ] Add a mutable wall clock test double and these exact tests:
+- [x] Add a mutable wall clock test double and these exact tests:
 
 ```text
 test_send_failure_persists_retry_without_ack
@@ -593,7 +599,7 @@ class _MutableClock:
         self.now += seconds
 ```
 
-- [ ] Run RED before state/production changes:
+- [x] Run RED before state/production changes:
 
 ```bash
 ./buddyswitch-test focused \
@@ -603,12 +609,12 @@ class _MutableClock:
 
 Expected RED: retry fields/statuses and clock dependency are absent.
 
-- [ ] Add strict normalizers for `outbound_retry` and
+- [x] Add strict normalizers for `outbound_retry` and
 `last_delivery_failure`. Reject incomplete, negative, non-finite, or
 mismatched values to the canonical empty value; never execute malformed retry
 state.
 
-- [ ] Implement retry calculation in one controller helper:
+- [x] Implement retry calculation in one controller helper:
 
 ```python
 def _record_outbound_failure(
@@ -617,7 +623,7 @@ def _record_outbound_failure(
     sender_key: str,
     event_id: str,
     message_id: str,
-    error: Exception,
+    error_code: str,
 ) -> dict[str, Any]:
     """Persist retry or terminal failure and return its delivery status."""
 ```
@@ -625,14 +631,14 @@ def _record_outbound_failure(
 No retry rule may be copied into the worker. The worker only asks
 `outbound_contact_keys()` for eligible contacts.
 
-- [ ] Emit exactly one terminal alert per event transition, excluding message
+- [x] Emit exactly one terminal alert per event transition, excluding message
 content, contact address, session key, and route:
 
 ```text
-iMessage channel delivery_failed event_id=<id> message_id=<id> attempts=<n> error=<detail>
+iMessage channel delivery_failed event_id=<id> message_id=<id> attempts=<n> error=<safe-stage-code>
 ```
 
-- [ ] Re-run RED targets for GREEN:
+- [x] Re-run RED targets for GREEN:
 
 ```bash
 ./buddyswitch-test focused \
@@ -650,7 +656,7 @@ only after durable record and ACK; logs contain no external-user address.
 - Modify: `tests/unit/im/test_imessage_command_client.py`
 - Modify: `tests/integration/im/test_imessage_worker.py`
 
-- [ ] Add lifecycle tests:
+- [x] Add lifecycle tests:
 
 ```text
 test_imsg_send_command_timeout_is_retryable_channel_error
@@ -659,7 +665,7 @@ test_worker_start_failure_creates_no_executor_or_thread_residue
 test_unexpected_delivery_exception_releases_contact_reservation
 ```
 
-- [ ] Run RED:
+- [x] Run RED:
 
 ```bash
 ./buddyswitch-test focused \
@@ -667,7 +673,7 @@ test_unexpected_delivery_exception_releases_contact_reservation
   tests/integration/im/test_imessage_worker.py
 ```
 
-- [ ] If the timeout RED proves the subprocess itself is unbounded, add one
+- [x] If the timeout RED proves the subprocess itself is unbounded, add one
   iMessage-only constant and map `subprocess.TimeoutExpired` to `ChannelError`:
 
 ```python
@@ -679,7 +685,7 @@ watch process, stop new scheduling, join inbound/scheduler threads, and shut
 down the one executor with pending futures canceled. Every started delivery
 operation remains bounded by HTTP and iMessage command/status timeouts.
 
-- [ ] Re-run for GREEN with clean resource evidence:
+- [x] Re-run for GREEN with clean resource evidence:
 
 ```bash
 ./buddyswitch-test focused \
@@ -692,13 +698,13 @@ operation remains bounded by HTTP and iMessage command/status timeouts.
 **Files:**
 - Modify: `tests/integration/im/test_external_event_capacity.py`
 
-- [ ] Extend the existing real-HTTP fixture without changing its lower-layer
+- [x] Extend the existing real-HTTP fixture without changing its lower-layer
 baseline. Create canonical iMessage state for all 100 external sessions, spread
 20 active sessions through the scan order, run the production
 `ImessageChannelWorker` against a thread-safe immediate-confirmation `imsg`
 double, and measure Central-event availability to recorded iMessage send.
 
-- [ ] Assert:
+- [x] Assert:
 
 ```text
 all 20 messages reach their exact routes
@@ -710,7 +716,7 @@ bridge P99 <= 5.0 seconds
 worker/executor/server threads are stopped
 ```
 
-- [ ] Run the exact product proof at least three times through the public entry:
+- [x] Run the exact product proof at least three times through the public entry:
 
 ```bash
 PYTEST_ADDOPTS=-s ./buddyswitch-test focused \
@@ -730,7 +736,7 @@ failure to investigate, not a reason to loosen the SLO.
 - Modify: `tests/integration/im/test_imessage_state.py`
 - Modify: affected iMessage tests listed above
 
-- [ ] Delete, rather than retain as aliases:
+- [x] Delete, rather than retain as aliases:
 
 ```text
 DEFAULT_REPLY_WAIT_MS
@@ -741,7 +747,7 @@ _BlockingReadApi (replaced by the contact-scoped _ControlledBlockingReadApi)
 tests that teach one serial all-contact outbound loop
 ```
 
-- [ ] Extend `ImessageForwardResidueTests` with exact forbidden source terms:
+- [x] Extend `ImessageForwardResidueTests` with exact forbidden source terms:
 
 ```python
 for retired in (
@@ -752,7 +758,7 @@ for retired in (
     self.assertNotIn(retired, source)
 ```
 
-- [ ] Run repository residue inspection excluding historical memos/plans:
+- [x] Run repository residue inspection excluding historical memos/plans:
 
 ```bash
 rg -n \
@@ -765,7 +771,7 @@ rg -n \
 Expected: no current runtime, test, or architecture surface teaches the retired
 serial model. Historical memos may retain history and are not live policy.
 
-- [ ] Prove no iMessage scheduling/retry semantics leaked outward:
+- [x] Prove no iMessage scheduling/retry semantics leaked outward:
 
 ```bash
 rg -n \
@@ -781,7 +787,7 @@ and requires no modification.
 
 ### Task 8: Focused Verification And Acceptance Audit
 
-- [ ] Discover current affected targets before running; do not hard-code a
+- [x] Discover current affected targets before running; do not hard-code a
   stale broad suite:
 
 ```bash
@@ -789,7 +795,7 @@ rg -l "imessage_channel|ImessageChannel|BuddySwitchImApi" \
   tests/unit tests/integration tests/process | sort
 ```
 
-- [ ] Run all directly affected iMessage targets through the sole public entry.
+- [x] Run all directly affected iMessage targets through the sole public entry.
 At minimum the candidate command is:
 
 ```bash
@@ -804,7 +810,7 @@ Do not run `./buddyswitch-test full` unless the branch is frozen for merge,
 the user explicitly requests repository-wide acceptance, or the affected-risk
 review discovers a repository-wide contract.
 
-- [ ] Verify syntax/diff/boundary hygiene:
+- [x] Verify syntax/diff/boundary hygiene:
 
 ```bash
 git diff --check
@@ -816,7 +822,7 @@ git diff -- tools/launcher/im_http_router.py \
 
 Expected last diff: empty.
 
-- [ ] Audit proof classes:
+- [x] Audit proof classes:
 
 | Proof class | Required evidence |
 | --- | --- |
@@ -826,7 +832,7 @@ Expected last diff: empty.
 | Replacement | serial names/calls absent from all live surfaces |
 | Operations | executor/watch/server cleanup; bounded command timeout; structured terminal alert |
 
-- [ ] Inspect the final diff against the acceptance sentence. If any material
+- [x] Inspect the final diff against the acceptance sentence. If any material
   proof is absent, leave the implementation unaccepted and name the exact
   remaining owner/action.
 
@@ -864,8 +870,8 @@ correct chat/handle for both contacts
 
 ## 9. Execution Evidence Contract
 
-This document is plan-only. No RED/GREEN implementation run belongs to this
-plan yet. During execution, append one compact evidence section containing:
+The execution evidence below is part of this memo. It records the source-bound
+RED/GREEN and acceptance state without creating another evidence ledger.
 
 ```text
 source commit
@@ -882,3 +888,71 @@ omitted checks and residual risk
 Do not claim completion from a broad suite alone, from mock call counts, or
 before the real two-contact product check is either passed or explicitly
 reported as pending user participation.
+
+## 10. Execution Evidence — 2026-07-20
+
+Source commit before implementation: `2494ec4c5fa796b974ffa27224c4abb3932a300f`.
+
+Automated implementation write scope is exactly:
+
+```text
+tools/launcher/imessage_channel.py
+tests/integration/im/_imessage_fakes.py
+tests/integration/im/test_external_event_capacity.py
+tests/integration/im/test_imessage_outbound.py
+tests/integration/im/test_imessage_state.py
+tests/integration/im/test_imessage_worker.py
+tests/unit/im/test_imessage_command_client.py
+this memo
+```
+
+No Central IM, `ExternalImSession`, router, Web management, Task Sys, actor
+runtime, or architecture file changed.
+
+### RED/GREEN Evidence
+
+| Claim | RED | GREEN |
+| --- | --- | --- |
+| Cross-contact fairness, FIFO, max four | `d3747eda57bc413bb7e6cfa92d06e641` — five expected constructor/behavior failures | `3180399473314253a53fa56568676676` — 5 passed |
+| Shared lock does not span A's blocked inbound HTTP while B delivers | `6d4f94100b994bb686c4aaeb93568d2f` — B blocked | `4a774449edb74ecaaa0c80b4bdaff180` — 16 passed including routing |
+| Durable retry, restart, two-minute terminal failure, ACK-only recovery | `f7e40c2c64114dc09a5f32a4c3bb8bf5` — 7 expected failures | `ebb4f64a1591456491fb97f5588f12d9` — 7 passed |
+| Bounded `imsg send` and worker lifecycle | `6756db0c39054a9a8b02ccc21f84bae8` — unwrapped/unbounded send timeout | `aa5055a5861f49baadb2fcf6d9d37b29` — 8 passed |
+| Retired serial model absent | `bae16ec6a7b646f4bef5ed24bbce86f0` — old constant/method found | `2a57d4b764b543048534e9cb96cd0226` — 13 passed, 10 residue subtests passed |
+| Independent-review edge cases: absolute deadline, fetch exception, hard cap, partial startup, safe errors | `fa15257234fd41feab73acef2c38abaa` — five expected failures | `7e68636b068c467381766138de35f3c0` — 5 passed, 4 subtests passed |
+| Persisted free-form error rejection | `587781d09b5c44e79a773e7f93eaeb29` — raw detail accepted | `8bafc98410dc4f60b10b19795377dd01` — 2 passed, 4 subtests passed |
+
+Baseline run `aa9af47de855484da25648a37bd8990d`: 19 passed, 7
+subtests passed. Final affected-surface run on the reviewed source
+`4960ab4049574d5d8f1a3ba1d396ca12`: 182 passed, 117 subtests
+passed. Independent re-review confirmed all five Important findings resolved
+with no remaining Critical or Important issue.
+
+### Production-Scheduler Capacity Evidence
+
+All final runs used 100 real HTTP external sessions, 20 active contacts, four
+iMessage workers, two additional FIFO events on one contact, exact route
+assertions, single-ACK assertions, and clean worker/server shutdown:
+
+| Run id | P95 | P99 | Result |
+| --- | ---: | ---: | --- |
+| `bfbe86227e194fa9b600683387c86651` | 288.9 ms | 499.5 ms | pass |
+| `8264aa63acef415b8704934d8313c927` | 281.8 ms | 486.2 ms | pass |
+| `73f6f03118e64b8f94de8883010e98f0` | 293.2 ms | 499.7 ms | pass |
+
+### Replacement And Boundary Evidence
+
+- `git diff --check`: clean.
+- Runtime/API boundary diff for `im_http_router.py`,
+  `external_im_session.py`, and `scripts/env/services/messages.py`: empty.
+- Scheduler/retry owner terms are absent from `scripts/env`, External IM,
+  router, Web management, and `docs/arch`.
+- The only live-tree matches for retired names are the scoped negative residue
+  assertions in `test_imessage_state.py`, which are permitted safety guards.
+
+### Pending Product Evidence
+
+Task 9 remains pending explicit user participation because it sends real
+iMessages. Until the two-contact check passes, automated architecture and
+capacity acceptance is complete, but final product acceptance is not claimed.
+No repository-wide full suite was run because the change is iMessage-local and
+the affected-surface run was clean.
