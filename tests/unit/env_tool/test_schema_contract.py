@@ -112,6 +112,19 @@ class EnvToolSchemaContractTests(unittest.TestCase):
                         path=f"{tool}.{action}.{field_name}",
                     )
 
+    def test_demand_absorb_keeps_provenance_out_of_actor_input(self) -> None:
+        absorb = catalog.get_action_definition("demand_sys", "absorb_into").input_schema
+        merged_target = absorb["properties"]["merged_target"]
+
+        self.assertEqual(
+            set(merged_target["properties"]),
+            {"description", "detail"},
+        )
+        self.assertEqual(
+            merged_target["required"],
+            ["description", "detail"],
+        )
+
     def test_high_risk_schema_shapes_match_domain_contracts(self) -> None:
         self.assertIn("track", catalog.supported_tools())
 

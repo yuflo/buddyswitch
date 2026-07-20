@@ -27,6 +27,7 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
         *,
         description: str | None = None,
         detail: str | None = None,
+        source_refs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         self._sequence += 1
         intake_key = f"actor-self:{label}-{self._sequence}"
@@ -35,7 +36,7 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
             intake_key,
             description or f"Demand {label}.",
             detail or f"Detailed requirement for {label}.",
-            self._refs(intake_key),
+            source_refs if source_refs is not None else self._refs(intake_key),
         )
         return demand_sys.get(
             self.actor_target,
@@ -301,22 +302,41 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
         return current
 
     def test_absorb_d_at_one_into_c_at_five_updates_both_once(self) -> None:
+        c_ref = {
+            "type": "im.message.created",
+            "ref": {
+                "message_id": "msg-c",
+                "conversation_id": "conv-csv",
+                "event_id": "imev-c",
+            },
+        }
+        d_ref = {
+            "type": "im.message.created",
+            "ref": {
+                "message_id": "msg-d",
+                "conversation_id": "conv-csv",
+                "event_id": "imev-d",
+            },
+        }
+        c_refs = [c_ref, c_ref]
+        d_refs = [c_ref, d_ref, d_ref]
         demand_c = self._revise_to_five(
             self._create(
                 "c",
                 description="Support user data CSV export.",
                 detail="Users can export their data as CSV.",
+                source_refs=c_refs,
             )
         )
         demand_d = self._create(
             "d",
             description="CSV export must include the user timezone.",
             detail="Add the user timezone to every exported row.",
+            source_refs=d_refs,
         )
         merged_target = {
             "description": "Support CSV export with the user timezone.",
             "detail": "Users can export CSV and every row includes the user timezone.",
-            "source_refs": [*demand_c["source_refs"], *demand_d["source_refs"]],
         }
 
         receipt = demand_sys.absorb_into(
@@ -341,6 +361,7 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
         self.assertEqual(current_c["revision"], 6)
         self.assertIsNone(current_c["terminal"])
         self.assertEqual(current_c["description"], merged_target["description"])
+        self.assertEqual(current_c["source_refs"], [c_ref, d_ref])
         self.assertEqual(current_d["revision"], 2)
         self.assertEqual(current_d["terminal"]["type"], "absorbed")
         self.assertEqual(current_d["terminal"]["ref"], demand_c["id"])
@@ -365,7 +386,6 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
         merged = {
             "description": "Merged demand.",
             "detail": "Merged detail.",
-            "source_refs": [*source["source_refs"], *target["source_refs"]],
         }
 
         for source_revision, target_revision in ((2, 1), (1, 2)):
@@ -399,7 +419,6 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
                 {
                     "description": "Merged demand.",
                     "detail": "Merged detail.",
-                    "source_refs": [],
                 },
                 "Live children must be handled explicitly.",
             ),

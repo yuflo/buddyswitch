@@ -782,7 +782,7 @@ def _normalize_merged_target(value: Any) -> dict[str, Any]:
     merged = _require_mapping(value, "merged_target")
     _require_exact_fields(
         merged,
-        {"description", "detail", "source_refs"},
+        {"description", "detail"},
         "merged_target",
     )
     return {
@@ -791,10 +791,6 @@ def _normalize_merged_target(value: Any) -> dict[str, Any]:
             "merged_target.description",
         ),
         "detail": _require_text(merged.get("detail"), "merged_target.detail"),
-        "source_refs": _normalize_refs(
-            merged.get("source_refs"),
-            "merged_target.source_refs",
-        ),
     }
 
 
@@ -839,8 +835,12 @@ def absorb_into(
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         records = _records(state, normalized_target)
         source = _find_record(records, normalized_source_id)
+        target = _find_record(records, normalized_target_id)
+        merged_source_refs: list[dict[str, Any]] = []
+        for source_ref in [*target["source_refs"], *source["source_refs"]]:
+            if source_ref not in merged_source_refs:
+                merged_source_refs.append(deepcopy(source_ref))
         if source["terminal"] is not None:
-            target = _find_record(records, normalized_target_id)
             if (
                 _lineage_terminal_matches(
                     source,
@@ -850,20 +850,24 @@ def absorb_into(
                 )
                 and target["description"] == normalized_merged_target["description"]
                 and target["detail"] == normalized_merged_target["detail"]
-                and target["source_refs"] == normalized_merged_target["source_refs"]
+                and target["source_refs"] == merged_source_refs
             ):
                 return False, _receipt(state_changed=False, changes=[])
             raise DemandTerminalConflict(f"Demand {normalized_source_id} is terminal")
         if normalized_source_id == normalized_target_id:
             raise DemandRelationConflict("A Demand cannot absorb into itself")
-        target = _find_record(records, normalized_target_id)
         _require_live(target)
         _require_expected_revision(source, normalized_source_revision)
         _require_expected_revision(target, normalized_target_revision)
         _require_no_live_children(records, normalized_source_id)
         now = runtime_files.now_iso()
         stored_target = state["demands"][normalized_target_id]
-        stored_target.update(deepcopy(normalized_merged_target))
+        stored_target.update(
+            {
+                **deepcopy(normalized_merged_target),
+                "source_refs": merged_source_refs,
+            }
+        )
         next_target_revision = _next_revision(stored_target, now=now)
         stored_source = state["demands"][normalized_source_id]
         stored_source["terminal"] = {

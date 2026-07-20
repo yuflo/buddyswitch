@@ -138,13 +138,15 @@ def _build_definition() -> ToolDefinition:
     }
     merged_target = {
         "type": "object",
-        "description": "Exact target content after absorbing the source Demand.",
+        "description": (
+            "Exact target description and detail after absorbing the source Demand; "
+            "Demand Sys preserves and merges provenance automatically."
+        ),
         "additionalProperties": False,
-        "required": ["description", "detail", "source_refs"],
+        "required": ["description", "detail"],
         "properties": {
             "description": _text("Merged target Demand description."),
             "detail": _text("Merged target Demand detail."),
-            "source_refs": source_refs,
         },
     }
     return ToolDefinition(

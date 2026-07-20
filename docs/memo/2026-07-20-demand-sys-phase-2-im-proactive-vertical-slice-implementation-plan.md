@@ -1614,6 +1614,68 @@ Verification Evidence
 - residual-risk: active actor only; offline capture/replay, Track cutover, and
   Demand/Task coordination remain explicitly later phases
 
+### Post-milestone provenance convergence repair
+
+The isolated milestone could pass when the actor copied every inbound source
+field exactly, but repeated default-environment actor runs exposed that this was
+not a stable system invariant. Actors `act-pm-8da576bd69d1` and
+`act-pm-aea024992318` both made the correct C/U/D organization decision while
+rewriting the absorbed target refs to `{"id": "msg-*"}` and losing the canonical
+conversation and event ids. The old actor schema described only `key` and `id`,
+and `absorb_into` trusted the actor to replace the complete target ref set.
+
+The forward repair makes the Demand domain the sole provenance owner during
+absorption. `merged_target` now contains exactly `description` and `detail`;
+the domain builds a target-first, structurally duplicate-free union across the
+target and source refs, and writes content, provenance, and lineage in the same
+aggregate transaction. No old payload field, alias, fallback, or compatibility
+branch remains in the live actor/domain contract.
+
+Verification Evidence
+- state: RED/GREEN -> IMPACT -> MILESTONE
+- source: `/Users/chen/Dev/buddyswitch/.worktrees/fea-daemon`, HEAD
+  `ddde913190d730b0392ae73ad02961710679b23b` plus the provenance convergence
+  patch; unrelated `.superpowers/` remained untouched
+- RED: focused run `ba5cf621ffec448f8b69781d761bbf68` failed both exact
+  probes because the domain still required `merged_target.source_refs` and the
+  actor schema still exposed it
+- GREEN: focused run `4dd65f0b33e04cf797f8b236cc5f42b5` passed both exact
+  domain/schema probes
+- IMPACT: focused run `f02812d2da5a4edf9ba54da2ee5684c2` passed 50 tests
+  and 662 subtests across Demand organization, actor schema and semantic
+  contracts, env.tool dispatch, native MCP projection, and architecture laws
+- MILESTONE 1: default shared root, real Codex `0.144.4`, actor
+  `act-pm-c30f5ca7a5fe`, thread `019f7b73-0cb3-73c0-a436-4793a0064409`;
+  exact C+D provenance passed, U remained independent, D absorbed into C, every
+  revision was checked, Task projection was empty, and all three daemon handler
+  results were `handled`
+- MILESTONE 2: a second independent default-root actor
+  `act-pm-d528642912b2`, thread `019f7b74-36a6-73f1-b0fa-a2ce7fd1ceec`, passed
+  the same exact assertions without an acceptance-specific corrective prompt
+- code review found that the first repair removed cross-list duplicates but
+  preserved duplicates already present in the target. Exact RED run
+  `79394434022d4fa3b2ddaa2c871b4a0b` reproduced `[A,A] + [A,D,D]` becoming
+  `[A,A,D]`; GREEN run `110b3b65ee2a444a9bf9b8ba5955893b` proved the stable
+  duplicate-free result `[A,D]`
+- post-review IMPACT run `f1112f7a50bb42f9a38708bb2720401e` passed the same
+  50 tests and 662 subtests on the final executable identity
+- final post-review MILESTONE: default-root actor `act-pm-3d4fcf6c302d`, thread
+  `019f7b79-3798-7391-8f16-d0a4383ed03f`, again passed exact C+D provenance,
+  independent U, absorbed D, complete revision acknowledgement, empty Task
+  projection, and three handled daemon results
+- cleanup: both live instances and their web/runtime processes were stopped and
+  deleted after each run; no `bs-demand-phase2-*` root remained. Durable
+  Demand/identity/IM records created in the explicitly requested default
+  environment remain as production-style acceptance evidence because there is
+  no scoped public purge action; the repository and unrelated runtime state
+  were not reset.
+- proves: provenance preservation no longer depends on actor payload
+  reconstruction; Phase 2 C/U/D organization converges through one domain-owned
+  write rule while Task Sys and generic daemon boundaries remain unchanged
+- residual-risk: default-root acceptance leaves durable test records unless the
+  whole environment is explicitly reset; offline intake/recovery and
+  Demand-to-Task coordination remain later phases
+
 ## 7. Definition of done
 
 Phase 2 is complete only when:

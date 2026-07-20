@@ -81,6 +81,14 @@ as `split` and `absorb_into` validate and mutate inside one actor aggregate
 transaction. Parent and dependency cycles are rejected. Exact intake and
 terminal action replays are idempotent; conflicting replays are rejected.
 
+Source provenance is domain-owned state, not actor-authored organization
+content. Inbound adapters supply exact source refs when a Demand is captured;
+when one Demand is absorbed into another, the Demand domain preserves the
+target-first order and builds one duplicate-free union with the source refs
+atomically. The actor decides the relation and merged description/detail, but
+cannot round-trip or rewrite the canonical provenance as part of
+`absorb_into`.
+
 ## Check semantics
 
 `check` is read-only. It returns:

@@ -303,7 +303,6 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
                 "merged_target": {
                     "description": "Merged target",
                     "detail": "Target now contains the supplemental Demand.",
-                    "source_refs": [],
                 },
                 "summary": "Supplement absorbed into the active Demand.",
             },
