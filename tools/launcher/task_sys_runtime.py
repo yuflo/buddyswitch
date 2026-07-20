@@ -121,8 +121,8 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             "Core policy: decide by required resources.",
             (
                 "A side thread may handle the task only when completion requires this task_sys.side_frame, exact "
-                "source objects referenced by this frame, bounded read-only inspection, source-specific message "
-                "tools allowed by this frame, and one Task Sys completion operation."
+                "source objects reachable through product tools allowed by this frame, source-specific message tools, "
+                "and one Task Sys completion operation."
             ),
             (
                 "If the task requires parent attention, workspace resources, browser/web/research resources, shared "
@@ -138,10 +138,6 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     "- Read exact source refs from this frame.",
                     "- Use source-specific product reads only when allowed above.",
                     "- Use track/artifact/context read-only tools only for bounded inspection.",
-                    (
-                        "- Use local read-only inspection only; do not run tests, builds, app servers, installers, "
-                        "formatters, or commands that write files/cache/state."
-                    ),
                     "- Use search.status only for capability/status inspection.",
                 )
             ),
@@ -162,6 +158,7 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                 (
                     "Do not use or mutate:",
                     "- parent turns, parent submit, parent interrupt, or parent steering directly,",
+                    "- Do not inspect the local filesystem or run shell commands from side, even for read-only work.",
                     "- source files, git, config, dependencies, tests, builds, app runtime, or workspace state,",
                     "- browser session, web search, webpage reading, evidence gathering, or research loops,",
                     "- Track shared state, including comments, status, requirements, materials, proof, resolve, archive,",
@@ -177,12 +174,13 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
                     "1. Identify the resources required to complete the user-visible task.",
                     "2. If all required resources are allowed side resources, complete the task in side.",
                     "3. If any required resource is forbidden or belongs to parent, call task_sys.need_parent.",
+                    "4. A request that requires projects/app or another workspace path must use task_sys.need_parent.",
                     (
-                        "4. Do not call task_sys.need_parent for message work that this frame's source-specific "
+                        "5. Do not call task_sys.need_parent for message work that this frame's source-specific "
                         "message guidance allows."
                     ),
                     (
-                        "5. Do call task_sys.need_parent for research, implementation, planning, verification, "
+                        "6. Do call task_sys.need_parent for research, implementation, planning, verification, "
                         "shared product-state writes, Track replies, "
                         "artifact/evidence output, browser/web use, or parent-thread continuity."
                     ),
@@ -267,11 +265,63 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
     )
 
 
+def render_completion_frame(frame: Mapping[str, Any]) -> str:
+    payload = _require_mapping(frame, "frame")
+    if set(payload) != {"kind", "task_id", "source", "evidence_ref", "completion"}:
+        raise ValueError(
+            "completion frame must contain exactly kind, task_id, source, evidence_ref, and completion"
+        )
+    task_id = _require_text(payload.get("task_id"), "frame.task_id")
+    source = _require_mapping(payload.get("source"), "frame.source")
+    if set(source) != {"type", "ref"} or source.get("type") != "demand":
+        raise ValueError("completion frame source must be an exact Demand reference")
+    source_ref = _require_mapping(source.get("ref"), "frame.source.ref")
+    if set(source_ref) != {"demand_id", "basis_revision"}:
+        raise ValueError("completion frame Demand ref must contain exactly demand_id and basis_revision")
+    _require_text(source_ref.get("demand_id"), "frame.source.ref.demand_id")
+    basis_revision = source_ref.get("basis_revision")
+    if type(basis_revision) is not int or basis_revision < 1:
+        raise ValueError("frame.source.ref.basis_revision must be a positive integer")
+    evidence_ref = _require_mapping(payload.get("evidence_ref"), "frame.evidence_ref")
+    if set(evidence_ref) != {"type", "ref"} or evidence_ref.get("type") != "task_sys.task":
+        raise ValueError("completion frame evidence_ref must be a task_sys.task reference")
+    evidence_identity = _require_mapping(evidence_ref.get("ref"), "frame.evidence_ref.ref")
+    if set(evidence_identity) != {"task_id"} or evidence_identity.get("task_id") != task_id:
+        raise ValueError("completion frame evidence_ref must identify the completed task_id exactly")
+    completion = _require_mapping(payload.get("completion"), "frame.completion")
+    if completion.get("type") != "completion" or completion.get("processor") not in {"side", "parent"}:
+        raise ValueError("completion frame must contain a side or parent completion receipt")
+    _require_text(completion.get("updated_at"), "frame.completion.updated_at")
+    return "\n\n".join(
+        (
+            "task_sys.completion_frame",
+            "This Task is already terminal. This frame is a completion receipt, not Task work.",
+            f"Completed Task id: {task_id}",
+            "Task source snapshot:\n" + _json_block(source),
+            "Task completion receipt:\n" + _json_block(completion),
+            "Task completion evidence reference:\n" + _json_block(evidence_ref),
+            "Required action:",
+            (
+                "Reconcile the source-owned obligation using the latest source state and actor tools. "
+                "The recorded source snapshot is evidence of what this Task processed, not proof that later source changes are satisfied. "
+                "Pass this evidence reference unchanged if the latest source obligation is completed."
+            ),
+            (
+                "Do not reopen this terminal Task or create a replacement for this same source snapshot. "
+                "Keep the source obligation live when the latest state is not satisfied. After reconciliation, continue now with at most "
+                "one other live Demand through task_sys.create when no Task is active."
+            ),
+        )
+    )
+
+
 def render_submit_parent_frame(frame: Mapping[str, Any]) -> str:
     payload = _require_mapping(frame, "frame")
     kind = _require_text(payload.get("kind"), "frame.kind")
     if kind == "task_sys.parent_frame":
         return render_parent_frame(payload)
+    if kind == "task_sys.completion_frame":
+        return render_completion_frame(payload)
     raise ValueError(f"unsupported submit_parent frame kind: {kind}")
 
 

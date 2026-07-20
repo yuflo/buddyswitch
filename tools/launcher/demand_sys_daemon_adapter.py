@@ -15,7 +15,7 @@ Actor-owned Demand revisions require attention.
 Call demand_sys.check(). Compare pending Demand descriptions with the live index,
 load only plausible candidates with demand_sys.get_many, apply only necessary
 Demand organization actions, and call demand_sys.complete_check with the exact
-revisions observed. Do not create or modify Task Sys during this Demand Check."""
+revisions observed."""
 
 
 def _actor_input_receipt(result: Any) -> dict[str, str]:

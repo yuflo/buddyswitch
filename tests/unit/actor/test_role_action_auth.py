@@ -67,6 +67,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "message.mark",
             "message.list",
             "task_sys.cancel",
+            "task_sys.create",
         ):
             with self.subTest(permission=permission):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
@@ -141,6 +142,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertIn("track.archive", summary["available_actions"])
         self.assertIn("track.resolve_comment_thread", summary["available_actions"])
         self.assertIn("task_sys.cancel", summary["available_actions"])
+        self.assertIn("task_sys.create", summary["available_actions"])
         self.assertEqual(summary["restricted_actions"], [])
         self.assertEqual(summary["restricted_action_details"], {})
 

@@ -124,11 +124,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             },
         )
 
-    def _envelope(self) -> dict[str, Any]:
+    def _envelope(self, *, source_id: str = "event-1") -> dict[str, Any]:
         return {
             "source": {
                 "type": "test.inbound.created",
-                "ref": {"id": "event-1", "channel": "fixture"},
+                "ref": {"id": source_id, "channel": "fixture"},
             },
             "actor_target": {
                 "role_id": "dev",
@@ -637,9 +637,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
     def test_record_task_cancel_moves_each_active_status_to_canceled(self) -> None:
         task_sys = _task_sys()
 
-        for start_status in task_sys.ACTIVE_TASK_STATUSES:
+        for index, start_status in enumerate(task_sys.ACTIVE_TASK_STATUSES):
             with self.subTest(start_status=start_status):
-                task_id = task_sys.ingest(self._envelope())["task_id"]
+                task_id = task_sys.ingest(
+                    self._envelope(source_id=f"cancel-status-{index}")
+                )["task_id"]
                 if start_status in {task_sys.AWAITING_PARENT, task_sys.PARENT_PROCESSING}:
                     self._move_to_needs_parent(task_id)
                 if start_status == task_sys.PARENT_PROCESSING:
@@ -655,11 +657,15 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_task_cancel_is_retry_safe_but_rejects_completed(self) -> None:
         task_sys = _task_sys()
-        canceled_id = task_sys.ingest(self._envelope())["task_id"]
-        completed_id = task_sys.ingest(self._envelope())["task_id"]
+        canceled_id = task_sys.ingest(
+            self._envelope(source_id="cancel-retry")
+        )["task_id"]
 
         first = task_sys.record_task_cancel(canceled_id, {"reason": "Superseded."})
         retry = task_sys.record_task_cancel(canceled_id, {"reason": "Retry."})
+        completed_id = task_sys.ingest(
+            self._envelope(source_id="completed-before-cancel")
+        )["task_id"]
         task_sys.record_task_close(completed_id, {"summary": "Completed."})
 
         self.assertTrue(first["state_changed"])

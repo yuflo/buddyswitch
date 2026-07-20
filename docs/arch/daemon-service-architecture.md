@@ -35,7 +35,8 @@ Each product module owns its own business meaning and exposes a narrow adapter
 to generic daemon capabilities.
 
 - Task Sys owns task storage, lifecycle rules, actor task projection, runtime
-  command names, payload validation, timeout policy, and Task errors.
+  command names, payload validation, timeout policy, Task errors, and Task
+  completion attention frames.
 - Demand Sys owns Demand lifecycle, attention policy, actor-check prompt,
   organization judgment contract, and persistence.
 - IM owns actor-directed message delivery, payload validation, identity and
@@ -47,6 +48,11 @@ to generic daemon capabilities.
 
 Product adapters may depend on generic daemon contracts and clients. Generic
 daemon modules may not depend on product adapters.
+
+Cross-product judgment remains outside daemon infrastructure. In the current
+Demand/Task flow, the Actor + installed task-management skill calls the two
+independent actor action catalogs. Daemon runtime only delivers the Demand
+Check text and Task frames supplied by their owning product adapters.
 
 `DaemonRuntime` exposes only product-neutral host mechanics to handlers:
 

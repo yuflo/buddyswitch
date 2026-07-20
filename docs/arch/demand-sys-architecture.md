@@ -22,10 +22,13 @@ coordination, pending-attention policy, and the fixed Demand Check prompt. It
 calls the same domain owner used by actor actions and uses the generic daemon
 `input_actor` host capability; it does not own lifecycle or storage.
 
-The actor owns matching and organization judgment. Task Sys has no IM or Demand
-dependency. Track remains on its separate current Task path. This phase captures
-only for an already-active target actor; offline capture, replay, and startup
-recovery are not implemented.
+The actor owns matching, organization, and execution-selection judgment. The
+Actor + installed task-management skill is the only semantic composition
+boundary with Task Sys. Task Sys may persist an opaque DemandRef chosen by the
+actor, but it does not import, read, validate against, call, subscribe to, or
+mutate Demand state. Track remains on its separate current Task path. This
+phase captures only for an already-active target actor; offline capture,
+replay, and startup recovery are not implemented.
 
 ## Ownership and storage
 
@@ -151,7 +154,7 @@ Demand implementation -> Task Sys
 Demand implementation -> daemon modules or launcher product adapters
 generic daemon -> Demand implementation or Demand semantics
 IM handler -> Task Sys
-Task Sys -> IM or Demand
+Task implementation -> Demand import, read, validation, call, subscription, or mutation
 Track handler -> Demand implementation in this phase
 public CLI or actor tool -> Demand repository/raw aggregate files
 new Demand alias, fallback read, dual write, shadow state, or second schema

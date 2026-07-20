@@ -136,7 +136,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_list_comments = catalog.get_action_definition("track", "list_comments").input_schema
         track_resolve_comment = catalog.get_action_definition("track", "resolve_comment_thread").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
-        self.assertEqual(set(catalog.supported_actions("task_sys")), {"list", "get", "close", "cancel", "need_parent"})
+        self.assertEqual(set(catalog.supported_actions("task_sys")), {"create", "list", "get", "close", "cancel", "need_parent"})
+        task_sys_create_action = catalog.get_action_definition("task_sys", "create")
+        task_sys_create = task_sys_create_action.input_schema
         task_sys_list = catalog.get_action_definition("task_sys", "list").input_schema
         task_sys_get = catalog.get_action_definition("task_sys", "get").input_schema
         task_sys_close = catalog.get_action_definition("task_sys", "close").input_schema
@@ -235,6 +237,21 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("artifact_revision_id", track_add_comment["properties"])
         self.assertEqual(track_list_comments["properties"]["status"].get("enum"), ["open", "resolved", "all"])
 
+        self.assertEqual(task_sys_create.get("required"), ["demand_ref", "execution_brief"])
+        self.assertIs(task_sys_create.get("additionalProperties"), False)
+        self.assertEqual(set(task_sys_create["properties"]), {"demand_ref", "execution_brief"})
+        demand_ref = task_sys_create["properties"]["demand_ref"]
+        self.assertIs(demand_ref.get("additionalProperties"), False)
+        self.assertEqual(demand_ref.get("required"), ["demand_id", "basis_revision"])
+        self.assertEqual(set(demand_ref["properties"]), {"demand_id", "basis_revision"})
+        self.assertEqual(demand_ref["properties"]["basis_revision"].get("minimum"), 1)
+        execution_brief = task_sys_create["properties"]["execution_brief"]
+        self.assertIs(execution_brief.get("additionalProperties"), False)
+        self.assertEqual(execution_brief.get("required"), ["description", "detail"])
+        self.assertEqual(set(execution_brief["properties"]), {"description", "detail"})
+        self.assertEqual(task_sys_create_action.required_permission, "task_sys.create")
+        self.assertEqual(task_sys_create_action.task_requirement, "free")
+        self.assertEqual(task_sys_create_action.mutates, "runtime_objects")
         self.assertEqual(task_sys_list.get("required"), [])
         self.assertEqual(task_sys_list["properties"]["status"].get("enum"), ["active", "recoverable", "all"])
         self.assertEqual(task_sys_list["properties"]["limit"].get("type"), "integer")

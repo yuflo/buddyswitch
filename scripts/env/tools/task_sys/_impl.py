@@ -94,6 +94,45 @@ def _reject_unknown_payload_fields(*, action: str, args: dict[str, Any], context
     )
 
 
+def _domain_rejection(*, action: str, context: Any, exc: Exception) -> dict[str, Any]:
+    code = str(getattr(exc, "code", "E_TASK_SYS_PAYLOAD"))
+    extra: dict[str, Any] = {}
+    task_id = getattr(exc, "task_id", None)
+    if code == "E_TASK_SYS_ACTIVE_CONFLICT":
+        if isinstance(task_id, str):
+            extra["active_task_id"] = task_id
+        task_status = getattr(exc, "task_status", None)
+        if isinstance(task_status, str):
+            extra["active_task_status"] = task_status
+        retry_guidance = "Finish or cancel the returned active Task, then reconsider the current Demand revision."
+    elif code == "E_TASK_SYS_SOURCE_CONFLICT":
+        if isinstance(task_id, str):
+            extra["conflicting_task_id"] = task_id
+        retry_guidance = "Read the existing Task and do not reuse the same Demand revision with a different execution brief."
+    else:
+        retry_guidance = "Retry with the exact documented DemandRef and execution_brief fields."
+    return tool_results.rejection(
+        tool="task_sys",
+        action=f"task_sys.{action}",
+        current_identity=_current_identity(context),
+        active_role=_active_role(context),
+        code=code,
+        message=str(exc),
+        permission_boundary="task_sys.actor_owned_lifecycle",
+        human_summary="Task Sys rejected the requested action.",
+        why_blocked=str(exc),
+        impact="No Task, Demand, Track, Message, Artifact, or runtime turn was changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance=retry_guidance,
+        allowed_next_actions=[
+            "Use task_sys.list or task_sys.get to inspect the current actor-owned Task state.",
+            "Re-evaluate the current source snapshot before retrying task_sys.create.",
+        ],
+        extra=extra,
+    )
+
+
 def _task_events(task: Mapping[str, Any]) -> list[dict[str, Any]]:
     events = task.get("events")
     if not isinstance(events, list):
@@ -128,6 +167,8 @@ def _success(
     *,
     parent_instruction: dict[str, Any] | None = None,
     parent_runtime: dict[str, Any] | None = None,
+    runtime: dict[str, Any] | None = None,
+    completion_attention: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task = result.get("task") if isinstance(result.get("task"), dict) else {}
     execution = task.get("execution") if isinstance(task, dict) else None
@@ -165,7 +206,18 @@ def _success(
         extra["parent_instruction"] = parent_instruction
     if isinstance(parent_runtime, dict):
         extra["parent_runtime"] = parent_runtime
-    if action == "close":
+    if isinstance(completion_attention, dict):
+        extra["completion_attention"] = completion_attention
+    if action == "create":
+        source_ref = task.get("source_ref")
+        extra["demand_ref"] = dict(source_ref) if isinstance(source_ref, Mapping) else None
+        extra["runtime"] = dict(runtime) if isinstance(runtime, dict) else None
+        effect_summary = (
+            "Created and started Demand-sourced Task."
+            if result.get("outcome") == "created"
+            else "Returned existing Demand-sourced Task without restarting it."
+        )
+    elif action == "close":
         effect_summary = "Closed Task Sys task."
     elif action == "cancel":
         effect_summary = "Canceled Task Sys task."
@@ -181,7 +233,8 @@ def _success(
         effect_summary=effect_summary,
         state_changed=bool(result.get("state_changed", True)),
         durability="durable",
-        updated_ids=[str(result.get("task_id"))],
+        created_ids=[str(result.get("task_id"))] if action == "create" and result.get("outcome") == "created" else [],
+        updated_ids=[str(result.get("task_id"))] if action != "create" else [],
         state_changes=[
             {
                 "object": "task_sys.task",
@@ -195,16 +248,16 @@ def _success(
     )
 
 
-def _execute_parent_instruction(context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
+def _execute_runtime_instruction(context: Any, instruction: dict[str, Any]) -> dict[str, Any]:
     runtime_access = context.get("task_sys_runtime") if isinstance(context, dict) else None
     if runtime_access is None:
         runtime_access = getattr(context, "task_sys_runtime", None)
     execute = getattr(runtime_access, "execute_instruction", None)
     if not callable(execute):
-        raise RuntimeError("Task Sys parent runtime execution is unavailable")
+        raise RuntimeError("Task Sys runtime execution is unavailable")
     result = execute(instruction)
     if not isinstance(result, dict):
-        raise RuntimeError("Task Sys parent runtime execution returned a non-object result")
+        raise RuntimeError("Task Sys runtime execution returned a non-object result")
     return result
 
 
@@ -254,6 +307,41 @@ def _limit(args: dict[str, Any]) -> int:
     return raw
 
 
+def _actor_owned_task(task_sys: Any, context: Any, task_id: str) -> dict[str, Any]:
+    actor_target = _actor_target(context)
+    task = task_sys.get_task(task_id)
+    owner = task.get("actor_target")
+    if (
+        not isinstance(owner, Mapping)
+        or owner.get("actor_id") != actor_target["actor_id"]
+        or owner.get("role_id") != actor_target["role_id"]
+    ):
+        raise PermissionError("task does not belong to the active actor")
+    return task
+
+
+def create(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+    task_sys = _task_sys_domain(context)
+    try:
+        result = task_sys.create(
+            actor_target=_actor_target(context),
+            demand_ref=args.get("demand_ref"),
+            execution_brief=args.get("execution_brief"),
+        )
+    except task_sys.TaskSysError as exc:
+        return _domain_rejection(action="create", context=context, exc=exc)
+    except ValueError as exc:
+        return _domain_rejection(action="create", context=context, exc=exc)
+
+    runtime: dict[str, Any] | None = None
+    instruction = result.get("instruction")
+    if isinstance(instruction, dict):
+        runtime = _execute_runtime_instruction(context, instruction)
+        current_task = task_sys.get_task(str(result.get("task_id") or ""))
+        result = dict(result, task=current_task)
+    return _success("create", result, context, runtime=runtime)
+
+
 def list_tasks(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
     status = args.get("status") or "active"
@@ -285,12 +373,8 @@ def list_tasks(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def get(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
-    actor_target = _actor_target(context)
     task_id = str(args.get("task_id") or "")
-    task = task_sys.get_task(task_id)
-    owner = task.get("actor_target")
-    if not isinstance(owner, Mapping) or owner.get("actor_id") != actor_target["actor_id"] or owner.get("role_id") != actor_target["role_id"]:
-        raise PermissionError("task does not belong to the active actor")
+    task = _actor_owned_task(task_sys, context, task_id)
     events = _task_events(task)
     return _read_success(
         "get",
@@ -306,8 +390,10 @@ def get(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
+    task_id = str(args.get("task_id") or "")
+    _actor_owned_task(task_sys, context, task_id)
     result = task_sys.record_task_close(
-        str(args.get("task_id") or ""),
+        task_id,
         {"summary": args.get("summary")},
     )
     task = result.get("task") if isinstance(result.get("task"), dict) else {}
@@ -315,17 +401,35 @@ def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     execution_result = execution.get("result") if isinstance(execution, dict) else None
     if isinstance(execution_result, dict) and execution_result.get("processor") == "side" and "cleanup" not in execution_result:
         result = dict(result, task=_record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))["task"])
-    return _success("close", result, context)
+    completion_attention: dict[str, Any] | None = None
+    instruction = task_sys.completion_instruction(task_id)
+    if isinstance(instruction, dict):
+        try:
+            runtime_result = _execute_runtime_instruction(context, instruction)
+        except Exception as exc:
+            completion_attention = {
+                "status": "failed",
+                "task_id": task_id,
+                "error": str(exc),
+            }
+        else:
+            completion_attention = {
+                "status": "submitted",
+                "task_id": task_id,
+                "runtime": runtime_result,
+            }
+    return _success(
+        "close",
+        result,
+        context,
+        completion_attention=completion_attention,
+    )
 
 
 def cancel(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
-    actor_target = _actor_target(context)
     task_id = str(args.get("task_id") or "")
-    task = task_sys.get_task(task_id)
-    owner = task.get("actor_target")
-    if not isinstance(owner, Mapping) or owner.get("actor_id") != actor_target["actor_id"] or owner.get("role_id") != actor_target["role_id"]:
-        raise PermissionError("task does not belong to the active actor")
+    _actor_owned_task(task_sys, context, task_id)
     result = task_sys.record_task_cancel(task_id, {"reason": args.get("reason")})
     task = result.get("task") if isinstance(result.get("task"), dict) else {}
     execution = task.get("execution") if isinstance(task, dict) else None
@@ -337,15 +441,17 @@ def cancel(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
+    task_id = str(args.get("task_id") or "")
+    _actor_owned_task(task_sys, context, task_id)
     result = task_sys.record_side_need_parent(
-        str(args.get("task_id") or ""),
+        task_id,
         {
             "params": args.get("params"),
         },
     )
     instruction = task_sys.parent_handoff_instruction(str(result.get("task_id") or ""))
     try:
-        parent_runtime = _execute_parent_instruction(context, instruction)
+        parent_runtime = _execute_runtime_instruction(context, instruction)
     except Exception:
         _record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))
         raise
@@ -363,6 +469,7 @@ def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 _ACTION_HANDLERS = {
+    "create": create,
     "list": list_tasks,
     "get": get,
     "close": close,

@@ -31,7 +31,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
     _DOMAIN_CROSS_OBJECT_ALLOWLIST = {
         "publication",
         "artifact_visibility",
-        "tasks",
         "source_refs",
         "actor_private_workspace",
         "identity",
@@ -442,7 +441,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         allowed_paths = {
             "scripts/env/repos/artifacts.py",
             "scripts/env/repos/tracks.py",
-            "scripts/env/domain/tasks.py",
         }
         scanned_roots = [ROOT / "scripts/env/domain"]
         violations: list[str] = []
@@ -455,6 +453,18 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                 if any(term in source for term in publication_terms):
                     violations.append(rel)
         self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_retired_task_domain_and_repository_imports_are_absent(self) -> None:
+        self.assertFalse((ROOT / "scripts/env/domain/tasks.py").exists())
+        violations: list[str] = []
+        for scan_root in (ROOT / "scripts", ROOT / "tools", ROOT / "buddyswitch"):
+            for path in sorted(scan_root.rglob("*")):
+                if not path.is_file() or path.suffix not in {".py", ".md"}:
+                    continue
+                source = path.read_text(encoding="utf-8")
+                if "env.domain.tasks" in source or "env.repos.tasks" in source:
+                    violations.append(path.relative_to(ROOT).as_posix())
+        self.assertEqual(violations, [])
 
     def test_domain_cross_object_imports_are_allowlisted(self) -> None:
         domain_files = sorted(path for path in ROOT.glob("scripts/**/domain/*.py") if path.name != "__init__.py")

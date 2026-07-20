@@ -361,12 +361,13 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             tracks = track_read.list_external_tracks()
             track = track_read.get_external_track("track-demo")
 
-        task_keys = ("task_id", "source_type", "status", "actor", "updated_at")
+        task_keys = ("task_id", "source_type", "demand_ref", "status", "actor", "updated_at")
         for row in (*tasks, task):
             self.assertIsNotNone(row)
             assert row is not None
             self.assertEqual(tuple(row), task_keys)
             self.assertEqual(tuple(row["actor"]), ("actor_id", "role_id"))
+            self.assertIsNone(row["demand_ref"])
 
         track_summary_keys = (
             "id",

@@ -410,6 +410,30 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
         self.assertEqual(result.status, "handled")
         self._assert_track_comment_task(comment, runtime)
 
+    def test_track_comment_handler_replay_does_not_start_another_side_turn(self) -> None:
+        instance = self._instance()
+        runtime = FakeDaemonRuntime()
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
+        trigger = self._trigger(payload=self._payload_for(comment))
+
+        first = self.handler.handle(
+            instance["context"],
+            instance["state"],
+            runtime,
+            trigger,
+        )
+        replay = self.handler.handle(
+            instance["context"],
+            instance["state"],
+            runtime,
+            trigger,
+        )
+
+        self.assertEqual(first.status, "handled")
+        self.assertEqual(replay.status, "handled")
+        self.assertEqual(len(self._task_records()), 1)
+        self.assertEqual(len(self.adapter_calls), 1)
+
     def test_track_comment_handler_ignores_parent_activity_when_ingesting_task(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(activity={"status": "running", "active_turn_id": "turn-main-1"})

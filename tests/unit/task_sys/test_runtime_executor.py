@@ -161,6 +161,31 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             },
         }
 
+    def _completion_instruction(self) -> dict[str, Any]:
+        return {
+            "type": "submit_parent",
+            "task_id": "task-demand-completed123",
+            "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
+            "frame": {
+                "kind": "task_sys.completion_frame",
+                "task_id": "task-demand-completed123",
+                "source": {
+                    "type": "demand",
+                    "ref": {"demand_id": "demand-runtime-completed", "basis_revision": 4},
+                },
+                "evidence_ref": {
+                    "type": "task_sys.task",
+                    "ref": {"task_id": "task-demand-completed123"},
+                },
+                "completion": {
+                    "type": "completion",
+                    "processor": "side",
+                    "summary": "Completed the selected Demand snapshot.",
+                    "updated_at": "2026-07-20T10:00:00+08:00",
+                },
+            },
+        }
+
     def test_render_side_frame_is_task_sys_scoped_without_relation_gate(self) -> None:
         text = self.module.render_side_frame(self._instruction()["frame"])
 
@@ -183,6 +208,15 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("Track shared state, including comments", text)
         self.assertIn("browser session, web search, webpage reading, evidence gathering, or research loops", text)
         self.assertIn("source files, git, config, dependencies, tests, builds, app runtime, or workspace state", text)
+        self.assertIn(
+            "Do not inspect the local filesystem or run shell commands from side, even for read-only work.",
+            text,
+        )
+        self.assertIn(
+            "A request that requires projects/app or another workspace path must use task_sys.need_parent",
+            text,
+        )
+        self.assertNotIn("Use local read-only inspection only", text)
         self.assertIn("artifacts, evidence, durable deliverables", text)
         self.assertNotIn("checkpoint", text.lower())
         self.assertNotIn("checkpoint_update", text)
@@ -458,6 +492,43 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
 
         self.assertNotIn("checkpoint", text.lower())
         self.assertNotIn("checkpoint_update", text)
+
+    def test_render_completion_frame_is_terminal_receipt_for_source_reconciliation(self) -> None:
+        text = self.module.render_submit_parent_frame(self._completion_instruction()["frame"])
+
+        self.assertIn("task_sys.completion_frame", text)
+        self.assertIn("task-demand-completed123", text)
+        self.assertIn("demand-runtime-completed", text)
+        self.assertIn("basis_revision", text)
+        self.assertIn("Completed the selected Demand snapshot.", text)
+        self.assertIn('"task_id": "task-demand-completed123"', text)
+        self.assertIn("Pass this evidence reference unchanged", text)
+        self.assertIn("already terminal", text)
+        self.assertIn("reconcile", text.lower())
+        self.assertIn("source-owned obligation", text)
+        self.assertNotIn("task_sys.close", text)
+        self.assertNotIn("task_sys.cancel", text)
+        self.assertIn("task_sys.create", text)
+        self.assertIn("one other live Demand", text)
+        self.assertNotIn("Demand status", text)
+        self.assertNotIn("Demand lifecycle", text)
+
+    def test_execute_completion_instruction_reuses_submit_parent_runtime(self) -> None:
+        context = self._context()
+        calls: list[dict[str, Any]] = []
+        original_input = self.module.actor_session.input_actor_turn
+        self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_input)
+        self.module.actor_session.input_actor_turn = lambda **kwargs: (
+            calls.append(kwargs) or {"turn_id": "turn-completion-attention"}
+        )
+
+        result = self.module.execute_instruction(context, self._completion_instruction())
+
+        self.assertEqual(result["action"], "submit_parent")
+        self.assertEqual(result["task_id"], "task-demand-completed123")
+        self.assertEqual(result["turn_id"], "turn-completion-attention")
+        self.assertEqual(len(calls), 1)
+        self.assertIn("task_sys.completion_frame", calls[0]["text"])
 
     def test_render_side_frame_no_longer_calls_close_a_side_result(self) -> None:
         text = self.module.render_side_frame(self._instruction()["frame"])

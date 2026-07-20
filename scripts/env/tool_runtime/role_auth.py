@@ -18,6 +18,7 @@ COMMON_ROLE_PERMISSIONS = frozenset(
         "track.resolve_comment_thread",
         "task_sys.list",
         "task_sys.get",
+        "task_sys.create",
         "task_sys.close",
         "task_sys.need_parent",
         "task_sys.cancel",

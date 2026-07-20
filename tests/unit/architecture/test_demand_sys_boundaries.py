@@ -121,6 +121,11 @@ def test_phase_two_has_one_demand_daemon_adapter_and_no_task_or_generic_daemon_c
     assert not any("task_sys" in name for name in handler_imports)
     assert "env.domain.demand_sys" in adapter_imports
     assert not any("env.repos.demands" in name for name in adapter_imports)
+    adapter_source = (REPO_ROOT / adapter).read_text(encoding="utf-8").lower()
+    assert "task_sys" not in adapter_source
+    assert "task sys" not in adapter_source
+    assert "task lifecycle" not in adapter_source
+    assert "task selection" not in adapter_source
 
     track_source = (REPO_ROOT / "tools/launcher/track_comment_added_handler.py").read_text(encoding="utf-8")
     task_ingress = (REPO_ROOT / "tools/launcher/task_sys_ingress.py").read_text(encoding="utf-8")
@@ -163,3 +168,12 @@ def test_phase_one_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
         assert "demand_v2" not in source, path
         assert "legacy_demand" not in source, path
         assert "fallback_demand" not in source, path
+
+
+def test_current_architecture_allows_only_opaque_task_reference_collaboration() -> None:
+    text = (REPO_ROOT / "docs/arch/demand-sys-architecture.md").read_text(encoding="utf-8")
+
+    assert "opaque DemandRef" in text
+    assert "Actor + installed task-management skill" in text
+    assert "Task Sys -> IM or Demand" not in text
+    assert "Task implementation -> Demand import, read, validation, call, subscription, or mutation" in text

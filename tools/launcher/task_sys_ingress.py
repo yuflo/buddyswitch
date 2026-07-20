@@ -44,11 +44,14 @@ def _actor_target(*, actor_id: str, role_id: str) -> dict[str, str]:
 def _result_payload(result: Mapping[str, Any], *, actor_id: str, role_id: str) -> dict[str, Any]:
     instruction = result.get("instruction")
     instruction_type = instruction.get("type") if isinstance(instruction, Mapping) else None
+    outcome = str(result.get("outcome"))
     payload: dict[str, Any] = {
         "ok": bool(result.get("ok")),
         "actor_id": actor_id,
         "role_id": role_id,
-        "action": "task_created",
+        "action": "task_created" if outcome == "created" else "task_existing",
+        "outcome": outcome,
+        "state_changed": result.get("state_changed") is True,
         "task_id": result.get("task_id"),
         "instruction_type": instruction_type,
         "instruction": dict(instruction) if isinstance(instruction, Mapping) else None,

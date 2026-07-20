@@ -22,12 +22,14 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id="task_sys",
         title="Task Sys",
-        description="Task Sys actions read actor-owned task state and advance active side or parent frames.",
-        scope="Task Sys task reads and frame-state updates for the active actor.",
+        description="Task Sys actions create, read, and advance actor-owned Task lifecycle state.",
+        scope="Actor-owned Task creation, reads, and frame-state updates.",
         capability_boundary=(
-            "Task Sys read actions inspect actor-owned task state. task_sys.close and task_sys.cancel make legal "
-            "terminal transitions; task_sys.need_parent may submit or interrupt+submit the parent only through a "
-            "Task Sys runtime instruction. These actions do not send messages, mutate tracks, or write actor private files."
+            "task_sys.create establishes one Demand-sourced Task through the canonical side lifecycle. Task Sys read "
+            "actions inspect actor-owned task state. task_sys.close and task_sys.cancel make legal "
+            "terminal transitions; task_sys.close may submit Task completion attention and task_sys.need_parent may "
+            "submit or interrupt+submit the parent only through a Task Sys runtime instruction. These actions do not "
+            "mutate Demands, send messages, mutate tracks, or write actor private files."
         ),
         object_model=(
             "Task Sys tasks are durable task records with source refs, actor targets, one canonical lifecycle status, "
@@ -40,6 +42,84 @@ def _build_definition() -> ToolDefinition:
             "You need to act directly on IM, Track, artifact, browser, or parent-thread runtime state.",
         ),
         actions=(
+            ActionDefinition(
+                name="create",
+                title="task_sys.create",
+                description="Create or replay one Task from one exact Demand revision through the canonical side lifecycle.",
+                input_schema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["demand_ref", "execution_brief"],
+                    "properties": {
+                        "demand_ref": {
+                            "type": "object",
+                            "description": "Opaque Demand snapshot identity selected by the actor.",
+                            "additionalProperties": False,
+                            "required": ["demand_id", "basis_revision"],
+                            "properties": {
+                                "demand_id": {
+                                    "type": "string",
+                                    "description": "Exact actor-owned Demand id selected for execution.",
+                                },
+                                "basis_revision": {
+                                    "type": "integer",
+                                    "description": "Exact Demand revision observed when selecting the work.",
+                                    "minimum": 1,
+                                },
+                            },
+                        },
+                        "execution_brief": {
+                            "type": "object",
+                            "description": "Self-contained work brief for the Task side frame.",
+                            "additionalProperties": False,
+                            "required": ["description", "detail"],
+                            "properties": {
+                                "description": {
+                                    "type": "string",
+                                    "description": "Concise description of the work to perform.",
+                                },
+                                "detail": {
+                                    "type": "string",
+                                    "description": "Concrete detail sufficient to execute the selected Demand snapshot.",
+                                },
+                            },
+                        },
+                    },
+                },
+                output_schema={"$ref": "ToolResult"},
+                kind="write",
+                mutates=MUTATES_RUNTIME_OBJECTS,
+                task_requirement=TASK_REQUIREMENT_FREE,
+                required_permission="task_sys.create",
+                authority="task_sys.actor_create",
+                visibility="Actor-owned Demand-sourced Task lifecycle",
+                durability="durable",
+                result_content_level="create/replay outcome, Task lifecycle state, opaque DemandRef, execution facts, and runtime result",
+                success_effect="Creates at most one actor Task for the exact Demand snapshot and starts its side frame only when newly created.",
+                failure_state_guarantee="Payload, source, active-Task, and authority rejections create no Task and execute no runtime instruction.",
+                reads=("task sys task record",),
+                writes=("task sys task record", "side turn through Task Sys runtime instruction"),
+                does_not_write=("Demands", "parent turns", "messages", "tracks", "artifacts", "actor private files"),
+                preconditions=(
+                    "env.tool role-action policy allows this action for the active role",
+                    "demand_ref identifies one exact observed Demand revision",
+                    "the actor has no different active Task",
+                ),
+                returns=("outcome", "task_id", "task_status", "demand_ref", "execution", "runtime", "state_changed"),
+                use_when=("The actor selected one live Demand revision for execution and no different Task is active.",),
+                do_not_use_when=(
+                    "A Task is already active; continue or finish that Task first.",
+                    "You need to organize or terminalize a Demand; use Demand Sys.",
+                ),
+                risk_hints={
+                    "read_only": False,
+                    "destructive": False,
+                    "idempotent": True,
+                    "open_world": False,
+                    "requires_human_approval": False,
+                    "external_effect": False,
+                },
+            ),
             ActionDefinition(
                 name="list",
                 title="task_sys.list",
@@ -160,11 +240,21 @@ def _build_definition() -> ToolDefinition:
                 visibility="Task Sys close mutation",
                 durability="durable",
                 result_content_level="task id, lifecycle status, and execution completion result",
-                success_effect="Marks the task completed, records execution completion metadata, and clears active processing.",
-                failure_state_guarantee="Rejected close requests do not mutate task sys state.",
+                success_effect=(
+                    "Marks the Task completed, records execution completion metadata, clears active processing, and "
+                    "submits completion attention to the parent for a Demand-sourced Task."
+                ),
+                failure_state_guarantee=(
+                    "Rejected close requests do not mutate Task state. If completion-attention submission fails after "
+                    "the terminal write, the completed Task remains durable and the failure is returned explicitly."
+                ),
                 reads=("task sys task record",),
-                writes=("task sys task record",),
-                does_not_write=("parent turns", "side turns", "messages", "tracks", "artifacts"),
+                writes=(
+                    "task sys task record",
+                    "side runtime cleanup when closing from side",
+                    "parent turn through Task Sys completion runtime instruction for Demand-sourced Tasks",
+                ),
+                does_not_write=("Demands", "messages", "tracks", "artifacts", "actor private files"),
                 preconditions=(
                     "env.tool role-action policy allows this action for the active role",
                     "task_id exists",
@@ -179,6 +269,7 @@ def _build_definition() -> ToolDefinition:
                     "side_thread_id",
                     "side_cleanup",
                     "execution_result",
+                    "completion_attention",
                 ),
                 use_when=("The active side or parent frame completed the required frame work and the task should be closed.",),
                 do_not_use_when=(

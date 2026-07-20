@@ -22,7 +22,7 @@ from env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
 from env.domain import track_read  # noqa: E402
 
 
-TASK_KEYS = ("task_id", "source_type", "status", "actor", "updated_at")
+TASK_KEYS = ("task_id", "source_type", "demand_ref", "status", "actor", "updated_at")
 TASK_ACTOR_KEYS = ("actor_id", "role_id")
 TRACK_LIST_KEYS = (
     "id",
@@ -197,6 +197,7 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                 self.assertEqual(tuple(row.keys()), TASK_KEYS)
                 self.assertEqual(tuple(row["actor"].keys()), TASK_ACTOR_KEYS)
                 self.assertEqual(row["actor"], {"actor_id": actor_id, "role_id": "pm"})
+                self.assertIsNone(row["demand_ref"])
                 for sensitive in (
                     "execution",
                     "events",
@@ -232,6 +233,32 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
 
         with mock.patch.object(task_read.task_sys, "get_task", side_effect=ValueError("task not found: task-missing")):
             self.assertIsNone(task_read.get_external_task("task-missing", actor_profile=self._actor_profile()))
+
+    def test_external_task_projection_exposes_only_exact_demand_ref_for_demand_sources(self) -> None:
+        task_read = _task_read_module()
+        demand_record = self._task_record(
+            task_id="task-demand-external",
+            updated_at="2026-07-13T10:00:00Z",
+        )
+        demand_record["source_type"] = "demand"
+        demand_record["source_ref"] = {
+            "demand_id": "demand-external-safe",
+            "basis_revision": 7,
+            "detail": "must not leak",
+        }
+
+        demand_row = task_read.external_task_projection(demand_record)
+        non_demand_row = task_read.external_task_projection(
+            self._task_record(task_id="task-track-external", updated_at="2026-07-13T10:00:00Z")
+        )
+
+        self.assertEqual(
+            demand_row["demand_ref"],
+            {"demand_id": "demand-external-safe", "basis_revision": 7},
+        )
+        self.assertNotIn("detail", demand_row["demand_ref"])
+        self.assertIsNone(non_demand_row["demand_ref"])
+        self.assertEqual(tuple(demand_row), TASK_KEYS)
 
     def test_external_task_and_track_lists_return_empty_lists(self) -> None:
         task_read = _task_read_module()

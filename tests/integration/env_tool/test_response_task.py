@@ -40,6 +40,216 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class EnvToolTaskResponseTests(EnvToolResponseCase):
+    def _seed_active_task(self, *, instance_json: Path, role: str, actor_id: str) -> None:
+        del instance_json, role, actor_id
+
+    @staticmethod
+    def _create_args(*, detail: str = "Read the exact current product contract.") -> dict[str, object]:
+        return {
+            "demand_ref": {
+                "demand_id": "demand-task-sys-create-response",
+                "basis_revision": 2,
+            },
+            "execution_brief": {
+                "description": "Inspect the current product contract.",
+                "detail": detail,
+            },
+        }
+
+    def test_task_sys_create_response_starts_side_once_and_replays_exactly(self) -> None:
+        actor_label = "act-dev-task-sys-create"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            return_value={
+                "action": "start_side",
+                "status": "side_started",
+                "side_thread_id": "thr-side-create-response",
+            },
+        ) as execute_instruction:
+            created = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="create",
+                args=self._create_args(),
+            )
+            replay = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="create",
+                args=self._create_args(),
+            )
+
+        self._assert_write_success_contract(created)
+        self._assert_success_contract(replay)
+        self.assertEqual(created["outcome"], "created")
+        self.assertEqual(replay["outcome"], "existing")
+        self.assertEqual(replay["task_id"], created["task_id"])
+        self.assertEqual(created["task_status"], task_sys.SIDE_PROCESSING)
+        self.assertEqual(created["demand_ref"], self._create_args()["demand_ref"])
+        self.assertEqual(created["runtime"]["action"], "start_side")
+        self.assertIs(created["state_changed"], True)
+        self.assertIs(replay["state_changed"], False)
+        self.assertIsNone(replay["runtime"])
+        execute_instruction.assert_called_once()
+        self.assertEqual(
+            len(task_sys.list_tasks(actor_target={"actor_id": actor_id, "role_id": "dev"})),
+            1,
+        )
+
+    def test_task_sys_create_conflicts_return_targeted_rejections_without_runtime(self) -> None:
+        actor_label = "act-dev-task-sys-create-conflict"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        active = task_sys.ingest(
+            {
+                "source": {"type": "test.active", "ref": {"id": "existing-active"}},
+                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
+                "context": {"fixture": "active conflict"},
+            }
+        )
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=AssertionError("conflict must not execute Task runtime"),
+        ):
+            active_conflict = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="create",
+                args=self._create_args(),
+            )
+
+        self._assert_rejection_contract(active_conflict)
+        self.assertEqual(active_conflict["error"]["code"], "E_TASK_SYS_ACTIVE_CONFLICT")
+        self.assertEqual(active_conflict["active_task_id"], active["task_id"])
+
+        task_sys.record_task_cancel(active["task_id"], {"reason": "Release conflict fixture."})
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            return_value={"action": "start_side", "status": "side_started"},
+        ):
+            created = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="create",
+                args=self._create_args(),
+            )
+            source_conflict = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="create",
+                args=self._create_args(detail="Changed brief for the same immutable source."),
+            )
+
+        self._assert_write_success_contract(created)
+        self._assert_rejection_contract(source_conflict)
+        self.assertEqual(source_conflict["error"]["code"], "E_TASK_SYS_SOURCE_CONFLICT")
+        self.assertEqual(source_conflict["conflicting_task_id"], created["task_id"])
+
+    def test_task_sys_create_reloads_runtime_failure_state(self) -> None:
+        actor_label = "act-dev-task-sys-create-runtime-failure"
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+
+        def fail_side(_access: object, instruction: dict[str, object]) -> dict[str, object]:
+            task_sys.record_side_runtime_failure(
+                str(instruction["task_id"]),
+                {
+                    "reason": "runtime_failed",
+                    "stage": "side_fork",
+                    "processor": "side",
+                    "error": "real runtime could not start side",
+                    "retryable": True,
+                    "attempts": 2,
+                },
+            )
+            return {
+                "action": "start_side",
+                "status": "runtime_failed",
+                "task_id": instruction["task_id"],
+            }
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=fail_side,
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="create",
+                args=self._create_args(),
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["runtime"]["status"], "runtime_failed")
+        self.assertEqual(response["execution"]["result"]["reason"], "runtime_failed")
+        self.assertEqual(response["task_status"], task_sys.SIDE_PROCESSING)
+
+    def test_task_sys_close_and_need_parent_reject_foreign_task_before_mutation(self) -> None:
+        owner_label = "act-dev-task-owner"
+        caller_label = "act-dev-task-foreign-caller"
+        owner_id = self._runtime_actor_id(role="dev", label=owner_label)
+        caller_instance = self._instance_json(role="dev", actor_id=caller_label)
+
+        for action, args_tail in (
+            ("close", {"summary": "Must not close another actor's Task."}),
+            ("need_parent", {"params": {"parent_frame_context": {"next": "Forbidden."}}}),
+        ):
+            with self.subTest(action=action):
+                task_id = task_sys.ingest(
+                    {
+                        "source": {"type": "test.foreign", "ref": {"action": action}},
+                        "actor_target": {"actor_id": owner_id, "role_id": "dev"},
+                        "context": {"fixture": f"foreign {action}"},
+                    }
+                )["task_id"]
+                before = task_sys.get_task(task_id)
+                with patch.object(
+                    runtime_context.TaskSysRuntimeAccess,
+                    "execute_instruction",
+                    autospec=True,
+                    side_effect=AssertionError("foreign Task must not execute runtime"),
+                ), patch.object(
+                    runtime_context.TaskSysRuntimeAccess,
+                    "cleanup_side_lease",
+                    autospec=True,
+                    side_effect=AssertionError("foreign Task must not clean side runtime"),
+                ):
+                    response = self._dispatch(
+                        instance_json=caller_instance,
+                        actor_id=caller_label,
+                        role="dev",
+                        tool="task_sys",
+                        action=action,
+                        args={"task_id": task_id, **args_tail},
+                    )
+
+                self._assert_rejection_contract(response)
+                self.assertEqual(task_sys.get_task(task_id), before)
+                task_sys.record_task_cancel(task_id, {"reason": "Release foreign fixture."})
+
     def test_message_mark_needs_parent_rejects_without_parent_submit(self) -> None:
         dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
         pm_actor_id = self._runtime_actor_id(role="pm", label="act-pm-parent-submit-contract")
@@ -101,6 +311,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 "lease_unregistered": True,
                 "turn_interrupt_ok": True,
             },
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=AssertionError("non-Demand close must not submit completion attention"),
         ):
             response = self._dispatch(
                 instance_json=instance_json,
@@ -122,6 +337,154 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self.assertEqual(response["execution_result"]["processor"], "side")
         self.assertEqual(response["execution_result"]["side_thread_id"], "thr-side-response")
         self._assert_no_retired_task_sys_fields(response)
+
+    def test_demand_task_side_close_submits_terminal_completion_attention_and_replay_is_safe(self) -> None:
+        actor_label = "act-dev-demand-side-close"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        created = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": "dev"},
+            demand_ref={"demand_id": "demand-side-close", "basis_revision": 3},
+            execution_brief={
+                "description": "Complete the selected Demand.",
+                "detail": "Perform the bounded side work and record its result.",
+            },
+        )
+        instructions: list[dict[str, object]] = []
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
+            autospec=True,
+            return_value={
+                "side_thread_id": "thr-side-demand-close",
+                "lease_unregistered": True,
+                "turn_interrupt_ok": True,
+            },
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=lambda _access, instruction: (
+                instructions.append(instruction)
+                or {
+                    "action": "submit_parent",
+                    "task_id": instruction["task_id"],
+                    "turn_id": f"turn-completion-{len(instructions)}",
+                }
+            ),
+        ):
+            closed = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="close",
+                args={"task_id": created["task_id"], "summary": "Demand snapshot work completed."},
+            )
+            replay = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="close",
+                args={"task_id": created["task_id"], "summary": "Replay."},
+            )
+
+        self._assert_write_success_contract(closed)
+        self._assert_success_contract(replay)
+        self.assertEqual(closed["task_status"], task_sys.COMPLETED)
+        self.assertEqual(closed["completion_attention"]["status"], "submitted")
+        self.assertEqual(replay["completion_attention"]["status"], "submitted")
+        self.assertEqual(len(instructions), 2)
+        self.assertEqual({instruction["task_id"] for instruction in instructions}, {created["task_id"]})
+        self.assertTrue(all(instruction["type"] == "submit_parent" for instruction in instructions))
+        self.assertTrue(all(instruction["frame"]["kind"] == "task_sys.completion_frame" for instruction in instructions))
+
+    def test_demand_task_parent_close_submits_completion_attention_for_same_task(self) -> None:
+        actor_label = "act-dev-demand-parent-close"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        created = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": "dev"},
+            demand_ref={"demand_id": "demand-parent-close", "basis_revision": 1},
+            execution_brief={
+                "description": "Complete parent-required Demand work.",
+                "detail": "Use the same Task through handoff and completion.",
+            },
+        )
+        task_sys.record_side_need_parent(
+            created["task_id"],
+            {"params": {"parent_frame_context": {"next": "Finish in parent."}}},
+        )
+        task_sys.record_parent_handoff_started(created["task_id"])
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            return_value={
+                "action": "submit_parent",
+                "task_id": created["task_id"],
+                "turn_id": "turn-parent-completion-attention",
+            },
+        ) as execute_instruction:
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="close",
+                args={"task_id": created["task_id"], "summary": "Parent work completed."},
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["processor"], "parent")
+        self.assertEqual(response["completion_attention"]["status"], "submitted")
+        instruction = execute_instruction.call_args.args[1]
+        self.assertEqual(instruction["task_id"], created["task_id"])
+        self.assertEqual(instruction["frame"]["completion"]["processor"], "parent")
+
+    def test_completion_attention_failure_is_explicit_while_task_stays_completed(self) -> None:
+        actor_label = "act-dev-demand-completion-failure"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        created = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": "dev"},
+            demand_ref={"demand_id": "demand-completion-failure", "basis_revision": 2},
+            execution_brief={
+                "description": "Complete work before attention failure.",
+                "detail": "The Task truth must remain terminal if parent submission fails.",
+            },
+        )
+        demand_root = self.runtime_state_root / "buddyswitch" / "objects" / "demand-sys"
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
+            autospec=True,
+            return_value={"side_thread_id": "thr-side-attention-failure", "lease_unregistered": True},
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=RuntimeError("parent completion attention unavailable"),
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="close",
+                args={"task_id": created["task_id"], "summary": "Work itself completed."},
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["task_status"], task_sys.COMPLETED)
+        self.assertEqual(response["completion_attention"]["status"], "failed")
+        self.assertIn("parent completion attention unavailable", response["completion_attention"]["error"])
+        self.assertEqual(task_sys.get_task(created["task_id"])["status"], task_sys.COMPLETED)
+        self.assertFalse(demand_root.exists())
 
     def test_task_sys_cancel_response_exposes_side_cleanup_contract(self) -> None:
         actor_label = "act-dev-task-sys-cancel"

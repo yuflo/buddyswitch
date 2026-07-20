@@ -128,7 +128,9 @@ class TrackCommentAddedHandler:
                 source_identity_id=source_identity["identity_id"],
                 source_role_id=source_identity["role_id"],
             )
-            task_sys_daemon_adapter.execute_instruction(context, result["instruction"])
+            instruction = result.get("instruction")
+            if isinstance(instruction, dict):
+                task_sys_daemon_adapter.execute_instruction(context, instruction)
             return daemon_contracts.HandlerResult.handled()
         except Exception as exc:
             return daemon_contracts.HandlerResult.failed(str(exc))

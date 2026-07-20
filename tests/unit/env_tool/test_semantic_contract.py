@@ -58,7 +58,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request"},
     "message": {"contacts", "send", "get", "mark", "list", "conversation"},
-    "task_sys": {"list", "get", "close", "cancel", "need_parent"},
+    "task_sys": {"create", "list", "get", "close", "cancel", "need_parent"},
 }
 _TASK_REQUIREMENT_FREE = "free"
 _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
@@ -96,6 +96,7 @@ _EXPECTED_FREE_ACTIONS = {
     "search.status",
     "task_sys.list",
     "task_sys.get",
+    "task_sys.create",
     "task_sys.close",
     "task_sys.cancel",
     "task_sys.need_parent",
@@ -549,7 +550,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertTrue(str(row["required_permission"]).startswith("task_sys."))
                 self.assertIn("task sys task record", row["reads"])
                 self.assertEqual(row["writes"], [])
-        for action in ("task_sys.close", "task_sys.cancel", "task_sys.need_parent"):
+        for action in ("task_sys.create", "task_sys.close", "task_sys.cancel", "task_sys.need_parent"):
             self.assertIn(action, op)
             row = op[action]
             with self.subTest(action=action):
@@ -566,10 +567,15 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("task_sys.list", op)
         self.assertIn("task_sys.get", op)
         close_returns = set(op["task_sys.close"]["returns"])
+        create_returns = set(op["task_sys.create"]["returns"])
         cancel_returns = set(op["task_sys.cancel"]["returns"])
         need_parent_returns = set(op["task_sys.need_parent"]["returns"])
         list_returns = set(op["task_sys.list"]["returns"])
         get_returns = set(op["task_sys.get"]["returns"])
+
+        for field in ("outcome", "task_id", "task_status", "demand_ref", "execution", "runtime", "state_changed"):
+            with self.subTest(action="task_sys.create", field=field):
+                self.assertIn(field, create_returns)
 
         for field in ("tasks", "active_count", "recoverable_count"):
             with self.subTest(action="task_sys.list", field=field):
@@ -615,6 +621,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
         task_close = desc["task_sys"]["action_semantics"]["close"]
         task_side_effects = task_close["side_effects"]
+        self.assertIn("parent turn", " ".join(task_side_effects["writes"]).lower())
+        self.assertIn("demands", " ".join(task_side_effects["does_not_write"]).lower())
+        self.assertNotIn("parent turns", " ".join(task_side_effects["does_not_write"]).lower())
+        self.assertIn("completion attention", task_close["success_means"].lower())
+        self.assertIn("completed task", task_close["failure_state_guarantee"].lower())
         self.assertIn("tracks", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertIn("artifacts", " ".join(task_side_effects["does_not_write"]).lower())
 

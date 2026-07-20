@@ -50,10 +50,33 @@ def _matches_actor(record: Mapping[str, Any], actor_target: Mapping[str, str] | 
     return _record_actor(record) == dict(actor_target)
 
 
+def _external_demand_ref(task: Mapping[str, Any]) -> dict[str, Any] | None:
+    if task.get("source_type") != "demand":
+        return None
+    source_ref = task.get("source_ref")
+    if not isinstance(source_ref, Mapping):
+        return None
+    demand_id = source_ref.get("demand_id")
+    basis_revision = source_ref.get("basis_revision")
+    try:
+        normalized_demand_id = runtime_files.require_id(demand_id, "demand_id")
+    except ValueError:
+        return None
+    if not normalized_demand_id.startswith("demand-"):
+        return None
+    if type(basis_revision) is not int or basis_revision < 1:
+        return None
+    return {
+        "demand_id": normalized_demand_id,
+        "basis_revision": basis_revision,
+    }
+
+
 def external_task_projection(task: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "task_id": task.get("id"),
         "source_type": task.get("source_type"),
+        "demand_ref": _external_demand_ref(task),
         "status": task.get("status"),
         "actor": _record_actor(task),
         "updated_at": task.get("updated_at"),
