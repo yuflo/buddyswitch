@@ -10,7 +10,7 @@
 
 Date: 2026-07-20
 
-Status: automated implementation and claim-scoped verification complete; real two-contact iMessage validation pending
+Status: accepted — automated, production-capacity, and authorized two-contact real iMessage validation complete
 
 Branch/worktree: `fea-im` / `/Users/chen/Dev/buddyswitch/.worktrees/fea-im`
 
@@ -844,10 +844,10 @@ iMessages.
 
 ### Task 9: Guided Two-Contact Device Check
 
-- [ ] Confirm two consenting test contacts and a five-minute send window.
-- [ ] Start the current `fea-im` service through the normal launcher; do not
+- [x] Confirm two consenting test contacts and a five-minute send window.
+- [x] Start the current `fea-im` service through the normal launcher; do not
   reuse an unknown worker from another worktree.
-- [ ] Run these cases with timestamps and exact event/message/GUID correlation:
+- [x] Run these cases with timestamps and exact event/message/GUID correlation:
 
 ```text
 1. A remains silent while B receives an actor reply; B bridge latency < 2 s.
@@ -855,7 +855,7 @@ iMessages.
 3. Two replies for A remain ordered while one reply for B is interleaved.
 ```
 
-- [ ] Confirm Messages DB rows for every physical send:
+- [x] Confirm Messages DB rows for every physical send:
 
 ```text
 error=0
@@ -865,7 +865,7 @@ one Central event -> one visible iMessage bubble
 correct chat/handle for both contacts
 ```
 
-- [ ] Stop the task-owned service and prove no process, socket, executor thread,
+- [x] Stop the task-owned service and prove no process, socket, executor thread,
   lock, or temporary state remains.
 
 ## 9. Execution Evidence Contract
@@ -949,10 +949,33 @@ assertions, single-ACK assertions, and clean worker/server shutdown:
 - The only live-tree matches for retired names are the scoped negative residue
   assertions in `test_imessage_state.py`, which are permitted safety guards.
 
-### Pending Product Evidence
+### Authorized Two-Contact Product Evidence
 
-Task 9 remains pending explicit user participation because it sends real
-iMessages. Until the two-contact check passes, automated architecture and
-capacity acceptance is complete, but final product acceptance is not claimed.
-No repository-wide full suite was run because the change is iMessage-local and
-the affected-surface run was clean.
+The final device test used only the two contacts explicitly authorized by the
+user, labeled Contact C (`chat_id=3211`) and Contact B (`chat_id=3213`). An
+earlier preflight route was excluded and contributes no acceptance evidence.
+
+Contact C first sent `/actors`. The current `fea-im` worker consumed inbound
+GUID `AB5753D2-6B3A-47F3-B9C4-18DE9423155D` and produced the actor-list response
+at Messages DB row `27122`; the user confirmed the response was visible.
+
+| Case | Contact | Event | Message | iMessage GUID | DB row | Bridge | Send state |
+| --- | --- | --- | --- | --- | ---: | ---: | --- |
+| C1 while B silent | C | `imev-ab5166cfd92f` | `msg-720c8323cead` | `01FE7672-1C7B-4012-B65C-847C64DF1F18` | 27123 | 349 ms | `error=0 is_sent=1 is_delivered=1` |
+| C2 FIFO first | C | `imev-d511de563452` | `msg-c1147c632506` | `395D651B-83DA-4C03-9BB1-995B7E4DFB01` | 27125 | 370 ms | `error=0 is_sent=1 is_delivered=1` |
+| C3 FIFO second | C | `imev-c56e3d8d59d0` | `msg-76f5e5842119` | `A6B9FE04-B903-440A-90B1-450549848264` | 27126 | 819 ms | `error=0 is_sent=1 is_delivered=1` |
+| B3 interleaved | B | `imev-edc83e214ac3` | `msg-1cd7a11d2193` | `E2A0D2F7-E5CF-44B6-B967-6FAECC7E96E7` | 27124 | 356 ms | `error=0 is_sent=1 is_delivered=1` |
+
+Observed order was B3 row `27124`, C2 row `27125`, C3 row `27126`: B did not
+wait behind C, while C remained strict FIFO. Every event had exactly one
+persisted message/GUID link and an empty post-delivery event feed, proving ACK.
+Contact-scoped blocked-send and retry-failure isolation remain covered by the
+controlled worker tests because deliberately corrupting a consenting user's
+live route was neither safe nor necessary. The user confirmed C1/C2/C3 were
+visible exactly once and ordered, and B3 was visible exactly once.
+
+After confirmation, the task-owned service was stopped. PIDs `79029`, `79038`,
+and `79102` were absent; port `127.0.0.1:8765` had no listener; no `imsg watch
+--json` process remained; persisted retry and terminal-failure counts were both
+zero. No repository-wide full suite was run because the change is iMessage-local
+and the affected-surface run was clean.
