@@ -25,7 +25,7 @@ No production file is created or modified.
 **Files:**
 - Create: `tests/integration/im/test_external_event_capacity.py`
 
-- [ ] **Step 1: Add the real HTTP fixture and capacity scenario**
+- [x] **Step 1: Add the real HTTP fixture and capacity scenario**
 
 Create the complete test:
 
@@ -178,7 +178,8 @@ class ExternalEventCapacityTests(RuntimeWorkspaceTestCase):
         self.assertEqual(warm_events, [])
         idle_sweep_durations = [self._scan_once(sessions)[0] for _ in range(5)]
 
-        active_sessions = sessions[:ACTIVE_CONTACT_COUNT]
+        active_stride = CONTACT_COUNT // ACTIVE_CONTACT_COUNT
+        active_sessions = [sessions[index * active_stride] for index in range(ACTIVE_CONTACT_COUNT)]
         active_event_ids = {
             self._create_event(session, label=f"active {index:02d}")
             for index, session in enumerate(active_sessions)
@@ -230,7 +231,7 @@ class ExternalEventCapacityTests(RuntimeWorkspaceTestCase):
         self.assertLessEqual(burst_drain_seconds, BURST_DRAIN_LIMIT_SECONDS)
 ```
 
-- [ ] **Step 2: Run the capability gate**
+- [x] **Step 2: Run the capability gate**
 
 Run:
 
@@ -246,7 +247,7 @@ Expected result is deliberately evidence-dependent:
 
 Do not change production code or relax a threshold in response to failure.
 
-- [ ] **Step 3: Verify affected existing IM contracts**
+- [x] **Step 3: Verify affected existing IM contracts**
 
 Run:
 
@@ -261,7 +262,7 @@ Expected: every selected test passes with clean resource cleanup. If the new
 capacity gate failed in Step 2, do not run this step as a substitute for that
 evidence.
 
-- [ ] **Step 4: Inspect the boundary and diff**
+- [x] **Step 4: Inspect the boundary and diff**
 
 Run:
 
@@ -274,7 +275,7 @@ git diff -- tests/integration/im/test_external_event_capacity.py
 Expected: no whitespace errors; only the approved spec, plan, and one IM
 integration test are new; runtime source is unchanged.
 
-- [ ] **Step 5: Commit the capacity proof when accepted**
+- [x] **Step 5: Commit the capacity proof when accepted**
 
 ```bash
 git add \

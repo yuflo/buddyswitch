@@ -37,8 +37,9 @@ introduce a batch/cross-session IM contract.
 1. Create 100 external sessions through the real HTTP endpoint.
 2. Warm the event path, then measure five empty full scans using
    `read_events(wait_ms=0, limit=1)`.
-3. Send one actor event to each of 20 active sessions and measure event creation
-   to authenticated HTTP discovery plus `get_message` and ordered ACK.
+3. Spread 20 active sessions evenly across the 100-session scan order, send one
+   actor event to each, and measure event creation to authenticated HTTP
+   discovery plus `get_message` and ordered ACK.
 4. Inject a 50-event burst across those 20 sessions, drain it through repeated
    fair full scans, and prove exact event identity and no loss.
 5. Stop the HTTP server and join its thread.
