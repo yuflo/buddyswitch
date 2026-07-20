@@ -19,7 +19,7 @@ soak. No production source, test, runtime contract, or schema is modified.
 
 **Files:** none
 
-- [ ] **Step 1: Record the frozen repository identity**
+- [x] **Step 1: Record the frozen repository identity**
 
 ```bash
 git status --short
@@ -28,7 +28,7 @@ git rev-parse HEAD
 
 Expected: clean worktree at or after the committed design; no unrelated changes.
 
-- [ ] **Step 2: Prove actors and authorized contacts are ready**
+- [x] **Step 2: Prove actors and authorized contacts are ready**
 
 ```bash
 ./buddyswitch-codex instance list --role market
@@ -39,7 +39,7 @@ jq '{contacts:[.contacts|to_entries[]|select(.key=="sender:yuflo2024@126.com" or
 Expected: `act-market-645c3ea1fe37` and `act-market-8164b055c113` are active and
 healthy; both authorized contacts have routes and no retry/failure state.
 
-- [ ] **Step 3: Start and prove the only current iMessage worker**
+- [x] **Step 3: Start and prove the only current iMessage worker**
 
 Run from `/Users/chen/Dev/buddyswitch/.worktrees/fea-im` in one owned PTY:
 
@@ -62,7 +62,7 @@ Expected: health succeeds, the listener comes from `fea-im`, and exactly one
 
 **Files:** none
 
-- [ ] **Step 1: Contact C sends these messages five seconds apart**
+- [x] **Step 1: Contact C sends these messages five seconds apart**
 
 ```text
 @act-market-645c3ea1fe37 [SOAK-R1-C-M1] 这是纯文本生成任务，不浏览或调用外部工具。为“夏日午后”生成一个8字内标题。只回复一行，格式：[SOAK-R1-C-M1] <答案>
@@ -72,13 +72,13 @@ Expected: health succeeds, the listener comes from `fea-im`, and exactly one
 @act-market-8164b055c113 [SOAK-R1-C-M2] 这是纯文本生成任务，不浏览或调用外部工具。为“夏日午后”生成一个8字内标题。只回复一行，格式：[SOAK-R1-C-M2] <答案>
 ```
 
-- [ ] **Step 2: Wait for both C tokens; stop on anomaly**
+- [x] **Step 2: Wait for both C tokens; stop on anomaly**
 
 Expected: each actor produces one one-line reply carrying its exact token in
 Contact C's chat. Do not send replacements for missing, duplicate, or misrouted
 responses.
 
-- [ ] **Step 3: Contact B sends these messages five seconds apart**
+- [x] **Step 3: Contact B sends these messages five seconds apart**
 
 ```text
 @act-market-645c3ea1fe37 [SOAK-R1-B-M1] 这是纯文本生成任务，不浏览或调用外部工具。为“夏日午后”生成一个8字内标题。只回复一行，格式：[SOAK-R1-B-M1] <答案>
@@ -88,7 +88,7 @@ responses.
 @act-market-8164b055c113 [SOAK-R1-B-M2] 这是纯文本生成任务，不浏览或调用外部工具。为“夏日午后”生成一个8字内标题。只回复一行，格式：[SOAK-R1-B-M2] <答案>
 ```
 
-- [ ] **Step 4: Wait for both B tokens; stop on anomaly**
+- [x] **Step 4: Wait for both B tokens; stop on anomaly**
 
 Expected: four Round-1 request tokens each have exactly one visible reply in the
 originating chat.
@@ -97,7 +97,7 @@ originating chat.
 
 **Files:** none
 
-- [ ] **Step 1: Both users begin together and send M1 then M2 within fifteen seconds**
+- [x] **Step 1: Both users begin together and send M1 then M2 within fifteen seconds**
 
 Contact C sends:
 
@@ -119,7 +119,7 @@ Contact B sends:
 @act-market-8164b055c113 [SOAK-R2-B-M2] 这是纯文本生成任务，不浏览或调用外部工具。把“今天适合散步和喝茶”改写成10字内短句。只回复一行，格式：[SOAK-R2-B-M2] <答案>
 ```
 
-- [ ] **Step 2: Wait for all four Round-2 tokens; stop on anomaly**
+- [x] **Step 2: Wait for all four Round-2 tokens; stop on anomaly**
 
 Expected: each user sees one reply from each addressed actor, with no token in
 the other user's chat.
@@ -128,7 +128,7 @@ the other user's chat.
 
 **Files:** none
 
-- [ ] **Step 1: Both users begin together and send M2 then M1 within fifteen seconds**
+- [x] **Step 1: Both users begin together and send M2 then M1 within fifteen seconds**
 
 Contact C sends M2 first:
 
@@ -154,7 +154,7 @@ Then B sends M1:
 @act-market-645c3ea1fe37 [SOAK-R3-B-M1] 这是纯文本生成任务，不浏览或调用外部工具。生成3个表示“轻松”的词，用/分隔。只回复一行，格式：[SOAK-R3-B-M1] <答案>
 ```
 
-- [ ] **Step 2: Wait for all four Round-3 tokens; stop on anomaly**
+- [x] **Step 2: Wait for all four Round-3 tokens; stop on anomaly**
 
 Expected: reversed actor submission remains correctly attributed and isolated;
 the full soak now has 12 unique visible replies.
@@ -163,7 +163,7 @@ the full soak now has 12 unique visible replies.
 
 **Files:** none
 
-- [ ] **Step 1: Generate one exact correlation report**
+- [x] **Step 1: Generate one exact correlation report**
 
 Run this read-only probe with the normal runtime roots. It discovers all 12 tokens,
 Central reply messages/events, persisted event/GUID links, inbound and outbound DB
@@ -197,6 +197,10 @@ ACTORS = {
 EXTERNALS = {
     "C": "ext-548aad2fe42d",
     "B": "ext-47a3f3a23828",
+}
+CHATS = {
+    "C": (3211, "yuflo2024@126.com"),
+    "B": (3213, "hblouis@126.com"),
 }
 EXPECTED_TOKENS = {
     f"[SOAK-R{round_number}-{user}-{actor}]"
@@ -238,17 +242,28 @@ for contact in state["contacts"].values():
 
 with sqlite3.connect(f"file:{DB}?mode=ro", uri=True) as db:
     inbound_rows = db.execute(
-        "SELECT text,date FROM message WHERE COALESCE(is_from_me,0)=0 AND text LIKE '%[SOAK-R%'"
+        "SELECT m.ROWID,m.guid,m.date,c.ROWID,c.chat_identifier,m.text "
+        "FROM message m JOIN chat_message_join cmj ON cmj.message_id=m.ROWID "
+        "JOIN chat c ON c.ROWID=cmj.chat_id "
+        "WHERE COALESCE(m.is_from_me,0)=0 AND m.text LIKE '%[SOAK-R%'"
     ).fetchall()
-    inbound_dates_by_token = defaultdict(list)
-    for text, date in inbound_rows:
+    inbound_rows_by_token = defaultdict(list)
+    for db_rowid, guid, date, chat_id, chat_identifier, text in inbound_rows:
         match = TOKEN.search(str(text or ""))
         if match:
-            inbound_dates_by_token[match.group(0)].append(int(date))
+            inbound_rows_by_token[match.group(0)].append(
+                {
+                    "db_rowid": int(db_rowid),
+                    "guid": str(guid),
+                    "date": int(date),
+                    "chat_id": int(chat_id),
+                    "chat_identifier": str(chat_identifier),
+                }
+            )
 
-    assert set(inbound_dates_by_token) == EXPECTED_TOKENS, sorted(inbound_dates_by_token)
-    assert all(len(rows) == 1 for rows in inbound_dates_by_token.values()), {
-        token: len(rows) for token, rows in inbound_dates_by_token.items()
+    assert set(inbound_rows_by_token) == EXPECTED_TOKENS, sorted(inbound_rows_by_token)
+    assert all(len(rows) == 1 for rows in inbound_rows_by_token.values()), {
+        token: len(rows) for token, rows in inbound_rows_by_token.items()
     }
 
     report = []
@@ -257,6 +272,8 @@ with sqlite3.connect(f"file:{DB}?mode=ro", uri=True) as db:
         assert match is not None
         reply = reply_by_token[token]
         assert reply["sender_identity"]["id"] == ACTORS[match.group("actor")]
+        inbound = inbound_rows_by_token[token][0]
+        assert (inbound["chat_id"], inbound["chat_identifier"]) == CHATS[match.group("user")]
 
         candidate_events = events_by_message[str(reply["id"])]
         assert len(candidate_events) == 1, (token, candidate_events)
@@ -273,13 +290,17 @@ with sqlite3.connect(f"file:{DB}?mode=ro", uri=True) as db:
         assert len(physical_rows) == 1, (token, physical_rows)
         physical = physical_rows[0]
         event_at = iso_unix(str(event["created_at"]))
-        inbound_at = mac_unix(inbound_dates_by_token[token][0])
+        inbound_at = mac_unix(inbound["date"])
         outbound_at = mac_unix(int(physical[1]))
         report.append(
             {
                 "token": token,
                 "actor_id": reply["sender_identity"]["id"],
                 "external_id": event["visible_to_identity_id"],
+                "inbound_guid": inbound["guid"],
+                "inbound_db_rowid": inbound["db_rowid"],
+                "inbound_chat_id": inbound["chat_id"],
+                "inbound_chat_identifier": inbound["chat_identifier"],
                 "message_id": reply["id"],
                 "event_id": event["event_id"],
                 "event_created_at": event["created_at"],
@@ -296,7 +317,7 @@ with sqlite3.connect(f"file:{DB}?mode=ro", uri=True) as db:
         )
 
 assert len(report) == 12
-for field in ("message_id", "event_id", "guid", "db_rowid"):
+for field in ("inbound_guid", "inbound_db_rowid", "message_id", "event_id", "guid", "db_rowid"):
     assert len({row[field] for row in report}) == 12, field
 assert all(row["actor_seconds"] >= 0 and row["bridge_seconds"] >= 0 for row in report)
 assert all(row["error"] == 0 and row["is_sent"] == 1 for row in report)
@@ -332,7 +353,7 @@ Expected: exactly 12 rows, correct actor and external identity per token, unique
 message/event/GUID/DB row identities, no negative duration, physical order equal
 to Central order per external identity, and bridge P95/P99 within the accepted SLO.
 
-- [ ] **Step 2: Review the generated summary without recomputing evidence**
+- [x] **Step 2: Review the generated summary without recomputing evidence**
 
 Expected: the script has already failed closed on duplicates, routing mismatch,
 identity reuse, order mismatch, send errors, negative durations, or an exceeded
@@ -340,7 +361,7 @@ bridge SLO. Actor duration remains reported separately without an iMessage
 threshold. `is_delivered` is recorded rather than required when macOS does not
 supply delivery confirmation.
 
-- [ ] **Step 3: Confirm ACK and clean state**
+- [x] **Step 3: Confirm ACK and clean state**
 
 ```bash
 curl -fsS -H 'Authorization: Bearer imsk-d0553fc7d13a2814e83b3202f2eb9182d0784f201bed0af9' \
@@ -359,12 +380,12 @@ Expected: both event lists and both state arrays are empty.
 - Modify: `docs/memo/2026-07-20-imessage-multi-actor-two-user-soak-design.md`
 - Modify: `docs/memo/2026-07-20-imessage-multi-actor-two-user-soak-plan.md`
 
-- [ ] **Step 1: Obtain one exact user confirmation**
+- [x] **Step 1: Obtain one exact user confirmation**
 
 Ask the user to confirm that both devices show all six local tokens exactly once,
 with the correct actor token/content and no cross-contact token.
 
-- [ ] **Step 2: Stop the task-owned worker and prove cleanup**
+- [x] **Step 2: Stop the task-owned worker and prove cleanup**
 
 Send `Ctrl-C` to the owned launcher PTY, then run:
 
@@ -375,14 +396,14 @@ if ps -axo command | rg "imsg watch --json" | rg -v "rg "; then exit 1; fi
 
 Expected: neither command finds a resource.
 
-- [ ] **Step 3: Append compact evidence and update statuses**
+- [x] **Step 3: Append compact evidence and update statuses**
 
 Record source commit, C/B and M1/M2 labels, 12 token mappings, actor-duration
 summary, bridge P95/P99, DB flags, ACK/state result, user confirmation, cleanup,
 and residual risk in the source design. Check off this operational plan. Do not add
 a second evidence file.
 
-- [ ] **Step 4: Verify and commit the non-executable evidence change**
+- [x] **Step 4: Verify and commit the non-executable evidence change**
 
 ```bash
 git diff --check
