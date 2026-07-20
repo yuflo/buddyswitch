@@ -1,6 +1,6 @@
 ---
 name: task-management
-description: Use when an actor receives [DEMAND CHECK], a Task Sys side, parent, or completion frame, or must inspect or advance ongoing Task Sys state.
+description: Use when an actor receives [DEMAND CHECK], a Task Sys side, parent, outcome, or Progress Check, or must inspect or advance ongoing Task Sys state.
 ---
 
 # task-management
@@ -12,6 +12,8 @@ description: Use when an actor receives [DEMAND CHECK], a Task Sys side, parent,
 - The actor is the semantic bridge. Neither system's state implies a mutation in the other.
 - Task `status` is the only lifecycle truth: `in_progress.side_processing`, `in_progress.awaiting_parent`, `in_progress.parent_processing`, `completed`, or `canceled`.
 - Use native BuddySwitch env MCP tools through `env.tool`; never edit runtime objects directly.
+- Exact Task Sys payloads, effects, and response meanings come from native schemas and `context.get.tool_catalog['task_sys']`.
+- Diagnostic fallback: `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`.
 
 ## [DEMAND CHECK]
 
@@ -30,17 +32,19 @@ There is no queue, automatic selection, or automatic Demand-to-Task transition.
 
 - On `task_sys.side_frame`, call `task_sys.close` when side completes the frame, `task_sys.need_parent` when parent resources are required, or `task_sys.cancel` when work must stop.
 - On `task_sys.parent_frame`, complete the requested parent work and call `task_sys.close`; cancel only when work must stop without completion.
-- On a parent Progress Check, close, cancel, or continue parent work without changing status. Turn completion alone never completes a Task.
+- On a side Progress Check, close, cancel, request parent work, or continue side work without changing status merely for continuing.
+- On a parent Progress Check, close, cancel, or continue parent work without changing status merely for continuing. Turn completion alone never completes a Task.
 - Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.
 - Use `task_sys.cancel` when the actor decides an active Task must stop without completion.
 
-## Task Completion Check
+## Task Outcome Check
 
-On `task_sys.completion_frame`, the Task is already terminal:
+On `task_sys.outcome_frame`, the Task is already terminal:
 
 1. Call `demand_sys.get` for the Demand named by the frame's source ref. If it is already terminal, do not mutate it.
-2. For a live Demand, decide whether the latest Demand revision—not merely the Task's basis revision—is satisfied by the completion receipt.
-3. If satisfied, call `demand_sys.complete` with the latest exact revision and pass the frame's `evidence_ref` unchanged: `{"type":"task_sys.task","ref":{"task_id":"<task_id>"}}`. Then acknowledge the returned completed revision with `demand_sys.complete_check`. Otherwise keep the Demand live.
-4. Do not reopen or replace the completed Task for the same source snapshot. After reconciliation, continue now with the Task Selection Rule so at most one other live Demand can start.
+2. If Task status is `completed`, decide whether the latest Demand revision—not merely the Task's basis revision—is satisfied by the completion receipt. If satisfied, call `demand_sys.complete` with the latest exact revision and pass the frame's `evidence_ref` unchanged: `{"type":"task_sys.task","ref":{"task_id":"<task_id>"}}`. Otherwise keep the Demand live.
+3. If Task status is `canceled`, remember that Task cancellation does not imply Demand cancellation. Decide from the latest Demand whether to complete, cancel, revise, or keep it live, then use the corresponding Demand Sys action only when a mutation is warranted.
+4. After any Demand mutation, acknowledge its exact returned revision with `demand_sys.complete_check`. Do not invent a revision when reconciliation makes no mutation.
+5. Do not reopen or replace the terminal Task for the same source snapshot. After reconciliation, continue now with the Task Selection Rule so at most one other live Demand can start.
 
-Exact payloads and rejection recovery come from native schemas and `context.get.tool_catalog`. Product tools remain authoritative for their own data.
+For action details and rejection recovery, inspect `context.get.tool_catalog['task_sys']` or `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status`; runtime response fields and product tools remain authoritative for their own data.

@@ -27,7 +27,7 @@ def _build_definition() -> ToolDefinition:
         capability_boundary=(
             "task_sys.create establishes one Demand-sourced Task through the canonical side lifecycle. Task Sys read "
             "actions inspect actor-owned task state. task_sys.close and task_sys.cancel make legal "
-            "terminal transitions; task_sys.close may submit Task completion attention and task_sys.need_parent may "
+            "terminal transitions; either terminal action may submit Task outcome attention and task_sys.need_parent may "
             "submit or interrupt+submit the parent only through a Task Sys runtime instruction. These actions do not "
             "mutate Demands, send messages, mutate tracks, or write actor private files."
         ),
@@ -242,17 +242,17 @@ def _build_definition() -> ToolDefinition:
                 result_content_level="task id, lifecycle status, and execution completion result",
                 success_effect=(
                     "Marks the Task completed, records execution completion metadata, clears active processing, and "
-                    "submits completion attention to the parent for a Demand-sourced Task."
+                    "submits outcome attention to the parent for a Demand-sourced Task."
                 ),
                 failure_state_guarantee=(
-                    "Rejected close requests do not mutate Task state. If completion-attention submission fails after "
+                    "Rejected close requests do not mutate Task state. If outcome-attention submission fails after "
                     "the terminal write, the completed Task remains durable and the failure is returned explicitly."
                 ),
                 reads=("task sys task record",),
                 writes=(
                     "task sys task record",
                     "side runtime cleanup when closing from side",
-                    "parent turn through Task Sys completion runtime instruction for Demand-sourced Tasks",
+                    "parent turn through Task Sys outcome runtime instruction for Demand-sourced Tasks",
                 ),
                 does_not_write=("Demands", "messages", "tracks", "artifacts", "actor private files"),
                 preconditions=(
@@ -269,7 +269,7 @@ def _build_definition() -> ToolDefinition:
                     "side_thread_id",
                     "side_cleanup",
                     "execution_result",
-                    "completion_attention",
+                    "outcome_attention",
                 ),
                 use_when=("The active side or parent frame completed the required frame work and the task should be closed.",),
                 do_not_use_when=(
@@ -310,11 +310,21 @@ def _build_definition() -> ToolDefinition:
                 visibility="Task Sys cancel mutation",
                 durability="durable",
                 result_content_level="task id, canceled lifecycle status, and execution cancellation result",
-                success_effect="Marks the task canceled and records cancellation metadata.",
-                failure_state_guarantee="Rejected cancel requests do not mutate task sys state.",
+                success_effect=(
+                    "Marks the Task canceled, records cancellation metadata, clears active processing, and submits "
+                    "outcome attention to the parent for a Demand-sourced Task."
+                ),
+                failure_state_guarantee=(
+                    "Rejected cancel requests do not mutate Task state. If outcome-attention submission fails after "
+                    "the terminal write, the canceled Task remains durable and the failure is returned explicitly."
+                ),
                 reads=("task sys task record",),
-                writes=("task sys task record",),
-                does_not_write=("parent turns", "messages", "tracks", "artifacts"),
+                writes=(
+                    "task sys task record",
+                    "side runtime cleanup when canceling from side",
+                    "parent turn through Task Sys outcome runtime instruction for Demand-sourced Tasks",
+                ),
+                does_not_write=("Demands", "messages", "tracks", "artifacts", "actor private files"),
                 preconditions=(
                     "env.tool role-action policy allows this action for the active role",
                     "task_id exists",
@@ -329,6 +339,7 @@ def _build_definition() -> ToolDefinition:
                     "side_thread_id",
                     "side_cleanup",
                     "execution_result",
+                    "outcome_attention",
                 ),
                 use_when=("The actor decides to cancel an active Task Sys task so it stops without completion.",),
                 do_not_use_when=(

@@ -71,7 +71,7 @@ class ActorSideThreadTests(unittest.TestCase):
             self.assertEqual(calls[0]["model_reasoning_effort"], "xhigh")
             self.assertEqual(result["capability_level"], "fast")
             self.assertEqual(result["capability_source"], "actor_config")
-            self.assertEqual(result["capability_durability"], "thread_fork_only")
+            self.assertEqual(result["capability_durability"], "new_side_thread_only")
 
     def test_explicit_deep_level_uses_same_catalog_for_one_new_side(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -87,7 +87,7 @@ class ActorSideThreadTests(unittest.TestCase):
             self.assertEqual(calls[0]["model_reasoning_effort"], "xhigh")
             self.assertEqual(result["capability_level"], "deep")
             self.assertEqual(result["capability_source"], "override")
-            self.assertEqual(result["capability_durability"], "thread_fork_only")
+            self.assertEqual(result["capability_durability"], "new_side_thread_only")
 
     def test_invalid_explicit_level_fails_before_lifecycle_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

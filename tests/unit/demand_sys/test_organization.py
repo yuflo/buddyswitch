@@ -537,7 +537,8 @@ class DemandOrganizationTests(RuntimeWorkspaceTestCase):
     def test_complete_stores_summary_and_evidence_and_exact_replay_is_noop(self) -> None:
         record = self._create("complete")
         evidence_refs = [
-            {"type": "artifact", "ref": {"id": "art-demand-proof"}}
+            {"type": "artifact", "ref": {"id": "art-demand-proof"}},
+            {"type": "task_sys.task", "ref": {"task_id": "task-demand-proof"}},
         ]
 
         receipt = demand_sys.complete(

@@ -15,6 +15,19 @@ import side_thread_registry
 class SideThreadLifecycleError(RuntimeError):
     """Raised when a side-thread lifecycle operation cannot be completed."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        cleanup: Mapping[str, Any] | None = None,
+        input_submitted: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.cleanup = dict(cleanup or {})
+        self.input_submitted = input_submitted
+
 
 def _require_text(value: object, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -39,10 +52,10 @@ def _runtime_selection_result(model: str | None, model_reasoning_effort: str | N
     return payload
 
 
-def _thread_id_from_fork(result: Mapping[str, Any]) -> str:
+def _thread_id_from_start(result: Mapping[str, Any]) -> str:
     thread = result.get("thread")
     if not isinstance(thread, Mapping):
-        raise SideThreadLifecycleError("thread/fork did not return a thread object")
+        raise SideThreadLifecycleError("thread/start did not return a thread object")
     return _require_text(thread.get("id"), "thread.id")
 
 
@@ -85,6 +98,11 @@ def _row_purpose(row: Mapping[str, Any]) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _row_turn_kind(row: Mapping[str, Any]) -> str | None:
+    value = row.get("turn_kind")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def start_side_thread(
     *,
     socket_path: Path,
@@ -105,19 +123,17 @@ def start_side_thread(
     normalized_purpose = _require_text(purpose, "purpose")
     normalized_model = _optional_text(model, "model")
     normalized_effort = _optional_text(model_reasoning_effort, "model_reasoning_effort")
-    forked = app_server.thread_fork(
+    started = app_server.thread_start(
         socket_path,
-        normalized_parent,
-        workspace_dir=workspace_dir,
-        shared_project_workspace_dir=shared_project_workspace_dir,
-        permissions=permissions,
+        workspace_dir,
+        shared_project_workspace_dir,
+        permissions,
+        developer_instructions=app_server.SIDE_DEVELOPER_INSTRUCTIONS,
+        ephemeral=True,
         model=normalized_model,
         model_reasoning_effort=normalized_effort,
     )
-    side_thread_id = _thread_id_from_fork(forked)
-    app_server.thread_inject_items(socket_path, side_thread_id, [app_server.side_boundary_prompt_item()])
-    sent = app_server.turn_start(socket_path, side_thread_id, text, permissions)
-    turn_id = _turn_id_from_result(sent)
+    side_thread_id = _thread_id_from_start(started)
     side_thread_registry.register_side_thread(
         instance_json,
         actor_id=normalized_actor,
@@ -125,8 +141,75 @@ def start_side_thread(
         side_thread_id=side_thread_id,
         task_id=task_id,
         purpose=normalized_purpose,
-        turn_id=turn_id,
+        turn_kind="starting",
     )
+    lease_registered = True
+    lease_consumed = False
+    turn_id: str | None = None
+    try:
+        sent = app_server.turn_start(socket_path, side_thread_id, text, permissions)
+        turn_id = _turn_id_from_result(sent)
+        try:
+            transitioned = side_thread_registry.transition_side_thread_turn(
+                instance_json,
+                actor_id=normalized_actor,
+                parent_thread_id=normalized_parent,
+                side_thread_id=side_thread_id,
+                expected_turn_id=None,
+                expected_turn_kind="starting",
+                turn_id=turn_id,
+                turn_kind="work",
+            )
+        except side_thread_registry.SideThreadRegistryError as exc:
+            if not str(exc).startswith("Side thread is not registered for this instance:"):
+                raise
+            transitioned = None
+            lease_registered = False
+            lease_consumed = True
+            thread_status = "consumed"
+        if transitioned is None:
+            if not lease_consumed:
+                raise SideThreadLifecycleError(f"side thread {side_thread_id} starting lease changed unexpectedly")
+        else:
+            thread_status = _thread_status_kind(
+                app_server.thread_read(socket_path, side_thread_id, include_turns=False)
+            )
+            if thread_status not in {"active", "idle"}:
+                raise SideThreadLifecycleError(f"side thread {side_thread_id} is not active or idle after start")
+    except Exception as exc:
+        cleanup: dict[str, Any] = {
+            "turn_interrupt_attempted": turn_id is not None,
+            "turn_interrupt_ok": False,
+            "lease_unregistered": False,
+        }
+        if turn_id is not None:
+            try:
+                app_server.turn_interrupt(socket_path, side_thread_id, turn_id)
+            except Exception as interrupt_exc:
+                cleanup["turn_interrupt_error"] = str(interrupt_exc)
+            else:
+                cleanup["turn_interrupt_ok"] = True
+        if lease_registered:
+            try:
+                cleanup["lease_unregistered"] = side_thread_registry.unregister_side_thread(
+                    instance_json,
+                    actor_id=normalized_actor,
+                    parent_thread_id=normalized_parent,
+                    side_thread_id=side_thread_id,
+                )
+            except Exception as unregister_exc:
+                cleanup["lease_unregister_error"] = str(unregister_exc)
+        retryable = bool(
+            turn_id is not None
+            and cleanup["turn_interrupt_ok"]
+            and cleanup["lease_unregistered"]
+        )
+        raise SideThreadLifecycleError(
+            str(exc),
+            retryable=retryable,
+            cleanup=cleanup,
+            input_submitted=True if turn_id is not None else None,
+        ) from exc
     return {
         "action": "start",
         "purpose": normalized_purpose,
@@ -134,7 +217,9 @@ def start_side_thread(
         "side_thread_id": side_thread_id,
         "thread_action": sent.get("action") or "start",
         "turn_id": turn_id,
-        "lease_registered": True,
+        "thread_status": thread_status,
+        "lease_registered": lease_registered,
+        "lease_consumed": lease_consumed,
         **_runtime_selection_result(normalized_model, normalized_effort),
     }
 
@@ -148,37 +233,52 @@ def send_to_side_thread(
     side_thread_id: str,
     text: str,
     permissions: str,
+    turn_kind: str | None = None,
 ) -> dict[str, Any]:
-    normalized_actor = _require_text(actor_id, "actor_id")
-    normalized_parent = _require_text(parent_thread_id, "parent_thread_id")
-    normalized_side = _require_text(side_thread_id, "side_thread_id")
-    row = side_thread_registry.require_side_thread(
-        instance_json,
-        actor_id=normalized_actor,
-        parent_thread_id=normalized_parent,
-        side_thread_id=normalized_side,
-    )
-    status_kind = _thread_status_kind(app_server.thread_read(socket_path, normalized_side, include_turns=False))
-    if status_kind == "idle":
-        sent = app_server.turn_start(socket_path, normalized_side, text, permissions)
-        thread_action = "start"
-        expected_turn_id = None
-    elif status_kind == "active":
-        expected_turn_id = _row_turn_id(row)
-        if expected_turn_id is None:
-            raise SideThreadLifecycleError(f"side thread {normalized_side} has no stored turn id")
-        sent = app_server.turn_steer(socket_path, normalized_side, expected_turn_id, text)
-        thread_action = "steer"
-    else:
-        raise SideThreadLifecycleError(f"side thread {normalized_side} is not active or idle")
-    turn_id = _turn_id_from_result(sent)
-    side_thread_registry.update_side_thread(
-        instance_json,
-        actor_id=normalized_actor,
-        parent_thread_id=normalized_parent,
-        side_thread_id=normalized_side,
-        turn_id=turn_id,
-    )
+    input_submitted: bool | None = False
+    try:
+        normalized_actor = _require_text(actor_id, "actor_id")
+        normalized_parent = _require_text(parent_thread_id, "parent_thread_id")
+        normalized_side = _require_text(side_thread_id, "side_thread_id")
+        row = side_thread_registry.require_side_thread(
+            instance_json,
+            actor_id=normalized_actor,
+            parent_thread_id=normalized_parent,
+            side_thread_id=normalized_side,
+        )
+        status_kind = _thread_status_kind(
+            app_server.thread_read(socket_path, normalized_side, include_turns=False)
+        )
+        if status_kind == "idle":
+            input_submitted = None
+            sent = app_server.turn_start(socket_path, normalized_side, text, permissions)
+            input_submitted = True
+            thread_action = "start"
+            expected_turn_id = None
+        elif status_kind == "active":
+            expected_turn_id = _row_turn_id(row)
+            if expected_turn_id is None:
+                raise SideThreadLifecycleError(f"side thread {normalized_side} has no stored turn id")
+            input_submitted = None
+            sent = app_server.turn_steer(socket_path, normalized_side, expected_turn_id, text)
+            input_submitted = True
+            thread_action = "steer"
+        else:
+            raise SideThreadLifecycleError(f"side thread {normalized_side} is not active or idle")
+        turn_id = _turn_id_from_result(sent)
+        side_thread_registry.update_side_thread(
+            instance_json,
+            actor_id=normalized_actor,
+            parent_thread_id=normalized_parent,
+            side_thread_id=normalized_side,
+            turn_id=turn_id,
+            turn_kind=turn_kind,
+        )
+    except Exception as exc:
+        raise SideThreadLifecycleError(
+            str(exc),
+            input_submitted=input_submitted,
+        ) from exc
     payload: dict[str, Any] = {
         "action": "send",
         "purpose": _row_purpose(row),
@@ -186,10 +286,33 @@ def send_to_side_thread(
         "side_thread_id": normalized_side,
         "thread_action": sent.get("action") or thread_action,
         "turn_id": turn_id,
+        "turn_kind": turn_kind or _row_turn_kind(row),
         "lease_updated": True,
     }
     if expected_turn_id is not None:
         payload["expected_turn_id"] = expected_turn_id
+    return payload
+
+
+def interrupt_unleased_side_turn(
+    *,
+    socket_path: Path,
+    side_thread_id: str,
+    turn_id: str,
+) -> dict[str, Any]:
+    normalized_side = _require_text(side_thread_id, "side_thread_id")
+    normalized_turn = _require_text(turn_id, "turn_id")
+    payload: dict[str, Any] = {
+        "turn_interrupt_attempted": True,
+        "turn_interrupt_ok": False,
+        "lease_unregistered": False,
+    }
+    try:
+        app_server.turn_interrupt(socket_path, normalized_side, normalized_turn)
+    except Exception as exc:
+        payload["turn_interrupt_error"] = str(exc)
+    else:
+        payload["turn_interrupt_ok"] = True
     return payload
 
 

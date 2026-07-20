@@ -543,7 +543,13 @@ def record_task_cancel(task_id: str, update: Mapping[str, Any]) -> dict[str, Any
         "previous_status": status,
         "updated_at": now,
     }
-    processor = "side" if status == SIDE_PROCESSING else "parent" if status == PARENT_PROCESSING else None
+    processor = (
+        "side"
+        if status in {SIDE_PROCESSING, AWAITING_PARENT}
+        else "parent"
+        if status == PARENT_PROCESSING
+        else None
+    )
     if processor is not None:
         cancellation_result["processor"] = processor
     reason = payload.get("reason")
@@ -690,32 +696,38 @@ def parent_handoff_instruction(task_id: str) -> dict[str, Any]:
     )
 
 
-def completion_instruction(task_id: str) -> dict[str, Any] | None:
-    """Return parent attention for one completed Demand-sourced Task."""
+def outcome_instruction(task_id: str) -> dict[str, Any] | None:
+    """Return parent attention for one terminal Demand-sourced Task."""
 
     normalized_task_id = runtime_files.require_id(task_id, "task id")
     record = _load_task(normalized_task_id)
     if record.get("source_type") != "demand":
         return None
-    if record.get("status") != COMPLETED:
-        raise ValueError("Demand-sourced Task must be completed before completion attention")
-    completion = _payload_copy(_require_mapping(_execution_result(record), "task.execution.result"))
-    if completion.get("type") != "completion":
-        raise ValueError("completed Demand-sourced Task must have a completion result")
-    processor = completion.get("processor")
+    status = record.get("status")
+    expected_result_type = {
+        COMPLETED: "completion",
+        CANCELED: "cancellation",
+    }.get(status)
+    if expected_result_type is None:
+        raise ValueError("Demand-sourced Task must be completed or canceled before outcome attention")
+    outcome = _payload_copy(_require_mapping(_execution_result(record), "task.execution.result"))
+    if outcome.get("type") != expected_result_type:
+        raise ValueError(f"{status} Demand-sourced Task must have a {expected_result_type} result")
+    processor = outcome.get("processor")
     if processor not in {"side", "parent"}:
-        raise ValueError("Task completion processor must be side or parent")
-    _require_text(completion.get("updated_at"), "task.execution.result.updated_at")
+        raise ValueError("Task outcome processor must be side or parent")
+    _require_text(outcome.get("updated_at"), "task.execution.result.updated_at")
     demand_ref = _normalize_demand_ref(record.get("source_ref"))
     frame = {
-        "kind": "task_sys.completion_frame",
+        "kind": "task_sys.outcome_frame",
         "task_id": normalized_task_id,
+        "status": status,
         "source": {"type": "demand", "ref": demand_ref},
         "evidence_ref": {
             "type": "task_sys.task",
             "ref": {"task_id": normalized_task_id},
         },
-        "completion": completion,
+        "outcome": outcome,
     }
     return runtime_instruction(
         "submit_parent",

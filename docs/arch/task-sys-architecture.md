@@ -56,21 +56,62 @@ Task Sys owns three strict frame kinds:
 
 - `task_sys.side_frame` starts every new Task;
 - `task_sys.parent_frame` hands the same Task from side to parent;
-- `task_sys.completion_frame` returns a terminal Demand-sourced Task receipt to
+- `task_sys.outcome_frame` returns a terminal Demand-sourced Task receipt to
   the parent Actor.
 
-Parent handoff and completion attention both reuse the existing
-`submit_parent` runtime instruction. A completion frame contains the Task id,
-opaque DemandRef, exact `task_sys.task` evidence reference, and Task completion
-result only. It does not contain or copy Demand status, lifecycle, detail,
-relation state, or selection policy.
+Parent handoff and outcome attention both reuse the existing `submit_parent`
+runtime instruction. An outcome frame contains the Task id, canonical terminal
+status, opaque DemandRef, exact `task_sys.task` evidence reference, and matching
+completion or cancellation result only. It does not contain or copy Demand
+status, lifecycle, detail, relation state, or selection policy.
 
-Closing a Task persists terminal truth before completion attention is
+Closing or canceling a Task persists terminal truth before outcome attention is
 submitted. Submission failure is explicit feedback and never rolls back the
-completed Task. Non-Demand Tasks do not emit a completion frame. The Actor
-rereads source-owned state, decides any later source mutation, acknowledges the
-resulting Demand revision, and then applies the same at-most-one Task selection
-rule to another live Demand.
+terminal Task. Non-Demand Tasks do not emit an outcome frame. The Actor rereads
+source-owned state, decides any later source mutation, acknowledges the
+resulting Demand revision when required, and then applies the same at-most-one
+Task selection rule to another live Demand. Task cancellation never implies
+Demand cancellation.
+
+## Lifecycle attention
+
+Every side processor runs in a fresh isolated ephemeral App Server thread.
+`side_thread_lifecycle` creates it with `thread/start`, explicit side developer
+instructions and runtime capability. It registers a `starting` lease before
+submitting the self-contained side frame, atomically advances that lease to the
+exact `work` turn, then reads the resulting generic thread status. Side
+creation never inherits parent conversation history and has no fork or
+boundary-injection path. A post-submit setup failure is retryable only after the
+exact returned turn is interrupted and its lease is removed. If the starting
+lease disappeared before binding, Task Sys rereads canonical Task status: only
+a Task that already left `side_processing` is accepted as a legitimate
+terminal/handoff consume; otherwise the exact unleased turn is interrupted and
+the Task records a non-retryable runtime failure.
+
+Task Sys owns one processor-aware Task Progress Check. The Task Sys daemon
+adapter resolves the exact active Task from each processor's real yield signal:
+
+- a completed main-thread turn may check only the actor's
+  `in_progress.parent_processing` Task;
+- an idle registered `task_sys.side_frame` thread may check only the exact
+  actor-owned `in_progress.side_processing` Task named by its current lease and
+  `work` turn id.
+
+The runtime returns the check to the same processor: parent checks use the main
+thread, while side checks use the exact registered side thread. A side work
+turn is claimed by one atomic `work -> progress_check_pending -> progress_check`
+lease transition; the creator performs the same claim immediately when its
+post-start read finds that the first work turn already became idle. This closes
+the notification-before-registration race without polling or retry logic. A
+check turn is not eligible to create another check, including after daemon
+restart. Side keeps `progress_check_pending` whenever external submission may
+have happened but the returned turn identity could not be persisted; it rolls
+back to `work` only when the lifecycle owner proves submission was not
+attempted. Parent stores a `submitting` checkpoint before external submission,
+then adds the submitted turn id after receipt. Generic daemon state persists
+this opaque handler checkpoint; only the Task adapter interprets it. A completion or
+idle signal itself never changes Task status; only actor-selected Task actions
+do so.
 
 Side frames may use only frame data and explicitly allowed product tools. Local
 filesystem or shell inspection, including read-only workspace files, belongs to
@@ -103,8 +144,10 @@ Forbidden:
 Task implementation -> Demand import, read, validation, call, subscription, or mutation
 Demand implementation -> Task import, read, call, or mutation
 generic daemon -> Task or Demand business semantics
+generic daemon checkpoint storage -> interpretation of Task turn identities
+side lifecycle -> inherited parent conversation or parallel fork path
 second create name, gate, source write path, lifecycle, or shadow Task state
-Task completion mutating Demand without an Actor decision
+Task outcome mutating Demand without an Actor decision
 ```
 
 These laws are enforced by

@@ -305,4 +305,4 @@ class ActorCapabilityTests(unittest.TestCase):
             self.assertEqual(payload["model_reasoning_effort"], "xhigh")
             self.assertEqual(payload["capability_level"], "deep")
             self.assertEqual(payload["capability_source"], "override")
-            self.assertEqual(payload["capability_durability"], "thread_fork_only")
+            self.assertEqual(payload["capability_durability"], "new_side_thread_only")

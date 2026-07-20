@@ -370,7 +370,9 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
                     "demand_id": completable,
                     "expected_revision": completable_revision,
                     "summary": "Need was satisfied.",
-                    "evidence_refs": [{"type": "artifact", "ref": {"id": "art-demand-proof"}}],
+                    "evidence_refs": [
+                        {"type": "task_sys.task", "ref": {"task_id": "task-demand-proof"}}
+                    ],
                 },
             ),
             (
@@ -391,6 +393,17 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
                     args=args,
                 )
                 self._assert_write_success_contract(response)
+
+        completed = self._demand_dispatch(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            action="get",
+            args={"demand_id": completable},
+        )
+        self.assertEqual(
+            completed["demand"]["terminal"]["evidence_refs"],  # type: ignore[index]
+            [{"type": "task_sys.task", "ref": {"task_id": "task-demand-proof"}}],
+        )
 
 
 if __name__ == "__main__":

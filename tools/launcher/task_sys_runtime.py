@@ -20,6 +20,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 import app_server  # noqa: E402
 import actor_session  # noqa: E402
 import actor_side_thread  # noqa: E402
+import side_thread_registry  # noqa: E402
 import side_thread_lifecycle  # noqa: E402
 from env.domain import task_sys  # noqa: E402
 
@@ -109,9 +110,8 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
             "task_sys.side_frame",
             "You are processing exactly one Task Sys side frame.",
             (
-                "The inherited parent thread history is reference context only. The active task is only the task "
-                "described in this frame. Do not continue inherited parent-thread work, plans, tool calls, approvals, "
-                "edits, or requests."
+                "This is an isolated side thread with no parent conversation history. The active task is only the "
+                "task described in this frame."
             ),
             f"Task id: {task_id}",
             "Task Sys source:",
@@ -265,46 +265,65 @@ def render_parent_frame(frame: Mapping[str, Any]) -> str:
     )
 
 
-def render_completion_frame(frame: Mapping[str, Any]) -> str:
+def render_outcome_frame(frame: Mapping[str, Any]) -> str:
     payload = _require_mapping(frame, "frame")
-    if set(payload) != {"kind", "task_id", "source", "evidence_ref", "completion"}:
+    if set(payload) != {"kind", "task_id", "status", "source", "evidence_ref", "outcome"}:
         raise ValueError(
-            "completion frame must contain exactly kind, task_id, source, evidence_ref, and completion"
+            "outcome frame must contain exactly kind, task_id, status, source, evidence_ref, and outcome"
         )
     task_id = _require_text(payload.get("task_id"), "frame.task_id")
+    status = _require_text(payload.get("status"), "frame.status")
+    if status not in {task_sys.COMPLETED, task_sys.CANCELED}:
+        raise ValueError("outcome frame status must be completed or canceled")
     source = _require_mapping(payload.get("source"), "frame.source")
     if set(source) != {"type", "ref"} or source.get("type") != "demand":
-        raise ValueError("completion frame source must be an exact Demand reference")
+        raise ValueError("outcome frame source must be an exact Demand reference")
     source_ref = _require_mapping(source.get("ref"), "frame.source.ref")
     if set(source_ref) != {"demand_id", "basis_revision"}:
-        raise ValueError("completion frame Demand ref must contain exactly demand_id and basis_revision")
+        raise ValueError("outcome frame Demand ref must contain exactly demand_id and basis_revision")
     _require_text(source_ref.get("demand_id"), "frame.source.ref.demand_id")
     basis_revision = source_ref.get("basis_revision")
     if type(basis_revision) is not int or basis_revision < 1:
         raise ValueError("frame.source.ref.basis_revision must be a positive integer")
     evidence_ref = _require_mapping(payload.get("evidence_ref"), "frame.evidence_ref")
     if set(evidence_ref) != {"type", "ref"} or evidence_ref.get("type") != "task_sys.task":
-        raise ValueError("completion frame evidence_ref must be a task_sys.task reference")
+        raise ValueError("outcome frame evidence_ref must be a task_sys.task reference")
     evidence_identity = _require_mapping(evidence_ref.get("ref"), "frame.evidence_ref.ref")
     if set(evidence_identity) != {"task_id"} or evidence_identity.get("task_id") != task_id:
-        raise ValueError("completion frame evidence_ref must identify the completed task_id exactly")
-    completion = _require_mapping(payload.get("completion"), "frame.completion")
-    if completion.get("type") != "completion" or completion.get("processor") not in {"side", "parent"}:
-        raise ValueError("completion frame must contain a side or parent completion receipt")
-    _require_text(completion.get("updated_at"), "frame.completion.updated_at")
+        raise ValueError("outcome frame evidence_ref must identify the terminal task_id exactly")
+    outcome = _require_mapping(payload.get("outcome"), "frame.outcome")
+    expected_result_type = "completion" if status == task_sys.COMPLETED else "cancellation"
+    if outcome.get("type") != expected_result_type or outcome.get("processor") not in {"side", "parent"}:
+        raise ValueError(f"{status} outcome frame must contain a side or parent {expected_result_type} receipt")
+    _require_text(outcome.get("updated_at"), "frame.outcome.updated_at")
+    status_guidance = (
+        "Complete the Demand only when its latest state is satisfied; otherwise revise it or keep it live."
+        if status == task_sys.COMPLETED
+        else (
+            "Task cancellation does not imply Demand completion or cancellation. Decide whether to complete, cancel, "
+            "revise, or keep the Demand live from its latest state."
+        )
+    )
     return "\n\n".join(
         (
-            "task_sys.completion_frame",
-            "This Task is already terminal. This frame is a completion receipt, not Task work.",
-            f"Completed Task id: {task_id}",
+            "task_sys.outcome_frame",
+            "This Task is already terminal. This frame is an outcome receipt, not Task work.",
+            f"Terminal Task id: {task_id}",
+            f"Canonical Task status: {status}",
             "Task source snapshot:\n" + _json_block(source),
-            "Task completion receipt:\n" + _json_block(completion),
-            "Task completion evidence reference:\n" + _json_block(evidence_ref),
+            "Task outcome receipt:\n" + _json_block(outcome),
+            "Task outcome evidence reference:\n" + _json_block(evidence_ref),
             "Required action:",
             (
                 "Reconcile the source-owned obligation using the latest source state and actor tools. "
                 "The recorded source snapshot is evidence of what this Task processed, not proof that later source changes are satisfied. "
-                "Pass this evidence reference unchanged if the latest source obligation is completed."
+                "Pass this evidence reference unchanged if the latest source obligation is completed. "
+                + status_guidance
+            ),
+            (
+                "After any Demand mutation, acknowledge the exact returned revision with "
+                "the source owner's check action before selecting more work. If reconciliation makes no mutation, "
+                "do not invent a new revision."
             ),
             (
                 "Do not reopen this terminal Task or create a replacement for this same source snapshot. "
@@ -320,26 +339,38 @@ def render_submit_parent_frame(frame: Mapping[str, Any]) -> str:
     kind = _require_text(payload.get("kind"), "frame.kind")
     if kind == "task_sys.parent_frame":
         return render_parent_frame(payload)
-    if kind == "task_sys.completion_frame":
-        return render_completion_frame(payload)
+    if kind == "task_sys.outcome_frame":
+        return render_outcome_frame(payload)
     raise ValueError(f"unsupported submit_parent frame kind: {kind}")
 
 
-def render_parent_progress_check(
+def render_task_progress_check(
     task: Mapping[str, Any],
     previous_turn: Mapping[str, Any],
+    *,
+    processor: str,
 ) -> str:
     payload = _require_mapping(task, "task")
     task_id = _require_text(payload.get("id"), "task.id")
     status = _require_text(payload.get("status"), "task.status")
-    if status != task_sys.PARENT_PROCESSING:
-        raise ValueError("parent Progress Check requires an in_progress.parent_processing task")
+    normalized_processor = _require_text(processor, "processor")
+    expected_status = {
+        "side": task_sys.SIDE_PROCESSING,
+        "parent": task_sys.PARENT_PROCESSING,
+    }.get(normalized_processor)
+    if expected_status is None:
+        raise ValueError("Task Progress Check processor must be side or parent")
+    if status != expected_status:
+        raise ValueError(f"{normalized_processor} Progress Check requires an {expected_status} task")
     turn = _require_mapping(previous_turn, "previous_turn")
     turn_id = _require_text(turn.get("turn_id"), "previous_turn.turn_id")
     thread_id = _require_text(turn.get("thread_id"), "previous_turn.thread_id")
     turn_status = _require_text(turn.get("status"), "previous_turn.status")
-    if turn_status != "completed":
-        raise ValueError("parent Progress Check requires a completed previous turn")
+    expected_signal_status = "idle" if normalized_processor == "side" else "completed"
+    if turn_status != expected_signal_status:
+        raise ValueError(
+            f"{normalized_processor} Progress Check requires previous processor status {expected_signal_status}"
+        )
 
     source_ref = payload.get("source_ref")
     source = {
@@ -351,24 +382,36 @@ def render_parent_progress_check(
     if isinstance(events, list) and events and isinstance(events[-1], Mapping):
         last_event = dict(events[-1])
 
+    if normalized_processor == "side":
+        review_line = "Review the existing side-owned Task after the side thread became idle."
+        continue_line = "- If more side work is required, continue that work in this turn; do not mutate Task status merely for continuing."
+        operations = (
+            f"- If the Task is complete, call task_sys.close(task_id=\"{task_id}\", summary=...).",
+            f"- If the Task must stop without completion, call task_sys.cancel(task_id=\"{task_id}\", reason=...).",
+            f"- If parent resources are required, call task_sys.need_parent(task_id=\"{task_id}\", params=...).",
+            continue_line,
+            f"- On continue, status remains {expected_status} until the actor explicitly advances or terminalizes the Task.",
+        )
+    else:
+        review_line = "Review the existing parent-owned Task after the previous main-thread turn completed."
+        operations = (
+            f"- If the Task is complete, call task_sys.close(task_id=\"{task_id}\", summary=...).",
+            f"- If the Task must stop without completion, call task_sys.cancel(task_id=\"{task_id}\", reason=...).",
+            "- If more parent work is required, continue that work in this turn; do not mutate Task status merely for continuing.",
+            f"- On continue, status remains {expected_status} until the actor explicitly closes or cancels the Task.",
+        )
+
     return "\n\n".join(
         (
             "[TASK PROGRESS CHECK]",
-            "Review the existing parent-owned Task after the previous main-thread turn completed.",
-            f"Previous main-thread turn: {turn_id} on {thread_id}",
+            review_line,
+            f"Previous {normalized_processor} turn: {turn_id} on {thread_id}",
             f"Existing Task id: {task_id}",
             f"Canonical Task status: {status}",
             "Task source:\n" + _json_block(source),
             "Last lifecycle event:\n" + _json_block(last_event),
             "Actor decision:",
-            "\n".join(
-                (
-                    f"- If the Task is complete, call task_sys.close(task_id=\"{task_id}\", summary=...).",
-                    f"- If the Task must stop without completion, call task_sys.cancel(task_id=\"{task_id}\", reason=...).",
-                    "- If more parent work is required, continue that work in this turn; do not mutate Task status merely for continuing.",
-                    f"- On continue, status remains {task_sys.PARENT_PROCESSING} until the actor explicitly closes or cancels the Task.",
-                )
-            ),
+            "\n".join(operations),
             "This Progress Check is bound to the existing Task. Do not create another Task or infer completion from turn completion alone.",
         )
     )
@@ -398,20 +441,84 @@ def _project_workspace_dir(context: Any) -> Path:
     return _context_path(context, "project_workspace_dir")
 
 
-def submit_parent_progress_check(
+def submit_task_progress_check(
     context: Any,
     task: Mapping[str, Any],
     previous_turn: Mapping[str, Any],
+    *,
+    processor: str,
+    side_thread_id: str | None = None,
 ) -> dict[str, Any]:
     payload = _require_mapping(task, "task")
     task_id = _require_text(payload.get("id"), "task.id")
-    result = actor_session.input_actor_turn(
-        socket_path=_socket_path(context),
-        instance_json=_instance_json(context),
-        thread_id=_main_thread_id(context),
-        text=render_parent_progress_check(payload, previous_turn),
-        permissions=_permissions(context),
-    )
+    normalized_processor = _require_text(processor, "processor")
+    text = render_task_progress_check(payload, previous_turn, processor=normalized_processor)
+    if normalized_processor == "parent":
+        if side_thread_id is not None:
+            raise ValueError("parent Progress Check must not target a side thread")
+        result = actor_session.input_actor_turn(
+            socket_path=_socket_path(context),
+            instance_json=_instance_json(context),
+            thread_id=_main_thread_id(context),
+            text=text,
+            permissions=_permissions(context),
+        )
+    elif normalized_processor == "side":
+        normalized_side_thread_id = _require_text(side_thread_id, "side_thread_id")
+        previous = _require_mapping(previous_turn, "previous_turn")
+        if previous.get("thread_id") != normalized_side_thread_id:
+            raise ValueError("side Progress Check must target the completed side thread")
+        source_turn_id = _require_text(previous.get("turn_id"), "previous_turn.turn_id")
+        claim = side_thread_registry.transition_side_thread_turn(
+            _instance_json(context),
+            actor_id=_context_actor_id(context),
+            parent_thread_id=_main_thread_id(context),
+            side_thread_id=normalized_side_thread_id,
+            expected_turn_id=source_turn_id,
+            expected_turn_kind="work",
+            turn_kind="progress_check_pending",
+        )
+        if claim is None:
+            row = side_thread_registry.require_side_thread(
+                _instance_json(context),
+                actor_id=_context_actor_id(context),
+                parent_thread_id=_main_thread_id(context),
+                side_thread_id=normalized_side_thread_id,
+            )
+            return {
+                "action": "progress_check",
+                "status": "already_claimed",
+                "task_id": task_id,
+                "turn_id": _require_text(row.get("turn_id"), "side lease turn_id"),
+            }
+        try:
+            result = side_thread_lifecycle.send_to_side_thread(
+                socket_path=_socket_path(context),
+                instance_json=_instance_json(context),
+                actor_id=_context_actor_id(context),
+                parent_thread_id=_main_thread_id(context),
+                side_thread_id=normalized_side_thread_id,
+                text=text,
+                permissions=_permissions(context),
+                turn_kind="progress_check",
+            )
+        except Exception as exc:
+            if getattr(exc, "input_submitted", None) is False:
+                try:
+                    side_thread_registry.transition_side_thread_turn(
+                        _instance_json(context),
+                        actor_id=_context_actor_id(context),
+                        parent_thread_id=_main_thread_id(context),
+                        side_thread_id=normalized_side_thread_id,
+                        expected_turn_id=source_turn_id,
+                        expected_turn_kind="progress_check_pending",
+                        turn_kind="work",
+                    )
+                except side_thread_registry.SideThreadRegistryError:
+                    pass
+            raise
+    else:
+        raise ValueError("Task Progress Check processor must be side or parent")
     return {
         "action": "progress_check",
         "task_id": task_id,
@@ -455,8 +562,11 @@ def _start_side_attempt(
             "attempt": attempt_number,
             "stage": "side_lifecycle",
             "error": str(exc),
-            "retryable": True,
+            "retryable": bool(getattr(exc, "retryable", True)),
         }
+        cleanup = getattr(exc, "cleanup", None)
+        if isinstance(cleanup, Mapping):
+            attempt["cleanup"] = dict(cleanup)
         return {"ok": False, "attempt": attempt}
 
     payload = _require_mapping(started, "side lifecycle result")
@@ -501,22 +611,57 @@ def _execute_start_side(context: Any, instruction: Mapping[str, Any]) -> dict[st
         )
         if result.get("ok") is True:
             attempt = result.pop("attempt")
+            if result.get("lease_consumed") is True:
+                task = task_sys.get_task(task_id)
+                if task.get("status") == task_sys.SIDE_PROCESSING:
+                    cleanup = side_thread_lifecycle.interrupt_unleased_side_turn(
+                        socket_path=_socket_path(context),
+                        side_thread_id=_require_text(result.get("side_thread_id"), "side_thread_id"),
+                        turn_id=_require_text(result.get("turn_id"), "turn_id"),
+                    )
+                    if isinstance(attempt, dict):
+                        attempt.update(
+                            {
+                                "stage": "side_lease_consumed",
+                                "error": "side lease was consumed before Task lifecycle ownership changed",
+                                "retryable": False,
+                                "cleanup": cleanup,
+                            }
+                        )
+                        attempts.append(attempt)
+                    break
             if isinstance(attempt, dict):
                 attempts.append(attempt)
             result["attempts"] = attempts
+            if result.get("thread_status") == "idle":
+                task = task_sys.get_task(task_id)
+                if task.get("status") == task_sys.SIDE_PROCESSING:
+                    result["progress_check"] = submit_task_progress_check(
+                        context,
+                        task,
+                        {
+                            "thread_id": result["side_thread_id"],
+                            "turn_id": result["turn_id"],
+                            "status": "idle",
+                        },
+                        processor="side",
+                        side_thread_id=result["side_thread_id"],
+                    )
             return result
         attempt = result.get("attempt")
         if isinstance(attempt, dict):
             attempts.append(attempt)
+            if attempt.get("retryable") is not True:
+                break
 
-    last_attempt = attempts[-1] if attempts else {"stage": "side_fork", "error": "side dispatch failed"}
+    last_attempt = attempts[-1] if attempts else {"stage": "side_lifecycle", "error": "side dispatch failed"}
     failure = {
         "reason": "runtime_failed",
         "status": "runtime_failed",
-        "stage": last_attempt.get("stage") or "side_fork",
+        "stage": last_attempt.get("stage") or "side_lifecycle",
         "processor": "side",
         "error": str(last_attempt.get("error") or "side dispatch failed"),
-        "retryable": True,
+        "retryable": bool(last_attempt.get("retryable")),
         "attempts": len(attempts),
     }
     side_thread_id = last_attempt.get("side_thread_id")

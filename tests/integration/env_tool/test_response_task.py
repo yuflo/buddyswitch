@@ -174,7 +174,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 str(instruction["task_id"]),
                 {
                     "reason": "runtime_failed",
-                    "stage": "side_fork",
+                    "stage": "side_lifecycle",
                     "processor": "side",
                     "error": "real runtime could not start side",
                     "retryable": True,
@@ -338,7 +338,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self.assertEqual(response["execution_result"]["side_thread_id"], "thr-side-response")
         self._assert_no_retired_task_sys_fields(response)
 
-    def test_demand_task_side_close_submits_terminal_completion_attention_and_replay_is_safe(self) -> None:
+    def test_demand_task_side_close_submits_terminal_outcome_attention_and_replay_is_safe(self) -> None:
         actor_label = "act-dev-demand-side-close"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
@@ -370,7 +370,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 or {
                     "action": "submit_parent",
                     "task_id": instruction["task_id"],
-                    "turn_id": f"turn-completion-{len(instructions)}",
+                    "turn_id": f"turn-outcome-{len(instructions)}",
                 }
             ),
         ):
@@ -394,14 +394,14 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self._assert_write_success_contract(closed)
         self._assert_success_contract(replay)
         self.assertEqual(closed["task_status"], task_sys.COMPLETED)
-        self.assertEqual(closed["completion_attention"]["status"], "submitted")
-        self.assertEqual(replay["completion_attention"]["status"], "submitted")
+        self.assertEqual(closed["outcome_attention"]["status"], "submitted")
+        self.assertEqual(replay["outcome_attention"]["status"], "submitted")
         self.assertEqual(len(instructions), 2)
         self.assertEqual({instruction["task_id"] for instruction in instructions}, {created["task_id"]})
         self.assertTrue(all(instruction["type"] == "submit_parent" for instruction in instructions))
-        self.assertTrue(all(instruction["frame"]["kind"] == "task_sys.completion_frame" for instruction in instructions))
+        self.assertTrue(all(instruction["frame"]["kind"] == "task_sys.outcome_frame" for instruction in instructions))
 
-    def test_demand_task_parent_close_submits_completion_attention_for_same_task(self) -> None:
+    def test_demand_task_parent_close_submits_outcome_attention_for_same_task(self) -> None:
         actor_label = "act-dev-demand-parent-close"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
@@ -426,7 +426,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
             return_value={
                 "action": "submit_parent",
                 "task_id": created["task_id"],
-                "turn_id": "turn-parent-completion-attention",
+                "turn_id": "turn-parent-outcome-attention",
             },
         ) as execute_instruction:
             response = self._dispatch(
@@ -440,12 +440,12 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
 
         self._assert_write_success_contract(response)
         self.assertEqual(response["processor"], "parent")
-        self.assertEqual(response["completion_attention"]["status"], "submitted")
+        self.assertEqual(response["outcome_attention"]["status"], "submitted")
         instruction = execute_instruction.call_args.args[1]
         self.assertEqual(instruction["task_id"], created["task_id"])
-        self.assertEqual(instruction["frame"]["completion"]["processor"], "parent")
+        self.assertEqual(instruction["frame"]["outcome"]["processor"], "parent")
 
-    def test_completion_attention_failure_is_explicit_while_task_stays_completed(self) -> None:
+    def test_outcome_attention_failure_is_explicit_while_task_stays_completed(self) -> None:
         actor_label = "act-dev-demand-completion-failure"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
@@ -468,7 +468,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
             runtime_context.TaskSysRuntimeAccess,
             "execute_instruction",
             autospec=True,
-            side_effect=RuntimeError("parent completion attention unavailable"),
+            side_effect=RuntimeError("parent outcome attention unavailable"),
         ):
             response = self._dispatch(
                 instance_json=instance_json,
@@ -481,10 +481,164 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
 
         self._assert_write_success_contract(response)
         self.assertEqual(response["task_status"], task_sys.COMPLETED)
-        self.assertEqual(response["completion_attention"]["status"], "failed")
-        self.assertIn("parent completion attention unavailable", response["completion_attention"]["error"])
+        self.assertEqual(response["outcome_attention"]["status"], "failed")
+        self.assertIn("parent outcome attention unavailable", response["outcome_attention"]["error"])
         self.assertEqual(task_sys.get_task(created["task_id"])["status"], task_sys.COMPLETED)
         self.assertFalse(demand_root.exists())
+
+    def test_demand_task_side_cancel_submits_terminal_outcome_attention_and_replay_is_safe(self) -> None:
+        actor_label = "act-dev-demand-side-cancel"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        created = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": "dev"},
+            demand_ref={"demand_id": "demand-side-cancel", "basis_revision": 2},
+            execution_brief={
+                "description": "Attempt the selected Demand.",
+                "detail": "Stop cleanly when the execution route is unavailable.",
+            },
+        )
+        instructions: list[dict[str, object]] = []
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
+            autospec=True,
+            return_value={
+                "side_thread_id": "thr-side-demand-cancel",
+                "lease_unregistered": True,
+                "turn_interrupt_ok": True,
+            },
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=lambda _access, instruction: (
+                instructions.append(instruction)
+                or {
+                    "action": "submit_parent",
+                    "task_id": instruction["task_id"],
+                    "turn_id": f"turn-cancel-outcome-{len(instructions)}",
+                }
+            ),
+        ):
+            canceled = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="cancel",
+                args={"task_id": created["task_id"], "reason": "Execution route unavailable."},
+            )
+            replay = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="cancel",
+                args={"task_id": created["task_id"], "reason": "Replay."},
+            )
+
+        self._assert_write_success_contract(canceled)
+        self._assert_success_contract(replay)
+        self.assertEqual(canceled["task_status"], task_sys.CANCELED)
+        self.assertEqual(canceled["outcome_attention"]["status"], "submitted")
+        self.assertEqual(replay["outcome_attention"]["status"], "submitted")
+        self.assertEqual(len(instructions), 2)
+        self.assertEqual({instruction["task_id"] for instruction in instructions}, {created["task_id"]})
+        self.assertTrue(all(instruction["frame"]["status"] == task_sys.CANCELED for instruction in instructions))
+        self.assertTrue(all(instruction["frame"]["outcome"]["type"] == "cancellation" for instruction in instructions))
+
+    def test_demand_task_awaiting_parent_cancel_submits_side_owned_outcome_attention(self) -> None:
+        actor_label = "act-dev-demand-awaiting-cancel"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        created = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": "dev"},
+            demand_ref={"demand_id": "demand-awaiting-cancel", "basis_revision": 2},
+            execution_brief={
+                "description": "Attempt a Demand that needs parent resources.",
+                "detail": "Cancel cleanly if the parent handoff cannot start.",
+            },
+        )
+        task_sys.record_side_need_parent(
+            created["task_id"],
+            {"params": {"parent_frame_context": {"next": "Finish in parent."}}},
+        )
+        instructions: list[dict[str, Any]] = []
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
+            autospec=True,
+            return_value={"side_thread_id": None, "lease_unregistered": False},
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=lambda _access, instruction: (
+                instructions.append(instruction)
+                or {
+                    "action": "submit_parent",
+                    "task_id": instruction["task_id"],
+                    "turn_id": "turn-awaiting-cancel-outcome",
+                }
+            ),
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="cancel",
+                args={"task_id": created["task_id"], "reason": "Parent handoff could not start."},
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["task_status"], task_sys.CANCELED)
+        self.assertEqual(response["processor"], "side")
+        self.assertEqual(response["outcome_attention"]["status"], "submitted")
+        self.assertEqual(len(instructions), 1)
+        self.assertEqual(instructions[0]["frame"]["outcome"]["processor"], "side")
+
+    def test_cancel_outcome_attention_failure_is_explicit_while_task_stays_canceled(self) -> None:
+        actor_label = "act-dev-demand-cancel-failure"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        created = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": "dev"},
+            demand_ref={"demand_id": "demand-cancel-failure", "basis_revision": 1},
+            execution_brief={
+                "description": "Attempt work before cancellation.",
+                "detail": "Keep terminal Task truth when outcome submission fails.",
+            },
+        )
+
+        with patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "cleanup_side_lease",
+            autospec=True,
+            return_value={"side_thread_id": "thr-side-cancel-failure", "lease_unregistered": True},
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            side_effect=RuntimeError("parent canceled outcome attention unavailable"),
+        ):
+            response = self._dispatch(
+                instance_json=instance_json,
+                actor_id=actor_label,
+                role="dev",
+                tool="task_sys",
+                action="cancel",
+                args={"task_id": created["task_id"], "reason": "Execution cannot continue."},
+            )
+
+        self._assert_write_success_contract(response)
+        self.assertEqual(response["task_status"], task_sys.CANCELED)
+        self.assertEqual(response["outcome_attention"]["status"], "failed")
+        self.assertIn("parent canceled outcome attention unavailable", response["outcome_attention"]["error"])
+        self.assertEqual(task_sys.get_task(created["task_id"])["status"], task_sys.CANCELED)
 
     def test_task_sys_cancel_response_exposes_side_cleanup_contract(self) -> None:
         actor_label = "act-dev-task-sys-cancel"
@@ -525,6 +679,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self.assertEqual(response["side_cleanup"]["lease_unregistered"], True)
         self.assertEqual(response["execution_result"]["type"], "cancellation")
         self.assertEqual(response["execution_result"]["reason"], "Request superseded.")
+        self.assertNotIn("outcome_attention", response)
         self._assert_no_retired_task_sys_fields(response)
 
     def test_task_sys_list_and_get_responses_expose_canonical_status_and_execution(self) -> None:

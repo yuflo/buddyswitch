@@ -76,11 +76,26 @@ def test_current_task_architecture_names_exact_owners_and_forward_only_boundary(
         "in_progress.awaiting_parent",
         "in_progress.parent_processing",
         "task_sys.create",
-        "task_sys.completion_frame",
+        "task_sys.outcome_frame",
+        "processor-aware Task Progress Check",
+        "fresh isolated ephemeral App Server thread",
+        "idle registered `task_sys.side_frame` thread",
+        "`starting` lease",
+        "`work -> progress_check_pending -> progress_check`",
+        "opaque handler checkpoint",
         "opaque DemandRef",
         "Actor + installed task-management skill",
         "Track comment ingress",
     ):
         assert token in text
-    for token in ("task_sys.start", "task_sys.begin", "automatic Demand completion", "compatibility"):
+    for token in (
+        "task_sys.start",
+        "task_sys.begin",
+        "task_sys.completion_frame",
+        "completion attention",
+        "automatic Demand completion",
+        "compatibility",
+        "thread/fork",
+        "inherited parent conversation history",
+    ):
         assert token not in text

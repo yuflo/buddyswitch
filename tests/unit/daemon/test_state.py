@@ -139,6 +139,39 @@ class DaemonStateTests(unittest.TestCase):
             self.assertEqual(handler["last_result"], "handled")
             self.assertIsNone(handler["last_error"])
 
+    def test_handler_checkpoint_persists_opaque_consumer_identity(self) -> None:
+        state_module = _load_state_module()
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = Path(temp_root) / "instance"
+            state = state_module.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-state-current",
+                main_thread_id="thr-state-main",
+            )
+            state.update_handler_state(
+                "task_sys_progress_check",
+                {
+                    "checkpoint": {
+                        "source_turn_id": "turn-parent-work-1",
+                        "submitted_turn_id": "turn-parent-check-1",
+                    }
+                },
+            )
+
+            reloaded = state_module.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-state-current",
+                main_thread_id="thr-state-main",
+            )
+
+            self.assertEqual(
+                reloaded.handler_state("task_sys_progress_check")["checkpoint"],
+                {
+                    "source_turn_id": "turn-parent-work-1",
+                    "submitted_turn_id": "turn-parent-check-1",
+                },
+            )
+
     def test_owner_scoped_schedule_cancellation_preserves_other_schedules(self) -> None:
         state_module = _load_state_module()
         with tempfile.TemporaryDirectory() as temp_root:

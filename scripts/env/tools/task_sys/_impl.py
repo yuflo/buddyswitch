@@ -168,7 +168,7 @@ def _success(
     parent_instruction: dict[str, Any] | None = None,
     parent_runtime: dict[str, Any] | None = None,
     runtime: dict[str, Any] | None = None,
-    completion_attention: dict[str, Any] | None = None,
+    outcome_attention: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task = result.get("task") if isinstance(result.get("task"), dict) else {}
     execution = task.get("execution") if isinstance(task, dict) else None
@@ -206,8 +206,8 @@ def _success(
         extra["parent_instruction"] = parent_instruction
     if isinstance(parent_runtime, dict):
         extra["parent_runtime"] = parent_runtime
-    if isinstance(completion_attention, dict):
-        extra["completion_attention"] = completion_attention
+    if isinstance(outcome_attention, dict):
+        extra["outcome_attention"] = outcome_attention
     if action == "create":
         source_ref = task.get("source_ref")
         extra["demand_ref"] = dict(source_ref) if isinstance(source_ref, Mapping) else None
@@ -298,6 +298,25 @@ def _record_side_cleanup(task_sys: Any, context: Any, task_id: str) -> dict[str,
             "cleanup": cleanup,
         },
     )
+
+
+def _submit_outcome_attention(task_sys: Any, context: Any, task_id: str) -> dict[str, Any] | None:
+    try:
+        instruction = task_sys.outcome_instruction(task_id)
+        if not isinstance(instruction, dict):
+            return None
+        runtime_result = _execute_runtime_instruction(context, instruction)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "task_id": task_id,
+            "error": str(exc),
+        }
+    return {
+        "status": "submitted",
+        "task_id": task_id,
+        "runtime": runtime_result,
+    }
 
 
 def _limit(args: dict[str, Any]) -> int:
@@ -401,28 +420,12 @@ def close(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     execution_result = execution.get("result") if isinstance(execution, dict) else None
     if isinstance(execution_result, dict) and execution_result.get("processor") == "side" and "cleanup" not in execution_result:
         result = dict(result, task=_record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))["task"])
-    completion_attention: dict[str, Any] | None = None
-    instruction = task_sys.completion_instruction(task_id)
-    if isinstance(instruction, dict):
-        try:
-            runtime_result = _execute_runtime_instruction(context, instruction)
-        except Exception as exc:
-            completion_attention = {
-                "status": "failed",
-                "task_id": task_id,
-                "error": str(exc),
-            }
-        else:
-            completion_attention = {
-                "status": "submitted",
-                "task_id": task_id,
-                "runtime": runtime_result,
-            }
+    outcome_attention = _submit_outcome_attention(task_sys, context, task_id)
     return _success(
         "close",
         result,
         context,
-        completion_attention=completion_attention,
+        outcome_attention=outcome_attention,
     )
 
 
@@ -436,7 +439,8 @@ def cancel(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     execution_result = execution.get("result") if isinstance(execution, dict) else None
     if isinstance(execution_result, dict) and execution_result.get("processor") == "side" and "cleanup" not in execution_result:
         result = dict(result, task=_record_side_cleanup(task_sys, context, str(result.get("task_id") or ""))["task"])
-    return _success("cancel", result, context)
+    outcome_attention = _submit_outcome_attention(task_sys, context, task_id)
+    return _success("cancel", result, context, outcome_attention=outcome_attention)
 
 
 def need_parent(*, args: dict[str, Any], context: Any) -> dict[str, Any]:

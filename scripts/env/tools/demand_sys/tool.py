@@ -23,7 +23,12 @@ def _revision(description: str = "Expected current Demand revision.") -> dict[st
     return {"type": "integer", "minimum": 1, "description": description}
 
 
-def _source_refs(description: str) -> dict[str, Any]:
+def _refs(
+    description: str,
+    *,
+    ref_description: str,
+    ref_properties: dict[str, Any],
+) -> dict[str, Any]:
     return {
         "type": "array",
         "description": description,
@@ -36,17 +41,37 @@ def _source_refs(description: str) -> dict[str, Any]:
                 "type": _text("Source kind."),
                 "ref": {
                     "type": "object",
-                    "description": "Source identity data used by Phase 1 actor and artifact sources.",
+                    "description": ref_description,
                     "additionalProperties": False,
                     "required": [],
-                    "properties": {
-                        "key": _text("Stable source key when the source is actor-originated."),
-                        "id": _text("Stable source id when the source is an existing runtime object."),
-                    },
+                    "properties": ref_properties,
                 },
             },
         },
     }
+
+
+def _source_refs(description: str) -> dict[str, Any]:
+    return _refs(
+        description,
+        ref_description="Source identity data used by Phase 1 actor and artifact sources.",
+        ref_properties={
+            "key": _text("Stable source key when the source is actor-originated."),
+            "id": _text("Stable source id when the source is an existing runtime object."),
+        },
+    )
+
+
+def _evidence_refs(description: str) -> dict[str, Any]:
+    return _refs(
+        description,
+        ref_description="Evidence identity data owned by the referenced product.",
+        ref_properties={
+            "key": _text("Stable evidence key when the evidence is actor-originated."),
+            "id": _text("Stable evidence id when the referenced product uses id."),
+            "task_id": _text("Exact Task Sys task id when type is task_sys.task."),
+        },
+    )
 
 
 def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -413,7 +438,7 @@ def _build_definition() -> ToolDefinition:
                         "demand_id": demand_id,
                         "expected_revision": _revision(),
                         "summary": _text("How the Demand was satisfied."),
-                        "evidence_refs": _source_refs("Evidence references supporting Demand completion."),
+                        "evidence_refs": _evidence_refs("Evidence references supporting Demand completion."),
                     },
                     ["demand_id", "expected_revision", "summary", "evidence_refs"],
                 ),

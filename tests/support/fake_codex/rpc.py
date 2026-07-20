@@ -36,6 +36,11 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
                 },
             }
             return {"thread": default_thread(temp_state, thread_id=clear_thread_id)}
+        if isinstance(params, dict) and params.get("ephemeral") is True:
+            side_thread_id = str(state.get("next_side_thread_id", "thread-side-1"))
+            thread = default_thread(state, thread_id=side_thread_id, status={"type": "idle"})
+            thread["ephemeral"] = True
+            return {"thread": thread}
         return {"thread": default_thread(state)}
     if method == "thread/resume":
         thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else _main_thread_id(state)
@@ -57,13 +62,6 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
             "activePermissionProfile": {"id": "buddyswitch-runtime"},
             "reasoningEffort": None,
         }
-    if method == "thread/fork":
-        parent_thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else _main_thread_id(state)
-        side_thread_id = str(state.get("next_side_thread_id", "thread-side-1"))
-        thread = default_thread(state, thread_id=side_thread_id, status={"type": "idle"})
-        thread["forkedFromId"] = parent_thread_id
-        thread["ephemeral"] = True
-        return {"thread": thread}
     if method == "thread/inject_items":
         return {}
     if method == "thread/read":
@@ -121,6 +119,15 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
             main_thread["rollout_materialized"] = False
             _sync_main_thread_legacy(state)
             return
+        if isinstance(params, dict) and params.get("ephemeral") is True:
+            side_thread_id = _allocate_side_thread_id(state)
+            side_thread = _thread_state(state, side_thread_id)
+            side_thread["status"] = {"type": "idle"}
+            side_thread["turns"] = []
+            side_thread["injected_items"] = []
+            side_thread["rollout_materialized"] = False
+            side_thread["ephemeral"] = True
+            return
         main_thread = _thread_state(state, primary_thread_id)
         if "thread_status" in state or "turns" in state:
             if "thread_status" in state:
@@ -140,16 +147,6 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
         state["thread_resume_count"] = (count if isinstance(count, int) else 0) + 1
         if isinstance(params, dict):
             state["last_thread_resume_params"] = dict(params)
-        return
-    if method == "thread/fork":
-        parent_thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else primary_thread_id
-        side_thread_id = _allocate_side_thread_id(state)
-        side_thread = _thread_state(state, side_thread_id)
-        side_thread["status"] = {"type": "idle"}
-        side_thread["turns"] = []
-        side_thread["injected_items"] = []
-        side_thread["ephemeral"] = True
-        side_thread["forked_from_id"] = parent_thread_id
         return
     if method == "thread/inject_items":
         if not isinstance(params, dict):

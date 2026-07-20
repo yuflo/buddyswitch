@@ -362,7 +362,7 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(results[0]["thread"]["id"], "thread-1")
 
-    def test_thread_fork_sends_model_and_reasoning_effort_overrides(self) -> None:
+    def test_thread_start_sends_isolated_side_runtime_options(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))
             server = FakeUnixWebSocketServer(socket_path)
@@ -371,15 +371,16 @@ class AppServerClientTests(unittest.TestCase):
             results: list[dict[str, object]] = []
             errors: list[BaseException] = []
 
-            def run_fork() -> None:
+            def run_start() -> None:
                 try:
                     results.append(
-                        APP_SERVER.thread_fork(
+                        APP_SERVER.thread_start(
                             socket_path,
-                            "thread-parent",
-                            workspace_dir=Path("/tmp/bs-workspace"),
-                            shared_project_workspace_dir=Path("/tmp/bs-project"),
-                            permissions="buddyswitch-runtime",
+                            Path("/tmp/bs-workspace"),
+                            Path("/tmp/bs-project"),
+                            "buddyswitch-runtime",
+                            developer_instructions=APP_SERVER.SIDE_DEVELOPER_INSTRUCTIONS,
+                            ephemeral=True,
                             model="gpt-5.4",
                             model_reasoning_effort="high",
                         )
@@ -387,9 +388,9 @@ class AppServerClientTests(unittest.TestCase):
                 except BaseException as exc:
                     errors.append(exc)
 
-            fork_thread = threading.Thread(target=run_fork, daemon=True)
-            fork_thread.start()
-            fork_thread.join(timeout=0.05)
+            start_thread = threading.Thread(target=run_start, daemon=True)
+            start_thread.start()
+            start_thread.join(timeout=0.05)
             if errors:
                 raise errors[0]
 
@@ -399,15 +400,15 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(server.next_message()["method"], "initialized")
 
             request = server.next_message()
-            self.assertEqual(request["method"], "thread/fork")
+            self.assertEqual(request["method"], "thread/start")
             params = request["params"]
             assert isinstance(params, dict)
-            self.assertEqual(params["threadId"], "thread-parent")
             self.assertEqual(params["model"], "gpt-5.4")
             self.assertEqual(params["config"], {"model_reasoning_effort": "high"})
             self.assertEqual(params["permissions"], "buddyswitch-runtime")
             self.assertTrue(params["ephemeral"])
-            self.assertTrue(params["excludeTurns"])
+            self.assertEqual(params["developerInstructions"], APP_SERVER.SIDE_DEVELOPER_INSTRUCTIONS)
+            self.assertNotIn("threadId", params)
 
             server.send_response(
                 request["id"],
@@ -426,12 +427,12 @@ class AppServerClientTests(unittest.TestCase):
                     "reasoningEffort": "high",
                 },
             )
-            fork_thread.join(timeout=2)
+            start_thread.join(timeout=2)
 
             self.assertEqual(errors, [])
             self.assertEqual(results[0]["thread"]["id"], "thread-side-1")
 
-    def test_thread_fork_omits_model_and_effort_when_inheriting_parent(self) -> None:
+    def test_thread_start_omits_unspecified_optional_runtime_options(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))
             server = FakeUnixWebSocketServer(socket_path)
@@ -439,20 +440,19 @@ class AppServerClientTests(unittest.TestCase):
             self.addCleanup(server.close)
             errors: list[BaseException] = []
 
-            def run_fork() -> None:
+            def run_start() -> None:
                 try:
-                    APP_SERVER.thread_fork(
+                    APP_SERVER.thread_start(
                         socket_path,
-                        "thread-parent",
-                        workspace_dir=Path("/tmp/bs-workspace"),
-                        shared_project_workspace_dir=Path("/tmp/bs-project"),
-                        permissions="buddyswitch-runtime",
+                        Path("/tmp/bs-workspace"),
+                        Path("/tmp/bs-project"),
+                        "buddyswitch-runtime",
                     )
                 except BaseException as exc:
                     errors.append(exc)
 
-            fork_thread = threading.Thread(target=run_fork, daemon=True)
-            fork_thread.start()
+            start_thread = threading.Thread(target=run_start, daemon=True)
+            start_thread.start()
 
             init = server.next_message()
             self.assertEqual(init["method"], "initialize")
@@ -460,7 +460,7 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(server.next_message()["method"], "initialized")
 
             request = server.next_message()
-            self.assertEqual(request["method"], "thread/fork")
+            self.assertEqual(request["method"], "thread/start")
             params = request["params"]
             assert isinstance(params, dict)
             self.assertNotIn("model", params)
@@ -484,7 +484,7 @@ class AppServerClientTests(unittest.TestCase):
                     "reasoningEffort": None,
                 },
             )
-            fork_thread.join(timeout=2)
+            start_thread.join(timeout=2)
 
             self.assertEqual(errors, [])
 
@@ -878,15 +878,6 @@ class AppServerClientTests(unittest.TestCase):
             APP_SERVER.text_input_payload("hello"),
             [{"type": "text", "text": "hello", "text_elements": []}],
         )
-
-    def test_side_boundary_prompt_item_shape_is_codex_compatible(self) -> None:
-        item = APP_SERVER.side_boundary_prompt_item()
-        self.assertEqual(item["type"], "message")
-        self.assertEqual(item["role"], "user")
-        content = item["content"]
-        self.assertEqual(len(content), 1)
-        self.assertEqual(content[0]["type"], "input_text")
-        self.assertIn("Side conversation boundary.", content[0]["text"])
 
     def test_turn_steer_requires_expected_turn_id(self) -> None:
         with self.assertRaises(ValueError):

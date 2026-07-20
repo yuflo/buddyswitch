@@ -121,6 +121,9 @@ def normalize_app_server_notification(
     thread_id = _string_field(params, "threadId", "thread_id")
     turn_id = _string_field(turn_payload, "id", "turn_id", "turnId")
     turn_status = _string_field(turn_payload, "status")
+    status = params.get("status")
+    status_payload = status if isinstance(status, dict) else {}
+    thread_status = _string_field(status_payload, "type")
     source_context: dict[str, Any] = {"method": method}
     if thread_id is not None:
         source_context["thread_id"] = thread_id
@@ -128,6 +131,8 @@ def normalize_app_server_notification(
         source_context["turn_id"] = turn_id
     if turn_status is not None:
         source_context["turn_status"] = turn_status
+    if thread_status is not None:
+        source_context["thread_status"] = thread_status
     return DaemonTrigger(
         source=APP_SERVER_NOTIFICATION,
         type=_trigger_type_for_app_server_method(method),

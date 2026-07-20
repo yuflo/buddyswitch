@@ -289,7 +289,7 @@ except task_sys.TaskActiveConflict as exc:
             {tasks[0]["id"]},
         )
 
-    def test_completed_demand_task_builds_one_strict_parent_completion_instruction(self) -> None:
+    def test_completed_demand_task_builds_one_strict_parent_outcome_instruction(self) -> None:
         created = task_sys.create(
             actor_target=self.actor_target,
             demand_ref=self._demand_ref(),
@@ -300,7 +300,7 @@ except task_sys.TaskActiveConflict as exc:
             {"summary": "Satisfied the selected Demand snapshot."},
         )
 
-        instruction = task_sys.completion_instruction(created["task_id"])
+        instruction = task_sys.outcome_instruction(created["task_id"])
 
         self.assertEqual(instruction["type"], "submit_parent")
         self.assertEqual(instruction["task_id"], created["task_id"])
@@ -308,18 +308,50 @@ except task_sys.TaskActiveConflict as exc:
         self.assertEqual(
             instruction["frame"],
             {
-                "kind": "task_sys.completion_frame",
+                "kind": "task_sys.outcome_frame",
                 "task_id": created["task_id"],
+                "status": task_sys.COMPLETED,
                 "source": {"type": "demand", "ref": self._demand_ref()},
                 "evidence_ref": {
                     "type": "task_sys.task",
                     "ref": {"task_id": created["task_id"]},
                 },
-                "completion": closed["task"]["execution"]["result"],
+                "outcome": closed["task"]["execution"]["result"],
             },
         )
 
-    def test_completed_non_demand_task_has_no_completion_instruction(self) -> None:
+    def test_canceled_demand_task_builds_one_strict_parent_outcome_instruction(self) -> None:
+        created = task_sys.create(
+            actor_target=self.actor_target,
+            demand_ref=self._demand_ref(),
+            execution_brief=self._execution_brief(),
+        )
+        canceled = task_sys.record_task_cancel(
+            created["task_id"],
+            {"reason": "The selected execution route is no longer viable."},
+        )
+
+        instruction = task_sys.outcome_instruction(created["task_id"])
+
+        self.assertEqual(instruction["type"], "submit_parent")
+        self.assertEqual(instruction["task_id"], created["task_id"])
+        self.assertEqual(instruction["actor_target"], self.actor_target)
+        self.assertEqual(
+            instruction["frame"],
+            {
+                "kind": "task_sys.outcome_frame",
+                "task_id": created["task_id"],
+                "status": task_sys.CANCELED,
+                "source": {"type": "demand", "ref": self._demand_ref()},
+                "evidence_ref": {
+                    "type": "task_sys.task",
+                    "ref": {"task_id": created["task_id"]},
+                },
+                "outcome": canceled["task"]["execution"]["result"],
+            },
+        )
+
+    def test_terminal_non_demand_task_has_no_outcome_instruction(self) -> None:
         created = task_sys.ingest(
             {
                 "source": {"type": "test.fixture", "ref": {"id": "non-demand"}},
@@ -329,7 +361,7 @@ except task_sys.TaskActiveConflict as exc:
         )
         task_sys.record_task_close(created["task_id"], {"summary": "Finished."})
 
-        self.assertIsNone(task_sys.completion_instruction(created["task_id"]))
+        self.assertIsNone(task_sys.outcome_instruction(created["task_id"]))
 
 
 if __name__ == "__main__":

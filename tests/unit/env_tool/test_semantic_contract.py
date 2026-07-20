@@ -624,7 +624,14 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("parent turn", " ".join(task_side_effects["writes"]).lower())
         self.assertIn("demands", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertNotIn("parent turns", " ".join(task_side_effects["does_not_write"]).lower())
-        self.assertIn("completion attention", task_close["success_means"].lower())
+        self.assertIn("outcome attention", task_close["success_means"].lower())
+
+        task_cancel = desc["task_sys"]["action_semantics"]["cancel"]
+        cancel_side_effects = task_cancel["side_effects"]
+        self.assertIn("parent turn", " ".join(cancel_side_effects["writes"]).lower())
+        self.assertIn("demands", " ".join(cancel_side_effects["does_not_write"]).lower())
+        self.assertNotIn("parent turns", " ".join(cancel_side_effects["does_not_write"]).lower())
+        self.assertIn("outcome attention", task_cancel["success_means"].lower())
         self.assertIn("completed task", task_close["failure_state_guarantee"].lower())
         self.assertIn("tracks", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertIn("artifacts", " ".join(task_side_effects["does_not_write"]).lower())

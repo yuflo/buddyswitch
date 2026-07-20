@@ -146,6 +146,45 @@ class SideThreadRegistryTests(unittest.TestCase):
             self.assertEqual(payload["side_threads"], [row])
             self.assertEqual(payload["updated_at"], "2026-06-02T00:01:00Z")
 
+    def test_transition_side_turn_is_compare_and_set_for_progress_check_claims(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            self.registry.register_side_thread(
+                instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                side_thread_id="thr-side-1",
+                turn_id="turn-work-1",
+                turn_kind="work",
+                now=lambda: "2026-06-02T00:00:00Z",
+            )
+
+            claimed = self.registry.transition_side_thread_turn(
+                instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                side_thread_id="thr-side-1",
+                expected_turn_id="turn-work-1",
+                expected_turn_kind="work",
+                turn_kind="progress_check_pending",
+                now=lambda: "2026-06-02T00:01:00Z",
+            )
+            duplicate = self.registry.transition_side_thread_turn(
+                instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                side_thread_id="thr-side-1",
+                expected_turn_id="turn-work-1",
+                expected_turn_kind="work",
+                turn_kind="progress_check_pending",
+                now=lambda: "2026-06-02T00:02:00Z",
+            )
+
+            self.assertIsNotNone(claimed)
+            self.assertEqual(claimed["turn_kind"], "progress_check_pending")
+            self.assertIsNone(duplicate)
+            self.assertEqual(self._payload(instance_json)["side_threads"][0], claimed)
+
     def test_require_accepts_open_side_thread_for_actor_and_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(temp_root)

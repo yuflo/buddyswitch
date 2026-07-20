@@ -161,28 +161,39 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             },
         }
 
-    def _completion_instruction(self) -> dict[str, Any]:
+    def _outcome_instruction(self, *, status: str = "completed") -> dict[str, Any]:
+        outcome = (
+            {
+                "type": "completion",
+                "processor": "side",
+                "summary": "Completed the selected Demand snapshot.",
+                "updated_at": "2026-07-20T10:00:00+08:00",
+            }
+            if status == "completed"
+            else {
+                "type": "cancellation",
+                "processor": "side",
+                "reason": "The selected execution route is no longer viable.",
+                "updated_at": "2026-07-20T10:00:00+08:00",
+            }
+        )
         return {
             "type": "submit_parent",
-            "task_id": "task-demand-completed123",
+            "task_id": "task-demand-terminal123",
             "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
             "frame": {
-                "kind": "task_sys.completion_frame",
-                "task_id": "task-demand-completed123",
+                "kind": "task_sys.outcome_frame",
+                "task_id": "task-demand-terminal123",
+                "status": status,
                 "source": {
                     "type": "demand",
-                    "ref": {"demand_id": "demand-runtime-completed", "basis_revision": 4},
+                    "ref": {"demand_id": "demand-runtime-terminal", "basis_revision": 4},
                 },
                 "evidence_ref": {
                     "type": "task_sys.task",
-                    "ref": {"task_id": "task-demand-completed123"},
+                    "ref": {"task_id": "task-demand-terminal123"},
                 },
-                "completion": {
-                    "type": "completion",
-                    "processor": "side",
-                    "summary": "Completed the selected Demand snapshot.",
-                    "updated_at": "2026-07-20T10:00:00+08:00",
-                },
+                "outcome": outcome,
             },
         }
 
@@ -273,6 +284,66 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("task_sys.side_frame", call["text"])
         self.assertIn("task_sys.close", call["text"])
         self.assertIn("task_sys.need_parent", call["text"])
+
+    def test_execute_start_side_immediately_checks_an_idle_work_turn(self) -> None:
+        context = self._context()
+        task_id, instruction = self._ingested_instruction()
+        original_start = self.module.actor_side_thread.start_actor_side_thread
+        original_submit = self.module.submit_task_progress_check
+        submissions: list[dict[str, Any]] = []
+
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            return {
+                "action": "start",
+                "purpose": "task_sys.side_frame",
+                "parent_thread_id": kwargs["parent_thread_id"],
+                "side_thread_id": "thr-side-fast-idle",
+                "thread_action": "start",
+                "turn_id": "turn-side-fast-work",
+                "thread_status": "idle",
+                "lease_registered": True,
+            }
+
+        def fake_submit(
+            submit_context: Any,
+            task: dict[str, Any],
+            previous_turn: dict[str, Any],
+            *,
+            processor: str,
+            side_thread_id: str | None = None,
+        ) -> dict[str, Any]:
+            submissions.append(
+                {
+                    "context": submit_context,
+                    "task": task,
+                    "previous_turn": previous_turn,
+                    "processor": processor,
+                    "side_thread_id": side_thread_id,
+                }
+            )
+            return {"action": "progress_check", "task_id": task_id, "turn_id": "turn-side-fast-check"}
+
+        self.addCleanup(setattr, self.module.actor_side_thread, "start_actor_side_thread", original_start)
+        self.addCleanup(setattr, self.module, "submit_task_progress_check", original_submit)
+        self.module.actor_side_thread.start_actor_side_thread = fake_start_side_thread
+        self.module.submit_task_progress_check = fake_submit
+
+        result = self.module.execute_instruction(context, instruction)
+
+        self.assertEqual(result["progress_check"]["turn_id"], "turn-side-fast-check")
+        self.assertEqual(len(submissions), 1)
+        self.assertIs(submissions[0]["context"], context)
+        self.assertEqual(submissions[0]["task"]["id"], task_id)
+        self.assertEqual(
+            submissions[0]["previous_turn"],
+            {
+                "thread_id": "thr-side-fast-idle",
+                "turn_id": "turn-side-fast-work",
+                "status": "idle",
+            },
+        )
+        self.assertEqual(submissions[0]["processor"], "side")
+        self.assertEqual(submissions[0]["side_thread_id"], "thr-side-fast-idle")
 
     def test_execute_start_side_creates_fresh_lifecycle_call_for_each_task_sys_frame(self) -> None:
         context = self._context()
@@ -374,6 +445,144 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertEqual(execution["result"]["attempts"], 2)
         self.assertEqual(result["execution_result"], execution["result"])
         self.assertNotIn("failure_result", result)
+
+    def test_execute_start_side_does_not_retry_when_lifecycle_cannot_prove_turn_stopped(self) -> None:
+        context = self._context()
+        task_id, instruction = self._ingested_instruction()
+        calls: list[dict[str, Any]] = []
+        original_start = self.module.actor_side_thread.start_actor_side_thread
+
+        class UnsafeLifecycleFailure(RuntimeError):
+            retryable = False
+            cleanup = {
+                "turn_interrupt_attempted": True,
+                "turn_interrupt_ok": False,
+                "turn_interrupt_error": "turn interrupt failed",
+                "lease_unregistered": True,
+            }
+
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            raise UnsafeLifecycleFailure("side processor may still be active")
+
+        self.addCleanup(setattr, self.module.actor_side_thread, "start_actor_side_thread", original_start)
+        self.module.actor_side_thread.start_actor_side_thread = fake_start_side_thread
+
+        result = self.module.execute_instruction(context, instruction)
+
+        self.assertEqual(result["status"], "runtime_failed")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(result["attempts"]), 1)
+        self.assertFalse(result["attempts"][0]["retryable"])
+        execution_result = task_sys.get_task(task_id)["execution"]["result"]
+        self.assertFalse(execution_result["retryable"])
+        self.assertEqual(execution_result["cleanup"]["turn_interrupt_error"], "turn interrupt failed")
+
+    def test_execute_start_side_rejects_consumed_lease_while_task_is_still_side_owned(self) -> None:
+        context = self._context()
+        task_id, instruction = self._ingested_instruction()
+        starts: list[dict[str, Any]] = []
+        interrupts: list[dict[str, Any]] = []
+        original_start = self.module.actor_side_thread.start_actor_side_thread
+        original_interrupt = getattr(self.module.side_thread_lifecycle, "interrupt_unleased_side_turn", None)
+
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            starts.append(kwargs)
+            return {
+                "action": "start",
+                "purpose": "task_sys.side_frame",
+                "parent_thread_id": kwargs["parent_thread_id"],
+                "side_thread_id": "thr-side-consumed-without-transition",
+                "thread_action": "start",
+                "turn_id": "turn-side-consumed-without-transition",
+                "thread_status": "consumed",
+                "lease_registered": False,
+                "lease_consumed": True,
+            }
+
+        def fake_interrupt_unleased_side_turn(**kwargs: Any) -> dict[str, Any]:
+            interrupts.append(kwargs)
+            return {
+                "turn_interrupt_attempted": True,
+                "turn_interrupt_ok": True,
+                "lease_unregistered": False,
+            }
+
+        def restore_interrupt() -> None:
+            if original_interrupt is None:
+                delattr(self.module.side_thread_lifecycle, "interrupt_unleased_side_turn")
+            else:
+                setattr(self.module.side_thread_lifecycle, "interrupt_unleased_side_turn", original_interrupt)
+
+        self.addCleanup(setattr, self.module.actor_side_thread, "start_actor_side_thread", original_start)
+        self.addCleanup(restore_interrupt)
+        self.module.actor_side_thread.start_actor_side_thread = fake_start_side_thread
+        self.module.side_thread_lifecycle.interrupt_unleased_side_turn = fake_interrupt_unleased_side_turn
+
+        result = self.module.execute_instruction(context, instruction)
+
+        self.assertEqual(result["status"], "runtime_failed")
+        self.assertEqual(result["stage"], "side_lease_consumed")
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(len(interrupts), 1)
+        self.assertEqual(interrupts[0]["side_thread_id"], "thr-side-consumed-without-transition")
+        self.assertEqual(interrupts[0]["turn_id"], "turn-side-consumed-without-transition")
+        task = task_sys.get_task(task_id)
+        self.assertEqual(task["status"], task_sys.SIDE_PROCESSING)
+        self.assertEqual(task["execution"]["result"]["stage"], "side_lease_consumed")
+        self.assertTrue(task["execution"]["result"]["cleanup"]["turn_interrupt_ok"])
+
+    def test_execute_start_side_accepts_consumed_lease_after_task_left_side_processing(self) -> None:
+        context = self._context()
+        task_id, instruction = self._ingested_instruction()
+        interrupts: list[dict[str, Any]] = []
+        original_start = self.module.actor_side_thread.start_actor_side_thread
+        original_interrupt = getattr(self.module.side_thread_lifecycle, "interrupt_unleased_side_turn", None)
+
+        def fake_start_side_thread(**kwargs: Any) -> dict[str, Any]:
+            task_sys.record_side_need_parent(
+                task_id,
+                {
+                    "params": {
+                        "parent_frame_context": {"next": "Continue in parent."},
+                        "interrupt": False,
+                    }
+                },
+            )
+            return {
+                "action": "start",
+                "purpose": "task_sys.side_frame",
+                "parent_thread_id": kwargs["parent_thread_id"],
+                "side_thread_id": "thr-side-consumed-after-handoff",
+                "thread_action": "start",
+                "turn_id": "turn-side-consumed-after-handoff",
+                "thread_status": "consumed",
+                "lease_registered": False,
+                "lease_consumed": True,
+            }
+
+        def unexpected_interrupt(**kwargs: Any) -> dict[str, Any]:
+            interrupts.append(kwargs)
+            return {}
+
+        def restore_interrupt() -> None:
+            if original_interrupt is None:
+                delattr(self.module.side_thread_lifecycle, "interrupt_unleased_side_turn")
+            else:
+                setattr(self.module.side_thread_lifecycle, "interrupt_unleased_side_turn", original_interrupt)
+
+        self.addCleanup(setattr, self.module.actor_side_thread, "start_actor_side_thread", original_start)
+        self.addCleanup(restore_interrupt)
+        self.module.actor_side_thread.start_actor_side_thread = fake_start_side_thread
+        self.module.side_thread_lifecycle.interrupt_unleased_side_turn = unexpected_interrupt
+
+        result = self.module.execute_instruction(context, instruction)
+
+        self.assertEqual(result["action"], "start_side")
+        self.assertTrue(result["lease_consumed"])
+        self.assertNotIn("status", result)
+        self.assertEqual(interrupts, [])
+        self.assertEqual(task_sys.get_task(task_id)["status"], task_sys.AWAITING_PARENT)
 
     def test_cleanup_side_lease_delegates_to_lifecycle_owner(self) -> None:
         context = self._context()
@@ -493,16 +702,17 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("checkpoint", text.lower())
         self.assertNotIn("checkpoint_update", text)
 
-    def test_render_completion_frame_is_terminal_receipt_for_source_reconciliation(self) -> None:
-        text = self.module.render_submit_parent_frame(self._completion_instruction()["frame"])
+    def test_render_completed_outcome_frame_reconciles_latest_source_obligation(self) -> None:
+        text = self.module.render_submit_parent_frame(self._outcome_instruction()["frame"])
 
-        self.assertIn("task_sys.completion_frame", text)
-        self.assertIn("task-demand-completed123", text)
-        self.assertIn("demand-runtime-completed", text)
+        self.assertIn("task_sys.outcome_frame", text)
+        self.assertIn("task-demand-terminal123", text)
+        self.assertIn("demand-runtime-terminal", text)
         self.assertIn("basis_revision", text)
         self.assertIn("Completed the selected Demand snapshot.", text)
-        self.assertIn('"task_id": "task-demand-completed123"', text)
+        self.assertIn('"task_id": "task-demand-terminal123"', text)
         self.assertIn("Pass this evidence reference unchanged", text)
+        self.assertIn("After any Demand mutation, acknowledge the exact returned revision", text)
         self.assertIn("already terminal", text)
         self.assertIn("reconcile", text.lower())
         self.assertIn("source-owned obligation", text)
@@ -513,22 +723,44 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("Demand status", text)
         self.assertNotIn("Demand lifecycle", text)
 
-    def test_execute_completion_instruction_reuses_submit_parent_runtime(self) -> None:
+    def test_render_canceled_outcome_frame_requires_explicit_source_decision(self) -> None:
+        text = self.module.render_submit_parent_frame(self._outcome_instruction(status="canceled")["frame"])
+
+        self.assertIn("task_sys.outcome_frame", text)
+        self.assertIn("canceled", text.lower())
+        self.assertIn("does not imply", text.lower())
+        self.assertIn("complete, cancel, revise, or keep", text.lower())
+        self.assertIn("After any Demand mutation, acknowledge the exact returned revision", text)
+        self.assertNotIn("task_sys.close", text)
+        self.assertNotIn("task_sys.cancel(task_id", text)
+
+    def test_render_outcome_frame_rejects_status_result_mismatch(self) -> None:
+        completed = self._outcome_instruction()
+        completed["frame"]["status"] = "canceled"
+        canceled = self._outcome_instruction(status="canceled")
+        canceled["frame"]["status"] = "completed"
+
+        for frame in (completed["frame"], canceled["frame"]):
+            with self.subTest(frame=frame):
+                with self.assertRaisesRegex(ValueError, "outcome frame must contain"):
+                    self.module.render_submit_parent_frame(frame)
+
+    def test_execute_outcome_instruction_reuses_submit_parent_runtime(self) -> None:
         context = self._context()
         calls: list[dict[str, Any]] = []
         original_input = self.module.actor_session.input_actor_turn
         self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_input)
         self.module.actor_session.input_actor_turn = lambda **kwargs: (
-            calls.append(kwargs) or {"turn_id": "turn-completion-attention"}
+            calls.append(kwargs) or {"turn_id": "turn-outcome-attention"}
         )
 
-        result = self.module.execute_instruction(context, self._completion_instruction())
+        result = self.module.execute_instruction(context, self._outcome_instruction())
 
         self.assertEqual(result["action"], "submit_parent")
-        self.assertEqual(result["task_id"], "task-demand-completed123")
-        self.assertEqual(result["turn_id"], "turn-completion-attention")
+        self.assertEqual(result["task_id"], "task-demand-terminal123")
+        self.assertEqual(result["turn_id"], "turn-outcome-attention")
         self.assertEqual(len(calls), 1)
-        self.assertIn("task_sys.completion_frame", calls[0]["text"])
+        self.assertIn("task_sys.outcome_frame", calls[0]["text"])
 
     def test_render_side_frame_no_longer_calls_close_a_side_result(self) -> None:
         text = self.module.render_side_frame(self._instruction()["frame"])
@@ -693,7 +925,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("interrupted_turn_id", result)
         self.assertEqual([call["helper"] for call in calls], ["interrupt_turn", "input_actor_turn"])
 
-    def test_render_parent_progress_check_binds_existing_task_and_current_actions(self) -> None:
+    def test_render_task_progress_check_for_parent_binds_existing_task_and_current_actions(self) -> None:
         task = {
             "id": "task-controlled-inbound-progress123",
             "source_type": "test.inbound.created",
@@ -710,7 +942,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             "status": "completed",
         }
 
-        prompt = self.module.render_parent_progress_check(task, previous_turn)
+        prompt = self.module.render_task_progress_check(task, previous_turn, processor="parent")
 
         self.assertIn("[TASK PROGRESS CHECK]", prompt)
         self.assertIn("task-controlled-inbound-progress123", prompt)
@@ -726,7 +958,37 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, lowered)
 
-    def test_submit_parent_progress_check_uses_main_actor_thread(self) -> None:
+    def test_render_side_progress_check_binds_existing_side_task_and_current_actions(self) -> None:
+        task = {
+            "id": "task-controlled-inbound-side-progress123",
+            "source_type": "test.inbound.created",
+            "source_ref": {"id": "event-side-progress-1", "channel": "fixture"},
+            "status": "in_progress.side_processing",
+            "events": [
+                {"type": "created", "at": "2026-07-16T00:00:00Z"},
+                {"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"},
+            ],
+        }
+        previous_turn = {
+            "thread_id": "thr-side-progress",
+            "turn_id": "turn-side-work-1",
+            "status": "idle",
+        }
+
+        prompt = self.module.render_task_progress_check(task, previous_turn, processor="side")
+
+        self.assertIn("[TASK PROGRESS CHECK]", prompt)
+        self.assertIn("existing side-owned Task", prompt)
+        self.assertIn("side thread became idle", prompt)
+        self.assertIn("task-controlled-inbound-side-progress123", prompt)
+        self.assertIn("in_progress.side_processing", prompt)
+        self.assertIn("turn-side-work-1", prompt)
+        self.assertIn("task_sys.close", prompt)
+        self.assertIn("task_sys.cancel", prompt)
+        self.assertIn("task_sys.need_parent", prompt)
+        self.assertIn("status remains in_progress.side_processing", prompt)
+
+    def test_submit_task_progress_check_for_parent_uses_main_actor_thread(self) -> None:
         context = self._context()
         task = {
             "id": "task-controlled-inbound-progress123",
@@ -750,7 +1012,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.addCleanup(setattr, self.module.actor_session, "input_actor_turn", original_input)
         self.module.actor_session.input_actor_turn = fake_input_actor_turn
 
-        result = self.module.submit_parent_progress_check(context, task, previous_turn)
+        result = self.module.submit_task_progress_check(context, task, previous_turn, processor="parent")
 
         self.assertEqual(
             result,
@@ -766,6 +1028,222 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertEqual(calls[0]["thread_id"], context.main_thread_id)
         self.assertEqual(calls[0]["permissions"], context.permissions)
         self.assertIn("[TASK PROGRESS CHECK]", calls[0]["text"])
+
+    def test_submit_side_progress_check_uses_exact_registered_side_thread(self) -> None:
+        context = self._context()
+        side_thread_registry = importlib.import_module("side_thread_registry")
+        side_thread_registry.register_side_thread(
+            context.instance_json,
+            actor_id=context.actor_id,
+            parent_thread_id=context.main_thread_id,
+            side_thread_id="thr-side-progress",
+            task_id="task-controlled-inbound-side-progress123",
+            purpose="task_sys.side_frame",
+            turn_id="turn-side-work-1",
+            turn_kind="work",
+        )
+        task = {
+            "id": "task-controlled-inbound-side-progress123",
+            "source_type": "test.inbound.created",
+            "source_ref": {"id": "event-side-progress-1"},
+            "status": "in_progress.side_processing",
+            "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
+        }
+        previous_turn = {
+            "thread_id": "thr-side-progress",
+            "turn_id": "turn-side-work-1",
+            "status": "idle",
+        }
+        calls: list[dict[str, Any]] = []
+        original_send = self.module.side_thread_lifecycle.send_to_side_thread
+
+        def fake_send_to_side_thread(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {"action": "send", "turn_id": "turn-side-progress-check-1"}
+
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "send_to_side_thread", original_send)
+        self.module.side_thread_lifecycle.send_to_side_thread = fake_send_to_side_thread
+
+        result = self.module.submit_task_progress_check(
+            context,
+            task,
+            previous_turn,
+            processor="side",
+            side_thread_id="thr-side-progress",
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "action": "progress_check",
+                "task_id": "task-controlled-inbound-side-progress123",
+                "turn_id": "turn-side-progress-check-1",
+            },
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["socket_path"], context.socket_path)
+        self.assertEqual(calls[0]["instance_json"], context.instance_json)
+        self.assertEqual(calls[0]["actor_id"], context.actor_id)
+        self.assertEqual(calls[0]["parent_thread_id"], context.main_thread_id)
+        self.assertEqual(calls[0]["side_thread_id"], "thr-side-progress")
+        self.assertEqual(calls[0]["permissions"], context.permissions)
+        self.assertEqual(calls[0]["turn_kind"], "progress_check")
+        self.assertIn("existing side-owned Task", calls[0]["text"])
+
+    def test_side_progress_check_preserves_submit_failure_when_lease_is_concurrently_cleaned(self) -> None:
+        context = self._context()
+        side_thread_registry = importlib.import_module("side_thread_registry")
+        side_thread_registry.register_side_thread(
+            context.instance_json,
+            actor_id=context.actor_id,
+            parent_thread_id=context.main_thread_id,
+            side_thread_id="thr-side-cleaned-during-check",
+            task_id="task-controlled-inbound-side-cleaned123",
+            purpose="task_sys.side_frame",
+            turn_id="turn-side-cleaned-work",
+            turn_kind="work",
+        )
+        task = {
+            "id": "task-controlled-inbound-side-cleaned123",
+            "source_type": "test.inbound.created",
+            "source_ref": {"id": "event-side-cleaned"},
+            "status": "in_progress.side_processing",
+            "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
+        }
+        previous_turn = {
+            "thread_id": "thr-side-cleaned-during-check",
+            "turn_id": "turn-side-cleaned-work",
+            "status": "idle",
+        }
+        original_send = self.module.side_thread_lifecycle.send_to_side_thread
+
+        def fail_after_cleanup(**_kwargs: Any) -> dict[str, Any]:
+            side_thread_registry.unregister_side_thread(
+                context.instance_json,
+                actor_id=context.actor_id,
+                parent_thread_id=context.main_thread_id,
+                side_thread_id="thr-side-cleaned-during-check",
+            )
+            raise RuntimeError("side progress submit failed")
+
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "send_to_side_thread", original_send)
+        self.module.side_thread_lifecycle.send_to_side_thread = fail_after_cleanup
+
+        with self.assertRaisesRegex(RuntimeError, "side progress submit failed"):
+            self.module.submit_task_progress_check(
+                context,
+                task,
+                previous_turn,
+                processor="side",
+                side_thread_id="thr-side-cleaned-during-check",
+            )
+
+    def test_side_progress_check_keeps_pending_claim_when_external_submit_may_have_succeeded(self) -> None:
+        context = self._context()
+        side_thread_registry = importlib.import_module("side_thread_registry")
+        side_thread_registry.register_side_thread(
+            context.instance_json,
+            actor_id=context.actor_id,
+            parent_thread_id=context.main_thread_id,
+            side_thread_id="thr-side-uncertain-check",
+            task_id="task-controlled-inbound-side-uncertain123",
+            purpose="task_sys.side_frame",
+            turn_id="turn-side-uncertain-work",
+            turn_kind="work",
+        )
+        task = {
+            "id": "task-controlled-inbound-side-uncertain123",
+            "source_type": "test.inbound.created",
+            "source_ref": {"id": "event-side-uncertain"},
+            "status": "in_progress.side_processing",
+            "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
+        }
+        previous_turn = {
+            "thread_id": "thr-side-uncertain-check",
+            "turn_id": "turn-side-uncertain-work",
+            "status": "idle",
+        }
+        original_send = self.module.side_thread_lifecycle.send_to_side_thread
+
+        class SubmitPersistenceFailure(RuntimeError):
+            input_submitted = True
+
+        def fail_after_submit(**_kwargs: Any) -> dict[str, Any]:
+            raise SubmitPersistenceFailure("external Progress Check may have been submitted")
+
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "send_to_side_thread", original_send)
+        self.module.side_thread_lifecycle.send_to_side_thread = fail_after_submit
+
+        with self.assertRaisesRegex(SubmitPersistenceFailure, "may have been submitted"):
+            self.module.submit_task_progress_check(
+                context,
+                task,
+                previous_turn,
+                processor="side",
+                side_thread_id="thr-side-uncertain-check",
+            )
+
+        row = side_thread_registry.require_side_thread(
+            context.instance_json,
+            actor_id=context.actor_id,
+            parent_thread_id=context.main_thread_id,
+            side_thread_id="thr-side-uncertain-check",
+        )
+        self.assertEqual(row["turn_id"], "turn-side-uncertain-work")
+        self.assertEqual(row["turn_kind"], "progress_check_pending")
+
+    def test_side_progress_check_releases_pending_claim_when_submit_was_not_attempted(self) -> None:
+        context = self._context()
+        side_thread_registry = importlib.import_module("side_thread_registry")
+        side_thread_registry.register_side_thread(
+            context.instance_json,
+            actor_id=context.actor_id,
+            parent_thread_id=context.main_thread_id,
+            side_thread_id="thr-side-safe-retry-check",
+            task_id="task-controlled-inbound-side-safe-retry123",
+            purpose="task_sys.side_frame",
+            turn_id="turn-side-safe-retry-work",
+            turn_kind="work",
+        )
+        task = {
+            "id": "task-controlled-inbound-side-safe-retry123",
+            "source_type": "test.inbound.created",
+            "source_ref": {"id": "event-side-safe-retry"},
+            "status": "in_progress.side_processing",
+            "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
+        }
+        previous_turn = {
+            "thread_id": "thr-side-safe-retry-check",
+            "turn_id": "turn-side-safe-retry-work",
+            "status": "idle",
+        }
+        original_send = self.module.side_thread_lifecycle.send_to_side_thread
+
+        class PreSubmitFailure(RuntimeError):
+            input_submitted = False
+
+        self.addCleanup(setattr, self.module.side_thread_lifecycle, "send_to_side_thread", original_send)
+        self.module.side_thread_lifecycle.send_to_side_thread = lambda **_kwargs: (_ for _ in ()).throw(
+            PreSubmitFailure("validation failed before submit")
+        )
+
+        with self.assertRaisesRegex(PreSubmitFailure, "before submit"):
+            self.module.submit_task_progress_check(
+                context,
+                task,
+                previous_turn,
+                processor="side",
+                side_thread_id="thr-side-safe-retry-check",
+            )
+
+        row = side_thread_registry.require_side_thread(
+            context.instance_json,
+            actor_id=context.actor_id,
+            parent_thread_id=context.main_thread_id,
+            side_thread_id="thr-side-safe-retry-check",
+        )
+        self.assertEqual(row["turn_id"], "turn-side-safe-retry-work")
+        self.assertEqual(row["turn_kind"], "work")
 
     def test_task_sys_runtime_uses_actor_session_without_submit_turn_or_cli_imports(self) -> None:
         source = TASK_SYS_RUNTIME_PATH.read_text(encoding="utf-8")
