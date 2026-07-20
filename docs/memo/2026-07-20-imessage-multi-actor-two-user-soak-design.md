@@ -2,7 +2,7 @@
 
 Date: 2026-07-20
 
-Status: approved conversational design; written-spec review pending
+Status: approved; execution pending
 
 ## Purpose
 
