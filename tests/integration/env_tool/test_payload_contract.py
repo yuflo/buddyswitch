@@ -49,12 +49,13 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
 
     def _seed_active_task(self, *, instance_json: Path, role: str, actor_id: str) -> None:
         task_id = f"task-0001-{role}-payload-contract"
-        task_sys.ingest(
-            {
-                "source": {"type": "test.payload_contract", "ref": {"id": task_id}},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "payload contract"},
-            }
+        task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={"demand_id": f"demand-payload-contract-{role}", "basis_revision": 1},
+            execution_brief={
+                "description": "Payload contract fixture.",
+                "detail": f"Exercise payload contracts for {task_id}.",
+            },
         )
 
     def _dispatch(self, *, tool: str, action: str, args: dict[str, object], role: str = "dev") -> dict[str, object]:

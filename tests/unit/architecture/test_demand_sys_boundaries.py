@@ -127,12 +127,15 @@ def test_phase_two_has_one_demand_daemon_adapter_and_no_task_or_generic_daemon_c
     assert "task lifecycle" not in adapter_source
     assert "task selection" not in adapter_source
 
-    track_source = (REPO_ROOT / "tools/launcher/track_comment_added_handler.py").read_text(encoding="utf-8")
-    task_ingress = (REPO_ROOT / "tools/launcher/task_sys_ingress.py").read_text(encoding="utf-8")
+    track_handler = Path("tools/launcher/track_comment_added_handler.py")
+    track_imports = _imports(track_handler)
+    track_source = (REPO_ROOT / track_handler).read_text(encoding="utf-8")
     task_runtime = (REPO_ROOT / "tools/launcher/task_sys_runtime.py").read_text(encoding="utf-8")
     actor_session = (REPO_ROOT / "tools/launcher/actor_session.py").read_text(encoding="utf-8")
-    assert "demand_sys" not in track_source
-    assert "ingest_im_message" not in task_ingress
+    assert "demand_sys_daemon_adapter" in track_imports
+    assert not any("task_sys" in name for name in track_imports)
+    assert "capture_inbound(" in track_source
+    assert not (REPO_ROOT / "tools/launcher/task_sys_ingress.py").exists()
     assert 'source_type == "im.message.created"' not in task_runtime
     assert "demand_sys" not in actor_session
     assert "demand-sys" not in actor_session
@@ -172,8 +175,13 @@ def test_phase_one_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
 
 def test_current_architecture_allows_only_opaque_task_reference_collaboration() -> None:
     text = (REPO_ROOT / "docs/arch/demand-sys-architecture.md").read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
 
     assert "opaque DemandRef" in text
     assert "Actor + installed task-management skill" in text
+    assert "Track comment fact -> Track handler -> Demand daemon adapter -> Demand domain" in text
+    assert "Track thread structure is provenance and retrieval context, not Demand relation truth" in normalized
     assert "Task Sys -> IM or Demand" not in text
     assert "Task implementation -> Demand import, read, validation, call, subscription, or mutation" in text
+    assert "Track remains on its separate current Task path" not in text
+    assert "Track handler -> Demand implementation in this phase" not in text

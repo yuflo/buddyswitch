@@ -20,6 +20,9 @@ SCRIPTS = ROOT / "scripts"
 LAUNCHER = ROOT / "tools" / "launcher"
 
 import daemon_state  # noqa: E402
+import demand_sys_daemon_adapter  # noqa: E402
+from env.domain import demand_sys  # noqa: E402
+from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
@@ -49,13 +52,20 @@ def assert_contains_none(testcase: unittest.TestCase, text: str, forbidden: tupl
 
 
 class FakeDaemonRuntime:
-    def __init__(self, *, activity: dict[str, object] | None = None) -> None:
-        self.activity = activity or {"status": "idle", "active_turn_id": None}
-        self.calls: list[dict[str, object]] = []
+    def __init__(self, *, result: Any = None, error: BaseException | None = None) -> None:
+        self.result = (
+            {"action": "start", "turn_id": "turn-demand-track-1"}
+            if result is None
+            else result
+        )
+        self.error = error
+        self.inputs: list[str] = []
 
-    def parent_activity(self) -> dict[str, object]:
-        self.calls.append({"method": "parent_activity"})
-        raise AssertionError("Track comment handler must not inspect parent activity")
+    def input_actor(self, text: str) -> Any:
+        self.inputs.append(text)
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
@@ -63,18 +73,6 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
         self.daemon_core = load_module(DAEMON_CORE_PATH)
         self.handler_module = load_module(HANDLER_PATH)
         self.handler = self.handler_module.TrackCommentAddedHandler()
-        self.adapter_calls: list[dict[str, Any]] = []
-        original_execute = self.handler_module.task_sys_daemon_adapter.execute_instruction
-        self.addCleanup(
-            setattr,
-            self.handler_module.task_sys_daemon_adapter,
-            "execute_instruction",
-            original_execute,
-        )
-        self.handler_module.task_sys_daemon_adapter.execute_instruction = (
-            lambda _context, instruction: self.adapter_calls.append(dict(instruction))
-            or {"action": instruction["type"], "task_id": instruction["task_id"]}
-        )
 
     def _restore_runtime_env(self, values: dict[str, str | None]) -> None:
         for key, value in values.items():
@@ -189,33 +187,55 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
             for path in sorted(tasks_dir.glob("*.json"))
         ]
 
-    def _assert_track_comment_task(self, comment: dict[str, Any], runtime: FakeDaemonRuntime) -> dict[str, Any]:
-        records = self._task_records()
-        self.assertEqual(len(records), 1)
-        record = records[0]
-        self.assertEqual(record["source_type"], "track.comment.added")
-        self.assertEqual(
-            record["source_ref"],
-            {
-                "track_id": str(comment["track_id"]),
-                "comment_id": str(comment["id"]),
-                "thread_id": str(comment["thread_id"]),
-            },
+    def _demand_rows(self) -> list[dict[str, Any]]:
+        return demand_sys.list_demands(
+            {"actor_id": "act-dev-track-handler", "role_id": "dev"},
+            state="all",
         )
-        self.assertEqual(record["actor_target"], {"actor_id": "act-dev-track-handler", "role_id": "dev"})
-        self.assertEqual(record["inbound_context"]["track_id"], str(comment["track_id"]))
-        self.assertEqual(record["inbound_context"]["comment_id"], str(comment["id"]))
-        self.assertEqual(record["inbound_context"]["thread_id"], str(comment["thread_id"]))
-        self.assertEqual(record["inbound_context"]["source_identity_id"], "act-pm-track-source")
-        self.assertEqual(record["inbound_context"]["source_role_id"], "pm")
-        self.assertEqual(record["status"], "in_progress.side_processing")
-        self.assertEqual(record["execution"]["processor"], "side")
-        self.assertNotIn("task_relation", record)
-        self.assertNotIn("active_processor", record)
-        self.assertEqual(len(self.adapter_calls), 1)
-        self.assertEqual(self.adapter_calls[0]["type"], "start_side")
-        self.assertEqual(self.adapter_calls[0]["task_id"], record["id"])
-        return record
+
+    def _assert_track_comment_demand(
+        self,
+        comment: dict[str, Any],
+        runtime: FakeDaemonRuntime,
+        *,
+        existing_task_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        rows = self._demand_rows()
+        self.assertEqual(len(rows), 1)
+        demand = rows[0]
+        track_id = str(comment["track_id"])
+        comment_id = str(comment["id"])
+        thread_id = str(comment["thread_id"])
+        content = str(comment["content"]).strip()
+        self.assertEqual(
+            demand["intake_key"],
+            f"track.comment.added:{track_id}:{comment_id}",
+        )
+        self.assertEqual(demand["description"], content)
+        self.assertEqual(
+            demand["detail"],
+            f"Track comment on {track_id} (comment {comment_id}, thread {thread_id}):\n{content}",
+        )
+        self.assertEqual(
+            demand["source_refs"],
+            [{
+                "type": "track.comment.added",
+                "ref": {
+                    "track_id": track_id,
+                    "comment_id": comment_id,
+                    "thread_id": thread_id,
+                },
+            }],
+        )
+        self.assertEqual(demand["actor_target"], {"actor_id": "act-dev-track-handler", "role_id": "dev"})
+        self.assertEqual(demand["revision"], 1)
+        self.assertEqual(demand["checked_revision"], 0)
+        self.assertEqual(
+            [record["id"] for record in self._task_records()],
+            existing_task_ids or [],
+        )
+        self.assertEqual(runtime.inputs, [demand_sys_daemon_adapter.DEMAND_CHECK_PROMPT])
+        return demand
 
     def test_track_comment_handler_ignores_unknown_trigger_types(self) -> None:
         instance = self._instance()
@@ -226,7 +246,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
         result = self.handler.handle(instance["context"], instance["state"], runtime, trigger)
 
         self.assertEqual(result.status, "ignored")
-        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.inputs, [])
 
     def test_track_comment_handler_rejects_trigger_for_other_identity(self) -> None:
         instance = self._instance()
@@ -242,7 +262,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("wrong target identity", result.message)
-        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.inputs, [])
 
     def test_track_comment_handler_rejects_missing_payload_ids(self) -> None:
         instance = self._instance()
@@ -252,7 +272,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("track_id", result.message)
-        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.inputs, [])
 
     def test_track_comment_handler_rejects_comment_from_wrong_track(self) -> None:
         instance = self._instance()
@@ -269,7 +289,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("comment not found", result.message)
-        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.inputs, [])
 
     def test_track_comment_handler_rejects_wrong_thread_payload(self) -> None:
         instance = self._instance()
@@ -285,7 +305,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("thread", result.message)
-        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.inputs, [])
 
     def test_track_comment_handler_rejects_unintended_target_actor(self) -> None:
         instance = self._instance()
@@ -301,7 +321,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("not an intended recipient", result.message)
-        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.inputs, [])
 
     def test_track_comment_handler_rejects_archived_track(self) -> None:
         instance = self._instance()
@@ -321,7 +341,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("archived", result.message)
-        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.inputs, [])
 
     def test_track_comment_handler_reads_rows_from_daemon_bound_shared_state_root(self) -> None:
         original_env = {
@@ -392,11 +412,11 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
             )
 
             self.assertEqual(result.status, "handled")
-            self._assert_track_comment_task(comment, runtime)
+            self._assert_track_comment_demand(comment, runtime)
 
-    def test_track_comment_handler_ingests_task_without_parent_prompt(self) -> None:
+    def test_track_comment_handler_captures_demand_and_requests_actor_attention(self) -> None:
         instance = self._instance()
-        runtime = FakeDaemonRuntime(activity={"status": "idle", "active_turn_id": None})
+        runtime = FakeDaemonRuntime()
         comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         self.assertTrue(self.handler.handles(self._trigger(payload=self._payload_for(comment))))
@@ -408,9 +428,9 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
         )
 
         self.assertEqual(result.status, "handled")
-        self._assert_track_comment_task(comment, runtime)
+        self._assert_track_comment_demand(comment, runtime)
 
-    def test_track_comment_handler_replay_does_not_start_another_side_turn(self) -> None:
+    def test_track_comment_handler_replay_keeps_one_demand_and_retries_pending_attention(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime()
         comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
@@ -431,12 +451,27 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(first.status, "handled")
         self.assertEqual(replay.status, "handled")
-        self.assertEqual(len(self._task_records()), 1)
-        self.assertEqual(len(self.adapter_calls), 1)
+        self.assertEqual(len(self._demand_rows()), 1)
+        self.assertEqual(self._task_records(), [])
+        self.assertEqual(
+            runtime.inputs,
+            [
+                demand_sys_daemon_adapter.DEMAND_CHECK_PROMPT,
+                demand_sys_daemon_adapter.DEMAND_CHECK_PROMPT,
+            ],
+        )
 
-    def test_track_comment_handler_ignores_parent_activity_when_ingesting_task(self) -> None:
+    def test_track_comment_handler_captures_demand_while_another_task_is_active(self) -> None:
         instance = self._instance()
-        runtime = FakeDaemonRuntime(activity={"status": "running", "active_turn_id": "turn-main-1"})
+        runtime = FakeDaemonRuntime(result={"action": "steer", "turn_id": "turn-demand-track-active"})
+        active = task_sys.create(
+            actor_target={"actor_id": "act-dev-track-handler", "role_id": "dev"},
+            demand_ref={"demand_id": "demand-existing-active", "basis_revision": 1},
+            execution_brief={
+                "description": "Existing active work.",
+                "detail": "Keep this Task active while a Track Demand arrives.",
+            },
+        )
         comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         result = self.handler.handle(
@@ -447,7 +482,11 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
         )
 
         self.assertEqual(result.status, "handled")
-        self._assert_track_comment_task(comment, runtime)
+        self._assert_track_comment_demand(
+            comment,
+            runtime,
+            existing_task_ids=[str(active["task_id"])],
+        )
 
     def test_track_comment_handler_routes_reply_attention_to_parent_comment_author(self) -> None:
         instance = self._instance()
@@ -468,11 +507,37 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
         )
 
         self.assertEqual(result.status, "handled")
-        self._assert_track_comment_task(reply, runtime)
+        self._assert_track_comment_demand(reply, runtime)
 
-    def test_track_comment_handler_ingests_task_when_parent_activity_is_unavailable(self) -> None:
+    def test_track_comment_handler_rejects_signal_source_that_is_not_comment_author(self) -> None:
         instance = self._instance()
-        runtime = FakeDaemonRuntime(activity={"status": "unavailable", "error": "app-server down"})
+        runtime = FakeDaemonRuntime()
+        comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
+
+        result = self.handler.handle(
+            instance["context"],
+            instance["state"],
+            runtime,
+            self._trigger(
+                payload=self._payload_for(comment),
+                source_context={
+                    "signal_id": "sig-track-comment",
+                    "source_identity_id": "act-design-not-author",
+                    "source_role_id": "design",
+                    "created_at": "2026-06-10T00:00:00Z",
+                },
+            ),
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("comment author", result.message)
+        self.assertEqual(self._demand_rows(), [])
+        self.assertEqual(self._task_records(), [])
+        self.assertEqual(runtime.inputs, [])
+
+    def test_actor_input_failure_leaves_canonical_track_demand_pending(self) -> None:
+        instance = self._instance()
+        runtime = FakeDaemonRuntime(error=RuntimeError("app-server down"))
         comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 
         result = self.handler.handle(
@@ -482,8 +547,12 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
             self._trigger(payload=self._payload_for(comment)),
         )
 
-        self.assertEqual(result.status, "handled")
-        self._assert_track_comment_task(comment, runtime)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("app-server down", result.message)
+        rows = self._demand_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["checked_revision"], 0)
+        self.assertEqual(self._task_records(), [])
 
     def test_track_comment_prompt_renderers_are_removed_from_domain_helpers(self) -> None:
         source = TRACK_COMMENT_DOMAIN_PATH.read_text(encoding="utf-8")

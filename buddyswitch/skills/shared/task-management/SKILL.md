@@ -20,6 +20,11 @@ description: Use when an actor receives [DEMAND CHECK], a Task Sys side, parent,
 1. Call `demand_sys.check`. Compare pending descriptions with the live index, load only plausible matches with `demand_sys.get_many`, apply necessary organization actions, then call `demand_sys.complete_check` for the exact observed revisions.
 2. Continue now with the Task Selection Rule.
 
+Demand source refs are provenance, not automatic Demand relations. When a
+`track.comment.added` Demand needs more context than its stored detail, use the
+exact Track id with Track reads; do not infer parent, dependency, duplicate, or
+absorption from Track thread structure alone.
+
 ## Task Selection Rule
 
 1. Call `task_sys.list(status=active)`.

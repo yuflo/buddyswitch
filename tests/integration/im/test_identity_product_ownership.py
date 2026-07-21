@@ -59,12 +59,13 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestCase):
     def test_task_new_writes_persist_owner_identity_id(self) -> None:
         actor = self._actor(role="pm", actor_id="act-pm-task-owner")
 
-        result = task_sys.ingest(
-            {
-                "source": {"type": "test.fixture", "ref": {"title": "Identity-owned task"}},
-                "actor_target": {"actor_id": actor["actor_id"], "role_id": actor["role_id"]},
-                "context": self._task_instance_payload(actor),
-            }
+        result = task_sys.create(
+            actor_target={"actor_id": actor["actor_id"], "role_id": actor["role_id"]},
+            demand_ref={"demand_id": "demand-identity-owned-task", "basis_revision": 1},
+            execution_brief={
+                "description": "Identity-owned Task.",
+                "detail": "Verify Task ownership uses the actor identity route.",
+            },
         )
         task = result["task"]
 

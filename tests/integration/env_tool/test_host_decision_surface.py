@@ -45,26 +45,34 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
             role=role,
             label=f"act-{role}-decision-surface",
         )
-        source_ref: dict[str, object] = {"fixture": "decision-surface"}
+        detail = "Exercise the host decision surface."
         if track_id is not None:
-            source_ref["track_id"] = track_id
-        result = task_sys.ingest(
-            {
-                "source": {"type": "test.decision_surface", "ref": source_ref},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "decision surface"},
-            }
+            detail += f" Track context: {track_id}."
+        result = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={
+                "demand_id": f"demand-decision-surface-{role}-{track_id or 'none'}",
+                "basis_revision": 1,
+            },
+            execution_brief={
+                "description": "Host decision surface fixture.",
+                "detail": detail,
+            },
         )
         return str(result["task_id"])
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         actor_id = self.workspace.actor_id(role=role, label="act-market-decision-surface")
-        self.workspace.seed_active_task(
-            instance_json=self.instance_json,
-            role=role,
-            actor_id=actor_id,
-            task_slug=f"{role}-decision-surface",
-        )
+        if not task_sys.list_tasks(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            statuses=task_sys.ACTIVE_TASK_STATUSES,
+        ):
+            self.workspace.seed_active_task(
+                instance_json=self.instance_json,
+                role=role,
+                actor_id=actor_id,
+                task_slug=f"{role}-decision-surface",
+            )
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_role=role,

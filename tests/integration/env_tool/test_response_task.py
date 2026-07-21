@@ -44,6 +44,18 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         del instance_json, role, actor_id
 
     @staticmethod
+    def _direct_task(*, actor_id: str, label: str) -> dict[str, Any]:
+        normalized_label = label.replace("_", "-")
+        return task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": "dev"},
+            demand_ref={"demand_id": f"demand-response-{normalized_label}", "basis_revision": 1},
+            execution_brief={
+                "description": f"Task response fixture: {label}.",
+                "detail": f"Exercise the exact Task response contract for {label}.",
+            },
+        )
+
+    @staticmethod
     def _create_args(*, detail: str = "Read the exact current product contract.") -> dict[str, object]:
         return {
             "demand_ref": {
@@ -109,13 +121,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-sys-create-conflict"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        active = task_sys.ingest(
-            {
-                "source": {"type": "test.active", "ref": {"id": "existing-active"}},
-                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
-                "context": {"fixture": "active conflict"},
-            }
-        )
+        active = self._direct_task(actor_id=actor_id, label="existing-active")
 
         with patch.object(
             runtime_context.TaskSysRuntimeAccess,
@@ -210,7 +216,6 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
     def test_task_sys_close_and_need_parent_reject_foreign_task_before_mutation(self) -> None:
         owner_label = "act-dev-task-owner"
         caller_label = "act-dev-task-foreign-caller"
-        owner_id = self._runtime_actor_id(role="dev", label=owner_label)
         caller_instance = self._instance_json(role="dev", actor_id=caller_label)
 
         for action, args_tail in (
@@ -218,13 +223,8 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
             ("need_parent", {"params": {"parent_frame_context": {"next": "Forbidden."}}}),
         ):
             with self.subTest(action=action):
-                task_id = task_sys.ingest(
-                    {
-                        "source": {"type": "test.foreign", "ref": {"action": action}},
-                        "actor_target": {"actor_id": owner_id, "role_id": "dev"},
-                        "context": {"fixture": f"foreign {action}"},
-                    }
-                )["task_id"]
+                owner_id = self._runtime_actor_id(role="dev", label=f"{owner_label}-{action}")
+                task_id = self._direct_task(actor_id=owner_id, label=f"foreign-{action}")["task_id"]
                 before = task_sys.get_task(task_id)
                 with patch.object(
                     runtime_context.TaskSysRuntimeAccess,
@@ -294,13 +294,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-sys-feedback"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        task_id = task_sys.ingest(
-            {
-                "source": {"type": "test.feedback", "ref": {"id": "task-sys-close-feedback"}},
-                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
-                "context": {"fixture": "task sys close feedback"},
-            }
-        )["task_id"]
+        task_id = self._direct_task(actor_id=actor_id, label="close-feedback")["task_id"]
 
         with patch.object(
             runtime_context.TaskSysRuntimeAccess,
@@ -644,13 +638,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-sys-cancel"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        task_id = task_sys.ingest(
-            {
-                "source": {"type": "test.cancel", "ref": {"id": "task-sys-cancel"}},
-                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
-                "context": {"fixture": "task sys cancel"},
-            }
-        )["task_id"]
+        task_id = self._direct_task(actor_id=actor_id, label="cancel")["task_id"]
 
         with patch.object(
             runtime_context.TaskSysRuntimeAccess,
@@ -661,6 +649,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 "lease_unregistered": True,
                 "turn_interrupt_ok": True,
             },
+        ), patch.object(
+            runtime_context.TaskSysRuntimeAccess,
+            "execute_instruction",
+            autospec=True,
+            return_value={"action": "submit_parent", "turn_id": "turn-cancel-outcome"},
         ):
             response = self._dispatch(
                 instance_json=instance_json,
@@ -679,20 +672,14 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self.assertEqual(response["side_cleanup"]["lease_unregistered"], True)
         self.assertEqual(response["execution_result"]["type"], "cancellation")
         self.assertEqual(response["execution_result"]["reason"], "Request superseded.")
-        self.assertNotIn("outcome_attention", response)
+        self.assertEqual(response["outcome_attention"]["status"], "submitted")
         self._assert_no_retired_task_sys_fields(response)
 
     def test_task_sys_list_and_get_responses_expose_canonical_status_and_execution(self) -> None:
         actor_label = "act-dev-task-sys-read-contract"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        task_id = task_sys.ingest(
-            {
-                "source": {"type": "test.read_contract", "ref": {"id": "task-sys-read-contract"}},
-                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
-                "context": {"fixture": "task sys read contract"},
-            }
-        )["task_id"]
+        task_id = self._direct_task(actor_id=actor_id, label="read-contract")["task_id"]
         listed = self._dispatch(
             instance_json=instance_json,
             actor_id=actor_label,
@@ -734,13 +721,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-sys-analysis"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        task_id = task_sys.ingest(
-            {
-                "source": {"type": "test.analysis", "ref": {"id": "task-sys-analysis"}},
-                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
-                "context": {"fixture": "task sys analysis"},
-            }
-        )["task_id"]
+        task_id = self._direct_task(actor_id=actor_id, label="analysis")["task_id"]
         before = task_sys.get_task(task_id)
 
         response = self._dispatch(
@@ -764,13 +745,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-sys-handoff"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        task_id = task_sys.ingest(
-            {
-                "source": {"type": "test.handoff", "ref": {"id": "task-sys-handoff"}},
-                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
-                "context": {"fixture": "task sys handoff"},
-            }
-        )["task_id"]
+        task_id = self._direct_task(actor_id=actor_id, label="handoff")["task_id"]
         with patch.object(
             runtime_context.TaskSysRuntimeAccess,
             "execute_instruction",
@@ -815,13 +790,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-sys-handoff-failure"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        task_id = task_sys.ingest(
-            {
-                "source": {"type": "test.handoff_failure", "ref": {"id": "task-sys-handoff-failure"}},
-                "actor_target": {"actor_id": actor_id, "role_id": "dev"},
-                "context": {"fixture": "task sys handoff failure"},
-            }
-        )["task_id"]
+        task_id = self._direct_task(actor_id=actor_id, label="handoff-failure")["task_id"]
         task_ids_before = {row["id"] for row in task_sys.list_tasks()}
 
         with patch.object(

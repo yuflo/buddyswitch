@@ -97,10 +97,32 @@ def _json_block(value: Mapping[str, Any]) -> str:
     return json.dumps(dict(value), ensure_ascii=True, indent=2, sort_keys=True)
 
 
+def _demand_source(value: Any, field: str) -> dict[str, Any]:
+    source = _require_mapping(value, field)
+    if set(source) != {"type", "ref"} or source.get("type") != "demand":
+        raise ValueError(f"{field} must be an exact Demand source")
+    source_ref = _require_mapping(source.get("ref"), f"{field}.ref")
+    if set(source_ref) != {"demand_id", "basis_revision"}:
+        raise ValueError(f"{field} must be an exact Demand source")
+    demand_id = _require_text(source_ref.get("demand_id"), f"{field}.ref.demand_id")
+    if not demand_id.startswith("demand-"):
+        raise ValueError(f"{field} must be an exact Demand source")
+    basis_revision = source_ref.get("basis_revision")
+    if type(basis_revision) is not int or basis_revision < 1:
+        raise ValueError(f"{field} must be an exact Demand source")
+    return {
+        "type": "demand",
+        "ref": {
+            "demand_id": demand_id,
+            "basis_revision": basis_revision,
+        },
+    }
+
+
 def render_side_frame(frame: Mapping[str, Any]) -> str:
     payload = _require_mapping(frame, "frame")
     task_id = _require_text(payload.get("task_id"), "frame.task_id")
-    source = _require_mapping(payload.get("source"), "frame.source")
+    source = _demand_source(payload.get("source"), "frame.source")
     source_guidance = (
         "Source-specific resources:",
         "No source-specific message capability is added for this source type.",
@@ -228,7 +250,7 @@ def render_side_frame(frame: Mapping[str, Any]) -> str:
 def render_parent_frame(frame: Mapping[str, Any]) -> str:
     payload = _require_mapping(frame, "frame")
     task_id = _require_text(payload.get("task_id"), "frame.task_id")
-    source = _require_mapping(payload.get("source"), "frame.source")
+    source = _demand_source(payload.get("source"), "frame.source")
     source_guidance = (
         "For this parent source:",
         "\n".join(
@@ -275,16 +297,7 @@ def render_outcome_frame(frame: Mapping[str, Any]) -> str:
     status = _require_text(payload.get("status"), "frame.status")
     if status not in {task_sys.COMPLETED, task_sys.CANCELED}:
         raise ValueError("outcome frame status must be completed or canceled")
-    source = _require_mapping(payload.get("source"), "frame.source")
-    if set(source) != {"type", "ref"} or source.get("type") != "demand":
-        raise ValueError("outcome frame source must be an exact Demand reference")
-    source_ref = _require_mapping(source.get("ref"), "frame.source.ref")
-    if set(source_ref) != {"demand_id", "basis_revision"}:
-        raise ValueError("outcome frame Demand ref must contain exactly demand_id and basis_revision")
-    _require_text(source_ref.get("demand_id"), "frame.source.ref.demand_id")
-    basis_revision = source_ref.get("basis_revision")
-    if type(basis_revision) is not int or basis_revision < 1:
-        raise ValueError("frame.source.ref.basis_revision must be a positive integer")
+    source = _demand_source(payload.get("source"), "frame.source")
     evidence_ref = _require_mapping(payload.get("evidence_ref"), "frame.evidence_ref")
     if set(evidence_ref) != {"type", "ref"} or evidence_ref.get("type") != "task_sys.task":
         raise ValueError("outcome frame evidence_ref must be a task_sys.task reference")
@@ -372,11 +385,10 @@ def render_task_progress_check(
             f"{normalized_processor} Progress Check requires previous processor status {expected_signal_status}"
         )
 
-    source_ref = payload.get("source_ref")
-    source = {
-        "type": _require_text(payload.get("source_type"), "task.source_type"),
-        "ref": dict(source_ref) if isinstance(source_ref, Mapping) else {},
-    }
+    source = _demand_source(
+        {"type": payload.get("source_type"), "ref": payload.get("source_ref")},
+        "task.source",
+    )
     events = payload.get("events")
     last_event: dict[str, Any] = {}
     if isinstance(events, list) and events and isinstance(events[-1], Mapping):

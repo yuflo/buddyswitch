@@ -50,22 +50,21 @@ def _matches_actor(record: Mapping[str, Any], actor_target: Mapping[str, str] | 
     return _record_actor(record) == dict(actor_target)
 
 
-def _external_demand_ref(task: Mapping[str, Any]) -> dict[str, Any] | None:
+def _external_demand_ref(task: Mapping[str, Any]) -> dict[str, Any]:
     if task.get("source_type") != "demand":
-        return None
+        raise ValueError("task.source_type must be demand")
     source_ref = task.get("source_ref")
     if not isinstance(source_ref, Mapping):
-        return None
+        raise ValueError("task.source_ref must be an exact DemandRef")
+    if set(source_ref) != {"demand_id", "basis_revision"}:
+        raise ValueError("task.source_ref must contain exactly demand_id and basis_revision")
     demand_id = source_ref.get("demand_id")
     basis_revision = source_ref.get("basis_revision")
-    try:
-        normalized_demand_id = runtime_files.require_id(demand_id, "demand_id")
-    except ValueError:
-        return None
+    normalized_demand_id = runtime_files.require_id(demand_id, "demand_id")
     if not normalized_demand_id.startswith("demand-"):
-        return None
+        raise ValueError("task.source_ref.demand_id must be a Demand id")
     if type(basis_revision) is not int or basis_revision < 1:
-        return None
+        raise ValueError("task.source_ref.basis_revision must be a positive integer")
     return {
         "demand_id": normalized_demand_id,
         "basis_revision": basis_revision,

@@ -117,6 +117,16 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         self.assertNotIn(stale_finish, skill_text)
         self.assertNotIn(stale_label, skill_text)
 
+    def test_demand_check_treats_track_provenance_as_context_not_relation_truth(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+        normalized = " ".join(skill_text.split())
+
+        self.assertIn("Demand source refs are provenance", skill_text)
+        self.assertIn("`track.comment.added`", skill_text)
+        self.assertIn("use the exact Track id with Track reads", normalized)
+        self.assertIn("do not infer parent, dependency, duplicate, or absorption", normalized)
+
     def test_task_sys_close_surfaces_use_frame_work_not_source_bound_work(self) -> None:
         close_action = tool_router.get_action_definition("task_sys", "close")
         surface_text = "\n".join((close_action.description, *close_action.use_when))

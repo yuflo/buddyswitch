@@ -41,8 +41,8 @@ to generic daemon capabilities.
   organization judgment contract, and persistence.
 - IM owns actor-directed message delivery, payload validation, identity and
   reachability decisions, and its trigger semantics.
-- Track owns comment delivery and the Task lifecycle requests caused by a
-  comment.
+- Track owns comment delivery, payload validation, and exact source-fact
+  materialization before Demand capture.
 - Browser owns page and cockpit lifecycle meaning and uses only public generic
   schedule operations.
 
@@ -53,6 +53,10 @@ Cross-product judgment remains outside daemon infrastructure. In the current
 Demand/Task flow, the Actor + installed task-management skill calls the two
 independent actor action catalogs. Daemon runtime only delivers the Demand
 Check text and Task frames supplied by their owning product adapters.
+
+IM and Track handlers may call the Demand daemon adapter after validating their
+own source fact. That adapter requests generic actor input; neither the generic
+daemon nor either inbound handler selects work or calls Task Sys.
 
 `DaemonRuntime` exposes only product-neutral host mechanics to handlers:
 

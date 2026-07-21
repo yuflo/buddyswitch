@@ -42,15 +42,16 @@ class TaskSysProgressCheckTests(RuntimeWorkspaceTestCase):
 
     def _create_task(self, *, parent_processing: bool = True, actor_id: str | None = None) -> str:
         target_actor_id = actor_id or self.actor_id
-        result = task_sys.ingest(
-            {
-                "source": {
-                    "type": "test.inbound.created",
-                    "ref": {"id": "event-progress-check", "channel": "fixture"},
-                },
-                "actor_target": {"actor_id": target_actor_id, "role_id": "dev"},
-                "context": {"text": "Continue the parent-owned task."},
-            }
+        result = task_sys.create(
+            actor_target={"actor_id": target_actor_id, "role_id": "dev"},
+            demand_ref={
+                "demand_id": f"demand-progress-check-{target_actor_id}",
+                "basis_revision": 1,
+            },
+            execution_brief={
+                "description": "Continue the parent-owned Task.",
+                "detail": "Continue the parent-owned Task after its completed turn.",
+            },
         )
         task_id = str(result["task_id"])
         if parent_processing:

@@ -425,7 +425,8 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                 json.dumps(
                     {
                         "id": "task-alpha",
-                        "source_type": "message",
+                        "source_type": "demand",
+                        "source_ref": {"demand_id": "demand-alpha", "basis_revision": 1},
                         "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
                         "status": "in_progress.side_processing",
                         "execution": {"processor": "side", "handoff": None, "result": None},

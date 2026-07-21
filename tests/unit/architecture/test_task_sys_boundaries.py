@@ -12,7 +12,6 @@ DOMAIN = Path("scripts/env/domain/task_sys.py")
 READ_MODEL = Path("scripts/env/domain/task_read.py")
 TOOL_ROOT = Path("scripts/env/tools/task_sys")
 RUNTIME = Path("tools/launcher/task_sys_runtime.py")
-INGRESS = Path("tools/launcher/task_sys_ingress.py")
 ARCH = Path("docs/arch/task-sys-architecture.md")
 
 
@@ -39,7 +38,6 @@ def _task_implementation_files() -> tuple[Path, ...]:
         DOMAIN,
         READ_MODEL,
         RUNTIME,
-        INGRESS,
         *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / TOOL_ROOT).glob("*.py"))),
     )
 
@@ -56,13 +54,21 @@ def test_task_sys_has_no_demand_implementation_dependency() -> None:
 
 def test_task_sys_has_one_actor_create_action_and_one_creation_owner() -> None:
     tool_source = (REPO_ROOT / TOOL_ROOT / "tool.py").read_text(encoding="utf-8")
+    tool_impl_source = (REPO_ROOT / TOOL_ROOT / "_impl.py").read_text(encoding="utf-8")
     domain_source = (REPO_ROOT / DOMAIN).read_text(encoding="utf-8")
 
     assert tool_source.count('name="create"') == 1
     assert 'name="start"' not in tool_source
     assert 'name="begin"' not in tool_source
     assert domain_source.count("def _create_task(") == 1
-    assert domain_source.count("_create_task(") == 3
+    assert domain_source.count("_create_task(") == 2
+    assert "def ingest(" not in domain_source
+    assert "def _normalize_source(" not in domain_source
+    assert "def _normalize_context(" not in domain_source
+    assert not (REPO_ROOT / "tools/launcher/task_sys_ingress.py").exists()
+    assert 'extra["demand_ref"] = dict(source_ref)' in tool_impl_source
+    assert 'extra["demand_ref"] = dict(source_ref) if' not in tool_impl_source
+    assert "if not isinstance(instruction, dict)" not in tool_impl_source
     assert "buddyswitch/local/locks/task-sys" not in domain_source
     assert not (REPO_ROOT / "scripts/env/domain/tasks.py").exists()
 
@@ -85,7 +91,8 @@ def test_current_task_architecture_names_exact_owners_and_forward_only_boundary(
         "opaque handler checkpoint",
         "opaque DemandRef",
         "Actor + installed task-management skill",
-        "Track comment ingress",
+        "Every Task is created from one exact DemandRef",
+        "`task_sys.create` is the sole Task creation path",
     ):
         assert token in text
     for token in (
@@ -97,5 +104,9 @@ def test_current_task_architecture_names_exact_owners_and_forward_only_boundary(
         "compatibility",
         "thread/fork",
         "inherited parent conversation history",
+        "Track comment ingress",
+        "shared Task ingress",
+        "Non-Demand Tasks",
+        "null` for every other source",
     ):
         assert token not in text

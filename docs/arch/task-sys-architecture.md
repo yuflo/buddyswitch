@@ -18,16 +18,19 @@ Task Sys does not own needs, matching, queueing, or coordination among needs.
 Demand Sys owns those facts. The Actor + installed task-management skill is the
 only semantic composition boundary between the two products.
 
+Every Task is created from one exact DemandRef. The reference is an opaque
+snapshot of the actor's selection, not permission for Task Sys to read or
+interpret Demand state.
+
 ## Creation owner
 
 `scripts/env/domain/task_sys.py` owns Task creation, source idempotency, the
 single-active gate, lifecycle transitions, and Task frame construction.
-`task_sys.create` is the only actor-facing creation action. It accepts one
-opaque DemandRef snapshot plus a self-contained execution brief; Task Sys
+`task_sys.create` is the sole Task creation path. It accepts one opaque
+DemandRef snapshot plus a self-contained execution brief; Task Sys
 validates their shape but does not read or interpret Demand state.
 
-Actor creation and current Track comment ingress call the same private creation
-primitive under one actor-scoped lock. Inside that lock Task Sys:
+Inside its actor-scoped lock Task Sys:
 
 1. returns an exact source/context replay without another runtime instruction;
 2. rejects a reused source identity with different context;
@@ -36,8 +39,9 @@ primitive under one actor-scoped lock. Inside that lock Task Sys:
    `start_side` instruction.
 
 Lock files are local coordination facts. Task JSON is the canonical product
-truth. Track comment ingress remains one current source until its planned
-Demand intake cutover; it does not own a separate gate or write path.
+truth. No inbound product handler can create a Task; the actor first organizes
+Demand state and then explicitly selects at most one Demand through
+`task_sys.create`.
 
 ## Actor tool boundary
 
@@ -56,8 +60,8 @@ Task Sys owns three strict frame kinds:
 
 - `task_sys.side_frame` starts every new Task;
 - `task_sys.parent_frame` hands the same Task from side to parent;
-- `task_sys.outcome_frame` returns a terminal Demand-sourced Task receipt to
-  the parent Actor.
+- `task_sys.outcome_frame` returns a terminal Task receipt and its exact
+  DemandRef to the parent Actor.
 
 Parent handoff and outcome attention both reuse the existing `submit_parent`
 runtime instruction. An outcome frame contains the Task id, canonical terminal
@@ -67,8 +71,8 @@ status, lifecycle, detail, relation state, or selection policy.
 
 Closing or canceling a Task persists terminal truth before outcome attention is
 submitted. Submission failure is explicit feedback and never rolls back the
-terminal Task. Non-Demand Tasks do not emit an outcome frame. The Actor rereads
-source-owned state, decides any later source mutation, acknowledges the
+terminal Task. Every terminal Task emits the same outcome frame. The Actor
+rereads Demand-owned state, decides any later Demand mutation, acknowledges the
 resulting Demand revision when required, and then applies the same at-most-one
 Task selection rule to another live Demand. Task cancellation never implies
 Demand cancellation.
@@ -122,9 +126,10 @@ parent processing and must use `task_sys.need_parent`.
 Internal actor tools use `actor_task_projection`, which exposes canonical Task
 status and execution facts for the active actor. Public CLI and Web surfaces
 use `task_read`, an exact allowlist. Its `demand_ref` is the safe two-field
-object only for Demand-sourced Tasks and `null` for every other source. It never
-projects arbitrary source refs, execution briefs, events, runtime instructions,
-paths, or raw context.
+object copied from every Task's exact source snapshot. Malformed or non-Demand
+records are rejected; they are not projected as a second supported shape. The
+read model never projects execution briefs, events, runtime instructions, paths,
+or raw context.
 
 ## Dependency laws
 
@@ -134,7 +139,6 @@ Allowed:
 Task tool -> ToolContext.rules.task_sys + TaskSysRuntimeAccess
 Task read projection -> Task domain
 Task runtime adapter -> Task domain + generic actor/runtime primitives
-Track comment handler -> shared Task ingress
 Actor workflow -> independent Demand Sys and Task Sys actor actions
 ```
 
@@ -148,6 +152,7 @@ generic daemon checkpoint storage -> interpretation of Task turn identities
 side lifecycle -> inherited parent conversation or parallel fork path
 second create name, gate, source write path, lifecycle, or shadow Task state
 Task outcome mutating Demand without an Actor decision
+inbound product handler -> Task creation
 ```
 
 These laws are enforced by

@@ -19,7 +19,8 @@ test('actor task summary renders canonical lifecycle status without retired rela
             active_tasks: [
               {
                 task_id: 'task-ui-current',
-                source_type: 'test.ui',
+                source_type: 'demand',
+                demand_ref: { demand_id: 'demand-ui-current', basis_revision: 1 },
                 status: 'in_progress.parent_processing',
                 actor: { actor_id: 'act-task', role_id: 'dev' },
               },
@@ -27,7 +28,8 @@ test('actor task summary renders canonical lifecycle status without retired rela
             recoverable_tasks: [
               {
                 task_id: 'task-ui-failed',
-                source_type: 'test.ui',
+                source_type: 'demand',
+                demand_ref: { demand_id: 'demand-ui-failed', basis_revision: 1 },
                 status: 'in_progress.side_processing',
                 actor: { actor_id: 'act-task', role_id: 'dev' },
               },

@@ -93,19 +93,28 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             "frame": {
                 "kind": "task_sys.side_frame",
                 "task_id": "task-controlled-inbound-abcdef123456",
-                "source": {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
+                "source": {
+                    "type": "demand",
+                    "ref": {"demand_id": "demand-runtime-side", "basis_revision": 1},
+                },
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
-                "context": {"text": "Draft brief"},
+                "context": {
+                    "execution_brief": {
+                        "description": "Draft brief.",
+                        "detail": "Draft the exact runtime fixture brief.",
+                    }
+                },
             },
         }
 
     def _ingested_instruction(self) -> tuple[str, dict[str, Any]]:
-        result = task_sys.ingest(
-            {
-                "source": {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
-                "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
-                "context": {"text": "Draft brief"},
-            }
+        result = task_sys.create(
+            actor_target={"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
+            demand_ref={"demand_id": "demand-runtime-ingested", "basis_revision": 1},
+            execution_brief={
+                "description": "Draft brief.",
+                "detail": "Draft the exact runtime fixture brief.",
+            },
         )
         return str(result["task_id"]), dict(result["instruction"])
 
@@ -117,9 +126,17 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
             "frame": {
                 "kind": "task_sys.parent_frame",
                 "task_id": "task-controlled-inbound-abcdef123456",
-                "source": {"type": "test.inbound.created", "ref": {"id": "event-1", "channel": "fixture"}},
+                "source": {
+                    "type": "demand",
+                    "ref": {"demand_id": "demand-runtime-parent", "basis_revision": 1},
+                },
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
-                "inbound_context": {"text": "Draft brief"},
+                "inbound_context": {
+                    "execution_brief": {
+                        "description": "Draft brief.",
+                        "detail": "Draft the exact runtime fixture brief.",
+                    }
+                },
                 "execution_handoff": {
                     "parent_frame_context": {
                         "next": "Draft the brief in parent.",
@@ -241,6 +258,25 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("[TRACK COMMENT " + "TRIAGE]", text)
         self.assertNotIn("submit parent", text.lower())
         self.assertNotIn("side_" + "interrupt", text)
+
+    def test_render_side_frame_rejects_non_demand_or_malformed_source(self) -> None:
+        for source in (
+            {"type": "test.inbound.created", "ref": {"id": "event-1"}},
+            {"type": "demand", "ref": {"demand_id": "demand-runtime-side"}},
+            {
+                "type": "demand",
+                "ref": {
+                    "demand_id": "demand-runtime-side",
+                    "basis_revision": 1,
+                    "extra": True,
+                },
+            },
+        ):
+            with self.subTest(source=source):
+                frame = self._instruction()["frame"]
+                frame["source"] = source
+                with self.assertRaisesRegex(ValueError, "exact Demand"):
+                    self.module.render_side_frame(frame)
 
     def test_execute_start_side_instruction_delegates_to_actor_side_boundary(self) -> None:
         context = self._context()
@@ -685,7 +721,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("- task_sys.close(task_id=..., summary=...)", text)
         self.assertIn("- task_sys.cancel(task_id=..., reason=...)", text)
 
-    def test_render_parent_frame_for_generic_controlled_source_uses_task_sys_actions(self) -> None:
+    def test_render_parent_frame_for_demand_source_uses_task_sys_actions(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
 
         self.assertIn("For this parent source:", text)
@@ -695,6 +731,16 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("parent_handoff_params", text)
         self.assertNotIn("For an IM source message:", text)
         self.assertNotIn("Only after the source-" + "bound IM action " + "succeeds", text)
+
+    def test_render_parent_frame_rejects_non_demand_source(self) -> None:
+        frame = self._parent_instruction()["frame"]
+        frame["source"] = {
+            "type": "track.comment.added",
+            "ref": {"comment_id": "comment-old"},
+        }
+
+        with self.assertRaisesRegex(ValueError, "exact Demand"):
+            self.module.render_parent_frame(frame)
 
     def test_render_parent_frame_does_not_mention_checkpoint_update(self) -> None:
         text = self.module.render_parent_frame(self._parent_instruction()["frame"])
@@ -928,8 +974,8 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def test_render_task_progress_check_for_parent_binds_existing_task_and_current_actions(self) -> None:
         task = {
             "id": "task-controlled-inbound-progress123",
-            "source_type": "test.inbound.created",
-            "source_ref": {"id": "event-progress-1", "channel": "fixture"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-runtime-progress-parent", "basis_revision": 1},
             "status": "in_progress.parent_processing",
             "events": [
                 {"type": "created", "at": "2026-07-16T00:00:00Z"},
@@ -961,8 +1007,8 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def test_render_side_progress_check_binds_existing_side_task_and_current_actions(self) -> None:
         task = {
             "id": "task-controlled-inbound-side-progress123",
-            "source_type": "test.inbound.created",
-            "source_ref": {"id": "event-side-progress-1", "channel": "fixture"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-runtime-progress-side", "basis_revision": 1},
             "status": "in_progress.side_processing",
             "events": [
                 {"type": "created", "at": "2026-07-16T00:00:00Z"},
@@ -988,12 +1034,29 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("task_sys.need_parent", prompt)
         self.assertIn("status remains in_progress.side_processing", prompt)
 
+    def test_render_task_progress_check_rejects_non_demand_source(self) -> None:
+        task = {
+            "id": "task-controlled-inbound-progress-old",
+            "source_type": "track.comment.added",
+            "source_ref": {"comment_id": "comment-old"},
+            "status": "in_progress.parent_processing",
+            "events": [],
+        }
+        previous_turn = {
+            "thread_id": "thr-main",
+            "turn_id": "turn-parent-work-old",
+            "status": "completed",
+        }
+
+        with self.assertRaisesRegex(ValueError, "exact Demand"):
+            self.module.render_task_progress_check(task, previous_turn, processor="parent")
+
     def test_submit_task_progress_check_for_parent_uses_main_actor_thread(self) -> None:
         context = self._context()
         task = {
             "id": "task-controlled-inbound-progress123",
-            "source_type": "test.inbound.created",
-            "source_ref": {"id": "event-progress-1"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-runtime-submit-parent", "basis_revision": 1},
             "status": "in_progress.parent_processing",
             "events": [{"type": "parent_handoff_started", "at": "2026-07-16T00:01:00Z"}],
         }
@@ -1044,8 +1107,8 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         )
         task = {
             "id": "task-controlled-inbound-side-progress123",
-            "source_type": "test.inbound.created",
-            "source_ref": {"id": "event-side-progress-1"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-runtime-submit-side", "basis_revision": 1},
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }
@@ -1105,8 +1168,8 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         )
         task = {
             "id": "task-controlled-inbound-side-cleaned123",
-            "source_type": "test.inbound.created",
-            "source_ref": {"id": "event-side-cleaned"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-runtime-side-cleaned", "basis_revision": 1},
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }
@@ -1153,8 +1216,8 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         )
         task = {
             "id": "task-controlled-inbound-side-uncertain123",
-            "source_type": "test.inbound.created",
-            "source_ref": {"id": "event-side-uncertain"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-runtime-side-uncertain", "basis_revision": 1},
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }
@@ -1207,8 +1270,8 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         )
         task = {
             "id": "task-controlled-inbound-side-safe-retry123",
-            "source_type": "test.inbound.created",
-            "source_ref": {"id": "event-side-safe-retry"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-runtime-side-safe-retry", "basis_revision": 1},
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }

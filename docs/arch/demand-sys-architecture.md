@@ -6,29 +6,30 @@ Demand Sys is the local product module that captures and organizes needs owned
 by one actor. A Demand records what requires attention; it is not a Task Sys
 execution record and does not imply that work has started.
 
-The implemented inbound boundary is:
+The implemented inbound boundaries are:
 
 ```text
 IM message fact -> IM handler -> Demand daemon adapter -> Demand domain
-                                      |
-                                      -> generic input_actor -> actor Demand Check
+Track comment fact -> Track handler -> Demand daemon adapter -> Demand domain
+                                             |
+                                             -> generic input_actor -> actor Demand Check
 
 actor judgment -> demand_sys action -> Demand domain
 ```
 
-The IM handler validates one exact target-visible message/event fact and maps it
-deterministically to Demand intake. The Demand daemon adapter owns only capture
-coordination, pending-attention policy, and the fixed Demand Check prompt. It
-calls the same domain owner used by actor actions and uses the generic daemon
-`input_actor` host capability; it does not own lifecycle or storage.
+Each product handler validates and materializes one exact target-visible source
+fact, then maps it deterministically to Demand intake. The Demand daemon adapter
+owns only capture coordination, pending-attention policy, and the fixed Demand
+Check prompt. It calls the same domain owner used by actor actions and uses the
+generic daemon `input_actor` host capability; it does not own lifecycle or
+storage.
 
 The actor owns matching, organization, and execution-selection judgment. The
 Actor + installed task-management skill is the only semantic composition
 boundary with Task Sys. Task Sys may persist an opaque DemandRef chosen by the
 actor, but it does not import, read, validate against, call, subscribe to, or
-mutate Demand state. Track remains on its separate current Task path. This
-phase captures only for an already-active target actor; offline capture,
-replay, and startup recovery are not implemented.
+mutate Demand state. Current inbound capture requires an already-active target
+actor; offline capture and startup recovery are not implemented.
 
 ## Ownership and storage
 
@@ -92,6 +93,11 @@ atomically. The actor decides the relation and merged description/detail, but
 cannot round-trip or rewrite the canonical provenance as part of
 `absorb_into`.
 
+Track thread structure is provenance and retrieval context, not Demand relation
+truth. A Track-backed Demand carries the exact Track, comment, and thread ids;
+the actor may use those ids to read more Track context, but parent, dependency,
+duplicate, and absorption decisions still require Demand Check judgment.
+
 ## Check semantics
 
 `check` is read-only. It returns:
@@ -144,6 +150,7 @@ Demand read projection -> Demand domain
 Demand tool adapter -> ToolContext.rules.demand_sys
 public CLI -> Demand read projection
 IM handler -> IM read service + Demand daemon adapter
+Track handler -> Track repository + Demand daemon adapter
 Demand daemon adapter -> Demand domain + generic DaemonRuntime.input_actor
 ```
 
@@ -155,7 +162,7 @@ Demand implementation -> daemon modules or launcher product adapters
 generic daemon -> Demand implementation or Demand semantics
 IM handler -> Task Sys
 Task implementation -> Demand import, read, validation, call, subscription, or mutation
-Track handler -> Demand implementation in this phase
+Track handler -> Task Sys
 public CLI or actor tool -> Demand repository/raw aggregate files
 new Demand alias, fallback read, dual write, shadow state, or second schema
 ```

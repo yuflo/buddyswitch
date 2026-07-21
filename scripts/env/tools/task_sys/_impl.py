@@ -210,7 +210,9 @@ def _success(
         extra["outcome_attention"] = outcome_attention
     if action == "create":
         source_ref = task.get("source_ref")
-        extra["demand_ref"] = dict(source_ref) if isinstance(source_ref, Mapping) else None
+        if not isinstance(source_ref, Mapping):
+            raise RuntimeError("created Task is missing its DemandRef")
+        extra["demand_ref"] = dict(source_ref)
         extra["runtime"] = dict(runtime) if isinstance(runtime, dict) else None
         effect_summary = (
             "Created and started Demand-sourced Task."
@@ -300,11 +302,9 @@ def _record_side_cleanup(task_sys: Any, context: Any, task_id: str) -> dict[str,
     )
 
 
-def _submit_outcome_attention(task_sys: Any, context: Any, task_id: str) -> dict[str, Any] | None:
+def _submit_outcome_attention(task_sys: Any, context: Any, task_id: str) -> dict[str, Any]:
     try:
         instruction = task_sys.outcome_instruction(task_id)
-        if not isinstance(instruction, dict):
-            return None
         runtime_result = _execute_runtime_instruction(context, instruction)
     except Exception as exc:
         return {

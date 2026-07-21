@@ -81,12 +81,13 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
 
     def _ensure_active_task(self, *, role: str, actor_id: str) -> None:
         task_id = f"task-0001-{role}-feedback"
-        task_sys.ingest(
-            {
-                "source": {"type": "test.feedback", "ref": {"id": task_id}},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "runtime feedback"},
-            }
+        task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={"demand_id": f"demand-feedback-{role}", "basis_revision": 1},
+            execution_brief={
+                "description": "Runtime feedback fixture.",
+                "detail": f"Exercise runtime feedback for {task_id}.",
+            },
         )
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:

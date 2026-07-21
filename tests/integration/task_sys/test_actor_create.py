@@ -58,6 +58,7 @@ class TaskSysActorCreateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(result["outcome"], "created")
         self.assertIs(result["state_changed"], True)
         task = result["task"]
+        self.assertTrue(task["id"].startswith("task-demand-"), task["id"])
         self.assertEqual(task_sys.get_task(result["task_id"]), task)
         self.assertEqual(task["source_type"], "demand")
         self.assertEqual(task["source_ref"], self._demand_ref())
@@ -184,34 +185,6 @@ class TaskSysActorCreateTests(RuntimeWorkspaceTestCase):
                 next_revision["task_id"]: task_sys.SIDE_PROCESSING,
             },
         )
-
-    def test_generic_ingest_replay_uses_the_same_creation_identity(self) -> None:
-        envelope = {
-            "source": {
-                "type": "track.comment.added",
-                "ref": {
-                    "track_id": "track-phase3",
-                    "comment_id": "comment-phase3",
-                    "thread_id": "thread-phase3",
-                },
-            },
-            "actor_target": self.actor_target,
-            "context": {
-                "track_id": "track-phase3",
-                "comment_id": "comment-phase3",
-                "thread_id": "thread-phase3",
-            },
-        }
-
-        created = task_sys.ingest(envelope)
-        replay = task_sys.ingest(envelope)
-
-        self.assertEqual(created["outcome"], "created")
-        self.assertEqual(replay["outcome"], "existing")
-        self.assertEqual(replay["task_id"], created["task_id"])
-        self.assertIs(replay["state_changed"], False)
-        self.assertIsNone(replay["instruction"])
-        self.assertEqual(len(task_sys.list_tasks(actor_target=self.actor_target)), 1)
 
     def test_concurrent_different_sources_create_exactly_one_active_task(self) -> None:
         gate_path = self.runtime_root / "start-task-create-race"
@@ -350,19 +323,6 @@ except task_sys.TaskActiveConflict as exc:
                 "outcome": canceled["task"]["execution"]["result"],
             },
         )
-
-    def test_terminal_non_demand_task_has_no_outcome_instruction(self) -> None:
-        created = task_sys.ingest(
-            {
-                "source": {"type": "test.fixture", "ref": {"id": "non-demand"}},
-                "actor_target": self.actor_target,
-                "context": {"fixture": "non-demand completion"},
-            }
-        )
-        task_sys.record_task_close(created["task_id"], {"summary": "Finished."})
-
-        self.assertIsNone(task_sys.outcome_instruction(created["task_id"]))
-
 
 if __name__ == "__main__":
     import unittest

@@ -32,8 +32,8 @@ def _build_definition() -> ToolDefinition:
             "mutate Demands, send messages, mutate tracks, or write actor private files."
         ),
         object_model=(
-            "Task Sys tasks are durable task records with source refs, actor targets, one canonical lifecycle status, "
-            "execution facts, and lifecycle events."
+            "Task Sys tasks are durable task records with one opaque DemandRef snapshot, an actor target, one canonical "
+            "lifecycle status, execution facts, and lifecycle events."
         ),
         use_when=(
             "You need to inspect ongoing actor-owned Task Sys tasks or record a legal operation for the active Task Sys side or parent frame.",
@@ -204,7 +204,7 @@ def _build_definition() -> ToolDefinition:
                     "task belongs to the active actor",
                 ),
                 returns=("task_id", "task", "events"),
-                use_when=("You need task_id detail, current lifecycle status, source refs, execution, or events for an actor-owned Task Sys task.",),
+                use_when=("You need task_id detail, current lifecycle status, its opaque DemandRef, execution, or events for an actor-owned Task Sys task.",),
                 do_not_use_when=("You need only a compact set of active ongoing tasks; use task_sys.list instead.",),
                 risk_hints={
                     "read_only": True,
@@ -242,7 +242,7 @@ def _build_definition() -> ToolDefinition:
                 result_content_level="task id, lifecycle status, and execution completion result",
                 success_effect=(
                     "Marks the Task completed, records execution completion metadata, clears active processing, and "
-                    "submits outcome attention to the parent for a Demand-sourced Task."
+                    "submits Task outcome attention to the parent."
                 ),
                 failure_state_guarantee=(
                     "Rejected close requests do not mutate Task state. If outcome-attention submission fails after "
@@ -252,7 +252,7 @@ def _build_definition() -> ToolDefinition:
                 writes=(
                     "task sys task record",
                     "side runtime cleanup when closing from side",
-                    "parent turn through Task Sys outcome runtime instruction for Demand-sourced Tasks",
+                    "parent turn through Task Sys outcome runtime instruction",
                 ),
                 does_not_write=("Demands", "messages", "tracks", "artifacts", "actor private files"),
                 preconditions=(
@@ -312,7 +312,7 @@ def _build_definition() -> ToolDefinition:
                 result_content_level="task id, canceled lifecycle status, and execution cancellation result",
                 success_effect=(
                     "Marks the Task canceled, records cancellation metadata, clears active processing, and submits "
-                    "outcome attention to the parent for a Demand-sourced Task."
+                    "Task outcome attention to the parent."
                 ),
                 failure_state_guarantee=(
                     "Rejected cancel requests do not mutate Task state. If outcome-attention submission fails after "
@@ -322,7 +322,7 @@ def _build_definition() -> ToolDefinition:
                 writes=(
                     "task sys task record",
                     "side runtime cleanup when canceling from side",
-                    "parent turn through Task Sys outcome runtime instruction for Demand-sourced Tasks",
+                    "parent turn through Task Sys outcome runtime instruction",
                 ),
                 does_not_write=("Demands", "messages", "tracks", "artifacts", "actor private files"),
                 preconditions=(

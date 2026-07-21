@@ -201,12 +201,13 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
 
     def _seed_active_task(self, *, instance_json: Path, role: str, actor_id: str) -> None:
         task_id = f"task-0001-{role}-response-contract"
-        task_sys.ingest(
-            {
-                "source": {"type": "test.response_contract", "ref": {"id": task_id}},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "response contract"},
-            }
+        task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={"demand_id": f"demand-response-contract-{role}", "basis_revision": 1},
+            execution_brief={
+                "description": "Response contract fixture.",
+                "detail": f"Exercise response contracts for {task_id}.",
+            },
         )
 
     def _dispatch(

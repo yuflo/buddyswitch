@@ -19,6 +19,7 @@ SCRIPTS = ROOT / "scripts"
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.domain import task_sys  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
@@ -64,14 +65,18 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         source_type: str,
         track_id: str | None = None,
     ) -> str:
-        source_ref: dict[str, object] = {"fixture": source_type}
+        detail = f"Context binding fixture for {source_type}."
         if track_id is not None:
-            source_ref["track_id"] = track_id
-        result = task_sys.ingest(
-            {
-                "source": {"type": source_type, "ref": source_ref},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "context binding"},
+            detail += f" Track context: {track_id}."
+        result = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={
+                "demand_id": f"demand-context-{runtime_files.slugify(source_type)}",
+                "basis_revision": 1,
+            },
+            execution_brief={
+                "description": "Context binding fixture.",
+                "detail": detail,
             },
         )
         return str(result["task_id"])
@@ -120,12 +125,16 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             + "\n",
             encoding="utf-8",
         )
-        self._seed_active_task_for_instance(
-            instance_json=instance_json_path,
-            role=role,
-            actor_id=actor_id,
-            task_slug=f"{role}-context-env",
-        )
+        if not task_sys.list_tasks(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            statuses=task_sys.ACTIVE_TASK_STATUSES,
+        ):
+            self._seed_active_task_for_instance(
+                instance_json=instance_json_path,
+                role=role,
+                actor_id=actor_id,
+                task_slug=f"{role}-context-env",
+            )
         return instance_json_path
 
     def _dispatch(self, *, instance_json: Path, tool: str, action: str, args: dict[str, object], actor_id: str = "act-dev-context", role: str = "dev") -> dict[str, object]:
@@ -180,12 +189,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             outcome="Context outcome",
             now={"next": "seed", "blocker": None},
         )
-        self.context_task_id = self._seed_task_sys_task(
-            actor_id=actor_id,
-            role="dev",
-            source_type="test.context.active",
-            track_id="track-context-active",
-        )
         env_store.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r1",
             title="Context Artifact v1",
@@ -235,6 +238,16 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             role="dev",
             source_type="test.context.archived",
             track_id="track-context-archived",
+        )
+        task_sys.record_task_close(
+            self.archived_task_id,
+            {"summary": "Archived Track fixture is terminal."},
+        )
+        self.context_task_id = self._seed_task_sys_task(
+            actor_id=actor_id,
+            role="dev",
+            source_type="test.context.active",
+            track_id="track-context-active",
         )
         archived_artifact = env_store.create_artifact_revision(
             artifact_id="art-task-dev-archived-r1",
@@ -421,7 +434,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("track-context-archived", candidate_ids)
         self.assertNotIn("track-context-archived", track_ids)
         self.assertIn(self.context_task_id, task_ids)
-        self.assertNotIn(self.archived_task_id, task_ids)
+        self.assertIn(self.archived_task_id, task_ids)
 
     def test_context_candidate_tasks_use_task_sys_metadata_and_ignore_legacy_shared_tasks(self) -> None:
         self._seed_context_state()
@@ -438,7 +451,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("task-legacy-shared", task_ids)
 
         candidate_task = next(row for row in candidate_tasks if isinstance(row, dict) and row.get("task_id") == self.context_task_id)
-        self.assertEqual(candidate_task.get("source_type"), "test.context.active")
+        self.assertEqual(candidate_task.get("source_type"), "demand")
+        self.assertEqual(
+            candidate_task.get("source_ref"),
+            {"demand_id": "demand-context-test-context-active", "basis_revision": 1},
+        )
         self.assertEqual(candidate_task.get("status"), "in_progress.side_processing")
         self.assertNotIn("task_desc", candidate_task)
         self.assertNotIn("task_relation", candidate_task)
