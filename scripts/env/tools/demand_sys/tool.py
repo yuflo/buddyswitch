@@ -54,7 +54,7 @@ def _refs(
 def _source_refs(description: str) -> dict[str, Any]:
     return _refs(
         description,
-        ref_description="Source identity data used by Phase 1 actor and artifact sources.",
+        ref_description="Source identity data for actor and implemented product sources.",
         ref_properties={
             "key": _text("Stable source key when the source is actor-originated."),
             "id": _text("Stable source id when the source is an existing runtime object."),
@@ -122,8 +122,9 @@ def _action(
         do_not_use_when=(do_not_use_when,),
         risk_hints={
             "read_only": read_only,
-            "destructive": name in {"absorb_into", "mark_duplicate", "supersede", "complete", "cancel"},
-            "idempotent": read_only or name in {"create", "complete_check"},
+            "destructive": name in {"absorb_into", "complete", "cancel"},
+            "idempotent": read_only
+            or name in {"create", "complete_check", "absorb_into", "complete", "cancel"},
             "open_world": False,
             "requires_human_approval": False,
             "external_effect": False,
@@ -149,18 +150,6 @@ def _build_definition() -> ToolDefinition:
             },
         },
     }
-    child = {
-        "type": "object",
-        "description": "One new child Demand created by split.",
-        "additionalProperties": False,
-        "required": ["intake_key", "description", "detail", "source_refs"],
-        "properties": {
-            "intake_key": _text("Actor-scoped idempotency key for the child Demand."),
-            "description": _text("Compact child Demand description."),
-            "detail": _text("Detailed child Demand content."),
-            "source_refs": source_refs,
-        },
-    }
     merged_target = {
         "type": "object",
         "description": (
@@ -177,17 +166,17 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id="demand_sys",
         title="Demand Sys",
-        description="Demand Sys captures and organizes actor-owned needs independently of Task Sys execution.",
-        scope="Actor-owned Demand capture, inspection, checking, organization, and terminal lineage.",
+        description="Demand Sys captures and canonicalizes actor-owned needs independently of Task Sys execution.",
+        scope="Actor-owned Demand capture, inspection, attention acknowledgement, canonicalization, and lifecycle.",
         capability_boundary=(
             "Demand Sys owns only the active actor's Demand aggregate. It does not create or mutate Task Sys tasks, "
             "register daemon work, consume inbound state, or expose cross-actor discovery."
         ),
         object_model=(
-            "A Demand is an actor-owned revisioned need with source refs, optional parent and dependency edges, "
-            "check acknowledgement, and one optional terminal lineage record."
+            "A Demand is an actor-owned revisioned need with source refs, check acknowledgement, and one nullable "
+            "terminal record of type completed, canceled, or absorbed."
         ),
-        use_when=("You need to capture, inspect, check, organize, or close an actor-owned Demand.",),
+        use_when=("You need to capture, inspect, check, canonicalize, or close an actor-owned Demand.",),
         do_not_use_when=("You need to create, advance, hand off, close, or cancel Task Sys execution.",),
         actions=(
             _action(
@@ -217,15 +206,14 @@ def _build_definition() -> ToolDefinition:
                         "expected_revision": _revision(),
                         "description": _text("Replacement compact Demand description."),
                         "detail": _text("Replacement detailed Demand content."),
-                        "source_refs": source_refs,
                     },
                     ["demand_id", "expected_revision", "description", "detail"],
                 ),
                 read_only=False,
                 result_content_level="revision change receipt",
-                success_effect="Revises description, detail, and optionally source refs while preserving organization state.",
+                success_effect="Revises description and detail while preserving provenance and lifecycle state.",
                 use_when="A live Demand's meaning or supporting detail has changed.",
-                do_not_use_when="The need is a separate Demand or should be merged through lineage.",
+                do_not_use_when="A separately captured Demand expresses the same need; use demand_sys.absorb_into.",
             ),
             _action(
                 name="list",
@@ -297,84 +285,6 @@ def _build_definition() -> ToolDefinition:
                 do_not_use_when="The actor has not yet read the current attention set; use demand_sys.check.",
             ),
             _action(
-                name="set_parent",
-                description="Set or clear the structural parent of one live Demand.",
-                input_schema=_schema(
-                    {
-                        "demand_id": demand_id,
-                        "expected_revision": _revision(),
-                        "parent_id": {
-                            "type": ["string", "null"],
-                            "description": "Live parent Demand id, or null to detach.",
-                        },
-                    },
-                    ["demand_id", "expected_revision", "parent_id"],
-                ),
-                read_only=False,
-                result_content_level="relation revision receipt",
-                success_effect="Sets one acyclic parent edge or clears the current parent edge.",
-                use_when="One Demand is a distinct structural component of another Demand.",
-                do_not_use_when="Two intake rows express one need; use demand_sys.absorb_into or mark_duplicate.",
-            ),
-            _action(
-                name="add_dependency",
-                description="Add one prerequisite edge to a live Demand.",
-                input_schema=_schema(
-                    {
-                        "demand_id": demand_id,
-                        "expected_revision": _revision(),
-                        "dependency_id": _text("Live Demand that must be resolved first."),
-                    },
-                    ["demand_id", "expected_revision", "dependency_id"],
-                ),
-                read_only=False,
-                result_content_level="dependency revision receipt",
-                success_effect="Adds one acyclic dependency edge to the Demand.",
-                use_when="A distinct Demand cannot be resolved before another live Demand.",
-                do_not_use_when="The related need is a structural child rather than a prerequisite.",
-            ),
-            _action(
-                name="remove_dependency",
-                description="Remove one prerequisite edge from a live Demand.",
-                input_schema=_schema(
-                    {
-                        "demand_id": demand_id,
-                        "expected_revision": _revision(),
-                        "dependency_id": _text("Demand id to remove from prerequisites."),
-                    },
-                    ["demand_id", "expected_revision", "dependency_id"],
-                ),
-                read_only=False,
-                result_content_level="dependency revision receipt",
-                success_effect="Removes the selected dependency edge while preserving all other edges.",
-                use_when="A previously recorded prerequisite no longer constrains this Demand.",
-                do_not_use_when="The dependency still blocks progress or the relation is a parent edge.",
-            ),
-            _action(
-                name="split",
-                description="Revise one live Demand and atomically create at least two child Demands.",
-                input_schema=_schema(
-                    {
-                        "demand_id": demand_id,
-                        "expected_revision": _revision(),
-                        "description": _text("Replacement parent description after decomposition."),
-                        "detail": _text("Replacement parent detail after decomposition."),
-                        "children": {
-                            "type": "array",
-                            "minItems": 2,
-                            "description": "At least two new structural child Demands.",
-                            "items": child,
-                        },
-                    },
-                    ["demand_id", "expected_revision", "description", "detail", "children"],
-                ),
-                read_only=False,
-                result_content_level="parent revision plus created child receipts",
-                success_effect="Atomically revises the parent and creates two or more live child Demands.",
-                use_when="One broad Demand must become a parent with multiple independently resolvable parts.",
-                do_not_use_when="The input is only a supplemental restatement of the same need.",
-            ),
-            _action(
                 name="absorb_into",
                 description="Merge one live source Demand into another and terminalize the source as absorbed.",
                 input_schema=_schema(
@@ -390,45 +300,9 @@ def _build_definition() -> ToolDefinition:
                 ),
                 read_only=False,
                 result_content_level="source and target revision receipts",
-                success_effect="Atomically revises the target and records absorbed lineage on the source.",
+                success_effect="Atomically revises the target, merges provenance, and terminalizes the source as absorbed.",
                 use_when="A new Demand supplements the same underlying need as an existing Demand.",
-                do_not_use_when="The source remains a distinct component or prerequisite Demand.",
-            ),
-            _action(
-                name="mark_duplicate",
-                description="Terminalize one Demand as a duplicate of another live Demand.",
-                input_schema=_schema(
-                    {
-                        "source_id": _text("Duplicate Demand to terminalize."),
-                        "source_revision": _revision("Expected current duplicate Demand revision."),
-                        "target_id": _text("Canonical live Demand represented by the duplicate."),
-                        "summary": _text("Why both Demands express the same need."),
-                    },
-                    ["source_id", "source_revision", "target_id", "summary"],
-                ),
-                read_only=False,
-                result_content_level="duplicate lineage revision receipt",
-                success_effect="Records duplicate lineage on the source without revising the target.",
-                use_when="Two Demands express the same need and the target already contains the required content.",
-                do_not_use_when="The source adds content that must be merged; use demand_sys.absorb_into.",
-            ),
-            _action(
-                name="supersede",
-                description="Terminalize an old Demand as superseded by a live replacement Demand.",
-                input_schema=_schema(
-                    {
-                        "old_id": _text("Old Demand to terminalize."),
-                        "old_revision": _revision("Expected current old Demand revision."),
-                        "replacement_id": _text("Live Demand that replaces the old need."),
-                        "summary": _text("Why the replacement invalidates the old Demand."),
-                    },
-                    ["old_id", "old_revision", "replacement_id", "summary"],
-                ),
-                read_only=False,
-                result_content_level="superseded lineage revision receipt",
-                success_effect="Records superseded lineage on the old Demand without revising the replacement.",
-                use_when="A newer Demand replaces rather than supplements the old need.",
-                do_not_use_when="Both Demands still express one current need; use absorb_into or mark_duplicate.",
+                do_not_use_when="The source remains a distinct live need that should be consumed independently.",
             ),
             _action(
                 name="complete",

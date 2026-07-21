@@ -39,8 +39,8 @@ Inside its actor-scoped lock Task Sys:
    `start_side` instruction.
 
 Lock files are local coordination facts. Task JSON is the canonical product
-truth. No inbound product handler can create a Task; the actor first organizes
-Demand state and then explicitly selects at most one Demand through
+truth. No inbound product handler can create a Task; the actor first
+canonicalizes Demand state and then explicitly selects at most one Demand through
 `task_sys.create`.
 
 ## Actor tool boundary
@@ -67,7 +67,8 @@ Parent handoff and outcome attention both reuse the existing `submit_parent`
 runtime instruction. An outcome frame contains the Task id, canonical terminal
 status, opaque DemandRef, exact `task_sys.task` evidence reference, and matching
 completion or cancellation result only. It does not contain or copy Demand
-status, lifecycle, detail, relation state, or selection policy.
+status, lifecycle, detail, provenance, canonicalization judgment, or selection
+policy.
 
 Closing or canceling a Task persists terminal truth before outcome attention is
 submitted. Submission failure is explicit feedback and never rolls back the

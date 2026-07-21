@@ -10,7 +10,7 @@ from typing import Any, Callable, Mapping
 from . import runtime_files
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _ACTOR_TARGET_FIELDS = {"actor_id", "role_id"}
 _AGGREGATE_FIELDS = {"schema_version", "actor_target", "demands"}
 

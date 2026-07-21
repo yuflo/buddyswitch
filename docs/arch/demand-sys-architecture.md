@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Demand Sys is the local product module that captures and organizes needs owned
-by one actor. A Demand records what requires attention; it is not a Task Sys
+Demand Sys is the local product module that captures and canonicalizes needs
+owned by one actor. A Demand records what requires attention. It is not an
 execution record and does not imply that work has started.
 
-The implemented inbound boundaries are:
+The implemented inbound paths are:
 
 ```text
 IM message fact -> IM handler -> Demand daemon adapter -> Demand domain
@@ -17,156 +17,129 @@ Track comment fact -> Track handler -> Demand daemon adapter -> Demand domain
 actor judgment -> demand_sys action -> Demand domain
 ```
 
-Each product handler validates and materializes one exact target-visible source
-fact, then maps it deterministically to Demand intake. The Demand daemon adapter
-owns only capture coordination, pending-attention policy, and the fixed Demand
-Check prompt. It calls the same domain owner used by actor actions and uses the
-generic daemon `input_actor` host capability; it does not own lifecycle or
-storage.
+Each inbound handler validates one exact target-visible source fact and maps it
+deterministically to Demand intake. The Demand daemon adapter coordinates
+capture, checks durable pending attention, and supplies one fixed Demand Check
+prompt through generic actor input. It does not decide canonical identity,
+select execution, or own storage.
 
-The actor owns matching, organization, and execution-selection judgment. The
-Actor + installed task-management skill is the only semantic composition
-boundary with Task Sys. Task Sys may persist an opaque DemandRef chosen by the
-actor, but it does not import, read, validate against, call, subscribe to, or
-mutate Demand state. Current inbound capture requires an already-active target
-actor; offline capture and startup recovery are not implemented.
+## One canonical Demand set
 
-## Ownership and storage
+The actor aggregate uses schema v2. It stores its actor target once and one
+canonical Demand set keyed by Demand id. Each Demand carries its intake
+identity, descriptive content, provenance, revision/check cursor, lifecycle
+terminal, and timestamps. A null terminal means live. The only terminal
+outcomes are completed, canceled, or absorbed into another live canonical
+Demand.
 
-`scripts/env/domain/demand_sys.py` is the sole owner of Demand lifecycle,
-revision, check, relation, and terminal-lineage rules. Only this module calls
-the aggregate transaction operation.
-
-`scripts/env/repos/demands.py` is the sole storage owner. It persists one
-atomic aggregate per exact actor identity and role at:
+`scripts/env/domain/demand_sys.py` is the single semantic owner for capture,
+revision, attention, canonicalization, and lifecycle. It is the only caller of
+the aggregate transaction operation. `scripts/env/repos/demands.py` is the
+single storage owner at:
 
 ```text
 buddyswitch/objects/demand-sys/actors/<actor-id>-<role-id>.json
 ```
 
-The aggregate contains only its schema version, exact actor target, and Demand
-records keyed by Demand id. Mutations take an exclusive per-actor lock and
-atomically replace the aggregate only when the domain reports a state change.
-There is no aggregate-wide discovery or cross-actor fallback read.
+The Domain validates current records and every mutation input before returning
+a next state. The repository takes an exclusive actor-scoped lock, validates
+the aggregate envelope, and atomically replaces the file only when state
+changes. Normal reads accept schema v2 only. There is no aggregate discovery,
+cross-actor fallback, older-schema translation, or second write path.
 
-## Demand record
+## Two-pass actor canonicalization
 
-A Demand is a revisioned need with:
+Inbound and actor sources always capture a new need before semantic judgment.
+On Demand Check the actor performs two-pass actor canonicalization:
 
-- an actor-scoped intake key;
-- compact `description` and detailed `detail` content;
-- source references;
-- optional `parent_id` and `depends_on` live structure;
-- `revision` and `checked_revision` attention state;
-- one optional terminal record;
-- creation and update timestamps.
+1. compare every pending description with the compact live index;
+2. load complete records only for plausible candidates;
+3. revise the row, absorb it into the same canonical need, keep it independently
+   live, or cancel it;
+4. acknowledge only the exact revisions actually observed.
 
-The canonical terminal types are `completed`, `canceled`, `absorbed`,
-`duplicate`, and `superseded`. Terminal lineage belongs to the source Demand;
-live organization edges remain limited to parent and dependency relations.
+`absorb_into` is the only cross-record semantic mutation. It validates two
+distinct live rows and both expected revisions in one transaction. The actor
+provides the merged target description and detail. The domain merges provenance
+in target-first unique order, advances the target, and makes the source an
+immutable absorbed terminal pointing to the target Demand id.
 
-## Domain actions
+Source references are provenance and retrieval context, not canonical identity.
+For a Track-backed Demand the actor may use the stored Track identity to read
+more source context. Track thread structure never decides canonical Demand
+identity.
 
-The current domain and actor tool expose one action vocabulary:
+Before absorption, the Actor + installed task-management skill reads active
+Task state. If exactly one of the two Demand rows is already represented by the
+active Task, that row remains the absorption target. This is actor workflow
+guidance, not a Demand domain dependency. The Task keeps its original opaque
+DemandRef snapshot; the actor rereads the latest Demand during later progress
+and outcome checks.
 
-- capture and content: `create`, `revise`;
-- reads and attention: `list`, `get`, `get_many`, `check`, `complete_check`;
-- live organization: `set_parent`, `add_dependency`, `remove_dependency`,
-  `split`;
-- consolidation and lineage: `absorb_into`, `mark_duplicate`, `supersede`;
-- terminal decisions: `complete`, `cancel`.
+## Attention and lifecycle
 
-Exact input schemas and action semantics are owned by
-`scripts/env/tools/demand_sys/tool.py`; this document does not duplicate that
-contract.
+`check` is read-only. It returns every revision newer than its check cursor, a
+compact id/description index of live Demands, and the pending count.
+`complete_check` advances only revisions the actor actually observed, so a
+concurrent newer revision remains pending. This cursor is Demand attention
+state, not Task progress and not a daemon subscription.
 
-All existing-Demand mutations are revision guarded. Multi-record actions such
-as `split` and `absorb_into` validate and mutate inside one actor aggregate
-transaction. Parent and dependency cycles are rejected. Exact intake and
-terminal action replays are idempotent; conflicting replays are rejected.
+Demand completion is independent of Task completion. A terminal Task produces
+an outcome frame, after which the actor rereads the latest Demand and explicitly
+decides whether the need is satisfied, canceled, revised, or still live. A
+Task outcome never mutates Demand state by implication.
 
-Source provenance is domain-owned state, not actor-authored organization
-content. Inbound adapters supply exact source refs when a Demand is captured;
-when one Demand is absorbed into another, the Demand domain preserves the
-target-first order and builds one duplicate-free union with the source refs
-atomically. The actor decides the relation and merged description/detail, but
-cannot round-trip or rewrite the canonical provenance as part of
-`absorb_into`.
+The actor tool exposes capture, revision, reads, attention acknowledgement,
+absorption, completion, and cancellation. Exact payloads and response contracts
+belong to `scripts/env/tools/demand_sys/tool.py`; this document does not mirror
+them. Existing-record writes are expected-revision guarded. Exact intake and
+terminal replays are idempotent; conflicting or stale writes leave the
+aggregate unchanged.
 
-Track thread structure is provenance and retrieval context, not Demand relation
-truth. A Track-backed Demand carries the exact Track, comment, and thread ids;
-the actor may use those ids to read more Track context, but parent, dependency,
-duplicate, and absorption decisions still require Demand Check judgment.
+## Product boundaries
 
-## Check semantics
+The only actor tool id is `demand_sys`. Its adapter derives actor identity and
+role from `ToolContext` and reaches the owner only through
+`ToolContext.rules.demand_sys`. It has no repository, Task runtime, daemon,
+inbound, actor-override, alias, or fallback capability.
 
-`check` is read-only. It returns:
-
-- every record whose `revision` is newer than `checked_revision`;
-- a compact id/description index of all live Demands for first-pass matching;
-- the pending count.
-
-The actor may use `get_many` for detailed comparison of selected candidates,
-apply any required organization actions, then call `complete_check` with only
-the exact Demand revisions it observed. Acknowledgement never advances past an
-observed revision, so a concurrent newer revision remains pending.
-
-This is attention state, not Task progress state and not a daemon subscription.
-After inbound capture, the Demand daemon adapter derives attention only from
-this durable pending state. A create replay therefore retries actor input while
-the revision remains unchecked and does not wake after acknowledgement.
-
-## Actor tool boundary
-
-The only actor tool id is `demand_sys`. Its adapter derives the actor target
-only from `ToolContext.current_actor_identity_profile` and reaches the domain
-only through `ToolContext.rules.demand_sys`.
-
-The adapter has no Demand repository capability, Task Sys dependency, daemon
-capability, inbound capability, actor-id payload override, alias, or fallback.
-All manifest roles receive the exact `demand_sys.*` permissions declared by the
-tool actions.
-
-## Public read boundary
-
-`scripts/env/domain/demand_read.py` projects an actor-scoped allowlist that
-omits Demand detail and source refs. The public CLI is a thin consumer:
+Public reads use `scripts/env/domain/demand_read.py`, which projects an
+actor-scoped allowlist and omits private detail and provenance. The CLI remains
+read-only:
 
 ```text
 buddyswitch-codex demand list --actor <actor-id>
 buddyswitch-codex demand get <demand-id> --actor <actor-id>
 ```
 
-Both commands require an actor id. The CLI exposes no Demand mutation and does
-not read aggregate files directly.
+Task Sys stores only the opaque DemandRef `{demand_id, basis_revision}` selected by the
+actor. Task implementation does not import, read, validate, call, subscribe to,
+or mutate Demand state. Generic daemon infrastructure delivers opaque trigger
+and actor-input mechanics; it contains no Demand rule.
 
-## Dependency laws
-
-Allowed:
+Allowed dependencies:
 
 ```text
 Demand domain -> Demand repository -> runtime file primitives
 Demand read projection -> Demand domain
 Demand tool adapter -> ToolContext.rules.demand_sys
 public CLI -> Demand read projection
-IM handler -> IM read service + Demand daemon adapter
-Track handler -> Track repository + Demand daemon adapter
-Demand daemon adapter -> Demand domain + generic DaemonRuntime.input_actor
+IM/Track handler -> owning source read + Demand daemon adapter
+Demand daemon adapter -> Demand domain + generic input_actor
+Actor workflow -> independent Demand Sys and Task Sys actions
 ```
 
-Forbidden:
+## Explicit non-goals
 
-```text
-Demand implementation -> Task Sys
-Demand implementation -> daemon modules or launcher product adapters
-generic daemon -> Demand implementation or Demand semantics
-IM handler -> Task Sys
-Task implementation -> Demand import, read, validation, call, subscription, or mutation
-Track handler -> Task Sys
-public CLI or actor tool -> Demand repository/raw aggregate files
-new Demand alias, fallback read, dual write, shadow state, or second schema
-```
+- No cross-Demand graph, hierarchy, prerequisite network, or general semantic
+  taxonomy.
+- No queue, scheduler, automatic work selection, or automatic Demand-to-Task
+  transition.
+- No Demand-to-Task callback and no Task-to-Demand completion callback.
+- No business rule in generic daemon infrastructure.
+- No schema compatibility reader, alias, dual write, shadow state, or migration
+  framework.
 
-These laws are enforced by
-`tests/unit/architecture/test_demand_sys_boundaries.py` in addition to the
-behavioral and atomicity tests.
+These boundaries are enforced by
+`tests/unit/architecture/test_demand_sys_boundaries.py` plus direct domain,
+repository, tool, inbound, and process tests.

@@ -23,6 +23,7 @@ import daemon_state  # noqa: E402
 import demand_sys_daemon_adapter  # noqa: E402
 from env.domain import demand_sys  # noqa: E402
 from env.domain import task_sys  # noqa: E402
+from env.repos import demands  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as comment_repo  # noqa: E402
 from env.repos import tracks as track_repo  # noqa: E402
@@ -227,7 +228,11 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
                 },
             }],
         )
-        self.assertEqual(demand["actor_target"], {"actor_id": "act-dev-track-handler", "role_id": "dev"})
+        actor_target = {"actor_id": "act-dev-track-handler", "role_id": "dev"}
+        self.assertEqual(
+            demands.load_actor_state(actor_target)["actor_target"],
+            actor_target,
+        )
         self.assertEqual(demand["revision"], 1)
         self.assertEqual(demand["checked_revision"], 0)
         self.assertEqual(

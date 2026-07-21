@@ -1,4 +1,4 @@
-"""Canonical Demand lifecycle and organization owner."""
+"""Canonical actor-owned Demand lifecycle and canonicalization owner."""
 
 from __future__ import annotations
 
@@ -11,16 +11,13 @@ from env.repos import demands
 from env.repos import runtime_files
 
 
-TERMINAL_TYPES = ("completed", "canceled", "absorbed", "duplicate", "superseded")
+TERMINAL_TYPES = ("completed", "canceled", "absorbed")
 _RECORD_FIELDS = {
     "id",
-    "actor_target",
     "intake_key",
     "description",
     "detail",
     "source_refs",
-    "parent_id",
-    "depends_on",
     "revision",
     "checked_revision",
     "terminal",
@@ -47,10 +44,6 @@ class DemandIntakeConflict(DemandError):
 
 class DemandTerminalConflict(DemandError):
     code = "E_DEMAND_TERMINAL"
-
-
-class DemandRelationConflict(DemandError):
-    code = "E_DEMAND_RELATION"
 
 
 class DemandPayloadError(DemandError):
@@ -148,7 +141,7 @@ def _normalize_terminal(value: Any) -> dict[str, Any] | None:
     elif terminal_type == "canceled":
         fields = {"type", "at", "summary"}
     else:
-        fields = {"type", "at", "ref", "summary"}
+        fields = {"type", "at", "summary", "target_demand_id"}
     _require_exact_fields(terminal, fields, "demand.terminal")
     normalized: dict[str, Any] = {
         "type": terminal_type,
@@ -158,10 +151,10 @@ def _normalize_terminal(value: Any) -> dict[str, Any] | None:
             "demand.terminal.summary",
         ),
     }
-    if "ref" in fields:
-        normalized["ref"] = _require_demand_id(
-            terminal.get("ref"),
-            "demand.terminal.ref",
+    if "target_demand_id" in fields:
+        normalized["target_demand_id"] = _require_demand_id(
+            terminal.get("target_demand_id"),
+            "demand.terminal.target_demand_id",
         )
     if "evidence_refs" in fields:
         normalized["evidence_refs"] = _normalize_refs(
@@ -171,40 +164,16 @@ def _normalize_terminal(value: Any) -> dict[str, Any] | None:
     return normalized
 
 
-def _normalize_record(
-    value: Any,
-    expected_actor_target: Mapping[str, str],
-) -> dict[str, Any]:
+def _normalize_record(value: Any) -> dict[str, Any]:
     record = _require_mapping(value, "demand")
     _require_exact_fields(record, _RECORD_FIELDS, "demand")
-    try:
-        actor_target = demands.normalize_actor_target(record.get("actor_target"))
-    except ValueError as exc:
-        raise _payload_error(str(exc)) from exc
-    if actor_target != dict(expected_actor_target):
-        raise _payload_error("demand.actor_target does not match its aggregate")
     revision = _require_revision(record.get("revision"), "demand.revision")
-    parent_id = record.get("parent_id")
-    if parent_id is not None:
-        parent_id = _require_demand_id(parent_id, "demand.parent_id")
-    raw_dependencies = record.get("depends_on")
-    if not isinstance(raw_dependencies, list):
-        raise _payload_error("demand.depends_on must be a list")
-    dependencies = [
-        _require_demand_id(item, f"demand.depends_on[{index}]")
-        for index, item in enumerate(raw_dependencies)
-    ]
-    if len(dependencies) != len(set(dependencies)):
-        raise _payload_error("demand.depends_on must contain unique Demand ids")
     return {
         "id": _require_demand_id(record.get("id"), "demand.id"),
-        "actor_target": actor_target,
         "intake_key": _require_text(record.get("intake_key"), "demand.intake_key"),
         "description": _require_text(record.get("description"), "demand.description"),
         "detail": _require_text(record.get("detail"), "demand.detail"),
         "source_refs": _normalize_refs(record.get("source_refs"), "demand.source_refs"),
-        "parent_id": parent_id,
-        "depends_on": dependencies,
         "revision": revision,
         "checked_revision": _require_checked_revision(
             record.get("checked_revision"),
@@ -216,10 +185,7 @@ def _normalize_record(
     }
 
 
-def _records(
-    state: Mapping[str, Any],
-    actor_target: Mapping[str, str],
-) -> dict[str, dict[str, Any]]:
+def _records(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     raw_records = state.get("demands")
     if not isinstance(raw_records, Mapping):
         raise _payload_error("Demand actor aggregate demands must be an object")
@@ -227,7 +193,7 @@ def _records(
     intake_keys: set[str] = set()
     for indexed_id, raw_record in raw_records.items():
         demand_id = _require_demand_id(indexed_id, "Demand aggregate key")
-        record = _normalize_record(raw_record, actor_target)
+        record = _normalize_record(raw_record)
         if record["id"] != demand_id:
             raise _payload_error("Demand aggregate key must match demand.id")
         if record["intake_key"] in intake_keys:
@@ -275,19 +241,6 @@ def _require_live(record: Mapping[str, Any]) -> None:
         raise DemandTerminalConflict(f"Demand {record['id']} is terminal")
 
 
-def _require_no_live_children(
-    records: Mapping[str, Mapping[str, Any]],
-    demand_id: str,
-) -> None:
-    if any(
-        record["parent_id"] == demand_id and record["terminal"] is None
-        for record in records.values()
-    ):
-        raise DemandRelationConflict(
-            f"Demand {demand_id} cannot be terminalized while it has live children"
-        )
-
-
 def create(
     actor_target: Mapping[str, Any],
     intake_key: Any,
@@ -302,7 +255,7 @@ def create(
     normalized_source_refs = _normalize_refs(source_refs, "source_refs")
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
+        records = _records(state)
         for record in records.values():
             if record["intake_key"] != normalized_intake_key:
                 continue
@@ -324,13 +277,10 @@ def create(
         now = runtime_files.now_iso()
         record = {
             "id": demand_id,
-            "actor_target": normalized_target,
             "intake_key": normalized_intake_key,
             "description": normalized_description,
             "detail": normalized_detail,
             "source_refs": normalized_source_refs,
-            "parent_id": None,
-            "depends_on": [],
             "revision": 1,
             "checked_revision": 0,
             "terminal": None,
@@ -356,31 +306,21 @@ def revise(
     expected_revision: Any,
     description: Any,
     detail: Any,
-    source_refs: Any = None,
 ) -> dict[str, Any]:
     normalized_target = demands.normalize_actor_target(actor_target)
     normalized_id = _require_demand_id(demand_id)
     normalized_revision = _require_revision(expected_revision)
     normalized_description = _require_text(description, "description")
     normalized_detail = _require_text(detail, "detail")
-    normalized_source_refs = (
-        None if source_refs is None else _normalize_refs(source_refs, "source_refs")
-    )
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
+        records = _records(state)
         record = _find_record(records, normalized_id)
         _require_live(record)
         _require_expected_revision(record, normalized_revision)
-        next_source_refs = (
-            record["source_refs"]
-            if normalized_source_refs is None
-            else normalized_source_refs
-        )
         if (
             record["description"] == normalized_description
             and record["detail"] == normalized_detail
-            and record["source_refs"] == next_source_refs
         ):
             return False, _receipt(state_changed=False, changes=[])
         next_revision = record["revision"] + 1
@@ -389,7 +329,6 @@ def revise(
             {
                 "description": normalized_description,
                 "detail": normalized_detail,
-                "source_refs": deepcopy(next_source_refs),
                 "revision": next_revision,
                 "updated_at": runtime_files.now_iso(),
             }
@@ -415,7 +354,7 @@ def list_demands(
     normalized_target = demands.normalize_actor_target(actor_target)
     if state not in {"live", "terminal", "all"}:
         raise _payload_error("state must be one of live, terminal, or all")
-    records = list(_records(demands.load_actor_state(normalized_target), normalized_target).values())
+    records = list(_records(demands.load_actor_state(normalized_target)).values())
     if state == "live":
         records = [record for record in records if record["terminal"] is None]
     elif state == "terminal":
@@ -426,7 +365,7 @@ def list_demands(
 def get(actor_target: Mapping[str, Any], demand_id: Any) -> dict[str, Any]:
     normalized_target = demands.normalize_actor_target(actor_target)
     normalized_id = _require_demand_id(demand_id)
-    records = _records(demands.load_actor_state(normalized_target), normalized_target)
+    records = _records(demands.load_actor_state(normalized_target))
     return _find_record(records, normalized_id)
 
 
@@ -443,13 +382,13 @@ def get_many(
     ]
     if len(normalized_ids) != len(set(normalized_ids)):
         raise _payload_error("demand_ids must contain unique Demand ids")
-    records = _records(demands.load_actor_state(normalized_target), normalized_target)
+    records = _records(demands.load_actor_state(normalized_target))
     return [_find_record(records, demand_id) for demand_id in normalized_ids]
 
 
 def check(actor_target: Mapping[str, Any]) -> dict[str, Any]:
     normalized_target = demands.normalize_actor_target(actor_target)
-    records = list(_records(demands.load_actor_state(normalized_target), normalized_target).values())
+    records = list(_records(demands.load_actor_state(normalized_target)).values())
     attention_items = sorted(
         [record for record in records if record["revision"] > record["checked_revision"]],
         key=lambda record: (record["created_at"], record["id"]),
@@ -502,7 +441,7 @@ def complete_check(
         )
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
+        records = _records(state)
         for observation in normalized_observed:
             record = _find_record(records, observation["demand_id"])
             if observation["revision"] > record["revision"]:
@@ -547,237 +486,6 @@ def _change(demand_id: str, revision: int, kind: str) -> dict[str, Any]:
     return {"demand_id": demand_id, "revision": revision, "kind": kind}
 
 
-def _reaches(
-    records: Mapping[str, dict[str, Any]],
-    start_id: str,
-    target_id: str,
-    relation: str,
-) -> bool:
-    pending = [start_id]
-    visited: set[str] = set()
-    while pending:
-        demand_id = pending.pop()
-        if demand_id == target_id:
-            return True
-        if demand_id in visited:
-            continue
-        visited.add(demand_id)
-        record = records.get(demand_id)
-        if record is None or record["terminal"] is not None:
-            continue
-        if relation == "parent":
-            parent_id = record["parent_id"]
-            if parent_id is not None:
-                pending.append(parent_id)
-        else:
-            pending.extend(record["depends_on"])
-    return False
-
-
-def set_parent(
-    actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
-    parent_id: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_id = _require_demand_id(demand_id)
-    normalized_revision = _require_revision(expected_revision)
-    normalized_parent_id = (
-        None if parent_id is None else _require_demand_id(parent_id, "parent_id")
-    )
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
-        record = _find_record(records, normalized_id)
-        _require_live(record)
-        _require_expected_revision(record, normalized_revision)
-        if normalized_parent_id is None:
-            if record["parent_id"] is None:
-                return False, _receipt(state_changed=False, changes=[])
-        else:
-            if normalized_parent_id == normalized_id:
-                raise DemandRelationConflict("A Demand cannot be its own parent")
-            parent = _find_record(records, normalized_parent_id)
-            _require_live(parent)
-            if _reaches(records, normalized_parent_id, normalized_id, "parent"):
-                raise DemandRelationConflict("Demand parent edge would create a cycle")
-            if record["parent_id"] == normalized_parent_id:
-                return False, _receipt(state_changed=False, changes=[])
-        stored = state["demands"][normalized_id]
-        stored["parent_id"] = normalized_parent_id
-        revision = _next_revision(stored, now=runtime_files.now_iso())
-        return True, _receipt(
-            state_changed=True,
-            changes=[_change(normalized_id, revision, "parent_set")],
-        )
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
-def add_dependency(
-    actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
-    dependency_id: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_id = _require_demand_id(demand_id)
-    normalized_revision = _require_revision(expected_revision)
-    normalized_dependency_id = _require_demand_id(dependency_id, "dependency_id")
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
-        record = _find_record(records, normalized_id)
-        _require_live(record)
-        _require_expected_revision(record, normalized_revision)
-        if normalized_dependency_id == normalized_id:
-            raise DemandRelationConflict("A Demand cannot depend on itself")
-        dependency = _find_record(records, normalized_dependency_id)
-        _require_live(dependency)
-        if normalized_dependency_id in record["depends_on"]:
-            return False, _receipt(state_changed=False, changes=[])
-        if _reaches(records, normalized_dependency_id, normalized_id, "dependency"):
-            raise DemandRelationConflict("Demand dependency edge would create a cycle")
-        stored = state["demands"][normalized_id]
-        stored["depends_on"] = [*record["depends_on"], normalized_dependency_id]
-        revision = _next_revision(stored, now=runtime_files.now_iso())
-        return True, _receipt(
-            state_changed=True,
-            changes=[_change(normalized_id, revision, "dependency_added")],
-        )
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
-def remove_dependency(
-    actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
-    dependency_id: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_id = _require_demand_id(demand_id)
-    normalized_revision = _require_revision(expected_revision)
-    normalized_dependency_id = _require_demand_id(dependency_id, "dependency_id")
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
-        record = _find_record(records, normalized_id)
-        _require_live(record)
-        _require_expected_revision(record, normalized_revision)
-        if normalized_dependency_id not in record["depends_on"]:
-            return False, _receipt(state_changed=False, changes=[])
-        stored = state["demands"][normalized_id]
-        stored["depends_on"] = [
-            item for item in record["depends_on"] if item != normalized_dependency_id
-        ]
-        revision = _next_revision(stored, now=runtime_files.now_iso())
-        return True, _receipt(
-            state_changed=True,
-            changes=[_change(normalized_id, revision, "dependency_removed")],
-        )
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
-def _normalize_split_children(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or len(value) < 2:
-        raise _payload_error("children must contain at least two child Demands")
-    children: list[dict[str, Any]] = []
-    intake_keys: set[str] = set()
-    fields = {"intake_key", "description", "detail", "source_refs"}
-    for index, raw_child in enumerate(value):
-        child = _require_mapping(raw_child, f"children[{index}]")
-        _require_exact_fields(child, fields, f"children[{index}]")
-        intake_key = _require_text(
-            child.get("intake_key"),
-            f"children[{index}].intake_key",
-        )
-        if intake_key in intake_keys:
-            raise _payload_error("children intake_key values must be unique")
-        intake_keys.add(intake_key)
-        children.append(
-            {
-                "intake_key": intake_key,
-                "description": _require_text(
-                    child.get("description"),
-                    f"children[{index}].description",
-                ),
-                "detail": _require_text(
-                    child.get("detail"),
-                    f"children[{index}].detail",
-                ),
-                "source_refs": _normalize_refs(
-                    child.get("source_refs"),
-                    f"children[{index}].source_refs",
-                ),
-            }
-        )
-    return children
-
-
-def split(
-    actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
-    description: Any,
-    detail: Any,
-    children: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_id = _require_demand_id(demand_id)
-    normalized_revision = _require_revision(expected_revision)
-    normalized_description = _require_text(description, "description")
-    normalized_detail = _require_text(detail, "detail")
-    normalized_children = _normalize_split_children(children)
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
-        parent = _find_record(records, normalized_id)
-        _require_live(parent)
-        _require_expected_revision(parent, normalized_revision)
-        existing_intake_keys = {record["intake_key"] for record in records.values()}
-        conflicting = [
-            child["intake_key"]
-            for child in normalized_children
-            if child["intake_key"] in existing_intake_keys
-        ]
-        if conflicting:
-            raise DemandIntakeConflict(
-                f"Demand intake_key already exists: {conflicting[0]}"
-            )
-        now = runtime_files.now_iso()
-        stored_parent = state["demands"][normalized_id]
-        stored_parent["description"] = normalized_description
-        stored_parent["detail"] = normalized_detail
-        parent_revision = _next_revision(stored_parent, now=now)
-        changes = [_change(normalized_id, parent_revision, "split")]
-        reserved_ids: dict[str, Any] = dict(records)
-        for child in normalized_children:
-            child_id = _new_demand_id(reserved_ids)
-            reserved_ids[child_id] = True
-            state["demands"][child_id] = {
-                "id": child_id,
-                "actor_target": normalized_target,
-                "intake_key": child["intake_key"],
-                "description": child["description"],
-                "detail": child["detail"],
-                "source_refs": deepcopy(child["source_refs"]),
-                "parent_id": normalized_id,
-                "depends_on": [],
-                "revision": 1,
-                "checked_revision": 0,
-                "terminal": None,
-                "created_at": now,
-                "updated_at": now,
-            }
-            changes.append(_change(child_id, 1, "created"))
-        return True, _receipt(state_changed=True, changes=changes)
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
 def _normalize_merged_target(value: Any) -> dict[str, Any]:
     merged = _require_mapping(value, "merged_target")
     _require_exact_fields(
@@ -794,17 +502,16 @@ def _normalize_merged_target(value: Any) -> dict[str, Any]:
     }
 
 
-def _lineage_terminal_matches(
+def _absorbed_terminal_matches(
     record: Mapping[str, Any],
-    terminal_type: str,
-    ref: str,
+    target_demand_id: str,
     summary: str,
 ) -> bool:
     terminal = record.get("terminal")
     return bool(
         isinstance(terminal, Mapping)
-        and terminal.get("type") == terminal_type
-        and terminal.get("ref") == ref
+        and terminal.get("type") == "absorbed"
+        and terminal.get("target_demand_id") == target_demand_id
         and terminal.get("summary") == summary
     )
 
@@ -825,6 +532,8 @@ def absorb_into(
         "source_revision",
     )
     normalized_target_id = _require_demand_id(target_id, "target_id")
+    if normalized_source_id == normalized_target_id:
+        raise _payload_error("source_id and target_id must identify different Demands")
     normalized_target_revision = _require_revision(
         target_revision,
         "target_revision",
@@ -833,7 +542,7 @@ def absorb_into(
     normalized_summary = _require_text(summary, "summary")
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
+        records = _records(state)
         source = _find_record(records, normalized_source_id)
         target = _find_record(records, normalized_target_id)
         merged_source_refs: list[dict[str, Any]] = []
@@ -842,9 +551,8 @@ def absorb_into(
                 merged_source_refs.append(deepcopy(source_ref))
         if source["terminal"] is not None:
             if (
-                _lineage_terminal_matches(
+                _absorbed_terminal_matches(
                     source,
-                    "absorbed",
                     normalized_target_id,
                     normalized_summary,
                 )
@@ -854,12 +562,9 @@ def absorb_into(
             ):
                 return False, _receipt(state_changed=False, changes=[])
             raise DemandTerminalConflict(f"Demand {normalized_source_id} is terminal")
-        if normalized_source_id == normalized_target_id:
-            raise DemandRelationConflict("A Demand cannot absorb into itself")
         _require_live(target)
         _require_expected_revision(source, normalized_source_revision)
         _require_expected_revision(target, normalized_target_revision)
-        _require_no_live_children(records, normalized_source_id)
         now = runtime_files.now_iso()
         stored_target = state["demands"][normalized_target_id]
         stored_target.update(
@@ -873,7 +578,7 @@ def absorb_into(
         stored_source["terminal"] = {
             "type": "absorbed",
             "at": now,
-            "ref": normalized_target_id,
+            "target_demand_id": normalized_target_id,
             "summary": normalized_summary,
         }
         next_source_revision = _next_revision(stored_source, now=now)
@@ -886,96 +591,6 @@ def absorb_into(
         )
 
     return demands.transact_actor_state(normalized_target, mutate)
-
-
-def _terminalize_lineage(
-    actor_target: Mapping[str, Any],
-    source_id: Any,
-    source_revision: Any,
-    target_id: Any,
-    summary: Any,
-    *,
-    terminal_type: str,
-    change_kind: str,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_source_id = _require_demand_id(source_id, "source_id")
-    normalized_source_revision = _require_revision(
-        source_revision,
-        "source_revision",
-    )
-    normalized_target_id = _require_demand_id(target_id, "target_id")
-    normalized_summary = _require_text(summary, "summary")
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
-        source = _find_record(records, normalized_source_id)
-        if source["terminal"] is not None:
-            if _lineage_terminal_matches(
-                source,
-                terminal_type,
-                normalized_target_id,
-                normalized_summary,
-            ):
-                return False, _receipt(state_changed=False, changes=[])
-            raise DemandTerminalConflict(f"Demand {normalized_source_id} is terminal")
-        if normalized_source_id == normalized_target_id:
-            raise DemandRelationConflict("A Demand cannot reference itself as lineage")
-        target = _find_record(records, normalized_target_id)
-        _require_live(target)
-        _require_expected_revision(source, normalized_source_revision)
-        _require_no_live_children(records, normalized_source_id)
-        now = runtime_files.now_iso()
-        stored = state["demands"][normalized_source_id]
-        stored["terminal"] = {
-            "type": terminal_type,
-            "at": now,
-            "ref": normalized_target_id,
-            "summary": normalized_summary,
-        }
-        revision = _next_revision(stored, now=now)
-        return True, _receipt(
-            state_changed=True,
-            changes=[_change(normalized_source_id, revision, change_kind)],
-        )
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
-def mark_duplicate(
-    actor_target: Mapping[str, Any],
-    source_id: Any,
-    source_revision: Any,
-    target_id: Any,
-    summary: Any,
-) -> dict[str, Any]:
-    return _terminalize_lineage(
-        actor_target,
-        source_id,
-        source_revision,
-        target_id,
-        summary,
-        terminal_type="duplicate",
-        change_kind="duplicate",
-    )
-
-
-def supersede(
-    actor_target: Mapping[str, Any],
-    old_id: Any,
-    old_revision: Any,
-    replacement_id: Any,
-    summary: Any,
-) -> dict[str, Any]:
-    return _terminalize_lineage(
-        actor_target,
-        old_id,
-        old_revision,
-        replacement_id,
-        summary,
-        terminal_type="superseded",
-        change_kind="superseded",
-    )
 
 
 def _terminalize_single(
@@ -992,13 +607,13 @@ def _terminalize_single(
     normalized_revision = _require_revision(expected_revision)
     normalized_summary = _require_text(summary, "summary")
     normalized_evidence_refs = (
-        None
-        if evidence_refs is None
-        else _normalize_refs(evidence_refs, "evidence_refs")
+        _normalize_refs(evidence_refs, "evidence_refs")
+        if terminal_type == "completed"
+        else None
     )
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state, normalized_target)
+        records = _records(state)
         record = _find_record(records, normalized_id)
         expected_terminal: dict[str, Any] = {
             "type": terminal_type,
@@ -1012,7 +627,6 @@ def _terminalize_single(
                 return False, _receipt(state_changed=False, changes=[])
             raise DemandTerminalConflict(f"Demand {normalized_id} is terminal")
         _require_expected_revision(record, normalized_revision)
-        _require_no_live_children(records, normalized_id)
         now = runtime_files.now_iso()
         stored = state["demands"][normalized_id]
         next_terminal: dict[str, Any] = {

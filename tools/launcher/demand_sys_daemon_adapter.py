@@ -12,10 +12,10 @@ from env.repos import runtime_files
 
 DEMAND_CHECK_PROMPT = """[DEMAND CHECK]
 Actor-owned Demand revisions require attention.
-Call demand_sys.check(). Compare pending Demand descriptions with the live index,
-load only plausible candidates with demand_sys.get_many, apply only necessary
-Demand organization actions, and call demand_sys.complete_check with the exact
-revisions observed."""
+Call demand_sys.check(). Canonicalize each pending Demand in two passes: compare
+descriptions with the compact live index, then load only plausible candidates
+with demand_sys.get_many. Revise, absorb, keep independent, or cancel as
+warranted, then call demand_sys.complete_check with the exact revisions observed."""
 
 
 def _actor_input_receipt(result: Any) -> dict[str, str]:

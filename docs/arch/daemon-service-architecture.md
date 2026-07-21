@@ -37,8 +37,8 @@ to generic daemon capabilities.
 - Task Sys owns task storage, lifecycle rules, actor task projection, runtime
   command names, payload validation, timeout policy, Task errors, and Task
   completion attention frames.
-- Demand Sys owns Demand lifecycle, attention policy, actor-check prompt,
-  organization judgment contract, and persistence.
+- Demand Sys owns Demand lifecycle, attention policy, actor-check prompt, and
+  persistence. The actor owns canonicalization judgment.
 - IM owns actor-directed message delivery, payload validation, identity and
   reachability decisions, and its trigger semantics.
 - Track owns comment delivery, payload validation, and exact source-fact

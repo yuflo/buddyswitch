@@ -81,13 +81,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "demand_sys.get_many",
             "demand_sys.check",
             "demand_sys.complete_check",
-            "demand_sys.set_parent",
-            "demand_sys.add_dependency",
-            "demand_sys.remove_dependency",
-            "demand_sys.split",
             "demand_sys.absorb_into",
-            "demand_sys.mark_duplicate",
-            "demand_sys.supersede",
             "demand_sys.complete",
             "demand_sys.cancel",
         }

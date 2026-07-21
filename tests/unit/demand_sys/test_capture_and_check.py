@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from env.domain import demand_sys
@@ -69,13 +70,10 @@ class DemandCaptureAndCheckTests(RuntimeWorkspaceTestCase):
             record,
             {
                 "id": record["id"],
-                "actor_target": self.actor_target,
                 "intake_key": "actor-self:csv-export-base",
                 "description": "Support user data CSV export.",
                 "detail": "Users can export their data as CSV.",
                 "source_refs": self._source_refs("actor-self:csv-export-base"),
-                "parent_id": None,
-                "depends_on": [],
                 "revision": 1,
                 "checked_revision": 0,
                 "terminal": None,
@@ -161,6 +159,22 @@ class DemandCaptureAndCheckTests(RuntimeWorkspaceTestCase):
         self.assertEqual(revised["source_refs"], original["source_refs"])
         self.assertEqual(revised["revision"], 2)
         self.assertEqual(revised["checked_revision"], 0)
+
+    def test_revise_does_not_accept_actor_authored_source_refs(self) -> None:
+        _, original = self._create()
+        before = self._aggregate_bytes()
+
+        with self.assertRaises(TypeError):
+            demand_sys.revise(
+                self.actor_target,
+                original["id"],
+                1,
+                "Support CSV export with timezone.",
+                "Every exported row includes the user timezone.",
+                self._source_refs("actor-self:replacement-provenance"),
+            )
+
+        self.assertEqual(self._aggregate_bytes(), before)
 
     def test_stale_revise_conflicts_without_any_state_change(self) -> None:
         _, record = self._create()
@@ -336,6 +350,49 @@ class DemandCaptureAndCheckTests(RuntimeWorkspaceTestCase):
                 ],
             )
         self.assertEqual(self._aggregate_bytes(), before)
+
+    def test_schema_v2_record_rejects_every_retired_field(self) -> None:
+        state_path = demands.actor_state_path(self.actor_target)
+        base_record = {
+            "id": "demand-schema-v2",
+            "intake_key": "actor-self:schema-v2",
+            "description": "Canonical schema-v2 Demand.",
+            "detail": "Retired record fields must be rejected.",
+            "source_refs": self._source_refs("actor-self:schema-v2"),
+            "revision": 1,
+            "checked_revision": 0,
+            "terminal": None,
+            "created_at": "2026-07-21T10:00:00+08:00",
+            "updated_at": "2026-07-21T10:00:00+08:00",
+        }
+        retired_fields = {
+            "actor_target": self.actor_target,
+            "parent_id": None,
+            "depends_on": [],
+        }
+
+        for field, value in retired_fields.items():
+            with self.subTest(field=field):
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                state_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 2,
+                            "actor_target": self.actor_target,
+                            "demands": {
+                                base_record["id"]: {**base_record, field: value},
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                before = state_path.read_bytes()
+
+                with self.assertRaises(demand_sys.DemandPayloadError):
+                    demand_sys.list_demands(self.actor_target, state="all")
+
+                self.assertEqual(state_path.read_bytes(), before)
 
 
 if __name__ == "__main__":

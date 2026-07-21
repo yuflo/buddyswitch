@@ -112,10 +112,19 @@ class EnvToolSchemaContractTests(unittest.TestCase):
                         path=f"{tool}.{action}.{field_name}",
                     )
 
-    def test_demand_absorb_keeps_provenance_out_of_actor_input(self) -> None:
+    def test_demand_revision_and_absorb_keep_provenance_domain_owned(self) -> None:
+        revise = catalog.get_action_definition("demand_sys", "revise").input_schema
         absorb = catalog.get_action_definition("demand_sys", "absorb_into").input_schema
         merged_target = absorb["properties"]["merged_target"]
 
+        self.assertEqual(
+            set(revise["properties"]),
+            {"demand_id", "expected_revision", "description", "detail"},
+        )
+        self.assertEqual(
+            revise["required"],
+            ["demand_id", "expected_revision", "description", "detail"],
+        )
         self.assertEqual(
             set(merged_target["properties"]),
             {"description", "detail"},

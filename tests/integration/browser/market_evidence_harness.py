@@ -17,7 +17,6 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.repos import artifacts as artifact_repo  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
@@ -214,23 +213,8 @@ class MarketEvidenceHarness(RuntimeWorkspaceTestCase):
                 continue
             payload[key] = value
         return payload
-    def _seed_market_task_and_artifact(self, *, actor_id: str = "act-market") -> tuple[str, str]:
-        track = env_store.create_track(
-            "track-market-evidence",
-            "Market Evidence",
-            owner_actor={"actor_id": self._runtime_actor_id(role="market", label=actor_id), "role_id": "market"},
-            outcome="Market evidence outcome",
-            now={"next": "seed", "blocker": None},
-        )
-        task_id = "task-market-evidence"
+    def _seed_market_artifact(self, *, actor_id: str = "act-market") -> str:
         actual_actor_id = self._runtime_actor_id(role="market", label=actor_id)
-        self._write_task_sys_task(
-            actor_id=actual_actor_id,
-            role="market",
-            task_slug=task_id,
-            title="Market evidence task",
-            track_id=track["id"],
-        )
         actor = {"actor_id": actual_actor_id, "role_id": "market"}
         artifact = artifact_repo.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
@@ -244,6 +228,6 @@ class MarketEvidenceHarness(RuntimeWorkspaceTestCase):
             source_refs=[{"type": "note", "label": "seed"}],
         )
         artifact = artifact_repo.update_artifact(str(artifact["id"]), {"is_current": True})
-        return task_id, artifact["id"]
+        return artifact["id"]
 
 __all__ = [name for name in globals() if not name.startswith('__')]

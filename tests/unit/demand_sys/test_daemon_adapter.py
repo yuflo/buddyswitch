@@ -119,10 +119,23 @@ class DemandSysDaemonAdapterTests(RuntimeWorkspaceTestCase):
         )
         self.assertEqual(runtime.inputs, [self._adapter().DEMAND_CHECK_PROMPT])
         prompt = self._adapter().DEMAND_CHECK_PROMPT
-        self.assertNotIn("task_sys", prompt.lower())
-        self.assertNotIn("task sys", prompt.lower())
-        self.assertNotIn("task lifecycle", prompt.lower())
-        self.assertNotIn("task selection", prompt.lower())
+        lowered_prompt = prompt.lower()
+        self.assertIn("canonicalize", lowered_prompt)
+        self.assertIn("revise, absorb, keep independent, or cancel", lowered_prompt)
+        for forbidden in (
+            "task_sys",
+            "task sys",
+            "task lifecycle",
+            "task selection",
+            "organization",
+            "parent",
+            "dependency",
+            "duplicate",
+            "supersede",
+            "relation",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, lowered_prompt)
         self.assertEqual(self._task_rows(), [])
 
     def test_same_intake_replay_after_input_failure_retries_attention_without_duplicate(self) -> None:

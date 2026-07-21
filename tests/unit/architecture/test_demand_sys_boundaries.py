@@ -14,6 +14,11 @@ REPOSITORY = Path("scripts/env/repos/demands.py")
 TOOL_ROOT = Path("scripts/env/tools/demand_sys")
 CONTEXT = Path("scripts/env/tool_runtime/context.py")
 CLI = Path("tools/launcher/cli.py")
+ROLE_AUTH = Path("scripts/env/tool_runtime/role_auth.py")
+CONTEXT_IMPL = Path("scripts/env/tools/context/_impl.py")
+DAEMON_ADAPTER = Path("tools/launcher/demand_sys_daemon_adapter.py")
+TASK_SKILL = Path("buddyswitch/skills/shared/task-management/SKILL.md")
+ARCH_ROOT = Path("docs/arch")
 GENERIC_DAEMON_PATHS = (
     Path("tools/launcher/daemon_contracts.py"),
     Path("tools/launcher/daemon_state.py"),
@@ -66,6 +71,34 @@ def _demand_implementation_files() -> tuple[Path, ...]:
     )
 
 
+def _current_demand_surfaces() -> tuple[Path, ...]:
+    return (
+        *_demand_implementation_files(),
+        ROLE_AUTH,
+        CONTEXT_IMPL,
+        DAEMON_ADAPTER,
+        TASK_SKILL,
+        *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / ARCH_ROOT).glob("*.md"))),
+    )
+
+
+def _retired_demand_tokens() -> tuple[str, ...]:
+    return (
+        "parent" + "_id",
+        "depends" + "_on",
+        "demand_sys." + "set_parent",
+        "demand_sys." + "add_dependency",
+        "demand_sys." + "remove_dependency",
+        "demand_sys." + "split",
+        "demand_sys." + "mark_duplicate",
+        "demand_sys." + "supersede",
+        "Demand" + "RelationConflict",
+        "E_DEMAND_" + "RELATION",
+        "terminal lineage",
+        "live organization",
+    )
+
+
 def test_dependency_direction_stays_inside_the_demand_owner_boundary() -> None:
     domain_imports = _imports(DOMAIN)
     repository_imports = _imports(REPOSITORY)
@@ -105,7 +138,14 @@ def test_demand_mutation_has_one_domain_owner_and_one_repository_write_path() ->
     assert "demands.transact_actor_state(" in domain_source
 
 
-def test_phase_two_has_one_demand_daemon_adapter_and_no_task_or_generic_daemon_coupling() -> None:
+def test_current_demand_surfaces_do_not_preserve_the_retired_graph_model() -> None:
+    for relative in _current_demand_surfaces():
+        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        for token in _retired_demand_tokens():
+            assert token not in source, (relative, token)
+
+
+def test_demand_attention_has_one_adapter_and_no_task_or_generic_daemon_coupling() -> None:
     for relative in GENERIC_DAEMON_PATHS:
         assert not [name for name in _imports(relative) if "demand" in name], relative
         source = (REPO_ROOT / relative).read_text(encoding="utf-8").lower()
@@ -141,7 +181,7 @@ def test_phase_two_has_one_demand_daemon_adapter_and_no_task_or_generic_daemon_c
     assert "demand-sys" not in actor_session
 
 
-def test_phase_one_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
+def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
     tool_root = REPO_ROOT / "scripts" / "env" / "tools"
     assert (tool_root / "demand_sys" / "tool.py").is_file()
     assert not (tool_root / "demand").exists()
@@ -177,11 +217,17 @@ def test_current_architecture_allows_only_opaque_task_reference_collaboration() 
     text = (REPO_ROOT / "docs/arch/demand-sys-architecture.md").read_text(encoding="utf-8")
     normalized = " ".join(text.split())
 
+    assert "schema v2" in text
+    assert "canonical Demand set" in text
+    assert "two-pass actor canonicalization" in text
     assert "opaque DemandRef" in text
     assert "Actor + installed task-management skill" in text
     assert "Track comment fact -> Track handler -> Demand daemon adapter -> Demand domain" in text
-    assert "Track thread structure is provenance and retrieval context, not Demand relation truth" in normalized
+    assert "Track thread structure never decides canonical Demand identity" in normalized
+    assert "Demand completion is independent of Task completion" in text
+    assert "## Explicit non-goals" in text
+    assert "No cross-Demand graph" in text
     assert "Task Sys -> IM or Demand" not in text
-    assert "Task implementation -> Demand import, read, validation, call, subscription, or mutation" in text
+    assert "Task implementation does not import, read, validate, call, subscribe to, or mutate Demand state" in normalized
     assert "Track remains on its separate current Task path" not in text
     assert "Track handler -> Demand implementation in this phase" not in text

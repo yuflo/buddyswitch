@@ -23,6 +23,7 @@ from tests.support.python import PYTHON  # noqa: E402
 
 SHIPPED_TOOLS = {
     "task_sys",
+    "demand_sys",
     "track",
     "artifact",
     "context",

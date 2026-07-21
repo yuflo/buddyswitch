@@ -7,7 +7,7 @@ description: Use when an actor receives [DEMAND CHECK], a Task Sys side, parent,
 
 ## Ownership
 
-- Demand Sys owns the need, its latest revision, organization, and terminal state.
+- Demand Sys owns the need, its provenance, latest revision, canonical identity, and terminal state.
 - Task Sys owns one actor Task's creation, source snapshot, status, execution, and terminal result.
 - The actor is the semantic bridge. Neither system's state implies a mutation in the other.
 - Task `status` is the only lifecycle truth: `in_progress.side_processing`, `in_progress.awaiting_parent`, `in_progress.parent_processing`, `completed`, or `canceled`.
@@ -17,13 +17,17 @@ description: Use when an actor receives [DEMAND CHECK], a Task Sys side, parent,
 
 ## [DEMAND CHECK]
 
-1. Call `demand_sys.check`. Compare pending descriptions with the live index, load only plausible matches with `demand_sys.get_many`, apply necessary organization actions, then call `demand_sys.complete_check` for the exact observed revisions.
-2. Continue now with the Task Selection Rule.
+1. Call `demand_sys.check` and compare every pending description with the compact live index.
+2. Only for plausible candidates, call `demand_sys.get_many` and compare complete descriptions and details.
+3. For each pending Demand, decide whether to revise it, absorb it, keep it independent, or cancel it.
+4. Before calling `demand_sys.absorb_into`, call `task_sys.list(status=active)`. If exactly one active Task references either Demand, that active Task's Demand must remain the absorption target. Never update the active Task's `basis_revision` after absorption; reread the latest Demand during progress and outcome checks.
+5. Call `demand_sys.complete_check` for the exact revisions actually observed, including the exact returned revision of every mutation.
+6. Continue now with the Task Selection Rule.
 
-Demand source refs are provenance, not automatic Demand relations. When a
+Demand source refs are provenance and retrieval context, not Demand identity. When a
 `track.comment.added` Demand needs more context than its stored detail, use the
-exact Track id with Track reads; do not infer parent, dependency, duplicate, or
-absorption from Track thread structure alone.
+exact Track id with Track reads. Track thread structure alone never decides
+whether two Demand rows express the same need.
 
 ## Task Selection Rule
 

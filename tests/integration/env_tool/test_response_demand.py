@@ -231,56 +231,6 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
         self.assertEqual(completed_check["acknowledged"], [{"demand_id": root, "revision": root_revision}])
         self.assertEqual(completed_check["still_pending"], [])
 
-        parent, parent_revision, _ = self._create(
-            instance_json=instance_json,
-            actor_id=actor_label,
-            intake_key="parent",
-        )
-        dependency, _, _ = self._create(
-            instance_json=instance_json,
-            actor_id=actor_label,
-            intake_key="dependency",
-        )
-        for action, args in (
-            (
-                "set_parent",
-                {"demand_id": root, "expected_revision": root_revision, "parent_id": parent},
-            ),
-            (
-                "add_dependency",
-                {"demand_id": root, "expected_revision": root_revision + 1, "dependency_id": dependency},
-            ),
-            (
-                "remove_dependency",
-                {"demand_id": root, "expected_revision": root_revision + 2, "dependency_id": dependency},
-            ),
-        ):
-            response = self._demand_dispatch(
-                instance_json=instance_json,
-                actor_id=actor_label,
-                action=action,
-                args=args,
-            )
-            self._assert_write_success_contract(response)
-
-        split = self._demand_dispatch(
-            instance_json=instance_json,
-            actor_id=actor_label,
-            action="split",
-            args={
-                "demand_id": parent,
-                "expected_revision": parent_revision,
-                "description": "Parent split",
-                "detail": "Parent now owns two concrete parts.",
-                "children": [
-                    {"intake_key": "child:one", "description": "Child one", "detail": "First part.", "source_refs": []},
-                    {"intake_key": "child:two", "description": "Child two", "detail": "Second part.", "source_refs": []},
-                ],
-            },
-        )
-        self._assert_write_success_contract(split)
-        self.assertEqual(len(split["changes"]), 3)  # type: ignore[arg-type]
-
         target, target_revision, _ = self._create(
             instance_json=instance_json,
             actor_id=actor_label,
@@ -314,26 +264,6 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
         }
         self.assertEqual(changed, {(target, 2), (source, 2)})
 
-        duplicate_source, duplicate_revision, _ = self._create(
-            instance_json=instance_json,
-            actor_id=actor_label,
-            intake_key="duplicate:source",
-        )
-        duplicate_target, _, _ = self._create(
-            instance_json=instance_json,
-            actor_id=actor_label,
-            intake_key="duplicate:target",
-        )
-        superseded, superseded_revision, _ = self._create(
-            instance_json=instance_json,
-            actor_id=actor_label,
-            intake_key="supersede:old",
-        )
-        replacement, _, _ = self._create(
-            instance_json=instance_json,
-            actor_id=actor_label,
-            intake_key="supersede:new",
-        )
         completable, completable_revision, _ = self._create(
             instance_json=instance_json,
             actor_id=actor_label,
@@ -346,24 +276,6 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
         )
 
         terminal_actions: tuple[tuple[str, dict[str, Any]], ...] = (
-            (
-                "mark_duplicate",
-                {
-                    "source_id": duplicate_source,
-                    "source_revision": duplicate_revision,
-                    "target_id": duplicate_target,
-                    "summary": "Same need.",
-                },
-            ),
-            (
-                "supersede",
-                {
-                    "old_id": superseded,
-                    "old_revision": superseded_revision,
-                    "replacement_id": replacement,
-                    "summary": "Replacement is the current need.",
-                },
-            ),
             (
                 "complete",
                 {
@@ -404,6 +316,112 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
             completed["demand"]["terminal"]["evidence_refs"],  # type: ignore[index]
             [{"type": "task_sys.task", "ref": {"task_id": "task-demand-proof"}}],
         )
+
+    def test_complete_requires_evidence_without_corrupting_demand_state(self) -> None:
+        actor_label = "act-dev-demand-complete-evidence"
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        actor_target = {
+            "actor_id": self._runtime_actor_id(role="dev", label=actor_label),
+            "role_id": "dev",
+        }
+
+        for evidence_args in ({}, {"evidence_refs": None}):
+            with self.subTest(evidence_args=evidence_args):
+                demand_id, revision, _ = self._create(
+                    instance_json=instance_json,
+                    actor_id=actor_label,
+                    intake_key=f"complete-evidence:{len(demands.load_actor_state(actor_target)['demands'])}",
+                )
+                state_path = demands.actor_state_path(actor_target)
+                before = state_path.read_bytes()
+
+                response = self._demand_dispatch(
+                    instance_json=instance_json,
+                    actor_id=actor_label,
+                    action="complete",
+                    args={
+                        "demand_id": demand_id,
+                        "expected_revision": revision,
+                        "summary": "Completion must carry evidence.",
+                        **evidence_args,
+                    },
+                )
+
+                self._assert_rejection_contract(response)
+                self.assertEqual((response.get("error") or {}).get("code"), "E_DEMAND_PAYLOAD")
+                self.assertEqual(state_path.read_bytes(), before)
+                self.assertIsNone(demand_sys.get(actor_target, demand_id)["terminal"])
+
+    def test_retired_demand_actions_are_unsupported_without_state_change(self) -> None:
+        actor_label = "act-dev-demand-retired-actions"
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        demand_id, _, _ = self._create(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            intake_key="retired-actions:root",
+        )
+        actor_target = {
+            "actor_id": self._runtime_actor_id(role="dev", label=actor_label),
+            "role_id": "dev",
+        }
+        retired = {
+            "set_parent": {"demand_id": demand_id, "expected_revision": 1, "parent_id": None},
+            "add_dependency": {"demand_id": demand_id, "expected_revision": 1, "dependency_id": "demand-other"},
+            "remove_dependency": {"demand_id": demand_id, "expected_revision": 1, "dependency_id": "demand-other"},
+            "split": {
+                "demand_id": demand_id,
+                "expected_revision": 1,
+                "description": "Retired split.",
+                "detail": "Retired split detail.",
+                "children": [],
+            },
+            "mark_duplicate": {"source_id": demand_id, "source_revision": 1, "target_id": "demand-other", "summary": "Retired."},
+            "supersede": {"old_id": demand_id, "old_revision": 1, "replacement_id": "demand-other", "summary": "Retired."},
+        }
+
+        for action, args in retired.items():
+            with self.subTest(action=action):
+                before = demands.load_actor_state(actor_target)
+                response = self._demand_dispatch(
+                    instance_json=instance_json,
+                    actor_id=actor_label,
+                    action=action,
+                    args=args,
+                )
+                self._assert_rejection_contract(response)
+                self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL")
+                self.assertEqual(demands.load_actor_state(actor_target), before)
+
+    def test_revise_rejects_actor_authored_source_refs_without_state_change(self) -> None:
+        actor_label = "act-dev-demand-revise-provenance"
+        instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        demand_id, _, _ = self._create(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            intake_key="revise-provenance:root",
+        )
+        actor_target = {
+            "actor_id": self._runtime_actor_id(role="dev", label=actor_label),
+            "role_id": "dev",
+        }
+        before = demands.load_actor_state(actor_target)
+
+        response = self._demand_dispatch(
+            instance_json=instance_json,
+            actor_id=actor_label,
+            action="revise",
+            args={
+                "demand_id": demand_id,
+                "expected_revision": 1,
+                "description": "Revised description.",
+                "detail": "Revised detail.",
+                "source_refs": [{"type": "actor", "ref": {"key": "replacement"}}],
+            },
+        )
+
+        self._assert_rejection_contract(response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_DEMAND_PAYLOAD")
+        self.assertEqual(demands.load_actor_state(actor_target), before)
 
 
 if __name__ == "__main__":

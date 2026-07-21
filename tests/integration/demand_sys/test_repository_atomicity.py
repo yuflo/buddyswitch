@@ -32,9 +32,9 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
         env["PYTHONPATH"] = os.pathsep.join(python_paths)
         return env
 
-    def test_absent_actor_state_loads_one_empty_schema_v1_aggregate(self) -> None:
+    def test_absent_actor_state_loads_one_empty_schema_v2_aggregate(self) -> None:
         expected = {
-            "schema_version": 1,
+            "schema_version": 2,
             "actor_target": ACTOR_TARGET,
             "demands": {},
         }
@@ -66,7 +66,7 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
         self.assertEqual(
             demands.load_actor_state(ACTOR_TARGET),
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "actor_target": ACTOR_TARGET,
                 "demands": {demand_id: {"id": demand_id}},
             },
@@ -104,7 +104,7 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
 
     def test_changed_transaction_validates_complete_aggregate_before_write(self) -> None:
         def corrupt_aggregate(state: dict[str, object]) -> tuple[bool, None]:
-            state["schema_version"] = 2
+            state["schema_version"] = 3
             return True, None
 
         with self.assertRaisesRegex(ValueError, "schema_version"):
@@ -223,16 +223,16 @@ demands.transact_actor_state(actor_target, mutate)
         aggregate_path = self._aggregate_path()
         self.assertEqual(list(aggregate_path.parent.iterdir()), [aggregate_path])
 
-    def test_wrong_schema_or_actor_target_is_rejected_without_rewrite(self) -> None:
+    def test_schema_v1_or_wrong_actor_target_is_rejected_without_rewrite(self) -> None:
         state_path = self._aggregate_path()
         invalid_aggregates = {
             "wrong schema": {
-                "schema_version": 2,
+                "schema_version": 1,
                 "actor_target": ACTOR_TARGET,
                 "demands": {},
             },
             "wrong actor target": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "actor_target": {"actor_id": "act-pm-other", "role_id": "pm"},
                 "demands": {},
             },
@@ -249,7 +249,7 @@ demands.transact_actor_state(actor_target, mutate)
                     mutator_called = True
                     return True, None
 
-                with self.assertRaises(ValueError):
+                with self.assertRaisesRegex(ValueError, "schema_version must be 2|actor_target"):
                     demands.transact_actor_state(ACTOR_TARGET, must_not_run)
 
                 self.assertFalse(mutator_called)

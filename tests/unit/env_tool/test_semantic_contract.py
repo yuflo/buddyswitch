@@ -45,13 +45,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
         "get_many",
         "check",
         "complete_check",
-        "set_parent",
-        "add_dependency",
-        "remove_dependency",
-        "split",
         "absorb_into",
-        "mark_duplicate",
-        "supersede",
         "complete",
         "cancel",
     },
@@ -78,13 +72,7 @@ _EXPECTED_FREE_ACTIONS = {
     "demand_sys.get_many",
     "demand_sys.check",
     "demand_sys.complete_check",
-    "demand_sys.set_parent",
-    "demand_sys.add_dependency",
-    "demand_sys.remove_dependency",
-    "demand_sys.split",
     "demand_sys.absorb_into",
-    "demand_sys.mark_duplicate",
-    "demand_sys.supersede",
     "demand_sys.complete",
     "demand_sys.cancel",
     "message.contacts",
@@ -310,6 +298,13 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row["writes"], list)
                 self.assertIsInstance(row["does_not_write"], list)
                 self.assertIn(row["durability"], {"none", "transient", "durable"})
+
+    def test_demand_exact_replay_actions_advertise_idempotency(self) -> None:
+        operations = catalog.operation_semantics()
+
+        for action in ("absorb_into", "complete", "cancel"):
+            with self.subTest(action=action):
+                self.assertIs(operations[f"demand_sys.{action}"]["risk_hints"]["idempotent"], True)
 
     def test_task_requirement_contract_is_declared_for_every_action(self) -> None:
         expected_keys = {
@@ -615,7 +610,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("collaboration facts", track_model)
         self.assertIn("comments are the only actor-attention", track_model)
         self.assertIn("task sys tasks", task_model)
-        self.assertIn("source refs", task_model)
+        self.assertIn("opaque demandref snapshot", task_model)
         self.assertIn("draft", artifact_model)
         self.assertIn("track.add_material", artifact_model)
 

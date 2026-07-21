@@ -122,10 +122,25 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         skill_text = skill_path.read_text(encoding="utf-8")
         normalized = " ".join(skill_text.split())
 
-        self.assertIn("Demand source refs are provenance", skill_text)
+        self.assertIn("Demand source refs are provenance and retrieval context, not Demand identity", skill_text)
         self.assertIn("`track.comment.added`", skill_text)
         self.assertIn("use the exact Track id with Track reads", normalized)
-        self.assertIn("do not infer parent, dependency, duplicate, or absorption", normalized)
+        self.assertIn(
+            "Track thread structure alone never decides whether two Demand rows express the same need",
+            normalized,
+        )
+
+    def test_demand_check_teaches_two_pass_canonicalization_and_active_task_targeting(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
+        normalized = " ".join(skill_path.read_text(encoding="utf-8").split())
+
+        self.assertIn("compare every pending description with the compact live index", normalized)
+        self.assertIn("Only for plausible candidates, call `demand_sys.get_many`", normalized)
+        self.assertIn("revise it, absorb it, keep it independent, or cancel it", normalized)
+        self.assertIn("Before calling `demand_sys.absorb_into`, call `task_sys.list(status=active)`", normalized)
+        self.assertIn("that active Task's Demand must remain the absorption target", normalized)
+        self.assertIn("Never update the active Task's `basis_revision` after absorption", normalized)
+        self.assertIn("reread the latest Demand during progress and outcome checks", normalized)
 
     def test_task_sys_close_surfaces_use_frame_work_not_source_bound_work(self) -> None:
         close_action = tool_router.get_action_definition("task_sys", "close")

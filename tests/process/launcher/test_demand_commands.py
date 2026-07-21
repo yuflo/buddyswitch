@@ -46,13 +46,10 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
         records = {
             "demand-older": {
                 "id": "demand-older",
-                "actor_target": target,
                 "intake_key": "inbound:older",
                 "description": "Older need",
                 "detail": "Private detail must not leave the external projection.",
                 "source_refs": [{"type": "inbound", "ref": {"id": "info-older"}}],
-                "parent_id": None,
-                "depends_on": [],
                 "revision": 2,
                 "checked_revision": 1,
                 "terminal": None,
@@ -61,13 +58,10 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
             },
             "demand-newer": {
                 "id": "demand-newer",
-                "actor_target": target,
                 "intake_key": "actor:newer",
                 "description": "Newer need",
                 "detail": "Another private detail.",
                 "source_refs": [],
-                "parent_id": "demand-older",
-                "depends_on": ["demand-older"],
                 "revision": 3,
                 "checked_revision": 3,
                 "terminal": {
@@ -82,7 +76,7 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
         }
         path.write_text(
             json.dumps(
-                {"schema_version": 1, "actor_target": target, "demands": records},
+                {"schema_version": 2, "actor_target": target, "demands": records},
                 ensure_ascii=True,
                 indent=2,
             )
@@ -119,17 +113,15 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
                 "actor",
                 "revision",
                 "checked_revision",
-                "parent_id",
-                "depends_on",
                 "terminal",
                 "created_at",
                 "updated_at",
             }
             self.assertEqual(set(rows[0]), expected_fields)
             self.assertEqual(rows[0]["actor"], {"actor_id": "act-dev-demand", "role_id": "dev"})
-            self.assertEqual(rows[0]["parent_id"], "demand-older")
-            self.assertEqual(rows[0]["depends_on"], ["demand-older"])
             self.assertEqual(rows[0]["terminal"]["type"], "completed")
+            self.assertNotIn("parent_id", rows[0])
+            self.assertNotIn("depends_on", rows[0])
 
             fetched = self._run(
                 env,
@@ -145,6 +137,8 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
             self.assertEqual(demand["demand_id"], "demand-older")
             self.assertNotIn("detail", demand)
             self.assertNotIn("source_refs", demand)
+            self.assertNotIn("parent_id", demand)
+            self.assertNotIn("depends_on", demand)
 
             wrong_actor = self._run(
                 env,

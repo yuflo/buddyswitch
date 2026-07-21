@@ -173,6 +173,7 @@ def _pytest_command(
         sys.executable,
         "-m",
         "pytest",
+        "--import-mode=importlib",
         *targets,
         "-q",
         "-p",
